@@ -549,68 +549,39 @@ section('§2 — the release state, restated at the end');
 section('§116–§122 — migration, clean boot, upgrade and restart');
 // =====================================================================
 {
-  const { MIGRATIONS, SCHEMA_VERSION, runMigrations: migrate, schemaReport } = await import('../../domains/platform/migrations.mjs');
+  // Rewritten in S14a: §116–§120 described the retired snapshot registry (step m220_001 at 2200, runMigrations over
+  // in-memory databases, schemaReport). They now check the table migration 0031 and a real file; the in-memory
+  // upgrade from an M21-era snapshot (§119) is gone with the blob store (no compatibility with old dev files).
+  const { DATA_MIGRATIONS } = await import('../../repositories/index.mjs');
+  const { BOX_CAM_MIGRATION } = await import('../../repositories/boxCam.mjs');
+  const { openStore } = await import('../../store.mjs');
+  const SCHEMA_VERSION = Number(DATA_MIGRATIONS.map((m) => m.id).sort().at(-1).slice(0, 4));
 
-  const step = MIGRATIONS.find((m) => m.id === 'm220_001_box_cam_cv_results');
-  ok(!!step, '§116. an M22 migration step exists');
-  // M22 raised the schema to 2200. It asserts its OWN contribution — that the
-  // version is at least the one it introduced — rather than pinning the global
-  // constant to a literal.
-  //
-  // The literal pin was `SCHEMA_VERSION === 2200`, and it broke the moment
-  // M23-D2 raised the version for a reason with no M22 meaning. That is the
-  // THIRD time this exact defect has landed: M20 found it in M19's suite, M21
-  // found it in M20's suite, and M23 has now found it here. Each time the
-  // failing assertion was true about its own milestone and false about the
-  // repository, which is the signature of pinning a shared constant.
-  ok(SCHEMA_VERSION >= 2200, `§116. the schema is at or beyond M22's 2200 (now ${SCHEMA_VERSION})`);
+  ok(DATA_MIGRATIONS.filter((m) => m.id === BOX_CAM_MIGRATION).length === 1, `§116. the Box Cam migration (${BOX_CAM_MIGRATION}) is registered once`);
+  ok(SCHEMA_VERSION >= 31, `§116. the schema is at or beyond 0031 (now ${SCHEMA_VERSION})`);
 
-  // §117 — the reuse audit, enforced rather than only written down.
-  neg(!MIGRATIONS.some((m) => JSON.stringify(m.up.toString()).includes('cvFrames')),
-    '§117. no migration creates a cvFrames store');
-  const allUp = MIGRATIONS.map((m) => m.up.toString()).join('\n');
-  neg(!/frame|pixel|video|blob/i.test(allUp.replace(/boxCamCvResults/g, '')),
-    '§117. and no migration creates any frame, pixel, video or blob store');
-
-  // §118–§120 (S12b): the CV results are a typed table, created by data migration 0031 and owned by
-  // repositories/boxCam.mjs. The blob step m220_001 is a recorded no-op: it creates no collection on a clean database,
-  // an M21-era database upgrades through it without anything changing, and a second boot runs nothing. The table
-  // itself — with no frame, pixel or video column — is asserted on a real store.
+  // §117/§118 (S12b): the CV results are a typed table, created by data migration 0031 and owned by
+  // repositories/boxCam.mjs — with no frame, pixel or video column — asserted on a real store.
+  const freshDir = mkdtempSync(path.join(tmpdir(), 'sbx-m22-table-'));
   {
-    const fresh = {};
-    migrate(fresh);
-    ok(fresh.boxCamCvResults === undefined, '§118. a clean database gets no boxCamCvResults collection: the results are a table (S12b)');
-    ok(fresh.schema.version === SCHEMA_VERSION, '§118. and lands on the current schema version');
-    neg(fresh.cvFrames === undefined, '§118. and no frame store is created');
-    const { openStore } = await import('../../store.mjs');
-    const store = openStore(mkdtempSync(path.join(tmpdir(), 'sbx-m22-table-')));
+    const store = openStore(freshDir);
+    const tables = store.sqlite.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((r) => r.name);
+    neg(!tables.some((t) => /frame|pixel/.test(t)), '§117. no migration creates a frame or pixel table (cvFrames does not exist)');
+    neg(!tables.includes('collections'), '§117. and there is no blob store to hide one in');
     const cols = store.sqlite.prepare('PRAGMA table_info(box_cam_cv_results)').all().map((c) => c.name);
     ok(cols.includes('provider_session_id') && cols.includes('session_id'), '§118. the results table exists on a fresh store, created by migration 0031');
-    neg(!cols.some((c) => /frame_bytes|pixel|video|blob|base64/.test(c)) && !store.sqlite.prepare("SELECT 1 FROM sqlite_master WHERE name LIKE '%frame%'").get(), '§118. and no column or table holds a frame, pixel, video or blob');
+    neg(!cols.some((c) => /frame_bytes|pixel|video|blob|base64/.test(c)), '§118. and no column of it holds a frame, pixel, video or blob');
     ok(store.sqlite.prepare('SELECT count(*) AS n FROM box_cam_cv_results').get().n === 0, '§118. and it starts empty');
     store.sqlite.close();
   }
 
-  // §119 — an M21-era database upgrades without losing anything.
-  {
-    const m21db = {
-      schema: { version: 2100, migrations: MIGRATIONS.filter((m) => m.id !== 'm220_001_box_cam_cv_results').map((m) => m.id) },
-      developmentPlans: [{ id: 'dp-legacy' }],
-    };
-    const r = migrate(m21db);
-    ok(m21db.schema.version === SCHEMA_VERSION, `§119. an M21 database upgrades 2100 → ${SCHEMA_VERSION}`);
-    ok(r.ran.includes('m220_001_box_cam_cv_results'), '§119. running exactly the new step (a recorded no-op since S12b)');
-    neg(m21db.boxCamCvResults === undefined, '§119. which creates no collection');
-    ok(m21db.developmentPlans.length === 1, '§119. and every prior record survives untouched');
-  }
-
   // §120 — restart idempotency.
   {
-    const db2 = {};
-    migrate(db2);
-    const again = migrate(db2);
-    neg(again.ran.length === 0, '§120. a second boot runs no migration step');
-    ok(schemaReport(db2).upToDate === true, '§120. the schema reports itself up to date');
+    const recorded = () => { const st = openStore(freshDir); try { return st.sqlite.prepare('SELECT id, applied_at FROM data_migrations ORDER BY id').all().map((r) => `${r.id}@${r.applied_at}`).join(); } finally { st.sqlite.close(); } };
+    const first = recorded();
+    neg(recorded() === first && first.split(',').length === DATA_MIGRATIONS.length, '§120. a second open runs no migration step');
+    const caps = (await j('GET', '/capabilities')).body;
+    ok(caps.schema?.upToDate === true && caps.schema.version === SCHEMA_VERSION, '§120. the running server reports its schema up to date');
   }
 }
 

@@ -67,7 +67,7 @@ export function registerEnterprise(ctx) {
   const {
     db, byId, users, sessions, orgs, mediaDeletions, codes, notifications, dispatches, outbox, pushLog, pushTokens, channels, safetyAudit, recruitment, recruitmentCases, players, app, orgRouter, adminRouter, nextId, persist, persistNow, notify,
     mailer, requireLead, isLead, paginate, histAppend, timingSafeEq, signBody,
-    storage, DATA_DIR, backupDatabase, unit, enterprise, enterpriseReads,
+    storage, DATA_DIR, backupDatabase, unit, enterprise, enterpriseReads, schemaVersion,
   } = ctx;
   if (!enterprise || !enterpriseReads) throw new TypeError('registerEnterprise needs the enterprise repository (ctx.enterprise, ctx.enterpriseReads)');
   if (!ctx.groupReads) throw new TypeError('registerEnterprise needs groupReads (the audit export lists the group grants)');
@@ -466,7 +466,7 @@ export function registerEnterprise(ctx) {
     const stamp = new Date().toISOString().replace(/[:.]/g, '-');
     const dir = path.join(DATA_DIR, 'backups', stamp);
     // 1. A consistent copy of the database (store.copyTo, VACUUM INTO): every
-    //    table and every remaining blob as committed. A restore is "copy this
+    //    table as committed. A restore is "copy this
     //    directory into a NEW, empty DATA_DIR and boot". Flushed first, so the
     //    copy holds every pending edit and the media queue is judged against
     //    every live reference.
@@ -563,16 +563,16 @@ export function registerEnterprise(ctx) {
   });
 
   // ================================================== E. reliability
-  // M18.2: the schema version is on the health check so an operator can see
-  // which snapshot shape this instance is running without reading a database.
+  // M18.2: the schema version (the latest table migration) is on the health check so an operator can see which
+  // schema this instance is running without reading the database.
   app.get('/healthz', (_req, res) => res.json({
     ok: true,
     uptimeS: Math.round((Date.now() - metrics.startedAt) / 1000),
-    schemaVersion: db.schema?.version ?? 0,
+    schemaVersion: schemaVersion(),
   }));
 
   app.get('/readyz', (_req, res) => {
-    // Ready = snapshot store writable + data loaded.
+    // Ready = the database writable (the staged repositories flush) + data loaded.
     try {
       persistNow();
       res.json({ ready: true, players: db.players.length });

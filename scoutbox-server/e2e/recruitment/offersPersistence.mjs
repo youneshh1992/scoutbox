@@ -1,9 +1,9 @@
 // M23 P6 — persistence, restart and corruption audit for the canonical Offer.
 //
-//   1  no P6 migration: the schema is what P5.7 left (2307); `recruitmentOffers`
-//      is module-guaranteed, created empty at registration, and a snapshot
-//      without it boots with an empty store — nothing is backfilled and no
-//      lifecycle state is reinterpreted as an Offer (§60–§62)
+//   1  no Offer migration beyond the contacts/offers tables (0017): schema 39;
+//      a file with no Offers boots with an empty store and no migration runs
+//      again — nothing is backfilled and no lifecycle state is reinterpreted
+//      as an Offer (§60–§62)
 //   2  a real journey — DRAFT, ISSUED+ACCEPTED, ISSUED+DECLINED, ISSUED+WITHDRAWN,
 //      SUPERSEDED — survives SIGTERM and a reboot byte-faithfully: revisions,
 //      responses, keys, history, read receipts, case stages; no signing appears
@@ -19,11 +19,11 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { MIGRATIONS, SCHEMA_VERSION } from '../../domains/platform/migrations.mjs';
 import { openStore } from '../../store.mjs';
-import { guaranteeFor } from '../../storeContract.mjs';
+import { DATA_MIGRATIONS, TABLE_BACKED } from '../../repositories/index.mjs';
 import { offerIntegrity } from '../../domains/recruitment/offers/offer.mjs';
 import { pickPort } from '../../scripts/testPort.mjs';
+const LATEST_SCHEMA = Number(DATA_MIGRATIONS.map((m) => m.id).sort().at(-1).slice(0, 4)); // S14a: the latest table migration's number
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SERVER = path.join(HERE, '..', '..', 'server.mjs');
@@ -74,23 +74,26 @@ const TERMS = { role: 'Central midfielder', squad: 'Under-23s', startDate: '2027
 const S_NOTE = 'PRIVATE_NOTE_PERSISTS_9911';
 
 // ------------------------------------------------------------- 1 — schema
-section('1 — no P6 migration: schema 2307, a module-guaranteed store, an absent store boots empty');
+// 1.1, 1.2, 1.4 and 1.6 rewritten in S14a: they described the blob's schema numbers and the store contract.
+const ledger = (dir) => { const st = openStore(dir); try { return JSON.stringify(st.sqlite.prepare('SELECT id, applied_at FROM data_migrations ORDER BY id').all()); } finally { st.sqlite.close(); } };
+section('1 — no Offer migration of its own: schema 39, the offers are their tables, a file with none boots empty');
 {
-  ok(SCHEMA_VERSION === 2308 && MIGRATIONS.length === 18 && !MIGRATIONS.some((m) => /offer/i.test(m.id)), `1.1 schema ${SCHEMA_VERSION}, ${MIGRATIONS.length} migrations, none named for an Offer`);
-  ok(guaranteeFor('recruitmentOffers') === null, '1.2 recruitmentOffers is no db collection: the offers are their tables, read through SQL (§4.3 step 2; rewritten, it described the old storage)');
+  ok(DATA_MIGRATIONS.length === LATEST_SCHEMA && DATA_MIGRATIONS.filter((m) => /offer/i.test(m.id)).map((m) => m.id).join() === '0017_recruitment_contacts_offers', '1.1 every table migration; the only one naming an Offer is 0017 (contacts and offers)');
+  ok(TABLE_BACKED.includes('recruitmentOffers'), '1.2 the offers are their tables, read through SQL (§4.3 step 2)');
   const DIR = mkdtempSync(path.join(tmpdir(), 'sbx-m23op-1-'));
   const s1 = await bootOn(DIR, PORT);
   ok(s1.up, '1.3 a fresh store boots');
   const h = (await s1.j('GET', '/healthz')).body;
-  ok(h.schemaVersion === 2308, `1.4 and reports schema ${h.schemaVersion}`);
+  ok(h.schemaVersion === LATEST_SCHEMA, `1.4 and reports schema ${h.schemaVersion}`);
   const db1 = await s1.stop();
+  const L1 = ledger(DIR);
   ok(Array.isArray(db1.recruitmentOffers) && db1.recruitmentOffers.length === 0, '1.5 the persisted snapshot carries an empty recruitmentOffers list');
-  // A snapshot from before P6: the store simply absent. Boot must create it empty and reinterpret nothing.
+  // A file with no Offers: boot must reinterpret nothing.
   delete db1.recruitmentOffers;
   const casesBefore = JSON.stringify(db1.recruitmentCases.map((c) => [c.id, c.room?.status ?? null]));
   openStore(DIR).save({ db: db1 });
   const s2 = await bootOn(DIR, PORT);
-  ok(s2.up && !/applied/.test(s2.log()), '1.6 a pre-P6 snapshot boots with no migration applied');
+  ok(s2.up && ledger(DIR) === L1 && JSON.parse(L1).length === DATA_MIGRATIONS.length, '1.6 the file boots with no migration applied (the ledger is unchanged)');
   const maria = (await s2.j('POST', '/auth/org/login', { orgId: 'org-eastport', scoutName: 'Maria Keane', role: 'Head of Recruitment' })).body;
   const room = await s2.j('POST', '/org/rooms', { playerId: 'pl-adeyemi', sourceContext: 'search' }, maria.token);
   const RID = room.body?.room?.roomId ?? room.body?.existingRoomId;

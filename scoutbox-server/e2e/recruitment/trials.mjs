@@ -46,10 +46,11 @@ import {
 import { M23_ERROR_HTTP, httpStatusFor } from '../../domains/recruitment/lifecycle/errors.mjs';
 import { EVENT_REGISTRY } from '../../domains/platform/eventRegistry.mjs';
 import { RATE_LIMIT_POLICY } from '../../domains/platform/rateLimit.mjs';
-import { MIGRATIONS, SCHEMA_VERSION, runMigrations } from '../../domains/platform/migrations.mjs';
+import { DATA_MIGRATIONS } from '../../repositories/index.mjs';
 import { STATUS_EVIDENCE_REQUIRED, roomCan } from '../../domains/recruitment/rooms/shared.mjs';
 import { EVIDENCE_KINDS } from '../../domains/recruitment/lifecycle/evidence.mjs';
 import { createEvidenceProvider } from '../../scripts/recruitmentReadsFixture.mjs'; // §4.3 step 2: the contacts/offers queries over the plain arrays
+const LATEST_SCHEMA = Number(DATA_MIGRATIONS.map((m) => m.id).sort().at(-1).slice(0, 4)); // S14a: the latest table migration's number
 
 const PORT = 6100 + Math.floor(Math.random() * 200);
 const BASE = `http://localhost:${PORT}`;
@@ -210,20 +211,9 @@ section('P — error bands, rate policies, events, migration, evidence, permissi
     neg(!!r && Array.isArray(r.payload) && r.payload.every((k) => /Id$/.test(k)) && !r.payload.some((k) => /name|note|message|reason|address|instruction/i.test(k)), `P4b ${e} payload is ids only`);
   }
   neg(EVENT_REGISTRY.trial_assessment_recorded === undefined && EVENT_REGISTRY.trial_observed === undefined, 'P5 no event announces an assessment or an observation — judgement never broadcasts');
-  const step = MIGRATIONS.find((m) => m.id === 'm230_005_trial_workflow');
-  // The Trial step is FROZEN at 2304. Later milestones keep adding steps above
-  // it, so this asserts the frozen fact and that the schema has only moved
-  // forward — not a literal current version, which every milestone would break.
-  ok(step?.version === 2304 && SCHEMA_VERSION >= 2306, `P6 migration m230_005_trial_workflow is frozen at 2304, and the schema has only moved forward since (now ${SCHEMA_VERSION})`);
-  const old = { schema: { version: 2303, migrations: MIGRATIONS.filter((m) => m.version <= 2303).map((m) => ({ id: m.id, version: m.version, at: 1 })) }, trials: [{ id: 't1', orgId: 'o', playerId: 'p', status: 'reported', proposedDate: '2025-05-01', acceptedAt: 1, report: { id: 'r' } }, { id: 't2', orgId: 'o', playerId: 'p', status: 'awaiting_report', workflowState: 'scheduled', schedule: { confirmedAt: 1, sessions: [{ id: 's', startsAt: 1, endsAt: 2 }] }, attendance: [], completion: null, rev: 4 }] };
-  const up = runMigrations(old);
-  // §4.3 step 2 (rewritten: P7/P8 described the blob migration): the step runs and is recorded but is a no-op; a trial
-  // gets its neutral containers from its typed row (testRecruitment: every trial reads back with them).
-  ok(up.ran.includes('m230_005_trial_workflow') && old.trials[0].workflowState === undefined && old.trials[0].status === 'reported', 'P7 a 2303 row is left as it is by the (no-op) step; status and report untouched');
-  neg(old.trials[0].status === 'reported' && old.trials[0].report.id === 'r' && old.trials[0].proposedDate === '2025-05-01', 'P7b awaiting_report/reported are never renamed; no date, attendance or completion is invented');
-  neg(old.trials[1].workflowState === 'scheduled' && old.trials[1].rev === 4 && old.trials[1].schedule.confirmedAt === 1, 'P7c a row that already carries P4B fields is left exactly as it was');
-  const again = runMigrations(old);
-  ok(again.ran.length === 0 && old.trials[0].workflowState === undefined, 'P8 running the migration twice changes nothing');
+  // P6–P8 rewritten in S14a: they ran the blob's 2304 trial step in memory (an upgrade path, ground rule 1). That a trial
+  // row reads back with neutral containers, nothing renamed or invented, is proved on typed rows in trialsPersistence §1.
+  ok(DATA_MIGRATIONS.length === LATEST_SCHEMA && DATA_MIGRATIONS.some((m) => m.id === '0015_recruitment'), 'P6 the current schema; the trials are typed rows of table migration 0015');
   ok(STATUS_EVIDENCE_REQUIRED.trial_requested?.kind === 'trial_invited' && STATUS_EVIDENCE_REQUIRED.trial_scheduled?.kind === 'trial_confirmed' && STATUS_EVIDENCE_REQUIRED.trial_completed?.kind === 'trial_completed', 'P9 the three trial stages are evidence-gated: invited, confirmed, completed (D-3/D-4/D-5)');
   ok(EVIDENCE_KINDS.includes('trial_invited') && EVIDENCE_KINDS.includes('trial_confirmed') && EVIDENCE_KINDS.includes('trial_completed'), 'P9b the evidence provider knows all three kinds');
   const kase = { id: 'k1', orgId: 'o', playerId: 'p' };
@@ -1244,7 +1234,7 @@ section('Z — restart: keys, links and truth survive the process dying');
   const re = await login('org-eastport', 'Maria Keane', 'Head of Recruitment');
   ok(!!re?.token, 'Z1 the server came back');
   const health = (await j('GET', '/healthz')).body;
-  ok(health.schemaVersion === SCHEMA_VERSION, `Z2 schema ${SCHEMA_VERSION} after the restart`);
+  ok(health.schemaVersion === LATEST_SCHEMA, 'Z2 the current schema after the restart');
   const inv = await invite(J.RID, re.token, { clientKey: 'J-inv' });
   neg(inv.status === 200 && inv.body.idempotent === true && inv.body.invitation.id === J.REQ, 'Z3 the invitation key still replays — it lives on the request row, not in memory');
   const comp = await j('POST', `/org/rooms/${J.RID}/trials/${J.TID}/complete`, { expectedRev: 1, clientKey: 'J-comp' }, re.token);

@@ -23,7 +23,7 @@ import {
   DISPATCHES_MIGRATION, DISPATCH_TABLES, DISPATCH_KEYS,
 } from '../repositories/dispatches.mjs';
 import { openStore } from '../store.mjs';
-import { NOW, TTL, tempDir, freshFile, FIXTURE, ORGS, USERS, SESSIONS, openRaw, dump } from './coreIdentityTestFixtures.mjs';
+import { NOW, TTL, tempDir, freshFile, FIXTURE, ORGS, USERS, SESSIONS, openRaw, dump, hasBlobTable } from './coreIdentityTestFixtures.mjs';
 
 let passed = 0;
 const only = process.env.TEST_ONLY || '';
@@ -38,8 +38,8 @@ const second = (dir) => new DatabaseSync(dbFile(dir), { readOnly: true });
 const rowsOf = (dir, table, order = 'rowid') => { const s = second(dir); try { return s.prepare(`SELECT * FROM ${table} ORDER BY ${order}`).all().map((r) => ({ ...r })); } finally { s.close(); } };
 const idsOf = (dir) => rowsOf(dir, 'dispatches', 'seq').map((r) => r.id);
 const attemptsOf = (dir) => rowsOf(dir, 'dispatch_attempts', 'dispatch_seq, seq').map((r) => [r.dispatch_seq, r.seq, r.kind, r.ok, r.error, r.note]);
-const blobOf = (dir, name) => { const s = second(dir); try { return s.prepare('SELECT value FROM collections WHERE name = ?').get(name)?.value ?? null; } finally { s.close(); } };
-const seqOf = (dir) => { const s = second(dir); try { return Number(s.prepare("SELECT value FROM meta WHERE key = 'saveSeq'").get()?.value) || 0; } finally { s.close(); } };
+/** Every table of the file, as committed (rewritten in S14a: replaces the save revision as the "nothing landed" check). */
+const fileDump = (dir) => { const s = second(dir); try { return dump(s); } finally { s.close(); } };
 const tableExists = (s, t) => !!s.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(t);
 const plain = (v) => JSON.parse(JSON.stringify(v));
 const FRACTIONAL = 1700000000000.5; // what the signed callback route writes for a finite fractional `at` (design probe of dc4b559)
@@ -57,20 +57,19 @@ const inApp = (id, notificationId) => dsp({ id, notificationId, channel: 'in_app
  * through the same save, so a malformed one is refused by it.
  */
 function s7aFile(dir, { dispatches, notifications = [ntf('ntf-1'), ntf('ntf-2')] } = {}) {
-  const db = { users: USERS(), sessions: SESSIONS(), orgs: ORGS(), ...FIXTURE(), requests: [], blobNotes: [], ledger: [], notifications, outbox: [], opsEvents: [], deliveryCallbacksSeen: [] };
+  const db = { users: USERS(), sessions: SESSIONS(), orgs: ORGS(), ...FIXTURE(), requests: [], ledger: [], notifications, outbox: [], opsEvents: [], deliveryCallbacksSeen: [] };
   if (dispatches !== undefined) db.dispatches = dispatches;
   const tool = openStore(dir);
-  try { tool.save({ savedAt: NOW, idCounter: 1000, db }); } finally { tool.sqlite.close(); }
+  try { tool.save({ idCounter: 1000, db }); } finally { tool.sqlite.close(); }
 }
 const migrate = (s, { now = NOW } = {}) => runDataMigrations(s, DATA_MIGRATIONS, { now, context: { sessionTtlMs: TTL } });
 /** A live server-mode store with the data layer attached: the repository in its STAGED mode, as the server runs it. */
 function live(dir, { now = () => NOW } = {}) {
   const store = openStore(dir, { tableBacked: TABLE_BACKED });
-  const db = store.load()?.db ?? {};
+  const db = {};
   const warnings = [];
   const layer = attachDataLayer({ db, store, nextId, persist: () => {}, sessionTtlMs: TTL, now, warn: (m) => warnings.push(m) });
-  const snapshot = () => ({ savedAt: NOW, idCounter: counter, db });
-  return { store, db, layer, warnings, dispatches: layer.dispatches, snapshot, save: () => store.save(snapshot()), close: () => store.sqlite.close() };
+  return { store, db, layer, warnings, dispatches: layer.dispatches, save: () => store.save(), close: () => store.sqlite.close() };
 }
 /** An immediate-mode repository on a bare connection (a tool, a test): own transaction per mutation. */
 const bare = (s, over = {}) => createDispatchesRepository({ sqlite: s, now: () => NOW, ...over });
@@ -99,7 +98,7 @@ test('snapshot save: every dispatch is written with its 18 fields, its array pos
   const r4 = s.prepare('SELECT fail_reason FROM dispatches WHERE id = ?').get('dsp-4');
   assert.equal(r4.fail_reason.length, legacy[3].failReason.length, 'failReason is stored untruncated (the sweep never truncates)');
   assert.deepEqual(s.prepare('SELECT name FROM pragma_table_info(?) ORDER BY cid').all('dispatches').map((c) => c.name).filter((n) => /json/.test(n)), [], 'no side column: typed columns only');
-  assert.equal(s.prepare("SELECT COUNT(*) AS n FROM collections WHERE name = 'dispatches'").get().n, 0, 'no blob row');
+  assert.equal(hasBlobTable(s), false, 'no blob table (rewritten in S14a)');
   assert.doesNotMatch(JSON.stringify(rowsOf(dir, 'dispatches')), /keep-me|legacyMarker/, 'the dropped value is stored nowhere');
   // The export reproduces the typed record, position for position, attempts included; the dropped fields are gone.
   const repo = bare(s);
@@ -130,7 +129,7 @@ test('migration 0010: a first installation creates the tables and imports nothin
   rm(none, early, odd);
 });
 
-test('snapshot save refusals: a dispatch that is not an object, without an id, with a duplicate id, a missing key of the literal, a non-string notificationId / channel / provider / status, a non-integer nextAt or createdAt, a non-finite or non-numeric deliveredAt, a non-integer actionedAt, a non-string failReason, attempts that are not an array, an attempt with both note and ok, with neither, a non-integer at, a non-boolean ok, an unknown audience or attempt field; a collection that is not an array — each refuses the whole save with DISPATCHES_IMPORT_BLOCKED (entry index and reason, never an address or a provider text) and writes nothing: no player, no notification, no dispatch, saveSeq unchanged', () => {
+test('snapshot save refusals: a dispatch that is not an object, without an id, with a duplicate id, a missing key of the literal, a non-string notificationId / channel / provider / status, a non-integer nextAt or createdAt, a non-finite or non-numeric deliveredAt, a non-integer actionedAt, a non-string failReason, attempts that are not an array, an attempt with both note and ok, with neither, a non-integer at, a non-boolean ok, an unknown audience or attempt field; a collection that is not an array — each refuses the whole save with DISPATCHES_IMPORT_BLOCKED (entry index and reason, never an address or a provider text) and writes nothing: no player, no notification, no dispatch, nothing else', () => {
   const SECRET = 'SECRET-ADDRESS-ZQX9@example.test';
   const cases = [
     ['not an object', [null], /entry #0: not an object/],
@@ -156,12 +155,14 @@ test('snapshot save refusals: a dispatch that is not an object, without an id, w
   ];
   for (const [label, dispatches, re] of cases) {
     const dir = tempDir('dsp-refuse');
+    { const t = openStore(dir); t.sqlite.close(); }
+    const fresh = fileDump(dir);
     let err = null; try { s7aFile(dir, { dispatches }); } catch (e) { err = e; }
     assert.ok(err, `${label}: must refuse`); assert.match(err.message, re, `${label}: ${err.message}`);
     if (!/snapshot collection/.test(err.message)) assert.match(err.message, /DISPATCHES_IMPORT_BLOCKED/, label);
     assert.equal(err.message.includes(SECRET), false, `${label}: the refusal never carries an address`); assert.equal(err.message.includes('example.test'), false, label);
     for (const t of ['players', 'notifications', ...DISPATCH_TABLES]) assert.equal(rowsOf(dir, t).length, 0, `${label}: nothing written to ${t}`);
-    assert.equal(seqOf(dir), 0, `${label}: saveSeq unchanged`);
+    assert.equal(fileDump(dir), fresh, `${label}: nothing written (rewritten in S14a: was saveSeq)`);
     rm(dir);
   }
   assert.throws(() => validateDispatchRows([dsp({ openedAt: Number.POSITIVE_INFINITY })]), /openedAt must be a finite number/);
@@ -248,92 +249,92 @@ test('repository (immediate mode): create / recordAttempt / patch validate like 
   s.close(); rm(dir);
 });
 
-// ============================================================= the staged mode (the server's): a write lands with the blobs it belongs to
-test('staged mode (the server): a create, an attempt and a patch are visible in memory at once but NOT durable ahead of the snapshot save that carries the blob edits made alongside them (the outbox row, the fail-inject counter, an ops event) — the next save lands them together in ONE revision (independent connection); a failed save (statement or real COMMIT failure) keeps them pending and the retry lands them once; inside a unit of work the writes and the blob edit commit together, a thrown failure, a statement failure at the unit\'s flush, a real COMMIT failure and a CAUGHT participant failure (a refused argument) each roll everything back and restore the rows, the attempts arrays and the counters in memory, writes pending before the unit stay pending; a repository given the participant API refuses to join or write until its save hook is registered', () => {
+// ============================================================= the staged mode (the server's): a write lands at the next save
+test('staged mode (the server): a create, an attempt and a patch are visible in memory at once but NOT durable ahead of the save that carries the staged writes made alongside them (the outbox row) — the next save lands them together (independent connection); a failed save (statement or real COMMIT failure) keeps them pending and the retry lands them once; inside a unit of work the writes commit together, a thrown failure, a statement failure at the unit\'s flush, a real COMMIT failure and a CAUGHT participant failure (a refused argument) each roll everything back and restore the rows, the attempts arrays and the counters in memory, writes pending before the unit stay pending; a repository given the participant API refuses to join or write until its save hook is registered', () => {
   const dir = tempDir('dsp-staged'); s7aFile(dir, { dispatches: [] });
   const L = live(dir); L.save();
-  const seq0 = seqOf(dir);
+  const file0 = fileDump(dir);
   L.layer.outbox.append({ id: 'mail-1', at: NOW, channel: 'email', to: 'synthetic@example.test', text: 'x', providerMessageId: 'fm_1', provider: 'local-fake' }); // S7c: the outbox row goes through its repository (staged into the same save)
   const a = L.dispatches.create(dsp({ id: 'dsp-1', status: 'queued', providerMessageId: null, attempts: [] }));
   L.dispatches.recordAttempt('dsp-1', { at: NOW, ok: true, error: null }); L.dispatches.patch('dsp-1', { status: 'accepted', providerMessageId: 'fm_1' });
   assert.equal(a.status, 'accepted', 'visible at once'); assert.equal(L.dispatches.pending(), 3); assert.deepEqual(idsOf(dir), [], 'nothing durable before the save'); assert.equal(rowsOf(dir, 'outbox', 'seq').length, 0);
   // A failed save (statement): pending stays.
   L.store.sqlite.exec("CREATE TEMP TRIGGER rv_fx BEFORE INSERT ON dispatches BEGIN SELECT RAISE(ABORT, 'synthetic flush failure'); END");
-  assert.throws(() => L.save(), /synthetic flush failure/); assert.deepEqual(idsOf(dir), []); assert.equal(seqOf(dir), seq0); assert.equal(L.dispatches.pending(), 3); assert.equal(rowsOf(dir, 'outbox', 'seq').length, 0, 'the outbox row did not land without the dispatch rows');
+  assert.throws(() => L.save(), /synthetic flush failure/); assert.deepEqual(idsOf(dir), []); assert.equal(fileDump(dir), file0); assert.equal(L.dispatches.pending(), 3); assert.equal(rowsOf(dir, 'outbox', 'seq').length, 0, 'the outbox row did not land without the dispatch rows');
   L.store.sqlite.exec('DROP TRIGGER rv_fx');
   // A failed save (real COMMIT): pending stays.
   L.store.sqlite.exec('CREATE TEMP TABLE rv_parent (id TEXT PRIMARY KEY); CREATE TEMP TABLE rv_child (parent_id TEXT NOT NULL REFERENCES rv_parent(id) DEFERRABLE INITIALLY DEFERRED); CREATE TEMP TRIGGER rv_commit AFTER INSERT ON dispatches BEGIN INSERT INTO rv_child (parent_id) VALUES (\'missing-on-purpose\'); END');
-  assert.throws(() => L.save(), /FOREIGN KEY constraint failed/); assert.deepEqual(idsOf(dir), []); assert.equal(seqOf(dir), seq0); assert.equal(L.dispatches.pending(), 3);
+  assert.throws(() => L.save(), /FOREIGN KEY constraint failed/); assert.deepEqual(idsOf(dir), []); assert.equal(fileDump(dir), file0); assert.equal(L.dispatches.pending(), 3);
   L.store.sqlite.exec('DROP TRIGGER rv_commit');
-  // The retry: one revision, the row, its attempt, its patch and the outbox row together.
+  // The retry: one commit, the row, its attempt, its patch and the outbox row together.
   L.save();
-  assert.equal(seqOf(dir), seq0 + 1); assert.deepEqual(idsOf(dir), ['dsp-1']); assert.deepEqual(rowsOf(dir, 'dispatches', 'seq').map((r) => [r.status, r.provider_message_id]), [['accepted', 'fm_1']]); assert.deepEqual(attemptsOf(dir), [[1, 0, 'send', 1, null, null]]); assert.equal(rowsOf(dir, 'outbox', 'seq').length, 1, 'the outbox row landed in the same save'); assert.equal(L.dispatches.pending(), 0);
-  L.save(); assert.equal(seqOf(dir), seq0 + 2); assert.deepEqual(attemptsOf(dir).length, 1, 'a later save does not replay');
+  assert.deepEqual(idsOf(dir), ['dsp-1']); assert.deepEqual(rowsOf(dir, 'dispatches', 'seq').map((r) => [r.status, r.provider_message_id]), [['accepted', 'fm_1']]); assert.deepEqual(attemptsOf(dir), [[1, 0, 'send', 1, null, null]]); assert.equal(rowsOf(dir, 'outbox', 'seq').length, 1, 'the outbox row landed in the same save'); assert.equal(L.dispatches.pending(), 0);
+  { const landed = fileDump(dir); L.save(); assert.equal(fileDump(dir), landed, 'a later save does not replay'); }
   // A unit of work: together or not at all; a caught participant failure still poisons the unit; pre-unit writes survive.
   const pre = L.dispatches.create(inApp('dsp-pre', 'ntf-2')); assert.equal(L.dispatches.pending(), 1);
-  const before = { rows: plain(L.dispatches.exportRows()), held: plain(a), attempts: a.attempts.length, counts: L.dispatches.countsByStatus(), requests: JSON.stringify(L.db.blobNotes), durable: attemptsOf(dir), ids: idsOf(dir), seq: seqOf(dir) };
-  const unchanged = (label) => { assert.deepEqual({ rows: plain(L.dispatches.exportRows()), held: plain(a), attempts: a.attempts.length, counts: L.dispatches.countsByStatus(), requests: JSON.stringify(L.db.blobNotes), durable: attemptsOf(dir), ids: idsOf(dir), seq: seqOf(dir) }, before, label); assert.equal(L.dispatches.pending(), 1, `${label}: the pre-unit write is still pending`); assert.ok(L.dispatches.byId('dsp-pre')); assert.equal(L.store.sqlite.isTransaction, false); assert.equal(L.store.unitOfWorkState().active, false); };
-  assert.throws(() => L.store.unitOfWork(() => { L.db.blobNotes.push({ id: 'req-u' }); L.dispatches.recordAttempt('dsp-1', { at: NOW + 1, ok: false, error: 'x' }); L.dispatches.patch('dsp-1', { status: 'retrying' }); L.dispatches.create(dsp({ id: 'dsp-u', attempts: [] })); throw new Error('synthetic unit failure'); }, { snapshot: L.snapshot }), /synthetic unit failure/);
+  const before = { rows: plain(L.dispatches.exportRows()), held: plain(a), attempts: a.attempts.length, counts: L.dispatches.countsByStatus(), file: fileDump(dir) };
+  const unchanged = (label) => { assert.deepEqual({ rows: plain(L.dispatches.exportRows()), held: plain(a), attempts: a.attempts.length, counts: L.dispatches.countsByStatus(), file: fileDump(dir) }, before, label); assert.equal(L.dispatches.pending(), 1, `${label}: the pre-unit write is still pending`); assert.ok(L.dispatches.byId('dsp-pre')); assert.equal(L.store.sqlite.isTransaction, false); assert.equal(L.store.unitOfWorkState().active, false); };
+  assert.throws(() => L.store.unitOfWork(() => { L.dispatches.recordAttempt('dsp-1', { at: NOW + 1, ok: false, error: 'x' }); L.dispatches.patch('dsp-1', { status: 'retrying' }); L.dispatches.create(dsp({ id: 'dsp-u', attempts: [] })); throw new Error('synthetic unit failure'); }), /synthetic unit failure/);
   unchanged('thrown');
   // A CAUGHT participant failure (a refused argument inside the joined boundary) still poisons the unit.
   let caught = null; let outer = null;
-  try { L.store.unitOfWork(() => { L.db.blobNotes.push({ id: 'req-u2' }); L.dispatches.patch('dsp-1', { status: 'retrying' }); try { L.dispatches.recordAttempt('dsp-1', { at: 1.5, ok: true, error: null }); } catch (e) { caught = e; } }, { snapshot: L.snapshot }); } catch (e) { outer = e; }
+  try { L.store.unitOfWork(() => { L.dispatches.patch('dsp-1', { status: 'retrying' }); try { L.dispatches.recordAttempt('dsp-1', { at: 1.5, ok: true, error: null }); } catch (e) { caught = e; } }); } catch (e) { outer = e; }
   assert.match(caught?.message ?? '', /at must be an integer timestamp/); assert.ok(outer, 'the caught participant failure still refuses the unit'); assert.equal(outer.unitOfWork, 'rolled_back');
   unchanged('caught');
   // A queued statement that fails when the unit's commit flushes it (staged mode runs the SQL at the commit, not at the call): the unit rolls back.
   L.store.sqlite.exec("CREATE TEMP TRIGGER rv_j BEFORE INSERT ON dispatch_attempts BEGIN SELECT RAISE(ABORT, 'synthetic joined failure'); END");
-  assert.throws(() => L.store.unitOfWork(() => { L.db.blobNotes.push({ id: 'req-u2b' }); L.dispatches.patch('dsp-1', { status: 'retrying' }); L.dispatches.recordAttempt('dsp-1', { at: NOW + 1, ok: false, error: 'x' }); }, { snapshot: L.snapshot }), /synthetic joined failure/);
+  assert.throws(() => L.store.unitOfWork(() => { L.dispatches.patch('dsp-1', { status: 'retrying' }); L.dispatches.recordAttempt('dsp-1', { at: NOW + 1, ok: false, error: 'x' }); }), /synthetic joined failure/);
   unchanged('statement failure at the unit\'s flush');
   L.store.sqlite.exec('DROP TRIGGER rv_j');
   L.store.sqlite.exec("CREATE TEMP TRIGGER rv_commit2 AFTER INSERT ON dispatch_attempts BEGIN INSERT INTO rv_child (parent_id) VALUES ('missing-on-purpose'); END");
-  assert.throws(() => L.store.unitOfWork(() => { L.db.blobNotes.push({ id: 'req-u3' }); L.dispatches.recordAttempt('dsp-1', { at: NOW + 1, ok: false, error: 'x' }); }, { snapshot: L.snapshot }), /FOREIGN KEY constraint failed/);
+  assert.throws(() => L.store.unitOfWork(() => { L.dispatches.recordAttempt('dsp-1', { at: NOW + 1, ok: false, error: 'x' }); }), /FOREIGN KEY constraint failed/);
   unchanged('real COMMIT failure');
   L.store.sqlite.exec('DROP TRIGGER rv_commit2');
-  L.store.unitOfWork(() => { L.db.blobNotes.push({ id: 'req-ok' }); L.dispatches.recordAttempt('dsp-1', { at: NOW + 1, ok: false, error: 'x' }); L.dispatches.patch('dsp-1', { status: 'retrying', nextAt: NOW + 5 }); }, { snapshot: L.snapshot });
-  assert.equal(seqOf(dir), before.seq + 1); assert.deepEqual(idsOf(dir), ['dsp-1', 'dsp-pre'], 'the pre-unit write landed with the unit'); assert.equal(attemptsOf(dir).length, 2); assert.ok(JSON.parse(blobOf(dir, 'blobNotes')).some((r) => r.id === 'req-ok')); assert.equal(L.dispatches.pending(), 0); assert.ok(pre.id);
+  L.store.unitOfWork(() => { L.dispatches.recordAttempt('dsp-1', { at: NOW + 1, ok: false, error: 'x' }); L.dispatches.patch('dsp-1', { status: 'retrying', nextAt: NOW + 5 }); });
+  assert.deepEqual(idsOf(dir), ['dsp-1', 'dsp-pre'], 'the pre-unit write landed with the unit'); assert.equal(attemptsOf(dir).length, 2); assert.equal(L.dispatches.pending(), 0); assert.ok(pre.id);
   // Hook registration is a precondition inside the joined boundary.
   const bareUnit = createDispatchesRepository({ sqlite: L.store.sqlite, now: () => NOW, unit: L.store.unit });
   const stagedUnit = createDispatchesRepository({ sqlite: L.store.sqlite, now: () => NOW, unit: L.store.unit, staged: true });
   for (const [label, work] of [['immediate', () => bareUnit.create(dsp({ id: 'dsp-h', attempts: [] }))], ['staged', () => stagedUnit.create(dsp({ id: 'dsp-h', attempts: [] }))]]) {
-    let c = null; let o = null;
-    try { L.store.unitOfWork(() => { L.db.blobNotes.push({ id: 'req-h' }); try { work(); } catch (e) { c = e; } }, { snapshot: L.snapshot }); } catch (e) { o = e; }
-    assert.match(c?.message ?? '', /save hook/, label); assert.ok(o, `${label}: the caught refusal still refuses the unit`); assert.equal(JSON.parse(blobOf(dir, 'blobNotes')).some((r) => r.id === 'req-h'), false);
+    let c = null; let o = null; const f0 = fileDump(dir);
+    try { L.store.unitOfWork(() => { try { work(); } catch (e) { c = e; } }); } catch (e) { o = e; }
+    assert.match(c?.message ?? '', /save hook/, label); assert.ok(o, `${label}: the caught refusal still refuses the unit`); assert.equal(fileDump(dir), f0, `${label}: nothing written`);
   }
   assert.throws(() => stagedUnit.create(dsp({ id: 'dsp-h', attempts: [] })), /save hook/, 'standalone staged write without the hook');
   L.close(); rm(dir);
 });
 
 // ============================================================= the snapshot dispatcher (backups, restores, the persistence suites)
-test('snapshot dispatcher: a tool that loads and saves the whole file round-trips every dispatch and attempt byte for byte (an unknown field — an own "__proto__" key — dropped silently by the save); a snapshot that OMITS the collection leaves the tables alone; an explicit EMPTY array clears them; a malformed collection (an object) rolls the WHOLE save back — saveSeq and every other collection unchanged; an invalid entry refuses the whole save with a text-free diagnostic', () => {
+test('snapshot dispatcher: a tool that loads and saves the whole file round-trips every dispatch and attempt byte for byte (an unknown field — an own "__proto__" key — dropped silently by the save); a snapshot that OMITS the collection leaves the tables alone; an explicit EMPTY array clears them; a malformed collection (an object) rolls the WHOLE save back — every other collection unchanged; an invalid entry refuses the whole save with a text-free diagnostic', () => {
   const dir = tempDir('dsp-snap');
   const typed = '{"id":"dsp-proto","notificationId":"ntf-1","audience":{"kind":"org_user","id":"usr-1"},"channel":"email","to":"synthetic@example.test","provider":"local-fake","status":"accepted","skipReason":null,"providerMessageId":"fm_p","attempts":[{"at":1,"note":"quiet hours re-check"},{"at":2,"ok":true,"error":null}],"nextAt":1,"actionDeadline":null,"createdAt":1,"deliveredAt":1700000000000.5,"openedAt":null,"actionedAt":null,"failedAt":null,"failReason":null';
   const special = JSON.parse(`${typed},"__proto__":{"legacyMarker":"keep-me"}}`); const clean = JSON.parse(`${typed}}`);
   s7aFile(dir, { dispatches: [inApp('dsp-1', 'ntf-1'), special] });
   const tool = openStore(dir); const snap = tool.load();
   assert.equal(JSON.stringify(snap.db.dispatches[1]), JSON.stringify(clean), 'read back as the typed record (the save dropped the unknown key)'); assert.equal(Object.hasOwn(snap.db.dispatches[1], '__proto__'), false);
-  const seq0 = tool.revision(); tool.save({ ...snap, db: { ...snap.db, dispatches: [snap.db.dispatches[0], special] } });
-  assert.equal(tool.revision(), seq0 + 1); assert.equal(JSON.stringify(tool.load().db.dispatches), JSON.stringify([inApp('dsp-1', 'ntf-1'), clean]), 'round-tripped through replace; an unknown top-level key is not stored'); assert.equal(attemptsOf(dir).length, 2);
+  tool.save({ ...snap, db: { ...snap.db, dispatches: [snap.db.dispatches[0], special] } });
+  assert.equal(JSON.stringify(tool.load().db.dispatches), JSON.stringify([inApp('dsp-1', 'ntf-1'), clean]), 'round-tripped through replace; an unknown top-level key is not stored'); assert.equal(attemptsOf(dir).length, 2);
   // Omitted: left alone.
   const { dispatches: _omit, ...without } = snap.db; tool.save({ ...snap, db: without });
-  assert.deepEqual(idsOf(dir), ['dsp-1', 'dsp-proto'], 'an omitted collection leaves the tables alone'); assert.equal(blobOf(dir, 'dispatches'), null, 'and never recreates a shadow blob');
+  assert.deepEqual(idsOf(dir), ['dsp-1', 'dsp-proto'], 'an omitted collection leaves the tables alone');
   // Malformed: the whole save rolls back.
-  const beforeDump = dump(tool.sqlite); const seq1 = tool.revision();
-  assert.throws(() => tool.save({ ...snap, db: { ...snap.db, blobNotes: [{ id: 'vch-x' }], dispatches: { id: 'x' } } }), /dispatches: the snapshot collection must be an array/);
-  assert.equal(tool.revision(), seq1); assert.deepEqual(dump(tool.sqlite), beforeDump, 'nothing of the save landed (blobNotes included)');
+  const beforeDump = dump(tool.sqlite);
+  assert.throws(() => tool.save({ ...snap, db: { ...snap.db, players: snap.db.players.map((p, i) => (i ? p : { ...p, name: 'Unrelated Change' })), dispatches: { id: 'x' } } }), /dispatches: the snapshot collection must be an array/);
+  assert.deepEqual(dump(tool.sqlite), beforeDump, 'nothing of the save landed (the unrelated edit included)');
   const SECRET = 'SECRET-ADDRESS-77@example.test';
   assert.throws(() => tool.save({ ...snap, db: { ...snap.db, dispatches: [dsp({ id: 'dsp-bad', to: SECRET, attempts: [{ at: 1 }] })] } }), (e) => /DISPATCHES_IMPORT_BLOCKED/.test(e.message) && /attempts\[0\] is neither/.test(e.message) && !e.message.includes(SECRET));
-  assert.equal(tool.revision(), seq1); assert.deepEqual(dump(tool.sqlite), beforeDump);
+  assert.deepEqual(dump(tool.sqlite), beforeDump);
   // Empty: cleared.
-  tool.save({ ...snap, db: { ...snap.db, dispatches: [] } }); assert.deepEqual(idsOf(dir), []); assert.equal(attemptsOf(dir).length, 0); assert.equal(blobOf(dir, 'dispatches'), null);
+  tool.save({ ...snap, db: { ...snap.db, dispatches: [] } }); assert.deepEqual(idsOf(dir), []); assert.equal(attemptsOf(dir).length, 0);
   tool.sqlite.close(); rm(dir);
 });
 
 // ============================================================= review of 26d492b (three independently reproduced findings)
-test('EVERY patch refusal is a participant failure: a null or non-object patch, a missing row, an unknown field and an invalid value each refuse INSIDE the joined boundary, so a unit that catches the refusal still rolls back — the earlier patch of the same unit, the blob row it appended, the status in the table (second connection) and saveSeq are all as before, the held view shows the restored row — caught and uncaught, for the staged repository and for an immediate one participating in the same store unit, and for a repository whose hook is not registered; a write pending BEFORE the refused unit stays pending and lands with the successful retry; a valid empty patch stays a no-op', () => {
+test('EVERY patch refusal is a participant failure: a null or non-object patch, a missing row, an unknown field and an invalid value each refuse INSIDE the joined boundary, so a unit that catches the refusal still rolls back — the earlier patch of the same unit and the status in the table (second connection) are as before, the held view shows the restored row — caught and uncaught, for the staged repository and for an immediate one participating in the same store unit, and for a repository whose hook is not registered; a write pending BEFORE the refused unit stays pending and lands with the successful retry; a valid empty patch stays a no-op', () => {
   const dir = tempDir('dsp-rv1'); s7aFile(dir, { dispatches: [] });
   const L = live(dir); L.dispatches.create(dsp({ id: 'dsp-1', attempts: [] })); L.save();
-  const seq0 = seqOf(dir); const held = L.dispatches.byId('dsp-1');
-  const durable = () => ({ status: rowsOf(dir, 'dispatches', 'seq')[0].status, seq: seqOf(dir), requests: JSON.parse(blobOf(dir, 'blobNotes')).map((r) => r.id), attempts: attemptsOf(dir).length });
+  const held = L.dispatches.byId('dsp-1');
+  const durable = () => ({ status: rowsOf(dir, 'dispatches', 'seq')[0].status, attempts: attemptsOf(dir).length, file: fileDump(dir) });
   const before = durable();
   const bad = {
     'null patch': () => L.dispatches.patch('dsp-1', null),
@@ -345,32 +346,32 @@ test('EVERY patch refusal is a participant failure: a null or non-object patch, 
   };
   for (const [label, refuse] of Object.entries(bad)) {
     let caught = null; let outer = null;
-    try { L.store.unitOfWork(() => { L.db.blobNotes.push({ id: `req-${label}` }); L.dispatches.patch('dsp-1', { status: 'delivered' }); assert.equal(held.status, 'delivered'); try { refuse(); } catch (e) { caught = e; } }, { snapshot: L.snapshot }); } catch (e) { outer = e; }
+    try { L.store.unitOfWork(() => { L.dispatches.patch('dsp-1', { status: 'delivered' }); assert.equal(held.status, 'delivered'); try { refuse(); } catch (e) { caught = e; } }); } catch (e) { outer = e; }
     assert.ok(caught, `${label}: the invalid call fails`); assert.ok(outer, `${label}: the unit is refused although the caller caught the failure`); assert.equal(outer.unitOfWork, 'rolled_back', label);
     assert.deepEqual(durable(), before, `${label}: nothing of the unit is durable`); assert.equal(held.status, 'accepted', `${label}: the held view shows the restored row`); assert.equal(L.dispatches.pending(), 0, `${label}: nothing stays queued from the rolled-back unit`); assert.equal(L.store.sqlite.isTransaction, false);
-    assert.throws(() => L.store.unitOfWork(() => { L.db.blobNotes.push({ id: `req-${label}-u` }); L.dispatches.patch('dsp-1', { status: 'delivered' }); refuse(); }, { snapshot: L.snapshot }), `${label}: uncaught`);
+    assert.throws(() => L.store.unitOfWork(() => { L.dispatches.patch('dsp-1', { status: 'delivered' }); refuse(); }), `${label}: uncaught`);
     assert.deepEqual(durable(), before, `${label}: uncaught — nothing durable`); assert.equal(held.status, 'accepted'); assert.equal(L.dispatches.pending(), 0);
   }
   // A write pending BEFORE the refused unit survives it and lands with the retry.
   L.dispatches.recordAttempt('dsp-1', { at: NOW, ok: true, error: null }); assert.equal(L.dispatches.pending(), 1);
-  let outer = null; try { L.store.unitOfWork(() => { L.db.blobNotes.push({ id: 'req-x' }); try { L.dispatches.patch('dsp-1', null); } catch { /* caught */ } }, { snapshot: L.snapshot }); } catch (e) { outer = e; }
+  let outer = null; try { L.store.unitOfWork(() => { try { L.dispatches.patch('dsp-1', null); } catch { /* caught */ } }); } catch (e) { outer = e; }
   assert.ok(outer); assert.equal(L.dispatches.pending(), 1, 'the pre-unit write is still pending'); assert.equal(attemptsOf(dir).length, 0); assert.equal(held.attempts.length, 1, 'and still in memory');
-  L.store.unitOfWork(() => { L.db.blobNotes.push({ id: 'req-ok' }); L.dispatches.patch('dsp-1', { status: 'delivered' }); }, { snapshot: L.snapshot });
-  assert.deepEqual(durable(), { status: 'delivered', seq: seq0 + 1, requests: ['req-ok'], attempts: 1 }, 'the retry lands the unit and the pre-unit write in one revision'); assert.equal(L.dispatches.pending(), 0);
+  L.store.unitOfWork(() => { L.dispatches.patch('dsp-1', { status: 'delivered' }); });
+  { const d = durable(); assert.deepEqual([d.status, d.attempts], ['delivered', 1], 'the retry lands the unit and the pre-unit write in one commit'); } assert.equal(L.dispatches.pending(), 0);
   // A valid empty patch is a no-op (nothing queued, nothing written), inside and outside a unit.
-  L.dispatches.patch('dsp-1', {}); assert.equal(L.dispatches.pending(), 0); L.save(); assert.equal(seqOf(dir), seq0 + 2);
-  L.store.unitOfWork(() => { L.dispatches.patch('dsp-1', {}); }, { snapshot: L.snapshot }); assert.equal(L.dispatches.pending(), 0);
+  L.dispatches.patch('dsp-1', {}); assert.equal(L.dispatches.pending(), 0); { const f = fileDump(dir); L.save(); assert.equal(fileDump(dir), f, 'nothing written'); }
+  L.store.unitOfWork(() => { L.dispatches.patch('dsp-1', {}); }); assert.equal(L.dispatches.pending(), 0);
   // An immediate repository participating in the same store unit (hook registered): the same boundary.
   const imm = createDispatchesRepository({ sqlite: L.store.sqlite, now: () => NOW, unit: L.store.unit }); L.store.setSaveHook(imm.saveHook());
   const before2 = durable();
   for (const [label, refuse] of [['null', () => imm.patch('dsp-1', null)], ['missing', () => imm.patch('absent', { status: 'opened' })], ['value', () => imm.patch('dsp-1', { failReason: 7 })]]) {
     let c = null; let o = null;
-    try { L.store.unitOfWork(() => { L.db.blobNotes.push({ id: `req-imm-${label}` }); imm.patch('dsp-1', { status: 'opened' }); try { refuse(); } catch (e) { c = e; } }, { snapshot: L.snapshot }); } catch (e) { o = e; }
+    try { L.store.unitOfWork(() => { imm.patch('dsp-1', { status: 'opened' }); try { refuse(); } catch (e) { c = e; } }); } catch (e) { o = e; }
     assert.ok(c, label); assert.ok(o, `immediate ${label}: the unit is refused`); assert.deepEqual(durable(), before2, `immediate ${label}: nothing durable`); assert.equal(imm.byId('dsp-1').status, 'delivered', `immediate ${label}: its mirror restored`); assert.equal(L.store.sqlite.isTransaction, false);
   }
   // A repository given the participant API but whose hook was never registered: the caught refusal is still a participant failure.
   const noHook = createDispatchesRepository({ sqlite: L.store.sqlite, now: () => NOW, unit: L.store.unit, staged: true });
-  { let c = null; let o = null; try { L.store.unitOfWork(() => { L.db.blobNotes.push({ id: 'req-nohook' }); try { noHook.patch('dsp-1', null); } catch (e) { c = e; } }, { snapshot: L.snapshot }); } catch (e) { o = e; } assert.match(c?.message ?? '', /save hook/); assert.ok(o); assert.deepEqual(durable(), before2); }
+  { let c = null; let o = null; try { L.store.unitOfWork(() => { try { noHook.patch('dsp-1', null); } catch (e) { c = e; } }); } catch (e) { o = e; } assert.match(c?.message ?? '', /save hook/); assert.ok(o); assert.deepEqual(durable(), before2); }
   L.close(); rm(dir);
 });
 
@@ -390,7 +391,7 @@ test('typed columns only (S8d fidelity rule): create drops an unknown top-level 
   assert.throws(() => { L.dispatches.byId('dsp-1').audience.id = 'view'; }, /written through its domain repository/, 'the view refuses a nested write');
   // A rolled-back unit: a repository write inside it is restored, the held view included.
   const held = L.dispatches.byId('dsp-1');
-  assert.throws(() => L.store.unitOfWork(() => { L.dispatches.patch('dsp-1', { status: 'delivered', failReason: 'x' }); assert.equal(held.status, 'delivered'); throw new Error('synthetic abort'); }, { snapshot: L.snapshot }), /synthetic abort/);
+  assert.throws(() => L.store.unitOfWork(() => { L.dispatches.patch('dsp-1', { status: 'delivered', failReason: 'x' }); assert.equal(held.status, 'delivered'); throw new Error('synthetic abort'); }), /synthetic abort/);
   assert.deepEqual(plain(held), expected); assert.equal(L.dispatches.pending(), 0);
   // Stored, reloaded (a restart) and round-tripped through the snapshot dispatcher: the same typed record.
   L.dispatches.reload(); assert.deepEqual(plain(L.dispatches.byId('dsp-1')), expected, 'after a reload; attempt order unchanged');
@@ -412,9 +413,9 @@ test('in the repository, a non-finite callback clock is the legacy in-memory sta
   { const r = second(dir); try { assert.deepEqual({ ...r.prepare("SELECT delivered_at AS v, typeof(delivered_at) AS t, status FROM dispatches WHERE id = 'dsp-1'").get() }, { v: null, t: 'null', status: 'delivered' }, 'the column stores NULL'); } finally { r.close(); } }
   assert.equal(L.dispatches.exportRows()[0].deliveredAt, null, 'the export carries null'); assert.equal(JSON.parse(JSON.stringify(L.db.dispatches[0])).deliveredAt, null, 'a JSON view carries null');
   // A unit that changes the row and rolls back restores the in-memory non-finite value; one that commits keeps it.
-  assert.throws(() => L.store.unitOfWork(() => { L.dispatches.patch('dsp-1', { deliveredAt: 5, openedAt: Number.NEGATIVE_INFINITY }); throw new Error('abort'); }, { snapshot: L.snapshot }), /abort/);
+  assert.throws(() => L.store.unitOfWork(() => { L.dispatches.patch('dsp-1', { deliveredAt: 5, openedAt: Number.NEGATIVE_INFINITY }); throw new Error('abort'); }), /abort/);
   assert.equal(held.deliveredAt, Number.POSITIVE_INFINITY); assert.equal(held.openedAt, null);
-  L.store.unitOfWork(() => { L.dispatches.patch('dsp-1', { openedAt: Number.NEGATIVE_INFINITY, status: 'opened' }); }, { snapshot: L.snapshot });
+  L.store.unitOfWork(() => { L.dispatches.patch('dsp-1', { openedAt: Number.NEGATIVE_INFINITY, status: 'opened' }); });
   assert.equal(held.openedAt, Number.NEGATIVE_INFINITY); assert.equal(rowsOf(dir, 'dispatches', 'seq')[0].opened_at, null);
   // Finite clocks are unchanged: exact, fractional included.
   L.dispatches.patch('dsp-2', { deliveredAt: FRACTIONAL, openedAt: 1700000000000 }); L.save();

@@ -17,7 +17,7 @@ import {
 } from '../repositories/oneTimeCodes.mjs';
 import { openStore } from '../store.mjs';
 import { createMailer, OUTBOX_SECRET_PLACEHOLDER } from '../adapters.mjs';
-import { NOW, TTL, tempDir, FIXTURE, ORGS, USERS, SESSIONS, openRaw, dump } from './coreIdentityTestFixtures.mjs';
+import { NOW, TTL, tempDir, FIXTURE, ORGS, USERS, SESSIONS, openRaw, dump, hasBlobTable } from './coreIdentityTestFixtures.mjs';
 
 let passed = 0;
 const only = process.env.TEST_ONLY || '';
@@ -31,8 +31,8 @@ const MIN = 60_000;
 /** A second, independent connection: what it reads is what is committed. */
 const second = (dir) => new DatabaseSync(dbFile(dir), { readOnly: true });
 const rowsOf = (dir, table) => { const s = second(dir); try { return s.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all().map((r) => ({ ...r })); } finally { s.close(); } };
-const blobOf = (dir, name) => { const s = second(dir); try { return s.prepare('SELECT value FROM collections WHERE name = ?').get(name)?.value ?? null; } finally { s.close(); } };
-const seqOf = (dir) => { const s = second(dir); try { return Number(s.prepare("SELECT value FROM meta WHERE key = 'saveSeq'").get()?.value) || 0; } finally { s.close(); } };
+/** Whether org-pro is suspended in the committed file: the unrelated edit the units below make. */
+const suspendedOf = (dir) => rowsOf(dir, 'orgs').find((o) => o.id === 'org-pro').suspended;
 const legacyChallenge = (over = {}) => ({ orgId: 'org-pro', email: 'recruitment@eastport.test', code: 'CHAL22', expiresAt: NOW + 20 * MIN, ...over });
 const legacyPairing = (over = {}) => ({ code: 'PAIR22', playerId: 'pl-child1', expiresAt: NOW + 10 * MIN, ...over });
 /**
@@ -42,23 +42,22 @@ const legacyPairing = (over = {}) => ({ code: 'PAIR22', playerId: 'pl-child1', e
  * save, so a malformed one is refused by it.
  */
 function s5File(dir, { emailChallenges, pairingCodes } = {}) {
-  const db = { users: USERS(), sessions: SESSIONS(), orgs: ORGS(), ...FIXTURE(), requests: [], blobNotes: [], ledger: [] };
+  const db = { users: USERS(), sessions: SESSIONS(), orgs: ORGS(), ...FIXTURE(), requests: [], ledger: [] };
   if (emailChallenges !== undefined) db.emailChallenges = emailChallenges;
   if (pairingCodes !== undefined) db.pairingCodes = pairingCodes;
   const tool = openStore(dir);
-  try { tool.save({ savedAt: NOW, idCounter: 1000, db }); } finally { tool.sqlite.close(); }
+  try { tool.save({ idCounter: 1000, db }); } finally { tool.sqlite.close(); }
 }
 /** A live server-mode store with the data layer attached at `now`. */
 function live(dir, { now = () => NOW } = {}) {
   const store = openStore(dir, { tableBacked: TABLE_BACKED });
-  const db = store.load()?.db ?? {};
+  const db = {};
   const layer = attachDataLayer({ db, store, nextId, persist: () => {}, sessionTtlMs: TTL, now, warn: () => {} });
-  const snapshot = () => ({ savedAt: NOW, idCounter: counter, db });
-  return { store, db, layer, codes: layer.codes, snapshot, close: () => store.sqlite.close() };
+  return { store, db, layer, codes: layer.codes, close: () => store.sqlite.close() };
 }
 
 // ============================================================= the snapshot save refuses junk
-test('snapshot save refusals: an entry with both code and codeHash, with neither, an unknown field, a malformed hash, a non-integer expiry, negative attempts, a missing owner, a duplicate organisation or child, a duplicate code, a collection that is not an array, a live challenge for an organisation that does not exist, a live code for a player that does not exist — each refuses the whole save (entry and reason, never a code) and writes nothing: no player, no organisation, no code, no save revision', () => {
+test('snapshot save refusals: an entry with both code and codeHash, with neither, an unknown field, a malformed hash, a non-integer expiry, negative attempts, a missing owner, a duplicate organisation or child, a duplicate code, a collection that is not an array, a live challenge for an organisation that does not exist, a live code for a player that does not exist — each refuses the whole save (entry and reason, never a code) and writes nothing: no player, no organisation, no staff, no session, no code', () => {
   const cases = [
     ['both formats', { pairingCodes: [{ ...legacyPairing(), codeHash: hashCode('PAIR22') }] }, /entry #0: carries both code and codeHash/],
     ['neither format', { pairingCodes: [{ playerId: 'pl-child1', expiresAt: NOW + MIN }] }, /entry #0: has neither code/],
@@ -74,14 +73,14 @@ test('snapshot save refusals: an entry with both code and codeHash, with neither
     ['an unknown organisation', { emailChallenges: [legacyChallenge({ orgId: 'org-nowhere' })] }, /EMAIL_CHALLENGE_ORG_MISSING/],
     ['an unknown player', { pairingCodes: [legacyPairing({ playerId: 'pl-nowhere' })] }, /PAIRING_CODE_PLAYER_MISSING.*pl-nowhere/],
   ];
-  for (const [label, blobs, re] of cases) {
+  for (const [label, collections, re] of cases) {
     const dir = tempDir('otc-refuse');
-    let err = null; try { s5File(dir, blobs); } catch (e) { err = e; }
+    let err = null; try { s5File(dir, collections); } catch (e) { err = e; }
     assert.ok(err, `${label}: must refuse`); assert.match(err.message, re, `${label}: ${err.message}`);
     assert.doesNotMatch(err.message, /PAIR22|CHAL22|OTHER2|NEWONE/i, `${label}: the refusal never carries a code`);
     const s = openRaw(dir);
-    for (const t of ['players', 'orgs', 'email_challenges', 'pairing_codes']) assert.equal(s.prepare(`SELECT COUNT(*) AS n FROM ${t}`).get().n, 0, `${label}: nothing written to ${t}`);
-    assert.equal(seqOf(dir), 0, `${label}: the save revision did not advance`);
+    // (Rewritten in S14a: the save revision is gone; the staff and session tables are checked as well.)
+    for (const t of ['players', 'orgs', 'org_users', 'sessions', 'email_challenges', 'pairing_codes']) assert.equal(s.prepare(`SELECT COUNT(*) AS n FROM ${t}`).get().n, 0, `${label}: nothing written to ${t}`);
     s.close(); rm(dir);
   }
 });
@@ -146,7 +145,7 @@ test('e-mail confirmation as one unit of work: a failure after the consumption a
     if (fault === 'after_consume') throw new Error('injected failure after the consumption');
     L.layer.orgs.update('org-pro', { emailDomain: consumed.email.split('@')[1], emailDomainVerified: true });
     if (fault === 'commit') L.store.failCommitOfOpenTransaction();
-  }, { snapshot: L.snapshot });
+  });
   const state = () => ({ challenge: rowsOf(dir, 'email_challenges').map((r) => r.org_id), verified: rowsOf(dir, 'orgs').find((o) => o.id === 'org-pro').email_domain_verified });
   for (const [fault, re] of [['after_consume', /injected failure after the consumption/], ['commit', /FOREIGN KEY constraint failed/]]) {
     assert.throws(() => confirm(fault), re, fault);
@@ -173,7 +172,7 @@ test('pairing as one unit of work: a failure after the consumption and a failure
     const token = L.layer.sessions.create('player', consumed.playerId).token;
     if (fault === 'commit') L.store.failCommitOfOpenTransaction();
     return token;
-  }, { snapshot: L.snapshot });
+  });
   for (const [fault, re] of [['after_consume', /injected failure after the consumption/], ['commit', /FOREIGN KEY constraint failed/]]) {
     assert.throws(() => pair(fault), re, fault);
     assert.equal(rowsOf(dir, 'pairing_codes').length, 1, `${fault}: the code is retained`);
@@ -186,26 +185,26 @@ test('pairing as one unit of work: a failure after the consumption and a failure
 });
 
 // ============================================================= review of b2a237e: the repository joins the store's unit of work
-/** Durable state read through an independent connection: the pairing rows, the `requests` blob and the save revision. */
-const durable = (dir) => ({ codes: rowsOf(dir, 'pairing_codes').map((r) => r.code_hash), challenges: rowsOf(dir, 'email_challenges').map((r) => [r.org_id, r.attempts]), requests: blobOf(dir, 'blobNotes'), seq: seqOf(dir) });
-/** Run `work` in a unit of work whose caller swallows the repository error; returns what the caller caught and what the unit threw. */
+/** Durable state read through an independent connection: the code rows and the unrelated organisation row. (Rewritten in S14a: this read a blob and the save revision.) */
+const durable = (dir) => ({ codes: rowsOf(dir, 'pairing_codes').map((r) => r.code_hash), challenges: rowsOf(dir, 'email_challenges').map((r) => [r.org_id, r.attempts]), suspended: suspendedOf(dir) });
+/** Run `work` in a unit of work, beside an unrelated organisation edit, whose caller swallows the repository error; returns what the caller caught and what the unit threw. */
 const swallowing = (L, work) => {
   let caught = null; let outer = null;
-  try { L.store.unitOfWork(() => { L.db.blobNotes.push({ id: 'unrelated-edit', status: 'pending' }); try { work(); } catch (e) { caught = e; } }, { snapshot: L.snapshot }); } catch (e) { outer = e; }
+  try { L.store.unitOfWork(() => { L.layer.orgs.update('org-pro', { suspended: true }); try { work(); } catch (e) { caught = e; } }); } catch (e) { outer = e; }
   return { caught, outer };
 };
 
-test('a caught repository failure cannot commit partial work: the pairing reissue deletes the old row, then the replacement insert fails (temporary trigger) and the caller catches the error; the enclosing unit refuses to commit — the old code is kept (independent connection), the unrelated in-memory edit is restored, saveSeq is unchanged, no transaction is left open; the standalone control still rolls back on its own; an explicit retry lands', () => {
+test('a caught repository failure cannot commit partial work: the pairing reissue deletes the old row, then the replacement insert fails (temporary trigger) and the caller catches the error; the enclosing unit refuses to commit — the old code is kept (independent connection), the unrelated edit is rolled back in the file and in memory, no transaction is left open; the standalone control still rolls back on its own; an explicit retry lands', () => {
   const dir = tempDir('otc-joined-pair'); s5File(dir);
   const L = live(dir);
   const first = L.codes.issuePairingCode('pl-child1');
-  L.store.save(L.snapshot());
-  const before = durable(dir); const memoryBefore = JSON.stringify(L.db.blobNotes);
+  L.store.save();
+  const before = durable(dir);
   assert.equal(before.codes.length, 1);
   L.store.sqlite.exec("CREATE TEMP TRIGGER t_pair_insert BEFORE INSERT ON pairing_codes BEGIN SELECT RAISE(ABORT, 'injected pairing insert failure'); END");
   // Standalone: the repository's own transaction rolls the deletion back with the failed insert.
   assert.throws(() => L.codes.issuePairingCode('pl-child1'), /injected pairing insert failure/);
-  assert.deepEqual(durable(dir), before, 'standalone: the old code and the revision are kept');
+  assert.deepEqual(durable(dir), before, 'standalone: the old code is kept');
   assert.equal(L.store.sqlite.isTransaction, false, 'standalone: no transaction left open');
   // Joined, and the error swallowed by the caller.
   const { caught, outer } = swallowing(L, () => L.codes.issuePairingCode('pl-child1'));
@@ -214,25 +213,24 @@ test('a caught repository failure cannot commit partial work: the pairing reissu
   assert.match(outer.message, /cannot commit.*injected pairing insert failure/s);
   assert.equal(outer.cause, caught, 'the unit names the swallowed error as its cause');
   assert.equal(outer.unitOfWork, 'rolled_back');
-  assert.deepEqual(durable(dir), before, 'nothing durable changed: the old code, the requests blob and saveSeq');
-  assert.equal(JSON.stringify(L.db.blobNotes), memoryBefore, 'the unrelated in-memory edit was restored');
+  assert.deepEqual(durable(dir), before, 'nothing durable changed: the old code and the unrelated organisation row');
+  assert.ok(!L.layer.orgs.byId('org-pro').suspended, 'the unrelated edit was restored in memory');
   assert.equal(L.store.sqlite.isTransaction, false, 'no transaction left open'); assert.equal(L.store.unitOfWorkState().active, false, 'the unit is closed');
   assert.deepEqual(L.codes.peekPairingCode(first.code), { playerId: 'pl-child1' }, 'the old code still works');
   // Retry, explicitly, once the fault is gone.
   L.store.sqlite.exec('DROP TRIGGER t_pair_insert');
-  const retry = L.store.unitOfWork(() => L.codes.issuePairingCode('pl-child1'), { snapshot: L.snapshot });
+  const retry = L.store.unitOfWork(() => L.codes.issuePairingCode('pl-child1'));
   assert.equal(rowsOf(dir, 'pairing_codes').length, 1); assert.equal(L.codes.peekPairingCode(first.code), null, 'replaced'); assert.deepEqual(L.codes.peekPairingCode(retry.code), { playerId: 'pl-child1' });
-  assert.equal(seqOf(dir), before.seq + 1, 'the retry advanced the revision exactly once');
   L.close(); rm(dir);
 });
 
-test('e-mail side, a multi-statement operation that already wrote: the tenth wrong attempt increments the count, then the cancellation fails (temporary trigger on the delete); standalone the count stays at nine; inside a unit whose caller catches the error the whole unit rolls back — nine in the file, the unrelated edit restored, saveSeq unchanged, no transaction open; the retry cancels the challenge', () => {
+test('e-mail side, a multi-statement operation that already wrote: the tenth wrong attempt increments the count, then the cancellation fails (temporary trigger on the delete); standalone the count stays at nine; inside a unit whose caller catches the error the whole unit rolls back — nine in the file, the unrelated edit rolled back, no transaction open; the retry cancels the challenge', () => {
   const dir = tempDir('otc-joined-mail'); s5File(dir);
   const L = live(dir);
   const { code } = L.codes.issueEmailChallenge('org-pro', 'x@eastport.test');
   for (let i = 1; i < EMAIL_CHALLENGE_MAX_ATTEMPTS; i++) L.codes.noteFailedEmailAttempt('org-pro');
-  L.store.save(L.snapshot());
-  const before = durable(dir); const memoryBefore = JSON.stringify(L.db.blobNotes);
+  L.store.save();
+  const before = durable(dir);
   assert.deepEqual(before.challenges, [['org-pro', EMAIL_CHALLENGE_MAX_ATTEMPTS - 1]]);
   L.store.sqlite.exec("CREATE TEMP TRIGGER t_mail_delete BEFORE DELETE ON email_challenges BEGIN SELECT RAISE(ABORT, 'injected challenge delete failure'); END");
   assert.throws(() => L.codes.noteFailedEmailAttempt('org-pro'), /injected challenge delete failure/);
@@ -241,39 +239,43 @@ test('e-mail side, a multi-statement operation that already wrote: the tenth wro
   const { caught, outer } = swallowing(L, () => L.codes.noteFailedEmailAttempt('org-pro'));
   assert.match(caught?.message ?? '', /injected challenge delete failure/);
   assert.ok(outer, 'the enclosing unit refused to commit'); assert.match(outer.message, /cannot commit.*injected challenge delete failure/s); assert.equal(outer.unitOfWork, 'rolled_back');
-  assert.deepEqual(durable(dir), before, 'the count is still nine, the blob and saveSeq unchanged');
-  assert.equal(JSON.stringify(L.db.blobNotes), memoryBefore, 'memory restored');
+  assert.deepEqual(durable(dir), before, 'the count is still nine, the organisation row unchanged');
+  assert.ok(!L.layer.orgs.byId('org-pro').suspended, 'memory restored');
   assert.equal(L.store.sqlite.isTransaction, false); assert.equal(L.store.unitOfWorkState().active, false);
   assert.deepEqual(L.codes.checkEmailChallenge('org-pro', code), { status: 'ok', email: 'x@eastport.test' }, 'the challenge is still live at nine');
   L.store.sqlite.exec('DROP TRIGGER t_mail_delete');
-  assert.deepEqual(L.store.unitOfWork(() => L.codes.noteFailedEmailAttempt('org-pro'), { snapshot: L.snapshot }), { attemptsRemaining: 0, invalidated: true }, 'the retry cancels the challenge');
-  assert.deepEqual(rowsOf(dir, 'email_challenges'), []); assert.deepEqual(L.codes.checkEmailChallenge('org-pro', code), { status: 'none' }); assert.equal(seqOf(dir), before.seq + 1);
+  assert.deepEqual(L.store.unitOfWork(() => L.codes.noteFailedEmailAttempt('org-pro')), { attemptsRemaining: 0, invalidated: true }, 'the retry cancels the challenge');
+  assert.deepEqual(rowsOf(dir, 'email_challenges'), []); assert.deepEqual(L.codes.checkEmailChallenge('org-pro', code), { status: 'none' });
   L.close(); rm(dir);
 });
 
-test('the boundary itself: joined successes commit with the unit (issue, consume and an unrelated edit, one revision); an uncaught failure rolls back as before; expected negative results stay return values and never poison a unit; a validation failure is part of the operation (caught inside a unit, it still poisons the unit); a raw SQLite transaction a tool opened is honoured without a nested BEGIN and is not mistaken for a unit (its ROLLBACK undoes the operation); a malformed participant API is refused at construction', () => {
+test('the boundary itself: joined successes commit with the unit (issue, consume and an unrelated edit, one transaction); an uncaught failure rolls back as before; expected negative results stay return values and never poison a unit; a validation failure is part of the operation (caught inside a unit, it still poisons the unit); a raw SQLite transaction a tool opened is honoured without a nested BEGIN and is not mistaken for a unit (its ROLLBACK undoes the operation); a malformed participant API is refused at construction', () => {
   const dir = tempDir('otc-joined-edge'); s5File(dir);
   const L = live(dir);
-  L.store.save(L.snapshot());
-  // Joined successes.
-  const seq0 = seqOf(dir);
-  const issued = L.store.unitOfWork(() => { const p = L.codes.issuePairingCode('pl-child1'); L.db.blobNotes.push({ id: 'edit-ok' }); assert.deepEqual(L.codes.consumePairingCode(p.code), { playerId: 'pl-child1' }); return p; }, { snapshot: L.snapshot });
-  assert.ok(issued.code); assert.deepEqual(rowsOf(dir, 'pairing_codes'), []); assert.match(blobOf(dir, 'blobNotes'), /edit-ok/); assert.equal(seqOf(dir), seq0 + 1, 'one commit, one revision');
+  L.store.save();
+  // Joined successes. (Rewritten in S14a: the unrelated edit was a blob and the save revision was counted; now it
+  // is an organisation row and the BEGINs are counted.)
+  const exec = L.store.sqlite.exec.bind(L.store.sqlite);
+  let begins = 0;
+  L.store.sqlite.exec = (sql) => { if (/^BEGIN/.test(sql)) begins += 1; return exec(sql); };
+  const issued = L.store.unitOfWork(() => { const p = L.codes.issuePairingCode('pl-child1'); L.layer.orgs.update('org-pro', { suspended: true }); assert.deepEqual(L.codes.consumePairingCode(p.code), { playerId: 'pl-child1' }); return p; });
+  L.store.sqlite.exec = exec;
+  assert.ok(issued.code); assert.deepEqual(rowsOf(dir, 'pairing_codes'), []); assert.equal(suspendedOf(dir), 1); assert.equal(begins, 1, 'one transaction');
   // An uncaught failure.
-  assert.throws(() => L.store.unitOfWork(() => { L.codes.issuePairingCode('pl-child1'); throw new Error('ordinary failure'); }, { snapshot: L.snapshot }), /ordinary failure/);
-  assert.deepEqual(rowsOf(dir, 'pairing_codes'), []); assert.equal(seqOf(dir), seq0 + 1);
+  assert.throws(() => L.store.unitOfWork(() => { L.codes.issuePairingCode('pl-child1'); L.layer.orgs.update('org-pro', { suspended: false }); throw new Error('ordinary failure'); }), /ordinary failure/);
+  assert.deepEqual(rowsOf(dir, 'pairing_codes'), []); assert.equal(suspendedOf(dir), 1);
   // Expected negatives inside a unit are results, not failures: the unit commits.
   L.store.unitOfWork(() => {
     assert.equal(L.codes.consumePairingCode('NOPE22'), null); assert.equal(L.codes.consumeEmailChallenge('org-pro', 'NOPE22'), null);
     assert.deepEqual(L.codes.checkEmailChallenge('org-pro', 'NOPE22'), { status: 'none' }); assert.deepEqual(L.codes.noteFailedEmailAttempt('org-pro'), { attemptsRemaining: 0, invalidated: false });
     assert.equal(L.codes.revokePairingCodesFor('pl-nobody'), 0); assert.equal(L.codes.revokeEmailChallenge('org-pro'), 0); assert.deepEqual(L.codes.sweepExpired(), { emailChallenges: 0, pairingCodes: 0 });
-    L.db.blobNotes.push({ id: 'edit-after-negatives' });
-  }, { snapshot: L.snapshot });
-  assert.match(blobOf(dir, 'blobNotes'), /edit-after-negatives/); assert.equal(seqOf(dir), seq0 + 2);
+    L.layer.orgs.update('org-pro', { suspended: false });
+  });
+  assert.equal(suspendedOf(dir), 0, 'the edit after the negatives committed');
   // Validation is inside the boundary.
   const v = swallowing(L, () => L.codes.issuePairingCode(''));
   assert.match(v.caught?.message ?? '', /player id/); assert.ok(v.outer, 'a caught validation failure still poisons the unit'); assert.match(v.outer.message, /cannot commit.*player id/s);
-  assert.equal(seqOf(dir), seq0 + 2); assert.doesNotMatch(blobOf(dir, 'blobNotes'), /unrelated-edit/);
+  assert.equal(suspendedOf(dir), 0, 'the unrelated edit did not commit');
   // A raw transaction on the store's connection, outside any unit (a tool, a test): honoured, no BEGIN of its own, no unit inferred.
   L.store.sqlite.exec('BEGIN');
   const raw = L.codes.issuePairingCode('pl-child1');
@@ -326,7 +328,7 @@ test('player deletion revokes the pairing code inside the deletion unit: a failu
     L.codes.revokePairingCodesFor('pl-child1');
     L.layer.players.remove('pl-child1');
     if (fault) L.store.failCommitOfOpenTransaction();
-  }, { snapshot: L.snapshot });
+  });
   assert.throws(() => del(true), /FOREIGN KEY constraint failed/);
   assert.equal(rowsOf(dir, 'pairing_codes').length, 1, 'the code survived the failed deletion'); assert.ok(rowsOf(dir, 'players').some((p) => p.id === 'pl-child1'));
   del(false);
@@ -335,7 +337,7 @@ test('player deletion revokes the pairing code inside the deletion unit: a failu
 });
 
 // ============================================================= snapshots (backups, restores, persistence suites)
-test('snapshot dispatcher: a tool reads the codes in their stored form (codeHash, never a code) and writes them back through the tables; a legacy plain-code entry written by a tool is hashed on the way in; a malformed stored entry, a duplicate, a challenge for an unknown organisation, or a whole-snapshot player rewrite that drops a player a retained code names refuses the WHOLE save (nothing written, the revision not advanced)', () => {
+test('snapshot dispatcher: a tool reads the codes in their stored form (codeHash, never a code) and writes them back through the tables; a legacy plain-code entry written by a tool is hashed on the way in; a malformed stored entry, a duplicate, a challenge for an unknown organisation, or a whole-snapshot player rewrite that drops a player a retained code names refuses the WHOLE save (nothing written)', () => {
   const dir = tempDir('otc-snap'); s5File(dir);
   { const s = openRaw(dir); const c = createOneTimeCodesRepository({ sqlite: s, now: () => NOW, newCode: () => 'LIVE22' }); c.issuePairingCode('pl-child1'); c.issueEmailChallenge('org-pro', 'x@eastport.test'); s.close(); }
   const tool = openStore(dir);
@@ -346,12 +348,13 @@ test('snapshot dispatcher: a tool reads the codes in their stored form (codeHash
   snap.db.pairingCodes.push({ code: 'FIXT33', playerId: 'pl-child2', expiresAt: NOW + MIN });
   tool.save(snap);
   assert.deepEqual(tool.sqlite.prepare('SELECT player_id, code_hash FROM pairing_codes ORDER BY player_id').all().map((r) => [r.player_id, r.code_hash]), [['pl-child1', hashCode('LIVE22')], ['pl-child2', hashCode('FIXT33')]]);
-  assert.doesNotMatch(dump(tool.sqlite), /FIXT33/); assert.equal(tool.sqlite.prepare("SELECT COUNT(*) AS n FROM collections WHERE name IN ('pairingCodes', 'emailChallenges')").get().n, 0, 'never a blob once the tables are live');
-  const before = dump(tool.sqlite); const seq = tool.revision();
+  assert.doesNotMatch(dump(tool.sqlite), /FIXT33/); assert.equal(hasBlobTable(tool.sqlite), false, 'never a blob');
+  const before = dump(tool.sqlite);
   const refused = (label, mutate, re) => {
-    const s2 = tool.load(); mutate(s2.db); s2.db.notes = [{ id: 'unrelated-change' }];
+    // (Rewritten in S14a: the unrelated edit was a blob collection, which a snapshot can no longer carry; it is a player rename now.)
+    const s2 = tool.load(); s2.db.players.find((p) => p.id === 'pl-child1').name = 'Unrelated Change'; mutate(s2.db);
     assert.throws(() => tool.save(s2), re, label);
-    assert.equal(tool.sqlite.isTransaction, false); assert.equal(dump(tool.sqlite), before, `${label}: nothing changed, the unrelated edit included`); assert.equal(tool.revision(), seq);
+    assert.equal(tool.sqlite.isTransaction, false); assert.equal(dump(tool.sqlite), before, `${label}: nothing changed, the unrelated edit included`);
   };
   refused('a malformed stored hash', (d) => { d.pairingCodes[0].codeHash = 'not-a-hash'; }, /ONE_TIME_CODES_IMPORT_BLOCKED.*codeHash must be 64/);
   refused('an unknown field on a stored entry', (d) => { d.pairingCodes[0].code = 'LIVE22'; }, /carries both code and codeHash/);
@@ -364,15 +367,16 @@ test('snapshot dispatcher: a tool reads the codes in their stored form (codeHash
   rm(dir);
 });
 
-test('boot: a stale in-memory code array (a seed container) is never imported — the table is the record; expired rows are swept at attach; the report carries counts and lifetimes, never a code or a hash', () => {
+test('boot: a stale code array handed in with the seed is never imported — the table is the record; expired rows are swept at attach; the report carries counts and lifetimes, never a code or a hash', () => {
   const dir = tempDir('otc-boot'); s5File(dir, { pairingCodes: [legacyPairing(), legacyPairing({ playerId: 'pl-child2', code: 'SOON22', expiresAt: NOW + MIN })] });
   let L = live(dir);
   assert.deepEqual(L.codes.counts(), { emailChallenges: 0, pairingCodes: 2 });
   L.close();
   const store = openStore(dir, { tableBacked: TABLE_BACKED });
-  const db = { ...store.load().db, pairingCodes: [{ code: 'STALE2', playerId: 'pl-adult', expiresAt: NOW + 99 * MIN }] };
+  // (S14a: server mode has nothing to load; the stale array is handed in as part of the seed, which an initialised file ignores.)
+  const seed = { pairingCodes: [{ code: 'STALE2', playerId: 'pl-adult', expiresAt: NOW + 99 * MIN }] };
   const warnings = [];
-  const layer = attachDataLayer({ db, store, nextId, persist: () => {}, sessionTtlMs: TTL, now: () => NOW + 2 * MIN, warn: (m) => warnings.push(m) });
+  const layer = attachDataLayer({ db: {}, seed, store, nextId, persist: () => {}, sessionTtlMs: TTL, now: () => NOW + 2 * MIN, warn: (m) => warnings.push(m) });
   assert.deepEqual(layer.boot.codes.swept, { emailChallenges: 0, pairingCodes: 1 }, 'the expired code was swept at attach');
   assert.equal(layer.codes.peekPairingCode('STALE2'), null, 'the stale array was not imported');
   const report = JSON.stringify(layer.report());
@@ -409,7 +413,7 @@ test('validation is format-exact and never coerces: validateCodeRows reports the
 });
 
 // ============================================================= review of e020aba
-test('stored attempts: a stored-format challenge must carry an explicit attempt count from 0 to 9 (missing, null, negative, fractional, nonnumeric, unsafe, at or above the limit are refused); a legacy challenge carries none and starts at 0; a snapshot save refuses such an entry whole (nothing written, the save revision not advanced, the unrelated edit not written); a legitimate count survives the snapshot round trip', () => {
+test('stored attempts: a stored-format challenge must carry an explicit attempt count from 0 to 9 (missing, null, negative, fractional, nonnumeric, unsafe, at or above the limit are refused); a legacy challenge carries none and starts at 0; a snapshot save refuses such an entry whole (nothing written, the unrelated edit included); a legitimate count survives the snapshot round trip', () => {
   const stored = (over = {}) => ({ orgId: 'org-pro', email: 'a@b.test', codeHash: hashCode('GOOD22'), expiresAt: NOW + MIN, attempts: 0, ...over });
   const missing = stored(); delete missing.attempts;
   for (const [label, entry, re] of [
@@ -425,15 +429,16 @@ test('stored attempts: a stored-format challenge must carry an explicit attempt 
   assert.equal(validateEmailChallengeRow(stored({ attempts: 9 })).row.attempts, 9, 'nine is a valid count');
   assert.equal(validateEmailChallengeRow(legacyChallenge()).row.attempts, 0, 'a legacy entry starts at 0');
   assert.match(validateEmailChallengeRow({ ...legacyChallenge(), attempts: 3 }).reason, /unknown field\(s\) attempts for the legacy format/, 'a legacy entry never carries a count');
-  // A snapshot save refuses whole: nothing written, the revision unchanged, the unrelated edit not written.
+  // A snapshot save refuses whole: nothing written, the unrelated edit included.
   const dir = tempDir('otc-f2-snap'); s5File(dir);
   { const s = openRaw(dir); createOneTimeCodesRepository({ sqlite: s, now: () => NOW }).issueEmailChallenge('org-pro', 'x@eastport.test'); s.close(); }
   const tool = openStore(dir);
-  const before = dump(tool.sqlite); const seq = tool.revision();
+  const before = dump(tool.sqlite);
   for (const [label, mutate] of [['missing', (c) => { delete c.attempts; }], ['exhausted', (c) => { c.attempts = 10; }], ['nonnumeric', (c) => { c.attempts = 'many'; }]]) {
-    const snap = tool.load(); mutate(snap.db.emailChallenges[0]); snap.db.notes = [{ id: 'unrelated-change' }];
+    // (Rewritten in S14a: the unrelated edit is a player rename, not a blob collection.)
+    const snap = tool.load(); mutate(snap.db.emailChallenges[0]); snap.db.players[0].name = 'Unrelated Change';
     assert.throws(() => tool.save(snap), /ONE_TIME_CODES_IMPORT_BLOCKED.*attempts/, label);
-    assert.equal(tool.sqlite.isTransaction, false); assert.equal(dump(tool.sqlite), before, `${label}: nothing changed, the unrelated edit included`); assert.equal(tool.revision(), seq, `${label}: the save revision did not advance`);
+    assert.equal(tool.sqlite.isTransaction, false); assert.equal(dump(tool.sqlite), before, `${label}: nothing changed, the unrelated edit included`);
   }
   const snap = tool.load(); snap.db.emailChallenges[0].attempts = 9; tool.save(snap);
   assert.equal(tool.load().db.emailChallenges[0].attempts, 9, 'a legitimate count round-trips through the snapshot');

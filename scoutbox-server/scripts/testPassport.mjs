@@ -44,7 +44,7 @@ const correction = (over = {}) => ({ id: 'pcor-1', playerId: PID, targetType: 'c
 
 function serverOpen(dir) {
   const store = openStore(dir, { tableBacked: TABLE_BACKED });
-  const db = { ...store.load().db, players: [], guardians: [] };
+  const db = {}; // S14a: a fixture-saved file is not a first installation, so there is nothing to hand in
   const layer = attachDataLayer({ db, store, nextId, persist: () => {}, sessionTtlMs: TTL, now: () => NOW, warn: () => {} });
   const snapshot = () => ({ savedAt: NOW, idCounter: 1000, db });
   return { store, db, repo: layer.passport, unit: (w) => store.unitOfWork(w, { snapshot }), close: () => store.sqlite.close() };

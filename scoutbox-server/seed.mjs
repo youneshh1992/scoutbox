@@ -471,21 +471,6 @@ export function buildSeed({ demo = true } = {}) {
     guardians: demo ? guardians : [],
     players: demo ? players : [],
     reputationSeed: demo ? reputationSeed : [],
-    users: [],       // org scout users, created at org login (with verified role)
-    requests: [],    // contact/trial requests (minors: routed to guardian)
-    trials: [],      // accepted trials awaiting/holding reports
-    ledger: [],      // append-only Discovery Ledger
-    reports: [],     // report-user/scout/club submissions (status → resolved)
-    blocks: [],      // {playerId, orgId, by, reason} — org loses all access
-    moderationLog: [],
-    sessions: [],
-    outbox: [],
-    pushLog: [],
-    pushTokens: [],
-    emailChallenges: [],
-    channels: [],       // moderated message threads, opened on acceptance
-    notifications: [],  // in-app notification feed per audience
-    mediaBlobs: {},     // mediaId → { dataUrl } for uploaded video (prototype store)
   };
 }
 

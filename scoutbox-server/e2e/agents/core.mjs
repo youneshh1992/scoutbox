@@ -55,10 +55,12 @@ import { AGENT_AUDIT_ACTIONS } from '../../domains/agents/core/audit.mjs';
 import { EVENT_REGISTRY } from '../../domains/platform/eventRegistry.mjs';
 import { RATE_LIMIT_POLICY } from '../../domains/platform/rateLimit.mjs';
 import { TYPE_CATEGORY, CATEGORIES } from '../../domains/platform/notificationPrefs.mjs';
-import { MIGRATIONS, SCHEMA_VERSION, runMigrations, PRODUCTION_REQUIRED_STORES } from '../../domains/platform/migrations.mjs';
-import { guaranteeFor } from '../../storeContract.mjs';
+import { DATA_MIGRATIONS } from '../../repositories/index.mjs';
+import { AGENT_CORE_MIGRATION } from '../../repositories/agentCore.mjs';
 import { openStore } from '../../store.mjs';
 import { TABLE_BACKED } from '../../repositories/index.mjs';
+
+const SCHEMA_VERSION = Number(DATA_MIGRATIONS.map((m) => m.id).sort().at(-1).slice(0, 4));
 
 const PORT = 6300 + Math.floor(Math.random() * 200);
 const BASE = `http://localhost:${PORT}`;
@@ -252,18 +254,12 @@ section('T1 — events, notification categories, rate policies and stores are de
   for (const [k, scope] of [['agent_representation_request', 'actor'], ['agent_player_lookup', 'actor'], ['agent_profile_write', 'actor'], ['agent_affiliation_write', 'org'], ['agent_client_response', 'actor']]) {
     ok(RATE_LIMIT_POLICY[k] && RATE_LIMIT_POLICY[k].scope === scope && RATE_LIMIT_POLICY[k].max > 0, `T1 rate policy ${k} (${scope})`);
   }
-  // S11a: the three stores are tables of the agent core (migration 0026), not collections a migration must guarantee.
-  for (const s of ['agentProfiles', 'agencyAffiliations', 'representationAgreements']) ok(guaranteeFor(s) !== 'migration' && !PRODUCTION_REQUIRED_STORES.includes(s) && TABLE_BACKED.includes(s), `T1 ${s} is a table of the agent core, not a collection`);
-  const step = MIGRATIONS.find((m) => m.id === 'm240_001_agent_core_stores');
-  // The P5.6B step is FROZEN at 2305 and is the only step at that version. Later
-  // milestones keep adding steps above it (2306 Compliance, 2307 Transaction), so
-  // this asserts the frozen fact and forward-only movement, not a literal current
-  // version that every later milestone would break.
-  ok(step?.version === 2305 && SCHEMA_VERSION >= 2306 && MIGRATIONS.filter((m) => m.version === 2305).length === 1, `T1 exactly one step advances the schema to 2305, and the schema has only moved forward since (now ${SCHEMA_VERSION})`);
-  // P5.6D added agentTransactions, so it is no longer in this list. What P5.6B
-  // asserted and what must stay true is that the Agent app has no parallel
-  // identity database and no Offer store — those are the claims, not the count.
-  neg(guaranteeFor('agentAuth') !== 'migration' && guaranteeFor('agentSessions') !== 'migration' && guaranteeFor('agentUsers') !== 'migration' && guaranteeFor('offers') !== 'migration', 'T1 no agent auth database and no offers store is guaranteed (signings is the existing M12 store, which no Agent milestone writes)');
+  // S11a: the three stores are tables of the agent core (migration 0026). Rewritten in S14a: the step-2305 and
+  // store-contract checks described the retired snapshot registry.
+  for (const s of ['agentProfiles', 'agencyAffiliations', 'representationAgreements']) ok(TABLE_BACKED.includes(s), `T1 ${s} is a table of the agent core, not a collection`);
+  ok(DATA_MIGRATIONS.filter((m) => m.id === AGENT_CORE_MIGRATION).length === 1 && SCHEMA_VERSION >= 26, `T1 exactly one migration creates the agent core tables (${AGENT_CORE_MIGRATION}), and the schema has only moved forward since (now ${SCHEMA_VERSION})`);
+  // What P5.6B asserted and what must stay true: the Agent app has no parallel identity database and no Offer store.
+  neg(!['agentAuth', 'agentSessions', 'agentUsers', 'offers'].some((s) => TABLE_BACKED.includes(s)), 'T1 no agent auth database and no offers store exists (signings is the existing M12 store, which no Agent milestone writes)');
 }
 
 // =================================================================== HTTP
@@ -307,7 +303,7 @@ const collect = (label, r) => { if (r.status >= 400) ERROR_BODIES.push({ label, 
 section('E — platform gating: agent login, org listing, club user refused');
 {
   const h = await j('GET', '/healthz');
-  ok(h.body.schemaVersion >= 2306, `E1 the server reports a schema at or above 2306 (now ${h.body.schemaVersion}; the P5.6B step is 2305)`);
+  ok(h.body.schemaVersion === SCHEMA_VERSION && h.body.schemaVersion >= 26, `E1 the server reports the current schema (now ${h.body.schemaVersion}; the agent core tables are 0026)`);
   const orgs = await j('GET', '/orgs?platform=agent');
   ok(orgs.status === 200 && orgs.body.length === 1 && orgs.body[0].id === 'org-northstar' && orgs.body[0].type === 'agency', 'E2 the agent platform lists agency organisations only');
   neg(!orgs.body.some((o) => o.type === 'club'), 'E3 no club appears on the agent login');
@@ -824,8 +820,9 @@ section('W — restart: everything survives the process dying');
   neg((await j('GET', `/org/agent/clients/${DELETED_REL}`, undefined, ana2.token)).body.client.removed === true, 'W8 the tombstone is still a tombstone');
   const h = await j('GET', '/healthz');
   ok(h.body.schemaVersion === SCHEMA_VERSION, `W9 schema ${h.body.schemaVersion} after restart; no step ran twice`);
-  const db = openStore(DATA_DIR).load()?.db;
-  ok(db.schema.migrations.filter((m) => m.id === 'm240_001_agent_core_stores').length === 1, 'W10 exactly one 2305 migration record');
+  const st = openStore(DATA_DIR);
+  ok(st.sqlite.prepare('SELECT COUNT(*) AS n FROM data_migrations WHERE id = ?').get(AGENT_CORE_MIGRATION).n === 1, `W10 exactly one ${AGENT_CORE_MIGRATION} migration record`);
+  st.sqlite.close();
 }
 
 // ============================================================ E2 — error contract

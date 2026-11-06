@@ -2,7 +2,7 @@
 // context and registers routes on the existing authenticated routers, so all
 // existing gates (bearer sessions, org suspension, guardian ownership,
 // visibleToOrg, blocks, moderation) apply before any M12 handler runs.
-import { migrateM12, buildShared } from './shared.mjs';
+import { buildShared } from './shared.mjs';
 import { registerPassport } from '../domains/scouting/passport.mjs';
 import { registerScouting } from '../domains/scouting/scouting.mjs';
 import { registerJourneys } from '../domains/scouting/journeys.mjs';
@@ -11,7 +11,6 @@ import { registerUploads } from '../domains/media/uploads.mjs';
 import { registerObjectives } from '../domains/development/objectives.mjs';
 
 export function registerM12(ctx) {
-  migrateM12(ctx.db, ctx.players);
   const shared = buildShared(ctx);
   const full = { ...ctx, ...shared };
   registerPassport(full);   // F1 evidence · F10 coach identity

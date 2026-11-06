@@ -1,7 +1,7 @@
 // M23 P5 — persistence, restart and corruption audit for the formal decision.
 //
-//   1  no P5 migration: the schema is what P4B left, `roomDecisions` is the
-//      one decision store, the draft lives on the case, nothing is renamed
+//   1  no decision migration of its own: `roomDecisions` is the one decision
+//      table (0016), the draft lives on the case, nothing is renamed
 //   2  a snapshot with legacy + formal rows and a draft restores byte-faithfully
 //      through a real boot: chain, keys, draft rev, case status
 //   3  corrupt FORMAL rows are named and omitted, never fabricated, never
@@ -18,12 +18,12 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { MIGRATIONS, SCHEMA_VERSION, runMigrations, PRODUCTION_REQUIRED_STORES } from '../../domains/platform/migrations.mjs';
 import { openStore } from '../../store.mjs';
 import { JOURNEY_REQUIRED_STORES } from '../../domains/recruitment/lifecycle/journey.mjs';
 import { decisionIntegrity, duplicateFinalHeads, chainHead, isFormal } from '../../domains/recruitment/lifecycle/decision.mjs';
-import { guaranteeFor } from '../../storeContract.mjs';
+import { DATA_MIGRATIONS, TABLE_BACKED } from '../../repositories/index.mjs';
 import { pickPort } from '../../scripts/testPort.mjs';
+const LATEST_SCHEMA = Number(DATA_MIGRATIONS.map((m) => m.id).sort().at(-1).slice(0, 4)); // S14a: the latest table migration's number
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SERVER = path.join(HERE, '..', '..', 'server.mjs');
@@ -86,8 +86,7 @@ function baseDb() {
       createdAt: 1000, history: [{ id: 'aud-1', at: 1000, byKind: 'org', byId: 'usr-owner', byName: 'Owner', action: 'room_created', detail: { status: 'watching' } }, { id: 'aud-2', at: 1001, byKind: 'org', byId: 'usr-owner', byName: 'Owner', action: 'room_status_changed', detail: { from: 'watching', to: 'shortlisted', reasonCodes: [] } }],
     }],
   };
-  runMigrations(db);
-  db.roomDecisions ??= []; db.recruitmentCases ??= []; // the snapshot's collections: the migrations no longer create them (§4.3 step 2)
+  db.roomDecisions ??= []; db.recruitmentCases ??= [];
   return db;
 }
 
@@ -131,25 +130,11 @@ const lead = (s) => s.j('POST', '/auth/org/login', { orgId: 'org-x', scoutName: 
 // ======================================================= 1 — no migration
 section('1 — no P5 migration: one decision store, the draft on the case, nothing renamed');
 {
-  // P5.6B moved the schema to 2305 for the Agent stores; the P5 truth — no decision migration — is unchanged.
-  // The claim is that P5 Decision adds NO migration step of its own, whatever the
-  // schema has since reached. The literal 2306 turned every later milestone's step
-  // into a Decision failure, which is the opposite of what this asserts.
-  ok(SCHEMA_VERSION >= 2306 && !MIGRATIONS.some((m) => /decision/i.test(m.id) && m.version > 2304), `the schema is ${SCHEMA_VERSION} and P5 Decision still adds no migration step of its own`);
-  ok(guaranteeFor('roomDecisions') === null && !PRODUCTION_REQUIRED_STORES.includes('roomDecisions') && !JOURNEY_REQUIRED_STORES.includes('roomDecisions'), 'roomDecisions is a typed table read through SQL, no db collection (§4.3 step 2; rewritten, it described the old storage)');
-  neg(guaranteeFor('recruitmentDecisions') !== 'migration' && guaranteeFor('decisionDrafts') !== 'migration' && guaranteeFor('recruitmentOffers') !== 'migration', 'no second decision store, no draft store, no offer store is guaranteed by the registry');
-  const fresh = {};
-  runMigrations(fresh);
-  // Migrations ALONE: P5 invented no store, and the P6 Offer store is created by
-  // its module at registration (guarantee 'module'), so it is absent here too.
-  ok(fresh.roomDecisions === undefined && fresh.recruitmentDecisions === undefined && fresh.decisionDrafts === undefined && fresh.recruitmentOffers === undefined, 'a clean database gets no roomDecisions collection (a table since §4.3 step 2) and no P5-invented store (the P6 Offer store arrives with its module, not a migration)');
-  const db = baseDb();
-  db.roomDecisions.push(legacyRow(), formalRow(), headRow());
-  db.recruitmentCases[0].decisionDraft = draftRow();
-  const before = stableJson(db.roomDecisions) + stableJson(db.recruitmentCases[0].decisionDraft);
-  const again = runMigrations(db);
-  ok(again.ran.length === 0 && stableJson(db.roomDecisions) + stableJson(db.recruitmentCases[0].decisionDraft) === before, 'running the migrations over formal rows and a draft changes nothing');
-  neg(db.recruitmentCases[0].room.status === 'shortlisted' && !('decisionStatus' in db.recruitmentCases[0].room), 'no case field was invented for the decision — the case carries only its draft');
+  // Rewritten in S14a: the schema-number, store-contract and runMigrations checks described the blob. The rows surviving
+  // a boot unchanged, with no case field invented, is proved over a real boot in §2.
+  ok(DATA_MIGRATIONS.length === LATEST_SCHEMA && !DATA_MIGRATIONS.some((m) => /decision/i.test(m.id)), 'the current schema, and the decision adds no migration of its own (its table comes with the cases, 0016)');
+  ok(TABLE_BACKED.includes('roomDecisions') && !JOURNEY_REQUIRED_STORES.includes('roomDecisions'), 'roomDecisions is a typed table read through SQL (§4.3 step 2)');
+  neg(!TABLE_BACKED.includes('recruitmentDecisions') && !TABLE_BACKED.includes('decisionDrafts'), 'no second decision table and no draft table');
 }
 
 // ======================================================= 2 — byte-faithful restore
@@ -190,6 +175,7 @@ section('2 — a snapshot with legacy + formal rows and a draft restores byte-fa
   }
   ok(after && after.roomDecisions.map(stableJson).join('\n') === beforeRows.join('\n') && stableJson(after.recruitmentCases[0].decisionDraft) === beforeDraft, 'after a boot, reads, refused writes and a graceful stop, every row and the draft are identical in every key and value — nothing rewritten, re-ordered or "repaired"');
   neg(!s.log().includes('DECISION integrity'), 'no integrity warning was logged for sound rows');
+  neg(after && !('decisionStatus' in after.recruitmentCases[0].room), 'no case field was invented for the decision — the case carries only its draft');
 }
 
 // ======================================================= 3 — corrupt rows
@@ -220,6 +206,9 @@ section('3 — corrupt formal rows are named and omitted; duplicate heads are co
   {
     // Since §4.2 a snapshot is written straight into the tables (store.mjs, snapshot mode): the save itself refuses
     // such a file, names the entries, and writes nothing; there is no blob for a later boot to import.
+    // What a fresh file holds (the migrations' reference rows, by id): the yardstick for "nothing was written".
+    const rowIds = (d) => JSON.stringify(Object.fromEntries(Object.entries(d).map(([k, rows]) => [k, rows.map((r) => r?.id ?? JSON.stringify(r))])));
+    const FRESH = rowIds(openStore(mkdtempSync(path.join(tmpdir(), 'sbx-m23d-fresh-'))).load().db);
     const refused = async (label, rows, pattern) => {
       const D = mkdtempSync(path.join(tmpdir(), 'sbx-m23d-refused-'));
       const fixture = baseDb(); fixture.roomDecisions.push(legacyRow({ supersededById: 'rdec-formal-2' }), headRow({ supersedes: 'rdec-legacy' }), ...rows);
@@ -227,7 +216,7 @@ section('3 — corrupt formal rows are named and omitted; duplicate heads are co
       try { openStore(D).save({ db: fixture }); } catch (e) { err = e; }
       const refusal = String(err?.message ?? '');
       ok(!!err && pattern.test(refusal), `${label}: the save is REFUSED and the refusal names the entries (${refusal.slice(0, 160)}…)`);
-      ok(openStore(D).load() === null, `${label}: nothing was written — nothing deleted, nothing repaired`);
+      ok(rowIds(openStore(D).load().db) === FRESH, `${label}: nothing was written — nothing deleted, nothing repaired`); // rewritten in S14a: load() was null with no blob
     };
     await refused('three alien entries (null, a string, a number)', [null, 'string', 42], /roomDecisions entry #2 is not an object \(null\); roomDecisions entry #3 is not an object \(a string\); roomDecisions entry #4 is not an object \(a number\)/);
     await refused('six corrupt rows the typed columns cannot hold', unstorable, /RECRUITMENT_CASES_INPUT_INVALID[\s\S]*6 roomDecisions entries refused[\s\S]*rdec-bad-outcome\.outcome[\s\S]*rdec-bad-proto\.outcome[\s\S]*rdec-bad-time\.createdAt[\s\S]*rdec-bad-reasons\.reasonCodes[\s\S]*rdec-bad-refs\.evidenceRefs[\s\S]*rdec-bad-rev\.rev/);

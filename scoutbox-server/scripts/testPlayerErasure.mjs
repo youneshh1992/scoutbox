@@ -45,33 +45,29 @@ const RECORD = (id, deletedAt, birthDate, country) => ({ id, deletedAt, birthDat
 // ------------------------------------------------------------------ harness (the identity suite's, with the whole data layer attached)
 const FIXTURE = () => ({ players: [adult(), child('pl-child1', 'gd-primary', '2014-03-03'), seeded(), child('pl-child2', 'gd-primary', '2016-08-08')], guardians: [gPrimary(), gCo(), gSignup()] });
 const ORGS = () => [{ id: 'org-pro', name: 'Eastport FC', type: 'club', level: 'pro', plan: 'Pro', country: 'GB' }];
-const baseDb = (players, guardians) => ({ orgs: ORGS(), users: [{ id: 'usr-1', orgId: 'org-pro', name: 'Maria', role: 'Head of Recruitment', createdAt: 1 }], sessions: [], players, guardians, requests: [], ledger: [], trials: [], channels: [], notifications: [], dispatches: [] });
 function boot(dir, { players = [], guardians = [], warnings = [] } = {}) {
-  const db = baseDb(clone(players), clone(guardians));
+  const db = {};
   const store = openStore(dir, { tableBacked: TABLE_BACKED });
-  const layer = attachDataLayer({ db, store, nextId, persist: () => {}, sessionTtlMs: TTL, now: () => NOW, warn: (m) => warnings.push(m) });
+  const layer = attachDataLayer({ db, seed: { orgs: ORGS(), players: clone(players), guardians: clone(guardians) }, store, nextId, sessionTtlMs: TTL, now: () => NOW, warn: (m) => warnings.push(m) });
   return wire({ store, layer, db, warnings });
 }
 function reopen(dir, { warnings = [] } = {}) {
   const store = openStore(dir, { tableBacked: TABLE_BACKED });
-  const loaded = store.load();
-  const db = { ...loaded.db, players: [], guardians: [] };
-  const layer = attachDataLayer({ db, store, nextId, persist: () => {}, sessionTtlMs: TTL, now: () => NOW, warn: (m) => warnings.push(m) });
+  const db = {};
+  const layer = attachDataLayer({ db, store, nextId, sessionTtlMs: TTL, now: () => NOW, warn: (m) => warnings.push(m) });
   return wire({ store, layer, db, warnings });
 }
 function wire({ store, layer, db, warnings }) {
-  const snapshot = () => ({ savedAt: NOW, idCounter: 1000, db });
-  store.save(snapshot());
+  store.save();
   const raw = (sql, ...p) => { const r = store.sqlite.prepare(sql).get(...p); return r ? { ...r } : r; };
   const all = (sql, ...p) => store.sqlite.prepare(sql).all(...p).map((r) => ({ ...r }));
   const row = (id) => raw('SELECT * FROM players WHERE id = ?', id);
   const OWNED_TABLES = SUBRECORD_TABLES.filter((t) => t !== 'player_media_tags'); // the tag rows hang off player_media (media_id), not the player
   const childRows = (id) => OWNED_TABLES.reduce((n, t) => n + raw(`SELECT COUNT(*) AS n FROM ${t} WHERE player_id = ?`, id).n, 0);
   const links = (id) => all('SELECT guardian_id, player_id, role FROM guardian_children WHERE player_id = ? ORDER BY rowid', id);
-  const revision = () => store.revision();
   return { store, layer, db, warnings, players: layer.identity.players, guardians: layer.identity.guardians, codes: layer.codes, sessions: layer.sessions, mediaDeletions: layer.mediaDeletions,
-    snapshot, save: (over = {}) => store.save({ ...snapshot(), db: { ...db, ...over } }), raw, all, row, childRows, links, revision,
-    unit: (fn) => store.unitOfWork(fn, { snapshot }), close: () => store.sqlite.close() };
+    save: () => store.save(), raw, all, row, childRows, links, fileDump: () => dump(store.sqlite),
+    unit: (fn) => store.unitOfWork(fn), close: () => store.sqlite.close() };
 }
 
 // ------------------------------------------------------------------ the erase
@@ -127,37 +123,36 @@ function snapshotStore(dir) {
   const store = openStore(dir); const loaded = store.load();
   const all = (sql, ...p) => store.sqlite.prepare(sql).all(...p).map((r) => ({ ...r }));
   const save = (over = {}) => { const db = { ...loaded.db, ...over }; for (const k of Object.keys(over)) if (over[k] === undefined) delete db[k]; return store.save({ savedAt: NOW, idCounter: 1000, db }); };
-  return { store, db: loaded.db, all, save, revision: () => store.revision(), close: () => store.sqlite.close() };
+  return { store, db: loaded.db, all, save, fileDump: () => dump(store.sqlite), close: () => store.sqlite.close() };
 }
 
-test('snapshots: an unchanged save keeps the retained rows byte-identical and advances the revision — an ordinary server-mode save, then in snapshot mode with the collection supplied, supplied twice, omitted (partial snapshot) and through the identity replace (every players row deleted and reinserted); a snapshot that lists a retained id as a LIVE player is refused atomically with ids only (no birth date in the message), nothing changed, revision unchanged; a playersRetained collection that is not an array, an entry without an id, a non-integer deletedAt, a malformed birth date, a country that is not text, a duplicate id, an unknown field, or an id that is also a live player is refused the same way; the under-18-without-guardian refusal still holds for LIVE records while retained rows sit beside them; a pairing code left behind by an erase that did not revoke it names a retained id and refuses the next identity-rewriting save (ids only) — cleared, it is accepted; a subset of the stored retained records is refused, never pruned', () => {
+test('snapshots: an unchanged save keeps the retained rows byte-identical — an ordinary server-mode save, then in snapshot mode with the collection supplied, supplied twice, omitted (partial snapshot) and through the identity replace (every players row deleted and reinserted); a snapshot that lists a retained id as a LIVE player is refused atomically with ids only (no birth date in the message), nothing written; a playersRetained collection that is not an array, an entry without an id, a non-integer deletedAt, a malformed birth date, a country that is not text, a duplicate id, an unknown field, or an id that is also a live player is refused the same way; the under-18-without-guardian refusal still holds for LIVE records while retained rows sit beside them; a pairing code left behind by an erase that did not revoke it names a retained id and refuses the next identity-rewriting save (ids only) — cleared, it is accepted; a subset of the stored retained records is refused, never pruned', () => {
   const dir = tempDir('erase-snapshot'); const t = boot(dir, FIXTURE());
   t.codes.issuePairingCode('pl-child2'); // a live child's code, left behind on purpose by the erase below (the route revokes it in the same unit; the repository does not)
   t.players.erase('pl-seeded', { at: NOW }); t.unit(() => t.players.erase('pl-child2', { at: NOW + 1 }));
   const expected = JSON.stringify([RETAINED_ROW('pl-seeded', NOW, '2004-03-14', 'GB'), RETAINED_ROW('pl-child2', NOW + 1, '2016-08-08', 'GB')]);
   const rowsT = () => JSON.stringify(t.all('SELECT * FROM players WHERE deleted_at IS NOT NULL ORDER BY rowid'));
   assert.equal(rowsT(), expected);
-  const r0 = t.revision(); t.save(); assert.equal(rowsT(), expected, 'an ordinary server-mode save: kept'); assert.equal(t.revision(), r0 + 1); t.close();
+  t.save(); assert.equal(rowsT(), expected, 'an ordinary server-mode save: kept'); t.close();
   const S = snapshotStore(dir);
   const rows = () => JSON.stringify(S.all('SELECT * FROM players WHERE deleted_at IS NOT NULL ORDER BY rowid'));
   const live = () => JSON.stringify(S.all('SELECT id FROM players WHERE deleted_at IS NULL ORDER BY rowid'));
   assert.deepEqual(S.db.playersRetained, [RECORD('pl-seeded', NOW, '2004-03-14', 'GB'), RECORD('pl-child2', NOW + 1, '2016-08-08', 'GB')], 'the snapshot read carries the records under their own name'); assert.equal(S.db.players.some((p) => p.id === 'pl-seeded' || p.id === 'pl-child2'), false, 'and never inside players');
-  let r1 = S.revision();
   const rowsNow = () => rows(); const liveNow = () => live();
   const refused = (over, pattern, label) => {
-    const liveBefore = liveNow(); const revBefore = S.revision();
+    const liveBefore = liveNow(); const fileBefore = S.fileDump();
     let err = null; try { S.save(over); } catch (e) { err = e; }
     assert.ok(err, `${label}: refused`); assert.match(String(err.message), pattern, `${label}: ${err?.message}`);
     assert.doesNotMatch(String(err.message), /2004-03-14|2016-08-08|2001-05-20/, `${label}: no birth date in the message`);
-    assert.equal(rowsNow(), expected, `${label}: retained rows unchanged`); assert.equal(liveNow(), liveBefore, `${label}: live rows unchanged`); assert.equal(S.revision(), revBefore, `${label}: revision unchanged`);
+    assert.equal(rowsNow(), expected, `${label}: retained rows unchanged`); assert.equal(liveNow(), liveBefore, `${label}: live rows unchanged`); assert.equal(S.fileDump(), fileBefore, `${label}: nothing written`); // S14a: replaces the save-revision check
   };
   // A pairing code never resolves to a retained id: the stale code the erase left behind (the loaded snapshot carries it) refuses every save that writes the codes — the final-state check and the import read live rows only; cleared, the save is accepted.
   refused({}, /pl-child2/, 'a pairing code naming a retained id');
-  S.save({ pairingCodes: [] }); S.db.pairingCodes = []; assert.equal(rows(), expected, 'supplied: identical'); assert.equal(S.revision(), r1 + 1);
-  S.save({}); assert.equal(rows(), expected, 'supplied again: identical'); assert.equal(S.revision(), r1 + 2);
-  S.save({ playersRetained: undefined }); assert.equal(rows(), expected, 'omitted: kept as it is'); assert.equal(S.revision(), r1 + 3);
+  S.save({ pairingCodes: [] }); S.db.pairingCodes = []; assert.equal(rows(), expected, 'supplied: identical');
+  S.save({}); assert.equal(rows(), expected, 'supplied again: identical');
+  S.save({ playersRetained: undefined }); assert.equal(rows(), expected, 'omitted: kept as it is');
   const identity = () => ({ players: clone(S.db.players), guardians: clone(S.db.guardians) });
-  S.save({ ...identity() }); assert.equal(rows(), expected, 'the identity pair rewritten (every players row deleted and reinserted by the replace): the retained rows survive'); assert.equal(S.revision(), r1 + 4);
+  S.save({ ...identity() }); assert.equal(rows(), expected, 'the identity pair rewritten (every players row deleted and reinserted by the replace): the retained rows survive');
   refused({ players: [...clone(S.db.players), { ...seeded(), id: 'pl-seeded' }], guardians: clone(S.db.guardians) }, /pl-seeded/, 'a retained id listed as a live player');
   refused({ playersRetained: { id: 'x' } }, /playersRetained/, 'not an array');
   refused({ playersRetained: [{ deletedAt: NOW, birthDate: '2004-03-14', country: 'GB' }] }, /id/, 'an entry without an id');
@@ -187,18 +182,17 @@ test('snapshot contract: stored retained records are PROTECTED — a supplied pl
   const expected = JSON.stringify([RETAINED_ROW('pl-seeded', NOW, '2004-03-14', 'GB'), RETAINED_ROW('pl-child2', NOW + 1, '2016-08-08', 'GB')]);
   const rows = () => JSON.stringify(S.all('SELECT * FROM players WHERE deleted_at IS NOT NULL ORDER BY rowid'));
   const live = () => JSON.stringify(S.all('SELECT id FROM players WHERE deleted_at IS NULL ORDER BY rowid'));
-  const requestsBlob = () => S.all("SELECT value FROM collections WHERE name = 'requests'")[0]?.value ?? null;
   assert.equal(rows(), expected);
-  const loadedView = JSON.stringify(S.db.playersRetained); const liveBefore = live(); const requestsBefore = requestsBlob();
+  const loadedView = JSON.stringify(S.db.playersRetained); const liveBefore = live();
   const seeded = RECORD('pl-seeded', NOW, '2004-03-14', 'GB'); const kid = RECORD('pl-child2', NOW + 1, '2016-08-08', 'GB');
   const refused = (over, pattern, label) => {
-    const revBefore = S.revision();
+    const fileBefore = S.fileDump();
     let err = null; try { S.save(over); } catch (e) { err = e; }
     assert.ok(err, `${label}: refused`); assert.match(String(err.message), pattern, `${label}: ${err?.message}`);
     assert.doesNotMatch(String(err.message), /2004-03-14|2016-08-08|1990-01-01|2001-05-20/, `${label}: no birth date in the message`);
     assert.equal(rows(), expected, `${label}: every stored retained row byte-identical`); assert.equal(live(), liveBefore, `${label}: live rows unchanged`);
-    assert.equal(S.revision(), revBefore, `${label}: revision unchanged`); assert.equal(S.store.sqlite.isTransaction, false, `${label}: no open transaction`);
-    assert.equal(JSON.stringify(S.db.playersRetained), loadedView, `${label}: the tool's loaded view is untouched`); assert.equal(requestsBlob(), requestsBefore, `${label}: an accompanying change to another collection did not land`);
+    assert.equal(S.store.sqlite.isTransaction, false, `${label}: no open transaction`);
+    assert.equal(JSON.stringify(S.db.playersRetained), loadedView, `${label}: the tool's loaded view is untouched`); assert.equal(S.fileDump(), fileBefore, `${label}: nothing written, an accompanying change to another collection included`); // S14a: a whole-file dump replaces the revision and the requests blob
   };
   refused({ playersRetained: [] }, /pl-child2|pl-seeded/, 'an empty collection');
   refused({ playersRetained: [seeded] }, /pl-child2/, 'a subset');
@@ -211,11 +205,10 @@ test('snapshot contract: stored retained records are PROTECTED — a supplied pl
   refused({ players: [...clone(S.db.players), { ...adult(), id: 'pl-seeded' }], guardians: clone(S.db.guardians) }, /pl-seeded/, 'step two of prune-then-recreate');
   refused({ playersRetained: [seeded, kid, RECORD('pl-adult', NOW, '2001-05-20', 'GB')] }, /pl-adult/, 'a direct live-id collision');
   // Positive controls: unchanged, repeated, omitted; a superset adds a record and changes nothing stored.
-  let r1 = S.revision();
-  S.save({}); assert.equal(rows(), expected); S.save({}); assert.equal(rows(), expected); S.save({ playersRetained: undefined }); assert.equal(rows(), expected); assert.equal(S.revision(), r1 + 3);
+  S.save({}); assert.equal(rows(), expected); S.save({}); assert.equal(rows(), expected); S.save({ playersRetained: undefined }); assert.equal(rows(), expected);
   S.save({ playersRetained: [seeded, kid, RECORD('pl-imported', NOW + 2, '2003-01-01', 'FR')] });
   assert.equal(rows(), JSON.stringify([...JSON.parse(expected), RETAINED_ROW('pl-imported', NOW + 2, '2003-01-01', 'FR')]), 'the new record is added; the stored rows are byte-identical');
-  assert.equal(S.revision(), r1 + 4); assert.equal(S.store.sqlite.isTransaction, false);
+  assert.equal(S.store.sqlite.isTransaction, false);
   S.close();
   const r = reopen(dir);
   assert.deepEqual(r.players.retainedRecords(), [seeded, kid, RECORD('pl-imported', NOW + 2, '2003-01-01', 'FR')]);
@@ -234,9 +227,10 @@ test('unit of work: an erase inside a unit that fails after every write — and 
   const view = t.players.byId('pl-child1'); const kids = t.guardians.byId('gd-primary').childIds;
   const sessionsBefore = t.raw("SELECT COUNT(*) AS n FROM sessions WHERE kind = 'player' AND ref_id = 'pl-child1'").n; assert.equal(sessionsBefore, 1);
   const stateOf = () => JSON.stringify({ row: t.row('pl-child1'), children: t.childRows('pl-child1'), links: t.links('pl-child1'), sessions: t.raw("SELECT COUNT(*) AS n FROM sessions WHERE kind = 'player' AND ref_id = 'pl-child1'").n, queue: t.raw('SELECT COUNT(*) AS n FROM media_deletions').n, codes: t.raw("SELECT COUNT(*) AS n FROM pairing_codes WHERE player_id = 'pl-child1'").n, ledger: t.all('SELECT * FROM ledger ORDER BY seq') });
-  const before = stateOf(); const r0 = t.revision();
+  const before = stateOf();
   // An unrelated write committed before the unit (S4a-E: every write is explicit; there is no pending edit to carry).
   t.players.update('pl-seeded', { city: 'Northgate' });
+  const fileBefore = t.fileDump();
   const attempt = (label, failHow) => {
     assert.throws(() => t.unit(() => {
       t.mediaDeletions.enqueue(['med-x'], { playerId: 'pl-child1', at: NOW });
@@ -246,7 +240,7 @@ test('unit of work: an erase inside a unit that fails after every write — and 
       assert.equal(t.players.byId('pl-child1'), null, `${label}: inside the unit the account is gone`); assert.equal(t.players.isRetained('pl-child1'), true);
       failHow();
     }), /synthetic|constraint failed|FOREIGN KEY/i, `${label}: the unit fails`);
-    assert.equal(stateOf(), before, `${label}: the file is exactly as before`); assert.equal(t.revision(), r0, `${label}: no save`);
+    assert.equal(stateOf(), before, `${label}: the file is exactly as before`); assert.equal(t.fileDump(), fileBefore, `${label}: nothing written anywhere`);
     assert.equal(t.players.byId('pl-child1'), view, `${label}: the same held view object`); assert.equal(view.name, 'Child pl-child1');
     assert.equal(t.guardians.byId('gd-primary').childIds, kids, `${label}: the held childIds array`); assert.deepEqual([...kids], ['pl-child1', 'pl-child2']);
     assert.equal(t.players.isRetained('pl-child1'), false); assert.equal(t.players.retainedCount(), 0); assert.equal(t.db.players.some((p) => p.id === 'pl-child1'), true);

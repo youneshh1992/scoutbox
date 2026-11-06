@@ -10,7 +10,7 @@
 //      agree; db.signings stays unique; nothing is fabricated on boot
 //   3  planted legacy and corrupt cases survive five restarts untouched:
 //      never repaired, never re-classified, never given a record
-//   4  the migration ledger applies nothing on replay (schema 2308)
+//   4  the migration ledger applies nothing on replay (schema 39)
 //   5  M23 P8.1 (§67): an under_review checkpoint; a stale Offer pointer,
 //      a cross-case second case, a legacy mix and a signed mismatch across
 //      restarts (never repaired, nothing inherited, nothing fabricated); key
@@ -18,13 +18,14 @@
 //      the analytics funnel identical across a restart
 //
 // Nothing is rewritten, re-ordered or "repaired" on boot.
+import { DATA_MIGRATIONS } from '../../repositories/index.mjs';
 import { spawn } from 'node:child_process';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
-import { SCHEMA_VERSION } from '../../domains/platform/migrations.mjs';
+const SCHEMA_VERSION = Number(DATA_MIGRATIONS.map((m) => m.id).sort().at(-1).slice(0, 4)); // the latest table migration's number
 import { openStore } from '../../store.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -77,6 +78,9 @@ async function bootOn(dataDir, port) {
 
 let S = await bootOn(DATA, PORT);
 ok(S.up, `boot 1 on an empty store (schema ${SCHEMA_VERSION})`);
+// The table-migration ledger (id and time applied), read beside the running server.
+const ledger = () => { const st = openStore(DATA); try { return JSON.stringify(st.sqlite.prepare('SELECT id, applied_at FROM data_migrations ORDER BY id').all()); } finally { st.sqlite.close(); } };
+const LEDGER1 = ledger();
 let maria; let kola;
 const login = async () => {
   maria = (await S.j('POST', '/auth/org/login', { orgId: 'org-eastport', scoutName: 'Maria Keane', role: 'Head of Recruitment' })).body;
@@ -224,8 +228,8 @@ section('4 — the migration ledger on replay');
 {
   const h = await fetch(`http://localhost:${PORT}/health`);
   ok(h.headers.get('x-scoutbox-schema') === String(SCHEMA_VERSION), `schema ${SCHEMA_VERSION} on the wire`);
-  const log = S.log();
-  neg(!/applied\s+m2\d\d_/.test(log) || /applied 0/.test(log), 'no migration step applied on replay');
+  // Rewritten in S14a: the old check matched the blob's m2xx step ids in the log.
+  neg(JSON.parse(LEDGER1).length === DATA_MIGRATIONS.length && ledger() === LEDGER1, 'no migration step applied on replay (the ledger is as boot 1 left it)');
 }
 
 // ================================================================ 5 — P8.1 hardening (§67)

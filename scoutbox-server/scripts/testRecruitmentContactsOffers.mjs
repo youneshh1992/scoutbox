@@ -16,7 +16,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { runDataMigrations } from '../repositories/database.mjs';
 import { attachDataLayer, DATA_MIGRATIONS, TABLE_BACKED, readTableBacked } from '../repositories/index.mjs';
 import { openStore } from '../store.mjs';
-import { NOW, TTL, tempDir } from './coreIdentityTestFixtures.mjs';
+import { NOW, TTL, tempDir, hasBlobTable } from './coreIdentityTestFixtures.mjs';
 import { p4bInvitation, minorInvitation, acceptedRequest, scheduledTrial, legacyTrialRequest, saveFixture, fixtureDb } from './recruitmentTestFixtures.mjs';
 import { S8B_FIX } from './recruitmentCasesTestFixtures.mjs';
 import { draftContact, respondedContact, nullKeyContact, externalContact, cancelledContact, draftOffer, acceptedOffer, declinedOffer, withdrawnOffer, revision, contactRequest, S8C_FIX, persisted, TX } from './recruitmentContactsOffersTestFixtures.mjs';
@@ -54,21 +54,19 @@ const refused = (fn, pattern, label = '') => { let err = null; try { fn(); } cat
 /** Save the fixtures, with `over`, into a new database and expect the save refused, atomically, twice. */
 const refusedSave = (tag, over, pattern) => {
   const d = tempDir(`s8c-ref-${tag}`); const st = openStore(d); const before = fullDump(st.sqlite);
-  for (const label of [tag, `${tag} (again)`]) { refused(() => st.save({ savedAt: NOW, idCounter: 1000, db: fixtureDb(fixtureCollections(over)) }), pattern, label); assert.equal(st.sqlite.isTransaction, false); assert.equal(fullDump(st.sqlite), before, `${label}: nothing written`); assert.equal(st.revision(), 0); }
+  for (const label of [tag, `${tag} (again)`]) { refused(() => st.save({ savedAt: NOW, idCounter: 1000, db: fixtureDb(fixtureCollections(over)) }), pattern, label); assert.equal(st.sqlite.isTransaction, false); assert.equal(fullDump(st.sqlite), before, `${label}: nothing written`); }
   st.sqlite.close(); rm(d);
 };
 function serverOpen(dir) {
   const store = openStore(dir, { tableBacked: TABLE_BACKED });
-  const loaded = store.load();
-  const db = { ...loaded.db, players: [], guardians: [] };
-  const layer = attachDataLayer({ db, store, nextId, persist: () => {}, sessionTtlMs: TTL, now: () => NOW, warn: () => {} });
-  const snapshot = () => ({ savedAt: NOW, idCounter: 1000, db });
-  return { store, layer, db, snapshot, save: () => store.save(snapshot()), unit: (w) => store.unitOfWork(w, { snapshot }), revision: () => store.revision(), repo: layer.recruitmentContactsOffers, recruitment: layer.recruitment, close: () => store.sqlite.close() };
+  const db = {}; // S14a: a fixture-saved file is not a first installation, so there is nothing to hand in
+  const layer = attachDataLayer({ db, store, nextId, sessionTtlMs: TTL, now: () => NOW, warn: () => {} });
+  return { store, layer, db, save: () => store.save(), unit: (w) => store.unitOfWork(w), repo: layer.recruitmentContactsOffers, recruitment: layer.recruitment, close: () => store.sqlite.close() };
 }
 function snapshotOpen(dir) {
   const store = openStore(dir); const db = store.load().db;
   const save = (over = {}, { omit = [] } = {}) => { const d = { ...db, ...over }; for (const k of omit) delete d[k]; return store.save({ savedAt: NOW, idCounter: 1000, db: d }); };
-  return { store, db, save, revision: () => store.revision(), close: () => store.sqlite.close() };
+  return { store, db, save, close: () => store.sqlite.close() };
 }
 
 // ------------------------------------------------------------- the schema and the typed snapshot
@@ -83,7 +81,7 @@ test('[schema] migration 0017 is registered before 0018 and creates the ten type
   assert.match(ddlOf(e, 'recruitment_contacts'), /status TEXT NOT NULL CHECK \(status IS NULL OR status IN \('draft','delivered','failed','responded','recorded','cancelled'\)\)/);
   assert.match(ddlOf(e, 'offer_revisions'), /internal_note TEXT CHECK \(internal_note IS NULL OR length\(internal_note\) <= 2000\)/);
   assert.doesNotMatch(ddlOf(e, 'idempotency_keys'), /'recruitment_contacts'|'recruitment_offers'/, 'the keys are the owners\' own columns');
-  for (const n of COLLECTIONS) assert.equal(col(e, 'SELECT count(*) FROM collections WHERE name = ?', n), 0, `no ${n} blob`);
+  assert.equal(hasBlobTable(e), false, 'no blob table'); // rewritten in S14a: it described the blob
   e.close(); rm(empty);
   const d = file('schema'); const s = new DatabaseSync(dbFile(d)); s.exec('PRAGMA foreign_keys = ON');
   const after = fullDump(s); assert.deepEqual(runDataMigrations(s, DATA_MIGRATIONS, { now: NOW, context: { sessionTtlMs: TTL } }).ran, []); assert.equal(fullDump(s), after, 'never runs twice');
@@ -99,7 +97,7 @@ test('[schema] migration 0017 is registered before 0018 and creates the ten type
   s.close(); rm(d);
 });
 
-test('[snapshot][typed] a save STOPS with the id on a record the columns cannot hold — nothing written, the revision unchanged, the same save refused again: an unknown status, a subject over 120 characters, an unknown field (top level and nested), an off-type rev, a list that is not a list, a current revision the offer does not hold, a response naming another offer\'s revision, two answers to one revision, a receipt naming a missing revision, a present null collection; a guardian that is not in the guardians table (Q8c-b); a contact naming a case or a request that is not there; a contact whose request names another contact', () => {
+test('[snapshot][typed] a save STOPS with the id on a record the columns cannot hold — nothing written, the same save refused again: an unknown status, a subject over 120 characters, an unknown field (top level and nested), an off-type rev, a list that is not a list, a current revision the offer does not hold, a response naming another offer\'s revision, two answers to one revision, a receipt naming a missing revision, a present null collection; a guardian that is not in the guardians table (Q8c-b); a contact naming a case or a request that is not there; a contact whose request names another contact', () => {
   const C = (over) => ({ recruitmentContacts: [draftContact(over)] });
   const O = (o) => ({ recruitmentOffers: [o] });
   refusedSave('status', C({ status: 'sent' }), /CONTACTS_OFFERS_INPUT_INVALID[\s\S]*recruitmentContacts entry #0 rct-1\.status must be one of draft\|delivered/);

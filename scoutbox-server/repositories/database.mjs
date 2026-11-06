@@ -1,20 +1,11 @@
 /**
- * The relational data layer's foundation: versioned table migrations and a
- * transaction helper over the node:sqlite handle that store.mjs opens.
- *
- * Why a second migration registry next to domains/platform/migrations.mjs: that one
- * shapes the in-memory snapshot (collections present, fields backfilled) and
- * runs against the loaded object. This one shapes TABLES, runs SQL, and is
- * recorded in the database itself, so a restored file carries its own schema
- * history. The two meet in one place — repositories/index.mjs — which runs
- * the table migrations after the snapshot ones and attaches each domain
- * repository.
+ * The data layer's foundation: versioned table migrations and a transaction helper over the node:sqlite handle that
+ * store.mjs opens.
  *
  * Every migration is a module in repositories/migrations/ exporting `{ id,
  * note, up(sqlite) }`. Ids sort lexically (`0001_…`); a migration runs once,
  * inside a transaction, and a failure rolls it back and aborts the boot with
- * the database untouched.
- */
+ * the database untouched. */
 // node:sqlite is required by the store, which refuses to open without it with
 // a compatibility error (store.mjs, runtime.mjs); this module must stay
 // importable without it so that refusal is what the operator sees.
@@ -131,7 +122,7 @@ export function migrationApplied(sqlite, id) {
 export function dataSchemaReport(sqlite, migrations) {
   if (!sqlite) throw new TypeError('dataSchemaReport needs a SQLite connection; the data layer has no in-memory engine');
   const applied = sqlite.prepare('SELECT COUNT(*) AS n FROM data_migrations').get()?.n ?? 0;
-  const tables = sqlite.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT IN ('collections', 'meta', 'data_migrations') AND name NOT LIKE 'sqlite_%' ORDER BY name").all().map((r) => r.name);
+  const tables = sqlite.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT IN ('meta', 'data_migrations', 'counters') AND name NOT LIKE 'sqlite_%' ORDER BY name").all().map((r) => r.name);
   const appliedIds = sqlite.prepare('SELECT id FROM data_migrations ORDER BY id').all().map((r) => r.id);
   return { engine: 'sqlite', migrationsApplied: applied, migrationsKnown: migrations.length, migrations: appliedIds, tables };
 }

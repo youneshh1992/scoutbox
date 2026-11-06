@@ -55,9 +55,11 @@ import { TRIAL_SCHEDULE_VIEWERS } from '../../domains/recruitment/lifecycle/tria
 import { POLICY_ACTIONS, MINOR_PATHWAY_PRODUCTION_ENABLED } from '../../domains/agents/compliance/policy.mjs';
 import { EVENT_REGISTRY, EVENT_NAMES } from '../../domains/platform/eventRegistry.mjs';
 import { TYPE_CATEGORY, CATEGORIES } from '../../domains/platform/notificationPrefs.mjs';
-import { MIGRATIONS, SCHEMA_VERSION, PRODUCTION_REQUIRED_STORES } from '../../domains/platform/migrations.mjs';
+import { DATA_MIGRATIONS, TABLE_BACKED } from '../../repositories/index.mjs';
 import { RATE_LIMIT_POLICY } from '../../domains/platform/rateLimit.mjs';
 import { openStore } from '../../store.mjs';
+
+const SCHEMA_VERSION = Number(DATA_MIGRATIONS.map((m) => m.id).sort().at(-1).slice(0, 4));
 
 const PORT = 7100 + Math.floor(Math.random() * 200);
 const BASE = `http://localhost:${PORT}`;
@@ -263,11 +265,11 @@ section('pure K/L/M — the trial projection is scheduling, and nothing adjacent
 
 section('pure §102/§103 — no new store, and no migration');
 {
-  ok(SCHEMA_VERSION === 2308 && !MIGRATIONS.some((m) => /agent|integration|p56e/i.test(m.id) && m.version > 2307), 'AN-p1 the schema is 2308 (P7\'s signing store): P5.6E adds no migration (§102 "prefer NO migration")');
-  neg(MIGRATIONS.filter((m) => m.version > 2307).every((m) => m.id === 'm280_001_signing_workflow'), 'AN-p2 and the only step above 2307 is P7\'s signing store');
-  neg(!MIGRATIONS.some((m) => /integration|disclosure|handoff|share/i.test(m.id)), 'AN-p3 no P5.6E migration id exists at all');
+  // Rewritten in S14a: these described the retired snapshot registry (schema 2308, the m280 step, required stores).
+  ok(DATA_MIGRATIONS.length === SCHEMA_VERSION, 'AN-p1 the schema is 39, the latest table migration (0039_retire_blob)');
+  neg(!DATA_MIGRATIONS.some((m) => /disclosure|handoff|share/i.test(m.id)), 'AN-p3 no P5.6E migration exists at all (no disclosure, handoff or share table of its own; 0034_integrations is the enterprise API)');
   const p56e = ['agentOpportunityShares', 'representationDisclosures', 'transactionHandoffs', 'agentContacts', 'agentTrials'];
-  neg(!p56e.some((s) => PRODUCTION_REQUIRED_STORES.includes(s)), 'AN-p4 and none of the five stores P5.6E might have declared exists — the disclosure lives on the agreement, the share lives on the agreement, and the handoff lives on the case (§103)');
+  neg(!p56e.some((s) => TABLE_BACKED.includes(s)), 'AN-p4 and none of the five stores P5.6E might have declared exists — the disclosure lives on the agreement, the share lives on the agreement, and the handoff lives on the case (§103)');
   ok(MAX_OPPORTUNITY_SHARES === 200, 'AN-p5 the share list is capped, so an unbounded array cannot grow on a hot row');
 }
 

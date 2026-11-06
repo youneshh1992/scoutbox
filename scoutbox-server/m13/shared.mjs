@@ -1,40 +1,7 @@
-// M13 shared: additive migrations + cross-cutting helpers.
-// Same conventions as m12/shared.mjs: nothing existing is renamed, retyped or
-// deleted; every helper enforces at the server, never in a client.
+// M13 shared: cross-cutting helpers. Every helper enforces at the server, never in a client.
 import crypto from 'node:crypto';
 import { isAdult, ageOn, adultAgeFor, visibleToOrg, haversineKm } from '../domain.mjs';
 import { isLeadUser, isFinanceUser } from '../roles.mjs';
-
-// ------------------------------------------------------------- migrations
-/** `players` (S5): the identity repository, for the external-ids default (a row write). */
-export function migrateM13(db, players) {
-  // F1 import batches, prospects, identity reviews, API keys, webhook endpoints and deliveries: tables of
-  // repositories/integrations.mjs (S13a), read through integrationReads.
-  // F3 private suitability preferences: the player_prefs tables of the opportunities and campaigns repository (S9d).
-  // F2 transition cases: tables of repositories/transitionsVouches.mjs (S10c), read through verificationReads.
-  // F10 adult representation (the legacy lane): removed in S11a; agent relationships are repositories/agentCore.mjs.
-  // F4–F7 exposure, review-later, evidence suggestions, calibration, fixtures and coverage: tables of
-  // repositories/insightCoverage.mjs (S12d), read through insightReads.
-  // F8 group workspaces and group grants: tables of repositories/groups.mjs (S13c), read through groupReads.
-  db.dispatches ??= [];           // F11 — per-channel delivery records for notifications (S7b: a table; attachDataLayer replaces this container with the repository's read-only view before m13 registers)
-  // F11 processed provider callback ids, the delivery centre's start and injected failures: tables of
-  // repositories/operations.mjs (S13e).
-  // F12 staff invites, SSO configurations and states, support tickets and access grants: tables of
-  // repositories/enterprise.mjs (S13b), read through enterpriseReads.
-  db.opsEvents ??= [];            // F12 — persisted operational failures/alerts
-  // F9 — deal scenarios live on the case (typed rows since S8b: a case without one reads back `budget: null`).
-  // Staff records (`db.users`) are owned by the users repository
-  // (repositories/users.mjs) and are read-only here: an unset `mfa` or
-  // `deliveryPrefs` is simply absent, and every reader already treats
-  // absent and null alike (`u.mfa?.enabledAt`, `u.deliveryPrefs?.channels`).
-  // F1 — [{provider, externalId, source, at}] provenance kept. Since S5 the
-  // external ids are rows of player_external_ids: a record that lacks the key
-  // (absent or null, as the in-place `??=` treated it) gains an empty list
-  // through the repository, once.
-  for (const p of [...(db.players ?? [])]) {
-    if (p.externalIds == null) players.setItems(p.id, 'externalIds', []);
-  }
-}
 
 // ----- TOTP (F12, RFC 6238 / HOTP RFC 4226, SHA-1, 6 digits, 30s step).
 // Module-level so the login path in server.mjs can verify codes too.

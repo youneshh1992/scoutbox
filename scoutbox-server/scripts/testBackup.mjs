@@ -135,11 +135,13 @@ await test('format: the backup holds scoutbox.db, media/ and manifest.json and n
   }
 });
 
-await test('copy: every table of the source database is in the copy with the same DDL and the same rows in the same order (data_migrations, meta, the remaining blob rows in collections and every domain table) — the only difference is what the server wrote AFTER the copy: the backup_created ops event, the one id it took and the save counters', async () => {
+await test('copy: every table of the source database is in the copy with the same DDL and the same rows in the same order (data_migrations, meta, counters and every domain table) — the only difference is what the server wrote AFTER the copy: the backup_created ops event and the one id it took', async () => {
   const before = dumpTables(path.join(src.dir, 'scoutbox.db'));
   const copy = dumpTables(path.join(src.backup, 'scoutbox.db'));
   assert.deepEqual(Object.keys(copy), Object.keys(before), 'the same tables');
-  for (const name of ['data_migrations', 'meta', 'collections', 'players', 'channels', 'messages', 'notifications', 'sessions', 'media_deletions']) {
+  // Rewritten in S14a: the blob rows in `collections` and the save counters in `meta` are gone; the id counter is a `counters` row.
+  assert.equal('collections' in before, false, 'there is no blob table');
+  for (const name of ['data_migrations', 'meta', 'counters', 'players', 'channels', 'messages', 'notifications', 'sessions', 'media_deletions']) {
     assert.ok(before[name]?.rows.length > 0, `${name} has rows in the source (the comparison is not over empty tables)`);
   }
   for (const name of Object.keys(before)) {
@@ -151,12 +153,11 @@ await test('copy: every table of the source database is in the copy with the sam
       assert.deepEqual(later.map((r) => r.kind), ['backup_created'], 'ops_events: only the backup_created event came after');
       continue;
     }
-    if (name === 'meta') {
-      const strip = (rows) => rows.filter((r) => !['savedAt', 'saveSeq', 'idCounter'].includes(r.key));
-      assert.deepEqual(strip(copy[name].rows), strip(before[name].rows), 'meta: identical apart from the save counters and the id counter');
-      const counter = (rows) => Number(rows.find((r) => r.key === 'idCounter').value);
-      assert.equal(counter(before[name].rows) - counter(copy[name].rows), 1, 'meta: the id counter moved by exactly the one id the backup_created event took');
-      assert.ok(Number(copy[name].rows.find((r) => r.key === 'saveSeq')?.value) > 0, 'the copy carries the save revision it was taken at');
+    if (name === 'counters') {
+      const strip = (rows) => rows.filter((r) => r.name !== 'id');
+      assert.deepEqual(strip(copy[name].rows), strip(before[name].rows), 'counters: identical apart from the id counter');
+      const counter = (rows) => Number(rows.find((r) => r.name === 'id').value);
+      assert.equal(counter(before[name].rows) - counter(copy[name].rows), 1, 'counters: the id counter moved by exactly the one id the backup_created event took');
       continue;
     }
     assert.deepEqual(copy[name].rows, before[name].rows, `${name}: the same rows in the same order`);

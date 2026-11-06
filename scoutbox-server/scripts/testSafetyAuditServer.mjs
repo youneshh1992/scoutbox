@@ -75,7 +75,8 @@ async function boot(dir, env = {}, server = SERVER) {
 const snap = (dir, fn) => { const s = new DatabaseSync(path.join(dir, 'scoutbox.db'), { readOnly: true }); try { s.exec('BEGIN'); try { return fn({ get: (sql, ...p) => { const r = s.prepare(sql).get(...p); return r ? { ...r } : r; }, all: (sql, ...p) => s.prepare(sql).all(...p).map((r) => ({ ...r })) }); } finally { s.exec('COMMIT'); } } finally { s.close(); } };
 const q1 = (dir, sql, ...p) => snap(dir, (c) => c.get(sql, ...p));
 const live = (dir) => !!q1(dir, 'SELECT 1 AS one FROM data_migrations WHERE id = ?', MIGRATION);
-const seqOf = (dir) => Number(q1(dir, "SELECT value FROM meta WHERE key = 'saveSeq'")?.value) || 0;
+/** Whether the file still has the retired blob table (dropped by migration 0039, S14a). */
+const hasBlobTable = (dir) => !!q1(dir, "SELECT 1 AS one FROM sqlite_master WHERE type = 'table' AND name = 'collections'");
 /** The typed record: every key of the collection in the writer's order, an absent key null. */
 const ordered = (row, keys) => Object.fromEntries(keys.map((k) => [k, row[k] === undefined ? null : row[k]]));
 /** The rows as the DATABASE holds them, in insertion order, as typed records. */
@@ -202,7 +203,7 @@ await test('[compat] a REAL adult account deletion retains every audit row that 
   const bk = await S.j('POST', '/admin/backup', {}, null, A); assert.equal(bk.status, 201, `an unchanged save after the deletion succeeds: ${bk.text}`);
   for (const n of COLLECTIONS) assert.equal(JSON.stringify(stored(bk.body.dir, n)), JSON.stringify(after[n]), `the backup's ${n} equals the stored rows`);
   const unknown = await S.j('POST', '/org/report', { targetKind: 'player', targetPlayerId: 'pl-never-existed', reason: 'Synthetic report naming an unknown player.' }, maria); assert.equal(unknown.status, 201, 'a report naming an unknown player stays accepted');
-  const seqBeforeIdle = seqOf(dir); await sleep(2600); assert.ok(seqOf(dir) >= seqBeforeIdle, 'the debounced save after the report did not fail'); assert.ok(stored(dir, 'reports').some((r) => r.targetPlayerId === 'pl-never-existed'), 'and landed');
+  const logIdle = S.log().length; await sleep(2600); assert.doesNotMatch(S.log().slice(logIdle), /save failed/, 'the debounced save after the report did not fail'); assert.ok(stored(dir, 'reports').some((r) => r.targetPlayerId === 'pl-never-existed'), 'and landed');
   await S.stop();
   // A restore into a new directory.
   const restored = tempDir('s6b-restored'); fs.cpSync(bk.body.dir, restored, { recursive: true });
@@ -214,20 +215,18 @@ await test('[compat] a REAL adult account deletion retains every audit row that 
 });
 
 // ============================================================= [cutover] the tables, the save points, the strict reference at boot
-await test('[cutover] the cutover and the save points: a fresh boot records 0013_safety_audit after 0012 and creates the eight tables with no blob behind them (the data layer reports the domain); a player\'s block and its ledger row land together in ONE revision with the next save; the IDV entry commits with the guardian\'s column before the 200 — both failure seams and the real COMMIT leave nothing, the retry lands, a SIGKILL right after the response loses nothing, a restart serves it; a failed ordinary save at the REAL COMMIT keeps a report in memory and lands it ONCE with the next save; the block lift is durable in its route\'s save', async () => {
+await test('[cutover] the cutover and the save points: a fresh boot records 0013_safety_audit after 0012 and creates the eight tables and the file has no blob table (the data layer reports the domain); a player\'s block and its ledger row land together with the next save; the IDV entry commits with the guardian\'s column before the 200 — both failure seams and the real COMMIT leave nothing, the retry lands, a SIGKILL right after the response loses nothing, a restart serves it; a failed ordinary save at the REAL COMMIT keeps a report in memory and lands it ONCE with the next save; the block lift is durable in its route\'s save', async () => {
   const dir = tempDir('s6b-cutover'); let S = await boot(dir, { M13_FAST_RETRY: '' });
   assert.ok(live(dir), 'the boot recorded 0013'); // fails on 1792fc7: no such record
   assert.deepEqual(snap(dir, (c) => c.all('SELECT id FROM data_migrations ORDER BY applied_at, id').map((r) => r.id).filter((id) => id < '0019').slice(-7)), ['0012_channels', MIGRATION, '0014_player_erasure', '0015_recruitment', '0016_recruitment_cases', '0017_recruitment_contacts_offers', '0018_signings_follow_ups']); // S4b-R, S8a, S8b and S8c registered after this step
   for (const t of Object.values(TABLES)) assert.ok(q1(dir, "SELECT 1 AS one FROM sqlite_master WHERE type = 'table' AND name = ?", t), `${t} exists`);
-  assert.equal(q1(dir, `SELECT COUNT(*) AS n FROM collections WHERE name IN (${COLLECTIONS.map((n) => `'${n}'`).join(', ')})`).n, 0, 'no audit blob');
+  assert.equal(hasBlobTable(dir), false, 'no blob table (rewritten in S14a)');
   const cap = (await S.j('GET', '/capabilities')).body; const domains = cap?.persistence?.dataLayer?.domains ?? cap?.dataLayer?.domains ?? {}; assert.ok(domains.safetyAudit, `the data layer reports the safetyAudit domain (${Object.keys(domains).join(', ')})`);
-  // A block and its ledger row: one save, one revision.
+  // A block and its ledger row: one save (read in one read transaction: the first committed state holding the block holds its ledger row).
   const { pid, token: adult } = await signupAdult(S, 'Cutover Adult');
-  const seq0 = seqOf(dir);
   assert.equal((await S.j('POST', '/player/block', { orgId: 'org-harbour', reason: 'synthetic' }, adult)).status, 201); // not org-eastport: its user writes the note below, and a blocked organisation reads the player as absent
-  assert.ok(await until(async () => q1(dir, 'SELECT 1 AS one FROM blocks WHERE player_id = ?', pid), 8000), 'the block lands with the next save');
-  const landed = snap(dir, (c) => ({ seq: Number(c.get("SELECT value FROM meta WHERE key = 'saveSeq'").value), block: c.get('SELECT org_id, reason FROM blocks WHERE player_id = ?', pid), ledger: c.all('SELECT type FROM ledger WHERE player_id = ? AND type = ?', pid, 'org_blocked_by_player') }));
-  assert.equal(landed.seq, seq0 + 1, 'one revision'); assert.deepEqual(landed.block, { org_id: 'org-harbour', reason: 'synthetic' }); assert.equal(landed.ledger.length, 1, 'the ledger row landed in the same save');
+  const landed = await until(async () => snap(dir, (c) => { const block = c.get('SELECT org_id, reason FROM blocks WHERE player_id = ?', pid); return block ? { block, ledger: c.all('SELECT type FROM ledger WHERE player_id = ? AND type = ?', pid, 'org_blocked_by_player') } : null; }), 8000);
+  assert.ok(landed, 'the block lands with the next save'); assert.deepEqual(landed.block, { org_id: 'org-harbour', reason: 'synthetic' }); assert.equal(landed.ledger.length, 1, 'the ledger row landed in the same save');
   // The IDV unit: the column and the entry together (both seams, the real COMMIT, SIGKILL, restart).
   const { gid, token: gtok } = await signupGuardian(S, 'Cutover Parent', 'cutover-parent@example.test');
   const dbState = () => ({ idVerified: q1(dir, 'SELECT id_verified AS v FROM guardians WHERE id = ?', gid).v, audit: snap(dir, (c) => c.all('SELECT status FROM idv_queue WHERE guardian_id = ? ORDER BY seq', gid)).map((r) => r.status) });
@@ -244,24 +243,24 @@ await test('[cutover] the cutover and the save points: a fresh boot records 0013
   await S.kill(); assert.deepEqual(dbState(), { idVerified: 1, audit: ['approved'] }, 'a SIGKILL right after the response loses nothing');
   S = await boot(dir, { M13_FAST_RETRY: '' }); assert.deepEqual(await view(S), [true, ['approved']], 'a restart serves the committed state');
   // A failed ordinary save at the REAL COMMIT: the report stays in memory and lands once.
-  const maria = await orgLogin(S); const logBefore = S.log().length; const seqR = seqOf(dir);
+  const maria = await orgLogin(S); const logBefore = S.log().length;
   assert.equal((await S.j('POST', '/__faults', { rules: 'internal:save.sqlite_commit:1' })).status, 200);
   const rep = await S.j('POST', '/org/report', { targetKind: 'player', targetPlayerId: pid, reason: 'Synthetic report whose save fails at COMMIT.' }, maria); assert.equal(rep.status, 201, 'the route answers although its save fails');
-  assert.ok(await until(async () => /snapshot save failed: FOREIGN KEY constraint failed/.test(S.log().slice(logBefore)), 8000), 'the save failed at the real COMMIT');
+  assert.ok(await until(async () => /save failed: FOREIGN KEY constraint failed/.test(S.log().slice(logBefore)), 8000), 'the save failed at the real COMMIT');
   assert.equal((await S.j('POST', '/__faults', { rules: '' })).status, 200);
-  assert.equal(q1(dir, 'SELECT 1 AS one FROM reports WHERE id = ?', rep.body.reportId), undefined, 'the report did not land'); assert.equal(seqOf(dir), seqR);
+  assert.equal(q1(dir, 'SELECT 1 AS one FROM reports WHERE id = ?', rep.body.reportId), undefined, 'the report did not land');
   assert.ok((await adminReports(S)).some((r) => r.id === rep.body.reportId), 'memory is the intended state');
   const note = await S.j('POST', `/org/players/${pid}/notes`, { text: 'Synthetic note that carries the next save.' }, maria); assert.equal(note.status, 201);
   assert.ok(await until(async () => q1(dir, 'SELECT 1 AS one FROM reports WHERE id = ?', rep.body.reportId), 8000), 'the next save landed the report');
   assert.equal(q1(dir, 'SELECT COUNT(*) AS n FROM reports WHERE id = ?', rep.body.reportId).n, 1, 'once'); assert.ok(q1(dir, 'SELECT 1 AS one FROM org_notes WHERE id = ?', note.body.id));
   // The block lift (Q5) is durable in its route's save.
   const blockId = (await adminBlocks(S)).find((b) => b.playerId === pid).id;
-  const seqLift = seqOf(dir); const logLift = S.log().length; const liftAt = Date.now();
+  const logLift = S.log().length; const liftAt = Date.now();
   const lift = await S.j('POST', `/admin/blocks/${blockId}/lift`, {}, null, A); assert.equal(lift.status, 200, lift.text);
   const gone = await until(async () => !q1(dir, 'SELECT 1 AS one FROM blocks WHERE id = ?', blockId), 8000);
-  // Diagnostics on failure only (the review of c6cf5e1 saw this assertion fail once): the save revisions, the clocks,
+  // Diagnostics on failure only (the review of c6cf5e1 saw this assertion fail once): the clocks,
   // the in-memory list, the lift answer and the child server's output since the lift (save failures are logged there).
-  const diag = async () => JSON.stringify({ seqBefore: seqLift, seqNow: seqOf(dir), waitedMs: Date.now() - liftAt, liftAnswer: lift.body, inMemory: (await adminBlocks(S)).map((b) => b.id), inFile: snap(dir, (c) => c.all('SELECT id FROM blocks ORDER BY seq')).map((r) => r.id), childExit: S.proc.exitCode, childLogSinceLift: S.log().slice(logLift).slice(-2500) });
+  const diag = async () => JSON.stringify({ waitedMs: Date.now() - liftAt, liftAnswer: lift.body, inMemory: (await adminBlocks(S)).map((b) => b.id), inFile: snap(dir, (c) => c.all('SELECT id FROM blocks ORDER BY seq')).map((r) => r.id), childExit: S.proc.exitCode, childLogSinceLift: S.log().slice(logLift).slice(-2500) });
   assert.ok(gone, `the lifted block row is deleted in the file — ${gone ? '' : await diag()}`);
   await S.stop(); rm(dir);
 });
@@ -282,7 +281,7 @@ await test('[cutover] the admin backup and a restore: the backup\'s database cop
   const restored = tempDir('s6b-restored2'); fs.cpSync(bk.body.dir, restored, { recursive: true });
   S = await boot(restored); assert.ok(live(restored));
   for (const n of COLLECTIONS) assert.equal(JSON.stringify(stored(restored, n)), JSON.stringify(copy[n]), `row for row: ${n}`);
-  assert.equal(q1(restored, `SELECT COUNT(*) AS n FROM collections WHERE name IN (${COLLECTIONS.map((n) => `'${n}'`).join(', ')})`).n, 0, 'no blob');
+  assert.equal(hasBlobTable(restored), false, 'no blob table');
   assert.equal((await adminBlocks(S)).length, copy.blocks.length, 'the admin lists the restored blocks');
   assert.ok((await adminReports(S)).some((r) => r.targetPlayerId === pid)); assert.equal((await adminIdv(S)).length, copy.idvQueue.length); assert.equal((await adminModeration(S)).length, copy.moderationLog.length);
   await S.stop();

@@ -39,25 +39,11 @@ export const DRILLDOWN_METRICS = ['stalled_rooms', 'decision_outstanding', 'term
 const PAGE_MAX = 50;
 const PAGE_DEFAULT = 25;
 
-/**
- * The one M20 migration. Additive, idempotent, and incapable of contradicting
- * a Room: it creates no analytics store. All it does is guarantee the
- * collections M20 READS exist on a snapshot that predates them — `db.trials`
- * in particular has only ever been created by the seed, so a snapshot restored
- * without it would have thrown on the first trial read, M20 or not.
- */
-export function migrateM20(db) {
-  // Nothing left to guarantee: the trials, requests and signings are SQL since §4.3 step 2, the watchlists and their
-  // history since S12c. Kept as the documented no-op the analytics battery checks.
-  void db;
-}
-
 export function registerAnalytics(ctx) {
   const { db, recruitmentReads, scoutingReads, orgRouter, requireLead, findPlayer, orgCanSee } = ctx;
   // The reporting context reads the recruitment records and (S9b) the club's assessments through SQL.
   const reportingReads = { ...recruitmentReads, ...scoutingReads, discovery: ctx.discoveryReads };
   if (typeof recruitmentReads?.contacts?.forOrg !== 'function' || typeof recruitmentReads?.offers?.forOrg !== 'function' || typeof recruitmentReads?.signings?.forOrg !== 'function' || typeof recruitmentReads?.signingPackages?.forOrg !== 'function') throw new TypeError('registerAnalytics needs recruitmentReads (contacts, offers, signings, signingPackages) from the data layer');
-  migrateM20(db);
 
   // Counters only, and deliberately only two: how often the page was read and
   // how often a drill-down was opened. There is no counter here that could be

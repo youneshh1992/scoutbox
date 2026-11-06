@@ -5,7 +5,7 @@
 // before any M13 handler. Order matters only where a module publishes a hook
 // another consumes (delivery exposes notifyAction; imports exposes
 // emitWebhook; enterprise exposes the exposure hook).
-import { migrateM13, buildSharedM13 } from './shared.mjs';
+import { buildSharedM13 } from './shared.mjs';
 import { registerImports } from '../domains/integrations/imports.mjs';
 import { registerDelivery } from './delivery.mjs';
 import { registerEnterprise } from '../domains/enterprise/enterprise.mjs';
@@ -17,7 +17,6 @@ import { registerBudgets } from '../domains/recruitment/budgets.mjs';
 import { registerGroups } from '../domains/groups/groups.mjs';
 
 export function registerM13(ctx) {
-  migrateM13(ctx.db, ctx.players);
   const full = { ...ctx, ...buildSharedM13(ctx) };
   registerImports(full);     // F1  imports · identity · API keys · webhooks
   registerDelivery(full);    // F11 dispatch centre · callbacks · acks (exposes notifyAction)

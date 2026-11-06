@@ -19,8 +19,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
-import { SCHEMA_VERSION, MIGRATIONS } from '../../domains/platform/migrations.mjs';
-import { guaranteeFor } from '../../storeContract.mjs';
+import { DATA_MIGRATIONS, TABLE_BACKED } from '../../repositories/index.mjs';
 import { EVENT_REGISTRY } from '../../domains/platform/eventRegistry.mjs';
 import { RATE_LIMIT_POLICY } from '../../domains/platform/rateLimit.mjs';
 import { M29_ERROR_HTTP, PUBLIC_ERROR_FIELDS, publicErrorBody } from '../../domains/recruitment/signings/errors.mjs';
@@ -29,6 +28,7 @@ import {
   payloadFingerprint, validateContractDates, validateExpiry, requiredPartiesFor, effectiveStatus, canStart, canCompleteParty, completionGate,
   signingIntegrity, signingConsistency, signingCorrupt, SIGNING_CORRUPTION, signingRecipientView, signingAgentView, signingClubView, cleanText,
 } from '../../domains/recruitment/signings/signing.mjs';
+const LATEST_SCHEMA = Number(DATA_MIGRATIONS.map((m) => m.id).sort().at(-1).slice(0, 4)); // S14a: the latest table migration's number
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SERVER = path.join(HERE, '..', '..', 'server.mjs');
@@ -63,9 +63,10 @@ const SHA_A = sha256(DOC_A); const SHA_B = sha256(DOC_B);
 // ================================================================ A — model / store (pure)
 section('A — model and store: vocabulary, validators, gates, integrity, error taxonomy, the closed minor pathway');
 {
-  ok(SCHEMA_VERSION === 2308 && MIGRATIONS.length === 18 && MIGRATIONS.some((m) => m.id === 'm280_001_signing_workflow' && m.version === 2308), 'A1 schema 2308: exactly one migration past 2307, m280_001_signing_workflow');
-  ok(guaranteeFor('signingPackages') === null && guaranteeFor('signings') === null, 'A2 signingPackages and signings are no db collections: tables read through SQL (§4.3 step 2; rewritten, it described the old storage)');
-  neg(/nothing is backfilled/.test(String(MIGRATIONS.at(-1).note)) && /no lifecycle state, player contract status or legacy signing row is reinterpreted/.test(String(MIGRATIONS.at(-1).note)), 'A3 the migration declares it backfills nothing and reinterprets nothing');
+  // A1–A3 rewritten in S14a: they described the blob's m280 step and the store contract. That nothing is backfilled
+  // or reinterpreted is proved on a planted legacy file in signingsPersistence §1.
+  ok(DATA_MIGRATIONS.length === LATEST_SCHEMA && DATA_MIGRATIONS.some((m) => m.id === '0018_signings_follow_ups'), 'A1 every table migration; the signing tables are 0018');
+  ok(TABLE_BACKED.includes('signingPackages') && TABLE_BACKED.includes('signings'), 'A2 signingPackages and signings are tables read through SQL (§4.3 step 2)');
   ok(SIGNING_STATUSES.length === 8 && SIGNING_STORED_STATUSES.length === 6 && !SIGNING_STORED_STATUSES.includes('EXPIRED') && !SIGNING_STORED_STATUSES.includes('SUPERSEDED'), 'A4 eight statuses; EXPIRED is derived and SUPERSEDED is a revision status — neither is ever stored on a package');
   neg(!SIGNING_STATUSES.includes('SIGNED'), 'A5 no SIGNED workflow status: the word belongs to the case lifecycle alone');
   ok(PARTY_TYPES.join() === 'PLAYER,GUARDIAN,CLUB_SIGNATORY' && SIGNING_METHODS.join() === 'PLATFORM_ACKNOWLEDGMENT,UPLOAD_EXECUTED_DOCUMENT', 'A6 three party types; only the two implemented methods');
@@ -764,7 +765,7 @@ section('Z — the boundary: ONE writer of db.signings, signed and under_contrac
   for (let i = 0; i < 40; i += 1) { try { await fetch(`${BASE}/healthz`); await sleep(100); } catch { break; } }
   server = await boot();
   const re = await login('org-eastport', 'Maria Keane', 'Head of Recruitment');
-  ok(!!re?.token && (await j('GET', '/healthz')).body.schemaVersion === 2308, 'Z7 the server came back on schema 2308');
+  ok(!!re?.token && (await j('GET', '/healthz')).body.schemaVersion === LATEST_SCHEMA, 'Z7 the server came back on the current schema');
   ok(JSON.stringify((await sGet(D.SID, re.token)).body.signing) === JSON.stringify(before.d) && JSON.stringify((await sGet(KI.SID, re.token)).body.signing) === JSON.stringify(before.k), 'Z8 completed packages are byte-identical after the restart');
   ok(JSON.stringify(await signings(re.token)) === JSON.stringify(before.rows), '#47 Z9 the db.signings rows are byte-identical: nothing was duplicated or repaired on boot');
   neg(expect(await complete(D.SID, { expectedRev: before.d.rev, clientKey: key() }, re.token), 409, 'SIGNING_ALREADY_COMPLETED') && (await signings(re.token)).length === before.rows.length, '#47 Z10 completion after a restart is still refused: one row');

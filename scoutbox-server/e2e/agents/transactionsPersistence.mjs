@@ -1,39 +1,45 @@
 // M23 P5.6D — persistence, migration and restart audit for the Agent
 // Transaction Workspace.
 //
-//   1  schema 2307: exactly one step above 2306, a recorded no-op since S11c (the
-//      three stores are tables of migration 0029), EMPTY on a clean database
-//   2  upgrade from a 2306 snapshot: NOTHING changes — no recruitment case, no
-//      compliance context, no agreement and no player becomes or gains a
-//      transaction, a re-run creates nothing, and a partial record is refused
-//   3  a real boot over that snapshot: /healthz 2307, the transaction lanes
+//   1  migration 0029: registered once; the three stores are tables, EMPTY on a
+//      clean database, and reopening the file changes nothing
+//   2  a database with a recruitment case, a compliance context and an
+//      agreement: NOTHING becomes or gains a transaction, and a partial record
+//      is refused
+//   3  a real boot over that database: /healthz reports the schema, the transaction lanes
 //      answer, and an empty workspace is an empty list rather than an error
 //   4  clean boot → transaction → confirmations → representation → document →
 //      note → terms → hold → stop → snapshot → reboot: bytes survive (party
 //      history, the compliance snapshot reference, document metadata and its
-//      version chain, the timeline, revs and idempotency keys), and the 2307
-//      step does not run twice
+//      version chain, the timeline, revs and idempotency keys), and no
+//      migration runs twice
 //   5  corruption is contained and named: a transaction whose context is gone,
 //      a document whose transaction is gone and an unknown status are rows the
 //      typed tables cannot hold (the save refuses them, naming them); a party
 //      revision that no longer matches the facts is planted and reads STALE
 //
 // Nothing is rewritten, re-ordered or "repaired" on boot.
+// S14a: the blob store and its snapshot registry (steps 2307/2308) are retired; schema checks read data_migrations.
 
 import { spawn } from 'node:child_process';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { MIGRATIONS, SCHEMA_VERSION, runMigrations, PRODUCTION_REQUIRED_STORES } from '../../domains/platform/migrations.mjs';
 import { openStore } from '../../store.mjs';
-import { guaranteeFor } from '../../storeContract.mjs';
-import { TABLE_BACKED } from '../../repositories/index.mjs';
+import { DATA_MIGRATIONS, TABLE_BACKED } from '../../repositories/index.mjs';
+import { AGENT_TRANSACTIONS_MIGRATION } from '../../repositories/agentTransactions.mjs';
 import { partyRevisionOf, snapshotStaleness, actorTransitionAllowed, TRANSACTION_STATUSES } from '../../domains/agents/transactions/transaction.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SERVER = path.join(HERE, '..', '..', 'server.mjs');
-const STEP = 'm260_001_transaction_stores';
+const STEP = AGENT_TRANSACTIONS_MIGRATION;
+const SCHEMA_VERSION = Number(DATA_MIGRATIONS.map((m) => m.id).sort().at(-1).slice(0, 4));
+/** The table migrations recorded in a data directory's file, with when each ran. */
+const appliedMigrations = (dir) => {
+  const st = openStore(dir);
+  try { return st.sqlite.prepare('SELECT id, applied_at FROM data_migrations ORDER BY id').all().map((r) => ({ id: r.id, at: r.applied_at })); } finally { st.sqlite.close(); }
+};
 const STORES = ['agentTransactions', 'transactionRepresentations', 'transactionDocuments'];
 
 let passed = 0; let negatives = 0;
@@ -77,47 +83,32 @@ async function bootOn(dataDir, port) {
   };
 }
 const snapshotOf = (dir) => openStore(dir).load()?.db ?? null;
-const writeSnapshot = (dir, db) => openStore(dir).save({ db, idCounter: 500_000, savedAt: Date.now() });
+const writeSnapshot = (dir, db) => openStore(dir).save({ db, idCounter: 500_000 });
 
 // ============================================================ 1
-section('1 — the P5.6D step: one step at 2307, a recorded no-op; the three stores are tables, EMPTY on a clean database');
+// Rewritten in S14a: sections 1 and 2 described the retired snapshot registry (step m260_001 at 2307, P7 at 2308,
+// runMigrations over in-memory snapshots, the store contract). They now check the table migration and the file.
+section('1 — migration 0029: registered once; the three stores are tables, EMPTY on a clean database');
 {
-  const step = MIGRATIONS.find((m) => m.id === STEP);
-  ok(step?.version === 2307 && SCHEMA_VERSION === 2308, `${STEP} is version 2307; the current schema is ${SCHEMA_VERSION} (P7 added m280_001_signing_workflow at 2308)`);
-  ok(MIGRATIONS.filter((m) => m.version === 2307).length === 1, 'exactly one step at 2307 — the schema was advanced exactly once');
-  neg(MIGRATIONS.filter((m) => m.version > 2307).map((m) => m.id).join(',') === 'm280_001_signing_workflow', 'and exactly one step above 2307 — P7\'s signing workflow');
-  const versions = MIGRATIONS.filter((m) => m.version).map((m) => m.version);
-  neg(new Set(versions).size === versions.length, 'every versioned step reaches a distinct schema version — no version is advanced twice');
-  const fresh = {};
-  const up = runMigrations(fresh);
-  // S11c: the three stores are tables (migration 0029); the step is a recorded no-op.
-  ok(up.to === 2308 && STORES.every((s) => fresh[s] === undefined), 'a clean database gets no transaction collection (the three stores are tables) and the schema lands at 2308');
+  const ids = DATA_MIGRATIONS.map((m) => m.id);
+  ok(ids.filter((id) => id === STEP).length === 1 && SCHEMA_VERSION >= 29, `${STEP} is registered once; the current schema is ${SCHEMA_VERSION}`);
+  neg(new Set(ids.map((id) => id.slice(0, 4))).size === ids.length, 'every migration reaches a distinct schema version — no version is advanced twice');
   const freshDir = mkdtempSync(path.join(tmpdir(), 'sbx-m26p-fresh-'));
-  openStore(freshDir).save({ db: fresh });
   const tables = openStore(freshDir).load().db;
   neg(STORES.every((s) => Array.isArray(tables[s]) && tables[s].length === 0), 'all three tables start EMPTY — a transaction is a new concept and no existing record is reinterpreted as one');
-  neg(fresh.recruitmentOffers === undefined && fresh.offers === undefined && fresh.agencyInvoices === undefined, 'no offer and no agency-invoice store was created (out of scope; the invoice store is deferred with its reason recorded)');
-  const { schema: _s1, ...storesBefore } = fresh;
-  const before = stableJson(storesBefore);
-  const idsBefore = fresh.schema.migrations.map((m) => m.id).join();
-  const again = runMigrations(fresh);
-  const { schema: _s2, ...storesAfter } = fresh;
-  ok(again.ran.length === 0 && stableJson(storesAfter) === before && fresh.schema.migrations.map((m) => m.id).join() === idsBefore, 'running again changes no store and adds no migration record');
-  const keep = { agentTransactions: [{ id: 'atx-keep' }] }; MIGRATIONS.find((m) => m.id === STEP).up(keep);
-  neg(keep.agentTransactions.length === 1 && keep.agentTransactions[0].id === 'atx-keep', 'a replay of the step over anything destroys nothing (it is a no-op)');
-  for (const s of STORES) ok(guaranteeFor(s) !== 'migration' && !PRODUCTION_REQUIRED_STORES.includes(s) && TABLE_BACKED.includes(s), `${s} is a table of the agent transactions repository, not a migration-guaranteed collection`);
+  neg(!['offers', 'agencyInvoices'].some((n) => TABLE_BACKED.includes(n)), 'no offer and no agency-invoice store exists (out of scope; the invoice store is deferred with its reason recorded)');
+  const recordsBefore = appliedMigrations(freshDir);
+  ok(stableJson(openStore(freshDir).load().db) === stableJson(tables) && stableJson(appliedMigrations(freshDir)) === stableJson(recordsBefore), 'reopening the file changes no table and records no migration again');
+  for (const s of STORES) ok(TABLE_BACKED.includes(s), `${s} is a table of the agent transactions repository, not a collection`);
 }
 
 // ============================================================ 2
-section('2 — upgrade from 2306: nothing moves, and nothing is invented');
+section('2 — a case, a context and an agreement: nothing moves, and nothing is invented');
 {
   const dir = mkdtempSync(path.join(tmpdir(), 'sbx-m26p-up-'));
-  // Build a real 2307 database, then REWIND it to 2306 by dropping the P5.6D
-  // step and its stores. Everything else — players, orgs, agent profiles,
-  // agreements, compliance contexts, seeded policies — is genuine.
-  const db = {};
-  runMigrations(db);
-  db.recruitmentCases = []; // the snapshot's cases: the migrations no longer create the collection (§4.3 step 2)
+  // A real database: players, orgs, staff, a recruitment case, an agreement, a compliance context; the seeded
+  // policies are rows of migration 0027.
+  const db = { orgs: [], players: [], guardians: [], users: [], recruitmentCases: [] };
   db.orgs.push({ id: 'org-a', name: 'Agency', type: 'agency', level: 'agency', plan: 'Agency', verified: false, location: null });
   db.players.push({ id: 'pl-1', name: 'Adult Player', dob: '1998-04-02', country: 'GB', city: 'London', media: [], attendance: [], trialReports: [], badges: [], timeline: [], medical: { shared: false, records: [], conditionStatus: 'unknown' }, level: 'amateur', location: { lat: 51.5, lng: -0.1 } });
   db.users.push({ id: 'usr-1', orgId: 'org-a', name: 'Agency Agent', role: 'Agent', createdAt: 1 }); // the agent the context and the agreement name, and the case's owner
@@ -126,41 +117,31 @@ section('2 — upgrade from 2306: nothing moves, and nothing is invented');
   db.complianceContexts = [{ id: 'ctx-1', agencyOrgId: 'org-a', agentUserId: 'usr-1', type: 'transfer', jurisdictions: ['ENG'], parties: [], representations: [], resolvedFacts: [], reEvaluationPending: false, reviewRejectedAt: null, status: 'open', openedAt: 1, closedAt: null, keys: {}, rev: 1, revAt: 1, revBy: null, history: [], evaluations: [] }];
   // S11a: the agreement is a row of the agent core, planted in the writer's whole literal (the typed save refuses a partial one).
   db.representationAgreements = [{ id: 'rep-1', agentUserId: 'usr-1', agencyOrgId: 'org-a', clientKind: 'player', clientId: 'pl-1', jurisdiction: 'ENG', exclusive: false, termMonths: 12, startAt: 1, endAt: null, status: 'active', proposedAt: 1, confirmedAt: 1, confirmedBy: { kind: 'player', id: 'pl-1' }, declinedAt: null, terminatedAt: null, terminatedBy: null, terminationReasonCode: null, disputedAt: null, disputeReason: null, shareWithAgencyStaff: false, scope: ['transfer'], policyVersions: [], keys: {}, createdAt: 1, rev: 1, revAt: 1, revBy: null, history: [] }];
-  db.schema.version = 2306;
-  // A TRUE 2306 snapshot: the P5.6D step and the P7 step (m280_001_signing_workflow, 2308) are both dropped with their stores.
-  db.schema.migrations = db.schema.migrations.filter((m) => m.id !== STEP && m.id !== 'm280_001_signing_workflow');
-  delete db.agentTransactions; delete db.transactionRepresentations; delete db.transactionDocuments; delete db.signingPackages;
-  const casesBefore = stableJson(db.recruitmentCases);
-  const contextsBefore = stableJson(db.complianceContexts);
-  const agreementsBefore = stableJson(db.representationAgreements);
-  const playersBefore = stableJson(db.players);
-  ok(db.schema.version === 2306 && db.agentTransactions === undefined, 'the fixture is a 2306 snapshot with a recruitment case, a compliance context and an agreement, and no transaction store');
-  const up = runMigrations(db);
-  ok(up.ran.join(',') === `${STEP},m280_001_signing_workflow` && up.to === 2308, 'a 2306 snapshot runs exactly the P5.6D step and then the P7 step, in order');
-  neg(STORES.every((s) => db[s] === undefined), 'no transaction collection appears (S11c: the stores are tables, empty until a route writes one)');
-  neg(stableJson(db.recruitmentCases) === casesBefore, 'the recruitment case is untouched — it did not become a transaction and gained no transaction field (§3)');
-  neg(stableJson(db.complianceContexts) === contextsBefore, 'the compliance context is untouched — it is not reinterpreted as a transaction either');
-  neg(stableJson(db.representationAgreements) === agreementsBefore && stableJson(db.players) === playersBefore, 'no agreement and no player row was touched');
-  db.schema.version = 2306; db.schema.migrations = db.schema.migrations.filter((m) => m.id !== STEP);
-  const rerun = runMigrations(db);
-  neg(rerun.ran[0] === STEP && STORES.every((s) => db[s] === undefined), 'a partial upgrade (the record missing) completes and creates nothing');
   // S11c: a partial transaction record is not a row the typed table can hold: the save refuses it, naming it.
   let refusedPartial = null;
   try { writeSnapshot(mkdtempSync(path.join(tmpdir(), 'sbx-m26p-partial-')), { ...db, agentTransactions: [{ id: 'atx-partial' }] }); } catch (e) { refusedPartial = e; }
   neg(refusedPartial?.code === 'AGENT_TRANSACTIONS_IMPORT_BLOCKED' && /atx-partial/.test(refusedPartial.message), 'a partial transaction record is refused by the save, naming it — nothing is written');
   writeSnapshot(dir, db);
+  const back = snapshotOf(dir);
+  neg(STORES.every((s) => back[s].length === 0), 'no transaction row appears (S11c: the stores are tables, empty until a route writes one)');
+  const c = back.recruitmentCases.find((x) => x.id === 'case-1');
+  neg(c && c.stage === 'identified' && c.transactionHandoff === null && !('transactionId' in c), 'the recruitment case did not become a transaction and gained no transaction field (§3)');
+  const ctx = back.complianceContexts.find((x) => x.id === 'ctx-1');
+  neg(ctx && ctx.status === 'open' && !ctx.transactionId && ctx.rev === 1, 'the compliance context is not reinterpreted as a transaction either');
+  neg(back.representationAgreements.length === 1 && back.representationAgreements[0].status === 'active' && back.representationAgreements[0].rev === 1 && back.players.some((p) => p.id === 'pl-1'), 'no agreement and no player row was touched');
   globalThis.UPGRADE_DIR = dir;
 }
 
 // ============================================================ 3
-section('3 — a real boot over the upgraded snapshot');
+section('3 — a real boot over that database');
 {
+  const recordsBefore = appliedMigrations(globalThis.UPGRADE_DIR);
   const s = await bootOn(globalThis.UPGRADE_DIR, 6810 + Math.floor(Math.random() * 40));
-  ok(s.up, 'the server boots over a 2306-derived snapshot');
+  ok(s.up, 'the server boots over that database');
   if (s.up) {
     const h = await s.j('GET', '/healthz');
-    ok(h.body.schemaVersion === 2308, 'and reports 2308');
-    neg(!new RegExp(STEP).test(s.log()), 'the P5.6D step did NOT run again — the migration record says it already ran');
+    ok(h.body.schemaVersion === SCHEMA_VERSION, `and reports ${SCHEMA_VERSION}`);
+    neg(stableJson(appliedMigrations(globalThis.UPGRADE_DIR)) === stableJson(recordsBefore), 'no migration ran again at boot — the records say they already ran');
     const org = await s.j('POST', '/auth/org/login', { orgId: 'org-a', scoutName: 'Boot Admin', role: 'Director', platform: 'agent' });
     const list = await s.j('GET', '/org/agent/transactions', undefined, org.body.token);
     ok(list.status === 200 && Array.isArray(list.body.items) && list.body.items.length === 0 && list.body.statuses.length === 10, 'an empty workspace is an empty list with the full state vocabulary — not an error');
@@ -218,7 +199,8 @@ section('4 — a real workspace survives a restart byte for byte');
     await s.stop();
   }
   const snap = snapshotOf(dir);
-  ok(snap && snap.schema.version === 2308 && snap.agentTransactions.length === 1 && snap.transactionRepresentations.length === 1 && snap.transactionDocuments.length === 2, 'the snapshot on disk holds one transaction, one representation binding and two document versions at 2307');
+  const recordsAtStop = appliedMigrations(dir);
+  ok(snap && Number(recordsAtStop.at(-1)?.id.slice(0, 4)) === SCHEMA_VERSION && snap.agentTransactions.length === 1 && snap.transactionRepresentations.length === 1 && snap.transactionDocuments.length === 2, `the file holds one transaction, one representation binding and two document versions, at schema ${SCHEMA_VERSION}`);
   const row = snap.agentTransactions[0];
   ok(row.status === 'ON_HOLD' && row.holdReasonCode === 'awaiting_document' && row.parties.length === 2 && row.parties.every((p) => p.confirmedAt), 'the status, its reason code and both party confirmations are on disk');
   // S11c: the snapshot names its evaluation row ('<context>#<n>'); the policy versions are that evaluation's own.
@@ -235,7 +217,7 @@ section('4 — a real workspace survives a restart byte for byte');
   s = await bootOn(dir, port + 1);
   ok(s.up, 'the server reboots over that snapshot');
   if (s.up) {
-    neg(!new RegExp(STEP).test(s.log()), 'the 2307 step did NOT run again');
+    neg(stableJson(appliedMigrations(dir)) === stableJson(recordsAtStop), 'no migration ran again (every record keeps its original time)');
     const tomas = (await s.j('POST', '/auth/org/login', { orgId: 'org-northstar', scoutName: 'Tomás Rivera', role: 'Director', platform: 'agent' })).body;
     const ana = (await s.j('POST', '/auth/org/login', { orgId: 'org-northstar', scoutName: 'Ana Costa', role: 'Agent', platform: 'agent' })).body;
     const after = await s.j('GET', `/org/agent/transactions/${TX}`, undefined, ana.token);

@@ -36,11 +36,12 @@ import {
 import { stageVisits, lastActivityAt, STALL_THRESHOLDS, DECISION_OWED_STATUSES, AGE_BUCKETS } from '../../m20/timeSeries.mjs';
 import { EVIDENCE_REASON_CODES } from '../../m20/cohorts.mjs';
 import { buildDashboard } from '../../m20/dashboard.mjs';
-import { migrateM20, DRILLDOWN_METRICS } from '../../m20/index.mjs';
+import { DRILLDOWN_METRICS } from '../../m20/index.mjs';
 import { ROOM_STATUSES, TERMINAL_ROOM_STATUSES, OPEN_ROOM_STATUSES, SOURCE_CONTEXTS, ROOM_PRIORITIES, REASON_CODES } from '../../domains/recruitment/rooms/shared.mjs';
 import { EVENT_NAMES } from '../../domains/platform/eventRegistry.mjs';
 import { CATEGORIES } from '../../domains/platform/notificationPrefs.mjs';
-import { MIGRATIONS, SCHEMA_VERSION, runMigrations } from '../../domains/platform/migrations.mjs';
+import { DATA_MIGRATIONS } from '../../repositories/index.mjs';
+import { openStore } from '../../store.mjs';
 import { RATE_LIMIT_POLICY } from '../../domains/platform/rateLimit.mjs';
 import { buildReportingContext } from '../../scripts/recruitmentReadsFixture.mjs'; // §4.3 step 2: the contacts/offers queries over the plain arrays
 
@@ -51,6 +52,7 @@ const SERVER = path.join(SERVER_DIR, 'server.mjs');
 const PORT = 5960 + Math.floor(Math.random() * 8);
 const BASE = `http://localhost:${PORT}`;
 const DATA_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-m20-'));
+const SCHEMA_VERSION = Number(DATA_MIGRATIONS.map((m) => m.id).sort().at(-1).slice(0, 4)); // the latest table migration's number
 
 let passed = 0; let negatives = 0;
 const seenNeg = new Set();
@@ -451,32 +453,21 @@ section('§9 — nothing new is emitted, notified or stored');
   ok(eventCount === EVENT_NAMES.length && Object.keys(CATEGORIES).length >= 13,
     `the event registry (${eventCount}) and notification categories (${Object.keys(CATEGORIES).length}) are untouched by M20`);
 
-  // The migration creates no analytics store.
-  const fresh = {};
-  migrateM20(fresh);
-  N(30, Object.keys(fresh).every((k) => ['trials', 'signings', 'requests', 'dynamicWatchlists', 'watchlistHistory'].includes(k)),
-    'the M20 migration creates only collections other milestones already own — no analytics store');
-  N(31, !Object.keys(fresh).some((k) => /analytic|metric|rollup|snapshotStats|report/i.test(k)),
+  // Rewritten in S14a: N30–N33 ran migrateM20 and the blob's runMigrations in memory; the same claims are now made of
+  // the table migrations on a fresh file.
+  const MIG_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-m20-mig-'));
+  const readFile = () => { const st = openStore(MIG_DIR); try { return { tables: st.sqlite.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((r) => r.name), ledger: st.sqlite.prepare('SELECT id, applied_at FROM data_migrations ORDER BY id').all() }; } finally { st.sqlite.close(); } };
+  const first = readFile();
+  const second = readFile();
+  N(30, first.tables.length > 0 && !first.tables.some((t) => /analytic|metric|rollup/i.test(t)),
+    'no migration creates an analytics store');
+  N(31, !first.tables.some((t) => /snapshot_?stats/i.test(t)),
     'and nothing that could ever disagree with a Recruitment Room');
-  const seeded = { trials: [{ id: 't1' }] };
-  migrateM20(seeded); migrateM20(seeded);
-  N(32, seeded.trials.length === 1, 'running the migration twice changes nothing');
-
-  const step = MIGRATIONS.find((m) => m.id === 'm200_001_analytics_sources_present');
-  ok(!!step, 'the M20 migration is registered with a stable id');
-  // At or beyond 2000 — the version moves whenever a LATER milestone adds a
-  // step, and pinning it here made M20 fail for an M21 reason with no M20
-  // meaning. What M20 actually needs is its own step present and the version
-  // no lower than the one M20 introduced; both are asserted, so this is a
-  // sharper check than the equality it replaces, not a weaker one. (The same
-  // defect M20 itself found in m19E2E's pin at 1900.)
-  ok(SCHEMA_VERSION >= 2000, `SCHEMA_VERSION is at or beyond 2000 (${SCHEMA_VERSION})`);
-  const db2 = {};
-  const first = runMigrations(db2, { now: NOW });
-  const second = runMigrations(db2, { now: NOW });
-  N(33, second.ran.length === 0 && first.ran.length === MIGRATIONS.length,
-    'a second boot applies no migration again');
-  ok(db2.schema.version === SCHEMA_VERSION, 'the snapshot records the schema version');
+  N(32, JSON.stringify(second.tables) === JSON.stringify(first.tables),
+    'opening the file again changes no table');
+  N(33, first.ledger.length === DATA_MIGRATIONS.length && JSON.stringify(second.ledger) === JSON.stringify(first.ledger),
+    'a second open applies no migration again');
+  ok(Number(first.ledger.at(-1).id.slice(0, 4)) === SCHEMA_VERSION, `the file records schema ${SCHEMA_VERSION} (its latest table migration)`);
 
   ok(!!RATE_LIMIT_POLICY.analytics_read && RATE_LIMIT_POLICY.analytics_read.scope === 'org',
     'the analytics read limit is named in the one policy table, organisation-scoped');

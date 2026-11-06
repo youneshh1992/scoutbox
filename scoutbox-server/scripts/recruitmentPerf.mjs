@@ -10,7 +10,7 @@
 // 2. Boots the real server on that directory and times the hot reads over HTTP (sequential, after a warm-up), for
 //    the busy club, a typical club, the popular player and a guardian.
 // 3. Times one write (a Room comment) and measures what it adds to the write-ahead log, against the size of the
-//    database and of the blob collections that are not yet tables.
+//    database.
 // 4. Times the every-minute sweeps' queries on their own connection.
 //
 // Timings include the HTTP round trip on localhost. Synthetic data only; nothing touches DATA_DIR.
@@ -158,8 +158,8 @@ if (reuse) say(`  reusing the database in ${dir}`);
 // sessions are minted through the repository (hashed in the table), as a login would
 const tokens = {};
 {
-  const store = openStore(dir, { tableBacked: TABLE_BACKED }); const loaded = store.load();
-  const layer = attachDataLayer({ db: loaded.db, store, nextId: (p) => `${p}-${Math.random().toString(36).slice(2)}`, sessionTtlMs: 30 * DAY, warn: () => {} });
+  const store = openStore(dir, { tableBacked: TABLE_BACKED });
+  const layer = attachDataLayer({ db: {}, store, nextId: (p) => `${p}-${Math.random().toString(36).slice(2)}`, sessionTtlMs: 30 * DAY, warn: () => {} });
   tokens.busy = layer.sessions.create('org', world.busy.id, { userId: world.busyUser }).token;
   tokens.typical = layer.sessions.create('org', world.typical.id, { userId: world.typicalUser }).token;
   tokens.player = layer.sessions.create('player', world.popular.id).token;
@@ -168,7 +168,6 @@ const tokens = {};
 }
 const ro = new DatabaseSync(path.join(dir, 'scoutbox.db'), { readOnly: true });
 const n = (sql, ...p) => ro.prepare(sql).get(...p).n;
-const blobBytes = n('SELECT COALESCE(SUM(length(value)), 0) AS n FROM collections');
 const counts = {
   cases: n('SELECT COUNT(*) AS n FROM recruitment_cases'), busyCases: n('SELECT COUNT(*) AS n FROM recruitment_cases WHERE org_id = ?', world.busy.id),
   requests: n('SELECT COUNT(*) AS n FROM recruitment_requests'), busyRequests: n('SELECT COUNT(*) AS n FROM recruitment_requests WHERE org_id = ?', world.busy.id),
@@ -178,7 +177,7 @@ const counts = {
 };
 ro.close();
 const dbBytes = fs.statSync(path.join(dir, 'scoutbox.db')).size;
-say(`  saved through the typed writers in ${fmt(saveMs)}: database ${mb(dbBytes)}, of which blob collections ${mb(blobBytes)}`);
+say(`  saved through the typed writers in ${fmt(saveMs)}: database ${mb(dbBytes)}`);
 say(`  rows: ${counts.cases} cases (${counts.busyCases} in the busy club), ${counts.requests} requests (${counts.busyRequests} busy), ${counts.trials} trials, ${counts.contacts} contacts, ${counts.offers} offers, ${counts.signings} signings, ${counts.followUps} follow-ups`);
 say(`  the popular player: ${counts.popularCases} cases, ${counts.popularRequests} requests`);
 
@@ -225,7 +224,7 @@ if (busyRoom) {
   if (lat.length) {
     say(`\nwrite: a Room comment, p50 ${fmt(quantile(lat, 0.5))} (p95 ${fmt(quantile(lat, 0.95))})`);
     say(`  write-ahead log growth per comment, including any debounced save: median ${(quantile(grew, 0.5) / 1000).toFixed(1)} kB, max ${(Math.max(...grew) / 1000).toFixed(1)} kB`);
-    say(`  (the database is ${mb(dbBytes)}; the blob collections ${mb(blobBytes)})`);
+    say(`  (the database is ${mb(dbBytes)})`);
   }
 }
 side.close();

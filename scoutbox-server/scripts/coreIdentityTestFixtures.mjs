@@ -73,8 +73,8 @@ export const SESSIONS = (now = NOW) => [
   { token: 'legacy-player-token-000000000000000000000000000', sid: 'sid-player', kind: 'player', refId: 'pl-adult', createdAt: now - DAY },
   { token: 'legacy-staff-token-0000000000000000000000000000', sid: 'sid-staff', kind: 'org', refId: 'org-pro', userId: 'usr-1', createdAt: now - DAY },
 ];
-/** `blobNotes`: a synthetic plain blob collection no domain owns, which the unit-of-work suites edit (`requests` was table-backed in S8a, `vouches` in S10c). */
-export const EXTRA = () => ({ requests: [], blobNotes: [{ id: 'vch-1', playerId: 'pl-adult', status: 'pending', history: [] }], ledger: [] });
+/** Further collections a fixture carries alongside the identity pair (every collection has a table since S14a). */
+export const EXTRA = () => ({ requests: [], ledger: [] });
 
 // ------------------------------------------------------------------ databases
 const BASE_DDL = 'CREATE TABLE IF NOT EXISTS collections (name TEXT PRIMARY KEY, value TEXT NOT NULL); CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);';
@@ -119,8 +119,8 @@ export const migrate = (sqlite, { now = NOW } = {}) => runDataMigrations(sqlite,
 export const applied = (sqlite) => sqlite.prepare('SELECT id FROM data_migrations ORDER BY id').all().map((r) => r.id);
 export const tableCols = (sqlite, t) => sqlite.prepare(`PRAGMA table_info(${t})`).all().map((c) => c.name);
 export const isLive = (sqlite, t) => tableCols(sqlite, t).includes('facets_json');
-export const blob = (sqlite, name) => { const r = sqlite.prepare('SELECT value FROM collections WHERE name = ?').get(name); return r ? JSON.parse(r.value) : undefined; };
-export const blobText = (sqlite, name) => sqlite.prepare('SELECT value FROM collections WHERE name = ?').get(name)?.value;
+/** Whether the file still has the retired blob table (dropped by migration 0039, S14a). */
+export const hasBlobTable = (sqlite) => !!sqlite.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'collections'").get();
 export const meta = (sqlite, key) => sqlite.prepare('SELECT value FROM meta WHERE key = ?').get(key)?.value;
 export const sessionRows = (sqlite) => sqlite.prepare('SELECT token_hash, sid, kind, ref_id, org_user_id, via, created_at, expires_at FROM sessions ORDER BY sid').all().map((r) => ({ ...r }));
 export const links = (sqlite) => sqlite.prepare('SELECT guardian_id, player_id, role FROM guardian_children ORDER BY rowid').all().map((l) => ({ guardian_id: l.guardian_id, player_id: l.player_id, role: l.role }));

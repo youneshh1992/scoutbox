@@ -22,7 +22,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
-import { SCHEMA_VERSION, MIGRATIONS } from '../../domains/platform/migrations.mjs';
+import { DATA_MIGRATIONS } from '../../repositories/index.mjs';
 import { openStore } from '../../store.mjs';
 import { ROOM_STATUSES, ROOM_TRANSITIONS, TERMINAL_ROOM_STATUSES, STATUS_EVIDENCE_REQUIRED } from '../../domains/recruitment/rooms/shared.mjs';
 import {
@@ -33,6 +33,7 @@ import { LIFECYCLE_ACTIONS, canTransitionRecruitmentCase, heldFromStatus, lifecy
 import { memoryRateLimitProvider } from '../../domains/platform/rateLimit.mjs';
 import { journeyEvidenceFunnel } from '../../m20/funnels.mjs';
 import { isAdult } from '../../domain.mjs';
+const LATEST_SCHEMA = Number(DATA_MIGRATIONS.map((m) => m.id).sort().at(-1).slice(0, 4)); // S14a: the latest table migration's number
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SERVER = path.join(HERE, '..', '..', 'server.mjs');
@@ -1219,7 +1220,7 @@ section('Z — boundary invariants, read from the source');
   neg(['../scoutbox-club/src/App.tsx', '../scoutbox-grassroots/src/App.tsx', '../scoutbox-agent/src/App.tsx'].every((f) => /visibilitychange/.test(src(f)) && /'pageshow'/.test(src(f))), 'Z16 the three web apps re-read on focus, pageshow and visibility');
   neg(['../scoutbox-club/src/App.tsx', '../scoutbox-grassroots/src/App.tsx', '../scoutbox-agent/src/App.tsx'].every((f) => { const s = strip(src(f)); const i = s.indexOf('api.onChange(session'); const block = s.slice(i, i + 400); return !/payload\.(status|to|from|stage)/.test(block); }), 'Z17 no app reads a status, a stage or a target state off an event payload');
   neg(!/room\.status\s*=[^=]/.test(strip(src('domains/recruitment/offers/index.mjs'))) && !/room\.status\s*=[^=]/.test(strip(src('domains/recruitment/signings/index.mjs'))) && !/room\.status\s*=[^=]/.test(strip(src('domains/recruitment/lifecycle/contactRoutes.mjs'))) && !/room\.status\s*=[^=]/.test(strip(src('domains/recruitment/lifecycle/trialRoutes.mjs'))) && !/room\.status\s*=[^=]/.test(strip(src('domains/recruitment/lifecycle/decisionRoutes.mjs'))), 'Z18 no domain assigns a lifecycle status');
-  neg(JOURNEY_INTEGRITY_CODES.includes('EVIDENCE_AHEAD_OF_LIFECYCLE') && NEXT_ACTION_CODES.length === 24 && ROOM_STATUSES.length === 18 && SCHEMA_VERSION === 2308 && MIGRATIONS.length === 18, 'Z19 one new integrity code; still 24 next actions, 18 states, schema 2308, 18 migrations');
+  neg(JOURNEY_INTEGRITY_CODES.includes('EVIDENCE_AHEAD_OF_LIFECYCLE') && NEXT_ACTION_CODES.length === 24 && ROOM_STATUSES.length === 18 && DATA_MIGRATIONS.length === LATEST_SCHEMA, 'Z19 one new integrity code; still 24 next actions, 18 states, every table migration'); // the migration count rewritten in S14a: it compared the blob's schema numbers
   neg(Object.keys(LIFECYCLE_ACTIONS).length === 19 && TERMINAL_ROOM_STATUSES.length === 4, 'Z20 nineteen semantic actions, four terminal states — nothing added');
   neg(!/recruitmentJourneyStates|db\.recruitmentJourneys\b(?!`)/.test(strip(src('domains/recruitment/lifecycle/journey.mjs')).replace(/there is no `db\.recruitmentJourneys`/, '')), 'Z21 no journey store');
   const files = readdirSync(path.join(ROOT, 'domains', 'recruitment', 'lifecycle')).filter((f) => f.endsWith('.mjs'));

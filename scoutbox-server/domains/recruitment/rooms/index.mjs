@@ -16,16 +16,8 @@ import {
   stageForRoomStatus, ALL_REASON_CODES, PROHIBITED_REASON_CODES,
 } from './shared.mjs';
 
-export function migrateM17(db) {
-  // Additive only. The Room facet lives on the existing case record; these are
-  // the stores nothing existing covers.
-  // The Room's comments, decisions, snapshots and evidence states are tables of the recruitment-cases repository, read
-  // through SQL (§4.3 step 2); no db.* here.
-  // (A case's Room facet is a typed column group since S8b: a case without one reads back `room: null`.)
-}
 
 export function registerM17(ctx) {
-  migrateM17(ctx.db);
 
   // Boot assertions. These are cheap and they catch the two ways this design
   // could rot silently: a room status that maps to no stage, and the M12 stage

@@ -84,15 +84,14 @@ const snap = (dir, fn) => { const s = new DatabaseSync(path.join(dir, 'scoutbox.
 const q1 = (dir, sql, ...p) => snap(dir, (c) => c.get(sql, ...p));
 const qAll = (dir, sql, ...p) => snap(dir, (c) => c.all(sql, ...p));
 const live = (dir) => !!q1(dir, "SELECT 1 AS one FROM data_migrations WHERE id = '0011_outbox_push'");
-const seqOf = (dir) => Number(q1(dir, "SELECT value FROM meta WHERE key = 'saveSeq'")?.value) || 0;
-const blobRows = (c, name) => { const r = c.get('SELECT value FROM collections WHERE name = ?', name); return r ? JSON.parse(r.value) : null; };
+/** Whether the file still has the retired blob table (dropped by migration 0039, S14a). */
+const hasBlobTable = (dir) => !!q1(dir, "SELECT 1 AS one FROM sqlite_master WHERE type = 'table' AND name = 'collections'");
 const outboxFromRow = (r) => (r.source === 'mailer' ? { id: r.id, ts: r.created_at, to: r.to_address, subject: r.subject, text: r.text, transport: r.transport, delivered: r.delivered === 1 } : { id: r.id, at: r.created_at, channel: r.channel, to: r.to_address, text: r.text, providerMessageId: r.provider_message_id, provider: r.transport });
 /** The three collections as the DATABASE holds them, in insertion order. */
 const readStored = (c) => ({
     outbox: c.all(`SELECT seq, id, source, created_at, to_address, subject, text, transport, delivered, channel, provider_message_id FROM outbox ORDER BY seq`).map(outboxFromRow),
     pushLog: c.all('SELECT id, created_at, audience_kind, audience_id, title, body, transport FROM push_log ORDER BY seq').map((r) => ({ id: r.id, ts: r.created_at, audience: { kind: r.audience_kind, id: r.audience_id }, title: r.title, body: r.body, transport: r.transport })),
     pushTokens: c.all('SELECT ref_kind, ref_id, token, registered_at FROM push_tokens ORDER BY seq').map((r) => ({ kind: r.ref_kind, refId: r.ref_id, token: r.token, ts: r.registered_at })),
-    seq: Number(c.get("SELECT value FROM meta WHERE key = 'saveSeq'")?.value) || 0,
 });
 const stored = (dir) => snap(dir, readStored);
 const playerTokens = (dir, id = 'pl-adeyemi') => stored(dir).pushTokens.filter((t) => t.kind === 'player' && t.refId === id);
@@ -111,31 +110,32 @@ async function adultChannel(S, maria, kola) {
 /**
  * Content-free state for a timing failure (the independent review of 40aa05c saw the normal-mode
  * row miss its 12 s window twice on Node 24/macOS and then pass unchanged; the cause is unconfirmed):
- * elapsed time, the save revisions, the row counts, the staged-write and pending-effect counts the
+ * elapsed time, the row counts, the staged-write and pending-effect counts the
  * server reports, the child's exit code and its log tail with addresses redacted.
  */
 async function timingDiagnostics(S, dir, t0, atResponse, before) {
   let cap = null; try { cap = (await S.j('GET', '/capabilities')).body; } catch { /* the child may be gone */ }
   const domains = cap?.persistence?.dataLayer?.domains ?? cap?.dataLayer?.domains ?? {};
   const st = stored(dir);
-  return JSON.stringify({ elapsedMs: Date.now() - t0, seqAtResponse: atResponse.seq, seqNow: st.seq, pushRowsBefore: before, pushRowsNow: st.pushLog.length, outboxPushPendingWrites: domains.outboxPush?.pendingWrites ?? null, notificationsPendingEffects: domains.notifications?.pendingEffects ?? null, childExitCode: S.proc.exitCode, logTail: S.log().slice(-1200).replace(/[\w.+-]+@[\w.-]+/g, '<address>') });
+  return JSON.stringify({ elapsedMs: Date.now() - t0, pushRowsBefore: before, pushRowsNow: st.pushLog.length, outboxPushPendingWrites: domains.outboxPush?.pendingWrites ?? null, notificationsPendingEffects: domains.notifications?.pendingEffects ?? null, childExitCode: S.proc.exitCode, logTail: S.log().slice(-1200).replace(/[\w.+-]+@[\w.-]+/g, '<address>') });
 }
-/** Send one message and watch the push row land WITHOUT any further request: when, with which revision, and how many dispatch rows the notice had by then. */
+/** Send one message and watch the push row land WITHOUT any further request: when, and how many dispatch rows the notice had by then. */
 async function measurePush(S, dir, channel, maria) {
   const before = stored(dir).pushLog.length; const memBefore = (await S.j('GET', '/admin/push-log', undefined, null, A)).body.length;
   const t0 = Date.now();
   assert.equal((await S.j('POST', `/org/channels/${channel.id}/messages`, { text: 'Synthetic timing message' }, maria)).status, 201);
-  const atResponse = snap(dir, (c) => { const st = readStored(c); return { notice: c.get("SELECT id FROM notifications WHERE audience_kind = 'player' AND audience_id = 'pl-adeyemi' AND type = 'message' ORDER BY seq DESC LIMIT 1"), pushRows: st.pushLog.length, seq: st.seq }; });
+  const atResponse = snap(dir, (c) => { const st = readStored(c); return { notice: c.get("SELECT id FROM notifications WHERE audience_kind = 'player' AND audience_id = 'pl-adeyemi' AND type = 'message' ORDER BY seq DESC LIMIT 1"), pushRows: st.pushLog.length }; });
   assert.ok(atResponse.notice, 'the notification row is committed when the route answers'); assert.equal(atResponse.pushRows, before, 'the push row is NOT in the notification\'s commit');
   const memory = (await S.j('GET', '/admin/push-log', undefined, null, A)).body; assert.equal(memory.length, memBefore + 1, 'THIS message\'s push row is in memory at once (the after-durable effect ran)');
-  const landed = await until(async () => snap(dir, (c) => { const st = readStored(c); if (st.pushLog.length <= before) return null; return { afterMs: Date.now() - t0, seq: st.seq, dispatchRows: c.get('SELECT COUNT(*) AS n FROM dispatches WHERE notification_id = ?', atResponse.notice.id).n, row: st.pushLog.at(-1) }; }), 12_000, 20);
+  const landed = await until(async () => snap(dir, (c) => { const st = readStored(c); if (st.pushLog.length <= before) return null; return { afterMs: Date.now() - t0, dispatchRows: c.get('SELECT COUNT(*) AS n FROM dispatches WHERE notification_id = ?', atResponse.notice.id).n, row: st.pushLog.at(-1), index: st.pushLog.length - 1 }; }), 12_000, 20);
   if (!landed) assert.fail(`the push row landed within 12 s without a further request — ${await timingDiagnostics(S, dir, t0, atResponse, before)}`);
-  assert.ok(landed.seq > atResponse.seq, 'the push row is in a LATER save than the notification'); assert.equal(landed.row.audience.kind, 'player'); assert.equal(landed.row.audience.id, 'pl-adeyemi');
-  return { ...landed, noticeId: atResponse.notice.id, noticeSeq: atResponse.seq };
+  // Rewritten in S14a (it compared save revisions): the notification row was committed at the response without the push row, and the push row appeared after it, so it is in a LATER commit.
+  assert.ok(landed.index >= atResponse.pushRows, 'the push row is in a LATER commit than the notification'); assert.equal(landed.row.audience.kind, 'player'); assert.equal(landed.row.audience.id, 'pl-adeyemi');
+  return { ...landed, noticeId: atResponse.notice.id };
 }
 
 // ============================================================= [compat] D1 — the push row's existing save scheduling
-await test('[compat] D1, normal mode (M13_FAST_RETRY unset, the 60-second sweep never runs): a message commits its notification row at once; the push row is written by the after-durable effect AFTER that commit, is in memory (admin push log) at once but in no save, and lands about two seconds later with a LATER revision through the debounced save the sender\'s nextId() already schedules — with ZERO dispatch rows for the notice (no sweep ran) and no further request; the delay is the existing best-effort debounce, not a guarantee', async () => {
+await test('[compat] D1, normal mode (M13_FAST_RETRY unset, the 60-second sweep never runs): a message commits its notification row at once; the push row is written by the after-durable effect AFTER that commit, is in memory (admin push log) at once but in no save, and lands about two seconds later in a LATER commit through the debounced save the sender\'s nextId() already schedules — with ZERO dispatch rows for the notice (no sweep ran) and no further request; the delay is the existing best-effort debounce, not a guarantee', async () => {
   const dir = tempDir('s7c-d1-normal'); const S = await boot(dir, { M13_FAST_RETRY: '', ...REAL_SAVE_DELAY });
   const maria = await orgLogin(S, 'org-eastport', 'Maria Keane', 'Head of Recruitment'); const kola = await playerLogin(S, 'pl-adeyemi');
   const channel = await adultChannel(S, maria, kola);
@@ -190,17 +190,17 @@ await test('[compat] an accepted queued dispatch with to: null (the stored state
 });
 
 // ============================================================= [cutover] the tables and the mailer's commit points
-await test('[cutover] the cutover and the mailer\'s rows: a fresh boot records 0011_outbox_push and creates the three tables with no blob behind them; the org invite\'s mail row is in the SAME revision as the invite row (the route\'s persistNow); the guardian sign-up\'s mail row is absent at the response and lands with the debounced save; the club challenge persists the withheld text while the admin view serves the process-local full text — and the placeholder after a restart; the sweep\'s delivery record is in the same committed state as the dispatch row that carries its provider message id; the admin overview counts the tables', async () => {
+await test('[cutover] the cutover and the mailer\'s rows: a fresh boot records 0011_outbox_push and creates the three tables and the file has no blob table; the org invite\'s mail row is committed with the invite row by the time the route answers (the route\'s persistNow); the guardian sign-up\'s mail row is absent at the response and lands with the debounced save; the club challenge persists the withheld text while the admin view serves the process-local full text — and the placeholder after a restart; the sweep\'s delivery record is in the same committed state as the dispatch row that carries its provider message id; the admin overview counts the tables', async () => {
   const dir = tempDir('s7c-cut'); let S = await boot(dir);
   assert.ok(live(dir), 'this proof reads the S7c tables'); // fails on the pre-S7c build (6ca66ba): the migration record does not exist
   for (const t of ['outbox', 'push_log', 'push_tokens']) assert.ok(q1(dir, "SELECT 1 AS one FROM sqlite_master WHERE type = 'table' AND name = ?", t), `${t} exists`);
-  for (const n of ['outbox', 'pushLog', 'pushTokens']) assert.equal(q1(dir, 'SELECT COUNT(*) AS n FROM collections WHERE name = ?', n).n, 0, `no ${n} blob after the cutover`);
+  assert.equal(hasBlobTable(dir), false, 'no blob table (rewritten in S14a)');
   const maria = await orgLogin(S, 'org-eastport', 'Maria Keane', 'Head of Recruitment'); const amara = await guardianLogin(S, 'gd-amara');
-  // The invite: one revision for the invite row and its mail row.
-  await settle(S); const seq0 = seqOf(dir); // the logins' own debounced save lands first, so the count below is the invite's alone
+  // The invite: the invite row and its mail row are committed when the route answers.
+  await settle(S);
   const invite = await S.j('POST', '/org/invites', { email: 'synthetic-invitee@example.invalid', name: 'Synthetic Invitee', role: 'Scout' }, maria); assert.equal(invite.status, 201, invite.text);
-  const after = snap(dir, (c) => ({ seq: Number(c.get("SELECT value FROM meta WHERE key = 'saveSeq'").value), mail: readStored(c).outbox.find((m) => m.subject && /invited you/.test(m.subject)), inviteRow: !!c.get('SELECT 1 AS one FROM org_invites WHERE id = ?', invite.body.invite.id) /* S13b: a row of org_invites */ }));
-  assert.equal(after.seq, seq0 + 1, 'one save'); assert.ok(after.mail && after.inviteRow, 'the mail row and the invite row are in that save'); assert.equal(after.mail.transport, 'dev-outbox'); assert.equal(after.mail.delivered, true);
+  const after = snap(dir, (c) => ({ mail: readStored(c).outbox.find((m) => m.subject && /invited you/.test(m.subject)), inviteRow: !!c.get('SELECT 1 AS one FROM org_invites WHERE id = ?', invite.body.invite.id) /* S13b: a row of org_invites */ }));
+  assert.ok(after.mail && after.inviteRow, 'the mail row and the invite row are committed at the response'); assert.equal(after.mail.transport, 'dev-outbox'); assert.equal(after.mail.delivered, true);
   // The sign-up: no save of its own; the debounced one carries it.
   const signup = await S.j('POST', '/auth/guardian/signup', { name: 'Synthetic Guardian', email: 'synthetic-guardian@example.invalid', password: 'synthetic-password-1' }); assert.equal(signup.status, 201, signup.text);
   const memSignup = (await S.j('GET', '/admin/outbox', undefined, null, A)).body.find((m) => m.subject && /guardian account/i.test(m.subject)); assert.ok(memSignup, 'in memory at once');
@@ -233,9 +233,9 @@ await test('[cutover] a failed ordinary save (internal:save.sqlite_commit at the
   await settle(S); const before = stored(dir); const logBefore = S.log().length; // the logins' own save lands first: the injected failure is for the invite's
   assert.equal((await S.j('POST', '/__faults', { rules: 'internal:save.sqlite_commit:1' })).status, 200);
   const invite = await S.j('POST', '/org/invites', { email: 'synthetic-invitee-2@example.invalid', name: 'Synthetic Two', role: 'Scout' }, maria); assert.equal(invite.status, 201, 'the route answers although its save failed');
-  assert.ok(await until(async () => /snapshot save failed: FOREIGN KEY constraint failed/.test(S.log().slice(logBefore)), 5000), 'the save failed at the real COMMIT');
+  assert.ok(await until(async () => /save failed: FOREIGN KEY constraint failed/.test(S.log().slice(logBefore)), 5000), 'the save failed at the real COMMIT');
   assert.equal((await S.j('POST', '/__faults', { rules: '' })).status, 200);
-  const mid = stored(dir); assert.equal(mid.outbox.length, before.outbox.length, 'no mail row landed'); assert.equal(mid.seq, before.seq);
+  const mid = stored(dir); assert.equal(mid.outbox.length, before.outbox.length, 'no mail row landed'); assert.deepEqual(mid, before, 'nothing of the three tables changed');
   assert.ok((await S.j('GET', '/admin/outbox', undefined, null, A)).body.some((m) => m.subject && /invited you/.test(m.subject)), 'memory is the intended state');
   assert.equal((await S.j('POST', '/push/register', { token: 'synthetic-device-token' }, kola)).status, 201); // schedules the next (debounced) save: it carries the pending mail row too
   const landed = await until(async () => { const st = stored(dir); return st.outbox.length === before.outbox.length + 1 && st.pushTokens.length === before.pushTokens.length + 1 ? st : null; }, 8000);
@@ -257,7 +257,7 @@ await test('[cutover] a failed ordinary save (internal:save.sqlite_commit at the
 });
 
 // ============================================================= [cutover] deletion, backup/restore
-await test('[cutover] an ordinary account deletion leaves the three tables alone (the deleted player\'s token rows and push rows stay); the admin backup\'s database copy carries outbox, pushLog and pushTokens row for row (both outbox literals, the null destination, the tokens); a restore into a NEW directory boots with the same rows and no blob', async () => {
+await test('[cutover] an ordinary account deletion leaves the three tables alone (the deleted player\'s token rows and push rows stay); the admin backup\'s database copy carries outbox, pushLog and pushTokens row for row (both outbox literals, the null destination, the tokens); a restore into a NEW directory boots with the same rows and no blob table', async () => {
   const dir = tempDir('s7c-backup'); let S = await boot(dir);
   const maria = await orgLogin(S, 'org-eastport', 'Maria Keane', 'Head of Recruitment'); const amara = await guardianLogin(S, 'gd-amara'); let kola = await playerLogin(S, 'pl-adeyemi');
   for (const token of [...BASELINE_TOKENS, 'ExponentPushToken[synthetic-d]', 'ExponentPushToken[synthetic-e]', 'ExponentPushToken[synthetic-f]', 'ExponentPushToken[synthetic-g]']) assert.equal((await S.j('POST', '/push/register', { token }, kola)).status, 201);
@@ -291,17 +291,17 @@ await test('[cutover] an ordinary account deletion leaves the three tables alone
   const restored = tempDir('s7c-restored'); fs.cpSync(bk.body.dir, restored, { recursive: true });
   S = await boot(restored); assert.ok(live(restored));
   const back = stored(restored); assert.deepEqual([back.outbox, back.pushLog, back.pushTokens], [all.outbox, all.pushLog, all.pushTokens], 'restored row for row');
-  for (const n of ['outbox', 'pushLog', 'pushTokens']) assert.equal(q1(restored, 'SELECT COUNT(*) AS n FROM collections WHERE name = ?', n).n, 0, 'no blob');
+  assert.equal(hasBlobTable(restored), false, 'no blob table');
   assert.equal((await S.j('GET', '/admin/outbox', undefined, null, A)).body.length, all.outbox.length, 'the admin view lists the restored outbox');
   await S.stop();
   rm(dir, bk.body.dir, restored);
 });
 
 // ============================================================= valid input only: a non-string e-mail never reaches the mailer
-await test('[valid input only] POST /org/invites and POST /org/verification/player-invites refuse an e-mail that is not a string — a JSON array (which RegExp.test / emailProblem used to coerce, handing the ORIGINAL array to the mailer), an array holding raw JSON 1e400, an object, a number — with 400 (EMAIL_INVALID / EMAIL_SYNTAX), storing no invite and no mail record; an ordinary string is answered 201 with its mail record in the route\'s one save, as before; on the live transport (provider intercepted locally) the provider receives the string and the row records its answer with the next save', async () => {
+await test('[valid input only] POST /org/invites and POST /org/verification/player-invites refuse an e-mail that is not a string — a JSON array (which RegExp.test / emailProblem used to coerce, handing the ORIGINAL array to the mailer), an array holding raw JSON 1e400, an object, a number — with 400 (EMAIL_INVALID / EMAIL_SYNTAX), storing no invite and no mail record; an ordinary string is answered 201 with its mail record committed at the response, as before; on the live transport (provider intercepted locally) the provider receives the string and the row records its answer with the next save', async () => {
   const dir = tempDir('s7c-email'); const S = await boot(dir);
   const maria = await orgLogin(S, 'org-eastport', 'Maria Keane', 'Head of Recruitment'); const logBefore = S.log().length;
-  const counts = () => snap(dir, (c) => ({ seq: Number(c.get("SELECT value FROM meta WHERE key = 'saveSeq'").value), mails: readStored(c).outbox.length, invites: c.get('SELECT COUNT(*) AS n FROM org_invites').n /* S13b: rows of org_invites */, playerInvites: (blobRows(c, 'verPlayerInvites') ?? []).length }));
+  const counts = () => snap(dir, (c) => ({ mails: readStored(c).outbox.length, invites: c.get('SELECT COUNT(*) AS n FROM org_invites').n /* S13b: rows of org_invites */, playerInvites: c.get('SELECT COUNT(*) AS n FROM ver_player_invites').n }));
   await settle(S); const before = counts(); // the login's own debounced save lands first
   for (const email of [['synthetic-review@example.invalid'], ['synthetic-second@example.invalid', 'x'], { a: 1 }, 7]) {
     const r = await S.j('POST', '/org/invites', { email, name: 'Synthetic Reviewer', role: 'Scout' }, maria); assert.equal(r.status, 400, `${JSON.stringify(email)}: ${r.text}`); assert.equal(r.body.error, 'EMAIL_INVALID');
@@ -310,8 +310,8 @@ await test('[valid input only] POST /org/invites and POST /org/verification/play
   for (const b of ['{"email":[1e400,"synthetic-overflow@example.invalid"],"name":"Synthetic Overflow","role":"Scout"}', '{"email":[[-1e400],"synthetic-nested@example.invalid"],"name":"Synthetic Nested","role":"Scout"}']) { const r = await S.raw('POST', '/org/invites', b, maria); assert.equal(r.status, 400, b); assert.equal(r.body.error, 'EMAIL_INVALID'); }
   await settle(S); assert.deepEqual(counts(), before, 'no invite, no mail record, no save (a whole save window passed)'); assert.equal(S.proc.exitCode, null); assert.doesNotMatch(S.log().slice(logBefore), /UnhandledPromiseRejection|not recorded/);
   const ok = await S.j('POST', '/org/invites', { email: 'synthetic-plain@example.invalid', name: 'Synthetic Plain', role: 'Scout' }, maria); assert.equal(ok.status, 201, ok.text);
-  const after = snap(dir, (c) => ({ seq: Number(c.get("SELECT value FROM meta WHERE key = 'saveSeq'").value), mail: readStored(c).outbox.find((m) => /Hi Synthetic Plain,/.test(m.text)) }));
-  assert.equal(after.seq, before.seq + 1, 'one save (the route\'s persistNow)'); assert.equal(after.mail?.to, 'synthetic-plain@example.invalid');
+  const after = snap(dir, (c) => ({ mail: readStored(c).outbox.find((m) => /Hi Synthetic Plain,/.test(m.text)) }));
+  assert.equal(after.mail?.to, 'synthetic-plain@example.invalid', 'committed at the response (the route\'s persistNow)');
   const pOk = await S.j('POST', '/org/verification/player-invites', { email: 'synthetic-player@example.invalid', name: 'Synthetic Player' }, maria); assert.equal(pOk.status, 201, pOk.text);
   assert.ok(await until(async () => stored(dir).outbox.some((m) => m.to === 'synthetic-player@example.invalid'), 6000), 'the player invite\'s mail record');
   await S.stop(); rm(dir);

@@ -41,11 +41,11 @@ import { RATE_LIMIT_POLICY } from '../../domains/platform/rateLimit.mjs';
 import { STATUS_EVIDENCE_REQUIRED, ROOM_TRANSITIONS, ROOM_STATUSES, roomCan } from '../../domains/recruitment/rooms/shared.mjs';
 import { EVIDENCE_KINDS } from '../../domains/recruitment/lifecycle/evidence.mjs';
 import { canTransitionRecruitmentCase, LIFECYCLE_ACTIONS, NULL_EVIDENCE_PROVIDER } from '../../domains/recruitment/lifecycle/lifecycle.mjs';
-import { PRODUCTION_STORE_CONTRACT as STORE_CONTRACT } from '../../storeContract.mjs';
-import { SCHEMA_VERSION, MIGRATIONS } from '../../domains/platform/migrations.mjs';
+import { DATA_MIGRATIONS, TABLE_BACKED } from '../../repositories/index.mjs';
 import { isAdult } from '../../domain.mjs';
 import { isExpiredAt, parseInstant } from '../../temporal.mjs';
 import { createEvidenceProvider } from '../../scripts/recruitmentReadsFixture.mjs'; // §4.3 step 2: the contacts/offers queries over the plain arrays
+const LATEST_SCHEMA = Number(DATA_MIGRATIONS.map((m) => m.id).sort().at(-1).slice(0, 4)); // S14a: the latest table migration's number
 
 const PORT = 6700 + Math.floor(Math.random() * 200);
 const BASE = `http://localhost:${PORT}`;
@@ -93,9 +93,10 @@ section('A — model and store: seven statuses, terminal at revision level, one 
   ok(minorOfferPathwayOpen('GB', { GB: true, DEFAULT: false }) === true && minorOfferPathwayOpen('FR', { GB: true, DEFAULT: false }) === false, 'A8b opening it is a policy-table change, per jurisdiction');
   // The store: no db collection since §4.3 step 2 (rewritten, it described the old storage) — the offers are their
   // tables, read through SQL; still created without a P6 migration.
-  ok(STORE_CONTRACT.recruitmentOffers === undefined, 'A9 recruitmentOffers is not a db collection: the offers are their tables, read through SQL (§4.3 step 2)');
-  ok(SCHEMA_VERSION === 2308 && !MIGRATIONS.some((m) => /offer/i.test(m.id ?? '')), `A10 schema is ${SCHEMA_VERSION} (P7's signing store is the one step past 2307) and still no migration names an Offer (§60: reuse the reserved store, no unnecessary migration)`);
-  ok(STORE_CONTRACT.signings === undefined, 'A11 the signings are no db collection in the store contract: a table read through SQL (§4.3 step 2; rewritten, it described the old storage)');
+  // A9–A11 rewritten in S14a: they described the store contract and the blob schema numbers.
+  ok(TABLE_BACKED.includes('recruitmentOffers'), 'A9 the offers are their tables, read through SQL (§4.3 step 2)');
+  ok(DATA_MIGRATIONS.length === LATEST_SCHEMA && DATA_MIGRATIONS.filter((m) => /offer/i.test(m.id)).map((m) => m.id).join() === '0017_recruitment_contacts_offers', 'A10 every table migration; the only one naming an Offer is 0017 (contacts and offers)');
+  ok(TABLE_BACKED.includes('signings'), 'A11 the signings are a table read through SQL (§4.3 step 2)');
   // Capabilities.
   ok(roomCan('viewer', 'offer_view') && roomCan('contributor', 'offer_view') && !roomCan('contributor', 'offer_draft') && !roomCan('contributor', 'offer_issue') && roomCan('room_lead', 'offer_draft') && roomCan('room_lead', 'offer_issue') && roomCan('recruitment_admin', 'offer_issue') && !roomCan('viewer', 'offer_draft'), 'A12 roomCan: anyone who reads the room reads Offers; drafting and issuing sit with the room lead (§16)');
   for (const k of PROTO_KEYS) neg(roomCan('room_lead', k) === false, `A13 "${k}" is not a capability`);

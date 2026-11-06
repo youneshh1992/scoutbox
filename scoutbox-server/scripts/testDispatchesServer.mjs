@@ -56,12 +56,11 @@ async function boot(dir, env = {}) {
 }
 const q1 = (dir, sql, ...p) => { const s = new DatabaseSync(path.join(dir, 'scoutbox.db'), { readOnly: true }); try { const r = s.prepare(sql).get(...p); return r ? { ...r } : r; } finally { s.close(); } };
 const qAll = (dir, sql, ...p) => { const s = new DatabaseSync(path.join(dir, 'scoutbox.db'), { readOnly: true }); try { return s.prepare(sql).all(...p).map((r) => ({ ...r })); } finally { s.close(); } };
-const seqOf = (dir) => Number(q1(dir, "SELECT value FROM meta WHERE key = 'saveSeq'")?.value) || 0;
-// S6b: opsEvents is the ops_events table since 0013 — read in the writer's literal through the repository's own reader when the blob is retired.
+// S6b: opsEvents is the ops_events table since 0013 — read in the writer's literal through the repository's own reader.
 // S13e: the delivery centre's bookkeeping is rows of repositories/operations.mjs (rewritten: the blob reads described the old storage).
 const seenIds = (dir) => qAll(dir, 'SELECT callback_id FROM delivery_callbacks_seen ORDER BY rowid').map((r) => r.callback_id);
 const injected = (dir) => Object.fromEntries(qAll(dir, 'SELECT channel, remaining FROM delivery_fail_injections').map((r) => [r.channel, r.remaining]));
-const blobRows = (dir, name) => { const r = q1(dir, 'SELECT value FROM collections WHERE name = ?', name); if (r) return JSON.parse(r.value); const t = AUDIT_SNAPSHOT_TABLES.find((x) => x.name === name); if (!t) return null; const s = new DatabaseSync(path.join(dir, 'scoutbox.db'), { readOnly: true }); try { return s.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(t.table) ? t.read(s) : null; } finally { s.close(); } };
+const auditRows = (dir, name) => { const t = AUDIT_SNAPSHOT_TABLES.find((x) => x.name === name); if (!t) return null; const s = new DatabaseSync(path.join(dir, 'scoutbox.db'), { readOnly: true }); try { return s.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(t.table) ? t.read(s) : null; } finally { s.close(); } };
 /** The webhook deliveries as the DATABASE holds them (S13a: rows of webhook_deliveries, the payload typed, attempts counted). */
 const webhookRows = (dir) => qAll(dir, "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'webhook_deliveries'").length
   ? qAll(dir, 'SELECT d.id, d.type, d.endpoint_id, d.subject_id, (SELECT COUNT(*) FROM webhook_delivery_attempts a WHERE a.delivery_id = d.id) AS attempts FROM webhook_deliveries d ORDER BY d.rowid')
@@ -92,8 +91,8 @@ async function guardianNotice(S, maria, amara, type = 'contact') {
 }
 const emailRowOf = (S, dir, notice) => until(async () => { await sweep(S); const d = storedRow(dir, stored(dir).find((x) => x.notificationId === notice.id && x.channel === 'email')?.id); return d && ['accepted', 'failed'].includes(d.status) ? d : null; }, 20_000);
 
-// ------------------------------------------------------------- 1. a sweep pass commits with the blobs it wrote
-await test('a sweep pass is ONE save: the dispatch rows it creates, the attempt it records, the status it sets, the outbox row the provider accepted and the failure-injection counter it decremented are durable together (second connection, one revision) — and when that save fails at the REAL COMMIT (internal:save.sqlite_commit) none of them is durable (no table row, no attempt, no outbox row, counter unchanged, saveSeq unchanged) while memory shows them; the next save lands all of them once; the rows are in the tables, not in a blob', async () => {
+// ------------------------------------------------------------- 1. a sweep pass commits everything it wrote together
+await test('a sweep pass is ONE save: the dispatch rows it creates, the attempt it records, the status it sets, the outbox row the provider accepted and the failure-injection counter it decremented are durable together (second connection, one save) — and when that save fails at the REAL COMMIT (internal:save.sqlite_commit) none of them is durable (no table row, no attempt, no outbox row, counter unchanged) while memory shows them; the next save lands all of them once; the rows are in the tables, and the file has no blob table', async () => {
   const dir = tempDir('s7b-sweep'); const S = await boot(dir);
   const maria = await orgLogin(S, 'org-eastport', 'Maria Keane', 'Head of Recruitment'); const amara = await guardianLogin(S, 'gd-amara');
   await inject(S, 1); // the first send fails: the row stays retrying until the next pass
@@ -101,18 +100,18 @@ await test('a sweep pass is ONE save: the dispatch rows it creates, the attempt 
   const emailId = await until(async () => { await sweep(S); return stored(dir).find((x) => x.notificationId === notice.id && x.channel === 'email')?.id; });
   assert.ok(emailId, 'the sweep created and saved the dispatch rows');
   const first = storedRow(dir, emailId); assert.equal(first.status, 'retrying'); assert.deepEqual(first.attempts.map((a) => [a.ok, a.error]), [[false, 'injected provider failure']]);
-  assert.equal(q1(dir, "SELECT COUNT(*) AS n FROM collections WHERE name = 'dispatches'").n, 0, 'no dispatches blob after the cutover');
-  const outboxBefore = outboxRows(dir).length; const seq0 = seqOf(dir); const injectBefore = injected(dir);
+  assert.equal(q1(dir, "SELECT 1 AS x FROM sqlite_master WHERE type = 'table' AND name = 'collections'"), undefined, 'no blob table (rewritten in S14a)');
+  const outboxBefore = outboxRows(dir).length; const injectBefore = injected(dir);
   // The next pass sends (and the provider accepts): arm the seam so that pass's save fails at COMMIT.
   await inject(S, 0 + 1); await sleep(50); // one more failure, so the row is still retrying when the seam is armed and the following success is the one we watch
   await until(async () => storedRow(dir, emailId).attempts.length === 2, 5000);
-  const seqArmed = seqOf(dir); const logBefore = S.log().length;
+  const logBefore = S.log().length; const injectArmed = injected(dir);
   assert.equal((await S.j('POST', '/__faults', { rules: 'internal:save.sqlite_commit:1' })).status, 200);
-  await until(async () => /snapshot save failed: FOREIGN KEY constraint failed/.test(S.log().slice(logBefore)), 8000);
-  assert.match(S.log().slice(logBefore), /snapshot save failed: FOREIGN KEY constraint failed/, 'the pass that accepted the send failed at its COMMIT');
+  await until(async () => /save failed: FOREIGN KEY constraint failed/.test(S.log().slice(logBefore)), 8000);
+  assert.match(S.log().slice(logBefore), /save failed: FOREIGN KEY constraint failed/, 'the pass that accepted the send failed at its COMMIT');
   const afterFailure = storedRow(dir, emailId);
   assert.equal(afterFailure.status, 'retrying', 'the accepted status is not durable'); assert.equal(afterFailure.attempts.length, 2, 'the third attempt row is not durable'); assert.equal(afterFailure.providerMessageId, null);
-  assert.equal(outboxRows(dir).length, outboxBefore, 'the outbox row did not land without the dispatch rows'); assert.equal(seqOf(dir), seqArmed, 'saveSeq unchanged');
+  assert.equal(outboxRows(dir).length, outboxBefore, 'the outbox row did not land without the dispatch rows'); assert.deepEqual(injected(dir), injectArmed, 'the counter is unchanged');
   const inMemory = (await admin(S)).recent.find((d) => d.id === emailId); assert.equal(inMemory.status, 'accepted', 'memory shows the pass (every unsaved edit does)'); assert.equal(inMemory.attempts.length, 3);
   // The next save lands everything once. Memory is the intended state (the store's contract since S3): the failed save
   // schedules nothing by itself, and a pass that changes nothing saves nothing, so the retry rides on the next pass that
@@ -124,7 +123,7 @@ await test('a sweep pass is ONE save: the dispatch rows it creates, the attempt 
   assert.equal(landed.status, 'accepted', 'the accepted status landed on the next save');
   assert.equal(landed.attempts.length, 3); assert.deepEqual(landed.attempts.map((a) => a.ok), [false, false, true]); assert.ok(landed.providerMessageId);
   assert.equal(outboxRows(dir).filter((m) => m.providerMessageId === landed.providerMessageId).length, 1, 'exactly one outbox row for the one accepted send (no replay of the failed save)');
-  assert.ok(outboxRows(dir).length >= outboxBefore + 1); assert.ok(seqOf(dir) > seqArmed);
+  assert.ok(outboxRows(dir).length >= outboxBefore + 1);
   assert.deepEqual(injected(dir), { ...injectBefore, email: 0 }, 'the counter is used up, and the rows landed');
   assert.ok(stored(dir).some((d) => d.notificationId === notice2.id), 'the new notice\'s rows landed in that same save');
   await S.stop(); rm(dir);
@@ -149,8 +148,8 @@ await test('retry ladder: a deferred-push notice is held (held_quiet_hours), its
   const notice2 = await guardianNotice(S, maria, amara, 'trial');
   const failed = await emailRowOf(S, dir, notice2);
   assert.equal(failed.status, 'failed'); assert.equal(failed.attempts.length, 4); assert.ok(failed.failedAt); assert.equal(failed.failReason, 'injected provider failure');
-  await until(async () => (blobRows(dir, 'opsEvents') ?? []).some((e) => e.kind === 'delivery_failed' && e.detail?.dispatchId === failed.id));
-  assert.equal((blobRows(dir, 'opsEvents') ?? []).filter((e) => e.kind === 'delivery_failed' && e.detail?.dispatchId === failed.id).length, 1);
+  await until(async () => (auditRows(dir, 'opsEvents') ?? []).some((e) => e.kind === 'delivery_failed' && e.detail?.dispatchId === failed.id));
+  assert.equal((auditRows(dir, 'opsEvents') ?? []).filter((e) => e.kind === 'delivery_failed' && e.detail?.dispatchId === failed.id).length, 1);
   assert.equal((await S.j('GET', '/admin/metrics', undefined, null, A)).body.dispatchBacklog, 0);
   await S.stop(); rm(dir);
 });
@@ -269,7 +268,7 @@ await test('coupled webhook intent (synthetic configured endpoint, ALLOW_LOCAL_W
   await until(async () => (webhookRows(dir) ?? []).some((w) => w.type === 'delivery.failed' && w.data?.dispatchId === failed.id));
   const delivery = (webhookRows(dir) ?? []).find((w) => w.type === 'delivery.failed' && w.data?.dispatchId === failed.id);
   assert.ok(delivery, 'the webhook delivery row is durable'); assert.equal(delivery.endpointId, hook.body.endpoint.id);
-  assert.ok((blobRows(dir, 'opsEvents') ?? []).some((e) => e.kind === 'delivery_failed' && e.detail?.dispatchId === failed.id));
+  assert.ok((auditRows(dir, 'opsEvents') ?? []).some((e) => e.kind === 'delivery_failed' && e.detail?.dispatchId === failed.id));
   await until(async () => (webhookRows(dir) ?? []).find((w) => w.id === delivery.id)?.attempts >= 1, 8000);
   assert.deepEqual(storedRow(dir, failed.id).attempts.length, 4, 'the webhook sweep touched the webhook row, not the dispatch');
   await S.stop(); rm(dir);
@@ -288,8 +287,8 @@ await test('crash recovery: a SIGKILL while an e-mail dispatch is retrying loses
   const resumedAt = Date.now();
   const done = await until(async () => { const d = storedRow(dir, id); return d.status === 'accepted' ? d : null; }, 20_000);
   // Diagnostics on failure only (the review of c6cf5e1 saw this assertion fail once): the row, every e-mail row of the
-  // notice, the persisted failure-injection counter, the save revision, the clocks and the child server's own output.
-  const diag = () => JSON.stringify({ atKill, now: storedRow(dir, id), sameNotice: stored(dir).filter((x) => x.notificationId === notice.id).map((x) => ({ id: x.id, channel: x.channel, status: x.status, nextAt: x.nextAt, attempts: x.attempts })), deliveryFailInject: injected(dir), saveSeq: seqOf(dir), waitedMs: Date.now() - resumedAt, clock: Date.now(), childExit: S.proc.exitCode, childLog: S.log().slice(-2500) });
+  // notice, the persisted failure-injection counter, the clocks and the child server's own output.
+  const diag = () => JSON.stringify({ atKill, now: storedRow(dir, id), sameNotice: stored(dir).filter((x) => x.notificationId === notice.id).map((x) => ({ id: x.id, channel: x.channel, status: x.status, nextAt: x.nextAt, attempts: x.attempts })), deliveryFailInject: injected(dir), waitedMs: Date.now() - resumedAt, clock: Date.now(), childExit: S.proc.exitCode, childLog: S.log().slice(-2500) });
   assert.ok(done, `the ladder resumed after the restart — ${done ? '' : diag()}`); assert.equal(done.attempts.length, 4); assert.deepEqual(done.attempts.map((a) => a.ok), [false, false, false, true]);
   await S.stop(); rm(dir);
 });
@@ -350,15 +349,15 @@ await test('through the real route, the pre-S7b nullish precedence survives a no
   await until(async () => storedRow(dir, r1.id).deliveredAt === 4321); assert.equal(storedRow(dir, r1.id).deliveredAt, 4321, 'after a restart the clock can be set');
   c = await callback(S, [{ callbackId: 'rv-r2', providerMessageId: r1.providerMessageId, status: 'delivered', at: 8765 }]); assert.equal(c.body.applied, 1); await sleep(150); assert.equal(storedRow(dir, r1.id).deliveredAt, 4321, 'an existing finite clock is kept');
   // A failed save at the real COMMIT keeps the callback's changes queued; the next save lands them once.
-  const seqBefore = seqOf(dir); const logBefore = S.log().length;
+  const logBefore = S.log().length;
   assert.equal((await S.j('POST', '/__faults', { rules: 'internal:save.sqlite_commit:1' })).status, 200);
   c = await callback(S, [{ callbackId: 'rv-f1', providerMessageId: r2.providerMessageId, status: 'delivered', at: 777 }]); assert.equal(c.body.applied, 1);
-  await until(async () => /snapshot save failed: FOREIGN KEY constraint failed/.test(S.log().slice(logBefore)), 8000);
-  assert.equal(storedRow(dir, r2.id).deliveredAt, null, 'not durable after the failed save'); assert.equal(seqOf(dir), seqBefore);
+  await until(async () => /save failed: FOREIGN KEY constraint failed/.test(S.log().slice(logBefore)), 8000);
+  assert.equal(storedRow(dir, r2.id).deliveredAt, null, 'not durable after the failed save');
   assert.equal((await S.j('POST', '/__faults', { rules: '' })).status, 200);
   c = await callback(S, [{ callbackId: 'rv-f2', providerMessageId: r2.providerMessageId, status: 'opened', at: 888 }]); assert.equal(c.body.applied, 1);
   await until(async () => storedRow(dir, r2.id).deliveredAt === 777);
-  s2 = storedRow(dir, r2.id); assert.equal(s2.deliveredAt, 777, 'the retried change landed'); assert.equal(s2.openedAt, 888); assert.ok(seqOf(dir) > seqBefore);
+  s2 = storedRow(dir, r2.id); assert.equal(s2.deliveredAt, 777, 'the retried change landed'); assert.equal(s2.openedAt, 888);
   assert.ok(seenIds(dir).includes('rv-f1') && seenIds(dir).includes('rv-f2'), 'the callback bookkeeping is durable');
   await S.stop(); rm(dir);
 });

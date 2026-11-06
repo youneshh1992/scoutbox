@@ -17,7 +17,7 @@ import { runDataMigrations } from '../repositories/database.mjs';
 import { attachDataLayer, DATA_MIGRATIONS, TABLE_BACKED, readTableBacked } from '../repositories/index.mjs';
 import { openStore } from '../store.mjs';
 import { playerJourneyReads } from '../domains/recruitment/lifecycle/journeyReads.mjs';
-import { NOW, TTL, tempDir } from './coreIdentityTestFixtures.mjs';
+import { NOW, TTL, tempDir, hasBlobTable } from './coreIdentityTestFixtures.mjs';
 import { p4bInvitation, minorInvitation, acceptedRequest, scheduledTrial, legacyTrialRequest, saveFixture, fixtureDb } from './recruitmentTestFixtures.mjs';
 import { S8B_FIX } from './recruitmentCasesTestFixtures.mjs';
 import { S8C_FIX } from './recruitmentContactsOffersTestFixtures.mjs';
@@ -59,22 +59,20 @@ const file = (tag, over = {}) => saveFixture(tempDir(`s8d-${tag}`), fixtureColle
 const refusedSave = (tag, over, pattern) => {
   const d = tempDir(`s8d-ref-${tag}`); const st = openStore(d); const before = fullDump(st.sqlite);
   refused(() => st.save({ savedAt: NOW, idCounter: 1000, db: fixtureDb(fixtureCollections(over)) }), pattern, tag);
-  assert.equal(st.sqlite.isTransaction, false); assert.equal(fullDump(st.sqlite), before, `${tag}: nothing written`); assert.equal(st.revision(), 0);
+  assert.equal(st.sqlite.isTransaction, false); assert.equal(fullDump(st.sqlite), before, `${tag}: nothing written`);
   refused(() => st.save({ savedAt: NOW, idCounter: 1000, db: fixtureDb(fixtureCollections(over)) }), pattern, `${tag} (again)`);
   st.sqlite.close(); rm(d);
 };
 function serverOpen(dir, { warnings = [] } = {}) {
   const store = openStore(dir, { tableBacked: TABLE_BACKED });
-  const loaded = store.load();
-  const db = { ...loaded.db, players: [], guardians: [] };
-  const layer = attachDataLayer({ db, store, nextId, persist: () => {}, sessionTtlMs: TTL, now: () => NOW, warn: (m) => warnings.push(m) });
-  const snapshot = () => ({ savedAt: NOW, idCounter: 1000, db });
-  return { store, layer, db, warnings, snapshot, save: () => store.save(snapshot()), unit: (w) => store.unitOfWork(w, { snapshot }), revision: () => store.revision(), repo: layer.signingsFollowUps, close: () => store.sqlite.close() };
+  const db = {}; // S14a: a fixture-saved file is not a first installation, so there is nothing to hand in
+  const layer = attachDataLayer({ db, store, nextId, sessionTtlMs: TTL, now: () => NOW, warn: (m) => warnings.push(m) });
+  return { store, layer, db, warnings, save: () => store.save(), unit: (w) => store.unitOfWork(w), repo: layer.signingsFollowUps, close: () => store.sqlite.close() };
 }
 function snapshotOpen(dir) {
   const store = openStore(dir); const loaded = store.load(); const db = loaded.db;
   const save = (over = {}, { omit = [] } = {}) => { const d = { ...db, ...over }; for (const k of omit) delete d[k]; return store.save({ savedAt: NOW, idCounter: 1000, db: d }); };
-  return { store, db, save, revision: () => store.revision(), close: () => store.sqlite.close() };
+  return { store, db, save, close: () => store.sqlite.close() };
 }
 const refused = (fn, pattern, label = '') => { let err = null; try { fn(); } catch (e) { err = e; } assert.ok(err, `${label}: expected a refusal`); assert.match(String(err.message), pattern, `${label}: ${err.message}`); assert.doesNotMatch(String(err.message), /agreed verbally|Regular starter|All good|open day|Adult Signup|Kid One/, `${label}: ids only, never a note, a name or a text`); return err; };
 /** The typed expectation of a fixture: what the cutover and every read return (the normalisations applied). */
@@ -93,12 +91,12 @@ test('[schema] migration 0018 is registered last and creates the ten typed STRIC
   assert.match(ddlOf(e, 'signing_packages'), /completion_signing_id\s+TEXT REFERENCES signings\(id\) DEFERRABLE INITIALLY DEFERRED/);
   assert.match(ddlOf(e, 'signings'), /CHECK \(method IN \('CANONICAL_COMPLETION','LEGACY_RECORDED'\)\)/);
   assert.match(ddlOf(e, 'idempotency_keys'), /owner_table IN \('signing_packages'\)/, 'the signing packages are the only owner: the other steps keep their keys as columns');
-  for (const n of COLLECTIONS) assert.equal(e.prepare('SELECT count(*) AS n FROM collections WHERE name = ?').get(n).n, 0, `no ${n} blob`);
+  assert.equal(hasBlobTable(e), false, 'no blob table'); // rewritten in S14a: it described the blob
   e.close(); rm(empty);
   // the fixtures
   const d = file('mig'); const s = openRaw(d);
   const after = fullDump(s); assert.deepEqual(migrateAll(s).ran, []); assert.equal(fullDump(s), after, 'never runs twice');
-  for (const n of COLLECTIONS) assert.equal(s.prepare('SELECT count(*) AS n FROM collections WHERE name = ?').get(n).n, 0, `no ${n} blob`);
+  assert.equal(hasBlobTable(s), false, 'no blob table'); // rewritten in S14a: it described the blob
   const back = readTableBacked(s);
   assert.deepEqual(plain(back.signingPackages), [typed('signingPackages', draftPackage()), typed('signingPackages', completedPackage())]);
   assert.deepEqual(plain(back.signings), [typed('signings', canonicalSigning()), typed('signings', legacySigning())]);
@@ -158,7 +156,7 @@ test('[repository] there is no db.* view (reading or assigning one of the four t
   assert.throws(() => { held.status = 'READY'; }, /written through its domain repository|read only|Cannot assign/, 'a field assignment on a record throws');
   assert.throws(() => { held.revisions[0].status = 'READY'; }, /written through its domain repository|read only|Cannot assign/, 'a nested edit throws');
   assert.throws(() => { L.repo.signingPackages.forCase(held.caseId)[0].status = 'READY'; }, /read only|Cannot assign/, 'a record a list query returns is read-only too');
-  const sp = L.repo.signingPackages; const rev0 = L.revision();
+  const sp = L.repo.signingPackages;
   // insert
   const pkg3 = draftPackage({ id: 'spk-3', offerId: 'rof-2', caseId: 'case-2', playerId: 'pl-child1', offerRevisionId: 'rofr-3', revisions: [srevision({ id: 'spr-3' })], currentRevisionId: 'spr-3', keys: { start: { key: 'k-start-3', fp: 'fp3' } }, history: [] });
   const inserted = sp.insert(pkg3);
@@ -191,9 +189,9 @@ test('[repository] there is no db.* view (reading or assigning one of the four t
   const r9b = L.repo.outcomeReports.addConfirmation('out-9', { by: { kind: 'guardian', id: 'gd-primary', name: 'Primary Parent' }, agree: false, note: 'Not quite', experienceRating: 2, at: NOW + 3 }, { status: 'disputed' }); assert.equal(r9b.status, 'disputed'); assert.equal(r9b.confirmations.length, 1);
   assert.throws(() => L.repo.outcomeReports.addConfirmation('out-9', { by: { kind: 'guardian', id: 'gd-primary', name: 'Primary Parent' }, agree: true, note: null, experienceRating: null, at: NOW + 4 }), /confirmations\[1\]\.by\.id duplicates gd-primary/);
   assert.throws(() => L.repo.outcomeReports.addConfirmation('out-9', { by: { kind: 'player', id: 'pl-child2', name: 'Kid Two' }, agree: true, note: 'x'.repeat(301), experienceRating: null, at: NOW + 5 }), /note must be text of at most 300/);
-  // a save writes nothing more; the revision moves only for the blobs; the counts
+  // a save writes nothing more; the counts (S14a: the save-sequence check described the blob)
   const dump = Object.fromEntries(JSON.parse(withRo(d, fullDump))); L.save(); withRo(d, (s) => { for (const t of TABLES) assert.equal(JSON.stringify(rowsOf(s, t)), JSON.stringify(dump[t]), `the save rewrites no ${t} row`); });
-  assert.deepEqual(L.repo.counts(), { signingPackages: 3, signings: 3, followUps: 4, outcomeReports: 2 }); assert.equal(L.revision(), rev0 + 1);
+  assert.deepEqual(L.repo.counts(), { signingPackages: 3, signings: 3, followUps: 4, outcomeReports: 2 });
   assert.deepEqual(L.layer.report().domains.signingsFollowUps.rows, { signingPackages: 3, signings: 3, followUps: 4, outcomeReports: 2 }); assert.equal(L.layer.report().domains.signingsFollowUps.pendingWrites, 0);
   L.close();
   // a restart reads the same records
@@ -318,19 +316,19 @@ test('[repository] a player\'s journey reads (§4.3 step 4): the bulk lists forC
   L.close(); rm(d);
 });
 
-test('[repository] the unit of work: several operations and a failure at the end — a thrown error, a refused typing inside a nested call, a REAL COMMIT failure — roll the rows back (a second connection sees nothing; a fresh read, the held references and the revision unchanged), while a read inside the unit sees its writes; the retry lands once; the completion cycle (the signing row, then the package\'s COMPLETED status with its completion naming the signing) commits in one unit through the deferred key, and a COMPLETED package without its signing row is refused at COMMIT; redactPlayer inside the deletion unit', () => {
+test('[repository] the unit of work: several operations and a failure at the end — a thrown error, a refused typing inside a nested call, a REAL COMMIT failure — roll the rows back (a second connection sees nothing; a fresh read and the held references unchanged), while a read inside the unit sees its writes; the retry lands once; the completion cycle (the signing row, then the package\'s COMPLETED status with its completion naming the signing) commits in one unit through the deferred key, and a COMPLETED package without its signing row is refused at COMMIT; redactPlayer inside the deletion unit', () => {
   need();
   const d = file('unit'); const L = serverOpen(d); const sp = L.repo.signingPackages;
-  const before = withRo(d, fullDump); const rev0 = L.revision(); const held = L.repo.signingPackages.byId('spk-1'); const views = plain(L.repo.exportAll());
+  const before = withRo(d, fullDump); const held = L.repo.signingPackages.byId('spk-1'); const views = plain(L.repo.exportAll());
   const work = (fail) => () => { sp.patch('spk-1', { internalNote: 'in unit' }); sp.setDocument('spk-1', 'spr-1', 'signing', sdoc('sgd-u')); L.repo.followUps.patch('fup-sign-2-6m', { status: 'due' }); L.repo.signings.record(legacySigning({ id: 'sign-u', playerId: 'pl-child2' })); assert.equal(sp.byId('spk-1').internalNote, 'in unit', 'a read inside the unit sees its write'); assert.ok(L.repo.signings.byId('sign-u')); if (fail === 'throw') throw new Error('synthetic failure after four writes'); if (fail === 'typed') sp.patch('spk-1', { status: 'OPEN' }); if (fail === 'commit') L.store.failCommitOfOpenTransaction(); };
   for (const fail of ['throw', 'typed', 'commit']) {
     assert.throws(() => L.unit(work(fail)), fail === 'typed' ? /SIGNINGS_INPUT_INVALID/ : fail === 'commit' ? /FOREIGN KEY constraint failed/ : /synthetic failure/, fail);
-    assert.equal(withRo(d, fullDump), before, `${fail}: nothing committed`); assert.equal(L.revision(), rev0);
+    assert.equal(withRo(d, fullDump), before, `${fail}: nothing committed`);
     assert.deepEqual(plain(L.repo.exportAll()), views, `${fail}: a fresh read sees the rollback`);
     assert.deepEqual(plain(L.repo.signingPackages.byId('spk-1')), plain(held), `${fail}: the same record is served again`); assert.equal(L.repo.signings.byId('sign-u'), null); assert.equal(L.store.sqlite.isTransaction, false);
   }
   L.unit(work(null));
-  assert.equal(withRo(d, (s) => col(s, "SELECT internal_note FROM signing_packages WHERE id = 'spk-1'")), 'in unit'); assert.ok(L.repo.signings.byId('sign-u')); assert.equal(L.revision(), rev0 + 1, 'one commit');
+  assert.equal(withRo(d, (s) => col(s, "SELECT internal_note FROM signing_packages WHERE id = 'spk-1'")), 'in unit'); assert.ok(L.repo.signings.byId('sign-u')); assert.equal(withRo(d, (s) => col(s, "SELECT count(*) FROM signings WHERE id = 'sign-u'")), 1, 'the retry lands once');
   // the completion cycle
   // on a second offer: rof-1 already carries the completed spk-2 (one COMPLETED package per offer, as m29 rules)
   sp.insert(draftPackage({ id: 'spk-c', caseId: 'case-2', playerId: 'pl-child1', offerId: 'rof-2', offerRevisionId: 'rofr-3', revisions: [srevision({ id: 'spr-c' })], currentRevisionId: 'spr-c', keys: { start: { key: 'k-start-c', fp: 'fpc' } }, history: [] }));
@@ -350,23 +348,23 @@ test('[repository] the unit of work: several operations and a failure at the end
 
 test('[snapshot] readTableBacked / writeTableBacked (snapshot mode): a save with the four collections supplied lands exactly (every record typed; a legacy-shaped signing normalised); a partial save retains the omitted collections whole; [] empties one; a departing signing a RETAINED follow-up still names is refused with the ids, atomically, as is a departing package a retained signing names; junk is refused with the id; the departures of a package and its offer in ONE save succeed (the S8d departures run before the S8c ones)', () => {
   need();
-  const d = file('snap'); const S = snapshotOpen(d); const rev0 = S.revision();
+  const d = file('snap'); const S = snapshotOpen(d);
   // a legacy-shaped signing: sign-legacy without a method, a copied ledger row — typed on the way in
   const fups = plain(S.db.followUps); const reports = plain(S.db.outcomeReports);
   S.save({ signingPackages: plain(S.db.signingPackages), signings: [canonicalSigning(), legacySigning()], followUps: fups, outcomeReports: reports }, { omit: ['requests', 'trials'] });
-  assert.equal(S.revision(), rev0 + 1); withRo(d, (s) => { assert.equal(col(s, "SELECT method FROM signings WHERE id = 'sign-legacy'"), 'LEGACY_RECORDED'); assert.deepEqual(plain(readTableBacked(s).signings), [typed('signings', canonicalSigning()), typed('signings', legacySigning())]); });
+  withRo(d, (s) => { assert.equal(col(s, "SELECT method FROM signings WHERE id = 'sign-legacy'"), 'LEGACY_RECORDED'); assert.deepEqual(plain(readTableBacked(s).signings), [typed('signings', canonicalSigning()), typed('signings', legacySigning())]); });
   // partial: follow-ups omitted are retained whole; [] empties the reports (the follow-up's report departs; nothing names it)
   const before = withRo(d, fullDump);
   S.save({ outcomeReports: [] }, { omit: ['signingPackages', 'signings', 'followUps', 'requests', 'trials'] });
   withRo(d, (s) => { assert.equal(s.prepare('SELECT count(*) AS n FROM outcome_reports').get().n, 0); assert.equal(s.prepare('SELECT count(*) AS n FROM outcome_report_confirmations').get().n, 0); assert.equal(s.prepare('SELECT count(*) AS n FROM follow_ups').get().n, 3, 'retained'); });
   S.save({ outcomeReports: [outcomeReport()] }, { omit: ['signingPackages', 'signings', 'followUps', 'requests', 'trials'] }); assert.equal(withRo(d, fullDump).length > 0, true);
   // a departing signing still named by a RETAINED follow-up; a departing package still named by a RETAINED signing
-  const mid = withRo(d, fullDump); const revMid = S.revision();
+  const mid = withRo(d, fullDump);
   refused(() => S.save({ signings: [legacySigning()] }, { omit: ['signingPackages', 'followUps', 'outcomeReports', 'requests', 'trials'] }), /SIGNINGS_STILL_REFERENCED[\s\S]*follow_ups fup-sign-2-3m → signings sign-2/, 'a retained follow-up');
   refused(() => S.save({ signingPackages: [draftPackage()] }, { omit: ['signings', 'followUps', 'outcomeReports', 'requests', 'trials'] }), /SIGNINGS_STILL_REFERENCED[\s\S]*signings sign-2 → signing_packages spk-2/, 'a retained signing');
   refused(() => S.save({ signings: [canonicalSigning(), legacySigning({ note: 'x'.repeat(401) })] }, { omit: ['signingPackages', 'followUps', 'outcomeReports', 'requests', 'trials'] }), /SIGNINGS_IMPORT_BLOCKED[\s\S]*sign-legacy\.note exceeds 400/, 'junk');
   refused(() => S.save({ followUps: null }, { omit: ['signingPackages', 'signings', 'outcomeReports', 'requests', 'trials'] }), /followUps: the snapshot collection must be an array/, 'a present null');
-  assert.equal(withRo(d, fullDump), mid, 'every refusal atomic'); assert.equal(S.revision(), revMid);
+  assert.equal(withRo(d, fullDump), mid, 'every refusal atomic');
   // the joint departure: the completed package, its signing, its follow-ups and report, and the OFFER it was opened over, in one save
   const offers = plain(S.db.recruitmentOffers).filter((o) => o.id !== 'rof-1'); const contacts = plain(S.db.recruitmentContacts).filter((c) => !(c.caseId === 'case-1'));
   S.save({ recruitmentOffers: offers, recruitmentContacts: contacts, signingPackages: [], signings: [legacySigning()], followUps: [], outcomeReports: [] }, { omit: ['requests', 'trials'] });

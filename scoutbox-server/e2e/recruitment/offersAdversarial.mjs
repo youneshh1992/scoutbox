@@ -34,7 +34,9 @@ import { isAdult, adultAgeFor } from '../../domain.mjs';
 import { isExpiredAt } from '../../temporal.mjs';
 import { canTransitionRecruitmentCase } from '../../domains/recruitment/lifecycle/lifecycle.mjs';
 import { openStore } from '../../store.mjs';
+import { DATA_MIGRATIONS } from '../../repositories/index.mjs';
 import { createEvidenceProvider } from '../../scripts/recruitmentReadsFixture.mjs'; // §4.3 step 2: the contacts/offers queries over the plain arrays
+const LATEST_SCHEMA = Number(DATA_MIGRATIONS.map((m) => m.id).sort().at(-1).slice(0, 4)); // S14a: the latest table migration's number
 
 const PORT = 6900 + Math.floor(Math.random() * 200);
 const BASE = `http://localhost:${PORT}`;
@@ -797,7 +799,8 @@ section('Z — restart: idempotency keys, terminal states, the paused-case warni
   ok((await issue(globalThis.__G.OID, { expectedRev: 1, clientKey: globalThis.__G.KI }, re.token)).body.idempotent === true, 'Z3 the issue key replays after the reboot');
   ok((await pAccept(globalThis.__G.OID, { revisionId: globalThis.__G.R, clientKey: globalThis.__G.KA }, theoRe.token)).body.idempotent === true, 'Z4 the accept key replays after the reboot');
   neg(expect(await aList(REP, beaRe.token), 404, 'REPRESENTATION_NOT_FOUND'), 'Z5 the same-agency rule holds after the reboot');
-  neg((await j('GET', '/healthz')).body.schemaVersion === 2308, 'Z6 schema 2308 — P6.1 added no migration; the one step past 2307 is P7\'s signing store');
+  // Rewritten in S14a: the schema is the latest table migration, not the old blob version.
+  neg((await j('GET', '/healthz')).body.schemaVersion === LATEST_SCHEMA && DATA_MIGRATIONS.length === LATEST_SCHEMA && !DATA_MIGRATIONS.some((m) => /offer/i.test(m.id) && !/contacts_offers/.test(m.id)), 'Z6 the current schema after the reboot, and no migration of its own for an Offer beyond the contacts/offers tables');
 }
 
 // ---------------------------------------------------------------- report

@@ -43,11 +43,11 @@ import { canTransitionRecruitmentCase } from '../../domains/recruitment/lifecycl
 import { M23_ERROR_HTTP, httpStatusFor } from '../../domains/recruitment/lifecycle/errors.mjs';
 import { EVENT_REGISTRY } from '../../domains/platform/eventRegistry.mjs';
 import { RATE_LIMIT_POLICY } from '../../domains/platform/rateLimit.mjs';
-import { MIGRATIONS, SCHEMA_VERSION, runMigrations, PRODUCTION_REQUIRED_STORES } from '../../domains/platform/migrations.mjs';
-import { guaranteeFor } from '../../storeContract.mjs';
+import { DATA_MIGRATIONS, TABLE_BACKED } from '../../repositories/index.mjs';
 import { roomCan } from '../../domains/recruitment/rooms/shared.mjs';
 import { pickPort } from '../../scripts/testPort.mjs';
 import { buildRecruitmentJourney, createEvidenceProvider } from '../../scripts/recruitmentReadsFixture.mjs'; // §4.3 step 2: the contacts/offers queries over the plain arrays
+const LATEST_SCHEMA = Number(DATA_MIGRATIONS.map((m) => m.id).sort().at(-1).slice(0, 4)); // S14a: the latest table migration's number
 
 const PORT = pickPort(5900, 200, [0]); // TH-6: never a fetch-blocked port
 const BASE = `http://localhost:${PORT}`;
@@ -280,7 +280,7 @@ section('V — a draft is not evidence; the journey carries milestones, never wo
   // §4.3 step 2 (rewritten: these described the old storage): the contacts are read through SQL, not a db collection.
   const noContacts = buildRecruitmentJourney({ recruitmentCases: [], roomDecisions: [], requests: [], trials: [], assessments: [], signings: [] }, 'k', { kind: 'org_staff', orgId: 'o1' });
   ok(noContacts.ok === false && noContacts.error === 'JOURNEY_STORE_MISSING' && noContacts.missing.includes('recruitmentContacts'), 'the journey requires the contacts: without their queries it reports the store missing');
-  ok(!PRODUCTION_REQUIRED_STORES.includes('recruitmentContacts') && guaranteeFor('recruitmentContacts') === null, 'and they are no db collection (a table since 0017, read through SQL)');
+  ok(TABLE_BACKED.includes('recruitmentContacts'), 'and they are a table since 0017, read through SQL'); // rewritten in S14a: it read the store contract
   const db = {
     recruitmentCases: [{ ...kase, room: { status: 'contacted', rev: 2 }, history: [{ action: 'room_status_changed', at: 10, by: { name: 'A' }, detail: { from: 'contact_planned', to: 'contacted' } }] }],
     roomDecisions: [], requests: [{ id: 'r1', orgId: 'o1', playerId: 'p1', type: 'contact', status: 'accepted', routedTo: 'player', createdAt: 10, contactId: 'cA', message: `${SENTINEL} shared body` }],
@@ -331,11 +331,8 @@ section('V — registry, limits and schema');
   neg(!EVENT_REGISTRY.contact_created.notificationEligible, 'a draft can never become a notification');
   for (const a of ['contact_draft', 'contact_send', 'contact_external_record', 'contact_response']) ok(RATE_LIMIT_POLICY[a]?.max > 0, `rate-limit policy ${a} exists (${RATE_LIMIT_POLICY[a].max}/window)`);
   ok(RATE_LIMIT_POLICY.contact_response.scope === 'actor', 'the response limit is per actor, so a club cannot exhaust a recipient\'s quota');
-  ok(SCHEMA_VERSION >= 2303 && MIGRATIONS.some((m) => m.id === 'm230_004_recruitment_contacts'), `schema ${SCHEMA_VERSION} (2303 introduced the Contact step; later phases may add steps, never remove this one)`);
-  const fresh = {}; runMigrations(fresh);
-  ok(!Object.hasOwn(fresh, 'recruitmentContacts'), 'a fresh database has no contacts collection after migrations: the contacts are a table, read through SQL (§4.3 step 2; rewritten, it described the old storage)');
-  const old = { recruitmentContacts: [{ id: 'keep' }] }; runMigrations(old);
-  ok(old.recruitmentContacts.length === 1 && old.recruitmentContacts[0].id === 'keep', 'an existing store is never overwritten');
+  // Rewritten in S14a: the blob's 2303 step and runMigrations described the old storage; the in-memory upgrade cases are gone.
+  ok(DATA_MIGRATIONS.length === LATEST_SCHEMA && DATA_MIGRATIONS.some((m) => m.id === '0017_recruitment_contacts_offers'), 'the current schema: table migration 0017 creates the contacts (later steps may add migrations, never remove this one)');
   for (const code of Object.keys(M23_ERROR_HTTP).filter((c) => c.startsWith('CONTACT_'))) {
     ok([400, 403, 404, 409, 422, 429, 500].includes(httpStatusFor(code)), `${code} → ${httpStatusFor(code)}`);
   }
@@ -1055,7 +1052,7 @@ section('Z — restart: idempotency and truth survive the process dying');
   const createReplay = await j('POST', `/org/rooms/${J.RID}/contacts`, { subject: 'Interest from Eastport', body: 'Hi Kola, we would like to talk about your plans for next season.', clientKey: 'J-create' }, re.token);
   neg(createReplay.status === 200 && createReplay.body.idempotent === true && createReplay.body.contact.id === J.CID, 'Z5 a create replay after restart returns the original contact');
   const health = (await j('GET', '/healthz')).body;
-  ok(health.schemaVersion === SCHEMA_VERSION, `Z6 schema ${SCHEMA_VERSION} after the restart`);
+  ok(health.schemaVersion === LATEST_SCHEMA, 'Z6 the current schema after the restart');
 }
 
 // ---------------------------------------------------------------- report

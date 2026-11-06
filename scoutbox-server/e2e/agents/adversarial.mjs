@@ -57,10 +57,12 @@ import { TRANSACTION_STATUSES, DOCUMENT_TYPES, DOCUMENT_VISIBILITY, TIMELINE_AUD
 import { isAdult, ageOn, parseDob } from '../../domain.mjs';
 import { agentClientBasis } from '../../m27/integration.mjs';
 import { EVENT_REGISTRY } from '../../domains/platform/eventRegistry.mjs';
-import { SCHEMA_VERSION, MIGRATIONS } from '../../domains/platform/migrations.mjs';
+import { DATA_MIGRATIONS } from '../../repositories/index.mjs';
 import { RATE_LIMIT_POLICY } from '../../domains/platform/rateLimit.mjs';
 import { openStore } from '../../store.mjs';
 import { hashPassword } from '../../adapters.mjs';
+
+const SCHEMA_VERSION = Number(DATA_MIGRATIONS.map((m) => m.id).sort().at(-1).slice(0, 4));
 
 const PORT = 7400 + Math.floor(Math.random() * 150);
 const BASE = `http://localhost:${PORT}`;
@@ -283,7 +285,8 @@ section('W/pure — events, and the vocabulary that must not appear');
   // P7 added the signing workflow's own club-private events (signing_*); the AGENT domain still emits none, and no `signed_contract` vocabulary exists.
   neg(!names.some((n) => /signed_contract/.test(n)) && names.filter((n) => /signing/.test(n)).every((n) => /^signing_/.test(n) && EVENT_REGISTRY[n].audience === 'org_private') && !names.some((n) => /^(agent|representation|transaction).*sign/.test(n)), 'W2b nor an agent-domain signing event — the P7 signing_* events are the club\'s own, org_private');
   neg(!names.some((n) => /commission|fee_agreed/.test(n)), 'W2c nor a commission event');
-  ok(SCHEMA_VERSION === 2308 && !MIGRATIONS.some((m) => /agent|representation|transaction|compliance/i.test(m.id) && m.version > 2307), 'W3 the schema is 2308 (P7) — P5.6F added no migration');
+  // Rewritten in S14a: it described the retired snapshot registry (2308). The schema is the latest table migration.
+  ok(DATA_MIGRATIONS.length === SCHEMA_VERSION, 'W3 the schema is 39, the latest table migration (0039_retire_blob)');
 }
 
 // =================================================================== LIVE

@@ -56,7 +56,7 @@ const q1 = (dir, sql, ...p) => snap(dir, (c) => c.get(sql, ...p));
 const qAll = (dir, sql, ...p) => snap(dir, (c) => c.all(sql, ...p));
 const live = (dir) => !!q1(dir, 'SELECT 1 AS one FROM data_migrations WHERE id = ?', MIGRATION);
 const applied = (dir) => qAll(dir, 'SELECT id FROM data_migrations ORDER BY id').map((r) => r.id);
-const blobOf = (dir, name) => snap(dir, (c) => { const r = c.get('SELECT value FROM collections WHERE name = ?', name); return r ? JSON.parse(r.value) : undefined; });
+const noBlobTable = (dir) => !q1(dir, "SELECT 1 AS one FROM sqlite_master WHERE type = 'table' AND name = 'collections'");
 const tableExists = (dir, t) => !!q1(dir, "SELECT 1 AS one FROM sqlite_master WHERE type = 'table' AND name = ?", t);
 const fkOf = (dir, t) => qAll(dir, `PRAGMA foreign_key_list(${t})`).map((r) => `${r.from}->${r.table}(${r.to}) ${r.on_delete}`);
 const ddlOf = (dir, t) => q1(dir, "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?", t)?.sql ?? null;
@@ -104,7 +104,7 @@ await test('[routes] a fresh boot records 0017_recruitment_contacts_offers; the 
   assert.equal(applied(dir).filter((id) => id < '0019').at(-2), MIGRATION, 'the recorded migration (0018_signings_follow_ups, S8d, follows it)'); for (const t of TABLES) assert.ok(tableExists(dir, t), `${t} exists`);
   assert.ok(fkOf(dir, 'recruitment_contacts').includes('request_id->recruitment_requests(id) NO ACTION'), `the request key: ${fkOf(dir, 'recruitment_contacts')}`); assert.ok(fkOf(dir, 'recruitment_offers').includes('case_id->recruitment_cases(id) RESTRICT'), 'the case key is immediate: the case is written before its offer');
   assert.match(ddlOf(dir, 'recruitment_contacts'), /request_id TEXT REFERENCES recruitment_requests\(id\) DEFERRABLE INITIALLY DEFERRED/, 'checked at COMMIT');
-  assert.doesNotMatch(ddlOf(dir, 'idempotency_keys') ?? '', /'recruitment_contacts'|'recruitment_offers'/, 'the keys are the records\' own columns'); for (const n of COLLECTIONS) assert.equal(blobOf(dir, n), undefined, `${n}: no blob`);
+  assert.doesNotMatch(ddlOf(dir, 'idempotency_keys') ?? '', /'recruitment_contacts'|'recruitment_offers'/, 'the keys are the records\' own columns'); assert.ok(noBlobTable(dir), 'no blob table'); // rewritten in S14a: it described the blob
   const maria = await orgLogin(S); const a = await signupAdult(S, 'Contact Adult'); const RID = await plannedRoom(S, maria, a.pid);
   // the contact: draft → edit → send (one injected transport failure first) → respond
   const draft = await S.j('POST', `/org/rooms/${RID}/contacts`, { subject: 'Interest from Eastport', body: PRIVATE_BODY, clientKey: 'c-create' }, maria); assert.equal(draft.status, 201, draft.text); const CID = draft.body.contact.id;

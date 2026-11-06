@@ -16,7 +16,7 @@ import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { attachDataLayer, DATA_MIGRATIONS, TABLE_BACKED } from '../repositories/index.mjs';
 import { openStore } from '../store.mjs';
-import { NOW, TTL, tempDir, USERS } from './coreIdentityTestFixtures.mjs';
+import { NOW, TTL, tempDir, USERS, hasBlobTable } from './coreIdentityTestFixtures.mjs';
 import { ROOM_STATUSES, OPEN_ROOM_STATUSES, CASE_STAGES, TASK_STATES, roomRole } from '../domains/recruitment/rooms/shared.mjs';
 import { pageSorted } from '../domains/platform/paging.mjs';
 import { p4bInvitation, minorInvitation, acceptedRequest, scheduledTrial, legacyTrialRequest, saveFixture, fixtureDb, SCOUT } from './recruitmentTestFixtures.mjs';
@@ -55,11 +55,9 @@ const refusedSave = (tag, over, pattern) => {
 };
 function serverOpen(dir) {
   const store = openStore(dir, { tableBacked: TABLE_BACKED });
-  const loaded = store.load();
-  const db = { ...loaded.db, players: [], guardians: [] };
-  const layer = attachDataLayer({ db, store, nextId, persist: () => {}, sessionTtlMs: TTL, now: () => NOW, warn: () => {} });
-  const snap = () => ({ savedAt: NOW, idCounter: 1000, db });
-  return { store, layer, db, save: () => store.save(snap()), unit: (w) => store.unitOfWork(w, { snapshot: snap }), repo: layer.recruitmentCases, close: () => store.sqlite.close() };
+  const db = {}; // S14a: a fixture-saved file is not a first installation, so there is nothing to hand in
+  const layer = attachDataLayer({ db, store, nextId, sessionTtlMs: TTL, now: () => NOW, warn: () => {} });
+  return { store, layer, db, save: () => store.save(), unit: (w) => store.unitOfWork(w), repo: layer.recruitmentCases, close: () => store.sqlite.close() };
 }
 
 test('[schema] migration 0016 is registered between 0015 and 0017 and creates the twenty-five typed STRICT tables (no lossless side column, the vocabulary CHECKs, the children cascading, the room rows RESTRICT, a decision\'s snapshot by key); the case keys of requests, trials, contacts and offers are immediate; idempotency_keys belongs to the signing packages; a fresh database holds no row and no blob', () => {
@@ -79,7 +77,7 @@ test('[schema] migration 0016 is registered between 0015 and 0017 and creates th
   assert.ok(fkOf(f, 'room_decisions').includes('snapshot_id->room_snapshots RESTRICT'));
   for (const t of ['recruitment_requests', 'trials', 'recruitment_contacts', 'recruitment_offers']) assert.ok(fkOf(f, t).includes('case_id->recruitment_cases RESTRICT'), `${t}.case_id is immediate`);
   assert.match(ddlOf(f, 'idempotency_keys'), /owner_table IN \('signing_packages'\)/);
-  for (const n of COLLECTIONS) assert.equal(col(f, 'SELECT count(*) FROM collections WHERE name = ?', n), 0, `no ${n} blob`);
+  assert.equal(hasBlobTable(f), false, 'no blob table'); // rewritten in S14a: it described the blob
   f.close(); rm(d);
 });
 

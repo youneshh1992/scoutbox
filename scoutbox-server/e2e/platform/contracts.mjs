@@ -24,7 +24,6 @@ import {
   EVENT_REGISTRY, EVENT_NAMES, AUDIENCES, minimizePayload, eventFingerprint, assertEventRegistry, isRegistered,
 } from '../../domains/platform/eventRegistry.mjs';
 import { EVENT_AUDIENCE, audienceFor } from '../../domains/platform/eventAudience.mjs';
-import { MIGRATIONS, SCHEMA_VERSION, runMigrations, schemaReport } from '../../domains/platform/migrations.mjs';
 import { CATEGORIES, TYPE_CATEGORY, categoryOf, defaultPrefs, registerNotificationPrefs } from '../../domains/platform/notificationPrefs.mjs';
 import { integrityReport, integritySummary } from '../../domains/platform/integrity.mjs';
 import { parseFaultRules, createFaultLayer } from '../../domains/platform/faults.mjs';
@@ -35,13 +34,14 @@ import { POLICY, secondLookStatus, secondLookExpired, briefIsLiveOn, validateRec
 import { PROVENANCE } from '../../domains/verification/passport/shared.mjs';
 import { openStore } from '../../store.mjs';
 import { DatabaseSync } from 'node:sqlite';
-import { runDataMigrations } from '../../repositories/database.mjs';
+import { runDataMigrations, dataSchemaReport, migrationApplied } from '../../repositories/database.mjs';
 import { DATA_MIGRATIONS } from '../../repositories/index.mjs';
 import { createNotificationsRepository } from '../../repositories/notifications.mjs';
 import { pickPort } from '../../scripts/testPort.mjs';
 import { knownFailure } from '../support/knownFailure.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
+const SCHEMA_VERSION = Number(DATA_MIGRATIONS.map((m) => m.id).sort().at(-1).slice(0, 4));
 const SERVER_DIR = path.join(HERE, '..', '..');
 const ROOT = path.join(SERVER_DIR, '..');
 const SERVER = path.join(SERVER_DIR, 'server.mjs');
@@ -240,29 +240,37 @@ section('§9 — defaults are conservative without muting an obligation, and the
 // ================================================== §10 migrations (unit)
 section('§10 — migrations: ordered, idempotent, recorded, and a failure aborts before any save');
 {
-  const db = {};
-  const first = runMigrations(db, { now: 1000 });
-  ok(first.from === 0 && first.to === SCHEMA_VERSION && first.ran.length === MIGRATIONS.length, `a fresh database runs all ${MIGRATIONS.length} steps to ${SCHEMA_VERSION}`);
-  const second = runMigrations(db, { now: 2000 });
-  ok(second.ran.length === 0 && second.alreadyApplied === MIGRATIONS.length, 'a second run applies nothing');
-  ok(db.schema.migrations.length === MIGRATIONS.length && db.schema.migrations.every((m) => m.at === 1000), 'the applied list is recorded once, with its time');
-  ok(schemaReport(db).upToDate === true, 'the report says up to date');
-  ok(new Set(MIGRATIONS.map((m) => m.id)).size === MIGRATIONS.length, 'migration ids are unique');
-  ok(MIGRATIONS.every((m) => /^m\d+_\d{3}_[a-z_]+$/.test(m.id) && m.note), 'every step has a stable id and a note');
-  // Prior-schema fixture: a room without rev, notifications without repeatCount, no schema record.
-  const old = { recruitmentCases: [{ id: 'c1', room: { status: 'watching' } }], notifications: [{ id: 'n1' }], players: [] };
-  const up = runMigrations(old, { now: 3000 });
-  // §4.3 step 2 and S12c (rewritten: the Rooms and the briefs are typed rows where rev is required, so the rev backfill
-  // is a recorded no-op and touches neither).
-  ok(up.from === 0 && old.recruitmentCases[0].room.rev === undefined && old.notifications[0].repeatCount === 1 && !('recruitmentBriefs' in old),
-    'a pre-M18.1 snapshot is upgraded: repeatCount 1, prefs collection present (a Room or a brief is not a blob row to backfill)');
-  ok(Array.isArray(old.notificationPrefs) && old.players.length === 0, 'no step invents data');
-  const broken = { notifications: 5 }; // S12c: the notifications are what an m182 step still walks
+  // Rewritten in S14a: this described the retired snapshot registry (runMigrations over an in-memory db, db.schema,
+  // the m182 backfills of a pre-M18.1 snapshot). It now runs the table migrations on an in-memory SQLite database.
+  const db = new DatabaseSync(':memory:'); db.exec('PRAGMA foreign_keys = ON;');
+  neg(!migrationApplied(db, DATA_MIGRATIONS.at(-1).id), 'an unmigrated database records no migration, never "fine"');
+  const first = runDataMigrations(db, DATA_MIGRATIONS, { now: 1000 });
+  ok(first.ran.length === DATA_MIGRATIONS.length && first.known === DATA_MIGRATIONS.length, `a fresh database runs all ${DATA_MIGRATIONS.length} migrations, to ${SCHEMA_VERSION}`);
+  ok(first.ran.join() === DATA_MIGRATIONS.map((m) => m.id).sort().join(), 'in id order');
+  const second = runDataMigrations(db, DATA_MIGRATIONS, { now: 2000 });
+  ok(second.ran.length === 0 && second.applied === DATA_MIGRATIONS.length, 'a second run applies nothing');
+  const rows = db.prepare('SELECT id, applied_at FROM data_migrations').all();
+  ok(rows.length === DATA_MIGRATIONS.length && rows.every((r) => r.applied_at === 1000), 'the applied list is recorded once, with its time');
+  const report = dataSchemaReport(db, DATA_MIGRATIONS);
+  ok(report.migrationsApplied === report.migrationsKnown && Number(report.migrations.at(-1).slice(0, 4)) === SCHEMA_VERSION, 'the report says every known migration is applied, the latest being the schema version');
+  ok(new Set(DATA_MIGRATIONS.map((m) => m.id)).size === DATA_MIGRATIONS.length, 'migration ids are unique');
+  ok(DATA_MIGRATIONS.every((m) => /^\d{4}_[a-z0-9_]+$/.test(m.id) && m.note), 'every migration has a stable numbered id and a note');
+  db.close();
+  // A failing migration names itself, and its transaction is rolled back: nothing it wrote, no record.
+  const db2 = new DatabaseSync(':memory:');
+  runDataMigrations(db2, DATA_MIGRATIONS, { now: 1000 });
+  const broken = { id: '9999_broken_on_purpose', note: 'fixture', up(sqlite) { sqlite.exec('CREATE TABLE broken_on_purpose (x TEXT)'); throw new Error('synthetic failure'); } };
   let threw = null;
-  try { runMigrations(broken); } catch (e) { threw = e; }
-  neg(!!threw && /m182_005_notification_repeat_count failed/.test(threw.message) && /not modified/.test(threw.message), 'a failing step names itself and promises the disk was untouched');
-  neg(schemaReport({}).upToDate === false && schemaReport({}).version === 0, 'an unmigrated database reports version 0, never "fine"');
-  neg(schemaReport({ schema: { version: SCHEMA_VERSION, migrations: [] } }).upToDate === false, 'the right version number with no applied list is NOT up to date');
+  try { runDataMigrations(db2, [...DATA_MIGRATIONS, broken], { now: 3000 }); } catch (e) { threw = e; }
+  neg(!!threw && /9999_broken_on_purpose failed/.test(threw.message) && /not modified/.test(threw.message), 'a failing migration names itself and promises the database was untouched');
+  neg(!db2.prepare("SELECT 1 FROM sqlite_master WHERE name = 'broken_on_purpose'").get() && !migrationApplied(db2, broken.id), 'and keeps that promise: no table it created, no record of it');
+  // The right latest id with the rest missing is NOT up to date.
+  const db3 = new DatabaseSync(':memory:');
+  db3.exec('CREATE TABLE data_migrations (id TEXT PRIMARY KEY, applied_at INTEGER NOT NULL);');
+  db3.prepare('INSERT INTO data_migrations (id, applied_at) VALUES (?, 1)').run(DATA_MIGRATIONS.at(-1).id);
+  const partial = dataSchemaReport(db3, DATA_MIGRATIONS);
+  neg(partial.migrationsApplied !== partial.migrationsKnown, 'the latest migration recorded without the rest is NOT reported as every migration applied');
+  db2.close(); db3.close();
 }
 
 // ============================================== §11 integrity (unit)
@@ -482,7 +490,7 @@ const login = async (orgId, scoutName, role, platform) =>
   const h = await j('GET', '/healthz');
   ok(h.body.schemaVersion === SCHEMA_VERSION, `/healthz reports schema ${SCHEMA_VERSION}`);
   const c = await j('GET', '/capabilities');
-  ok(c.body.schema?.upToDate === true && c.body.schema.migrationsApplied === MIGRATIONS.length, '/capabilities: schema up to date, every migration applied');
+  ok(c.body.schema?.upToDate === true && c.body.schema.version === SCHEMA_VERSION && c.body.schema.migrationsApplied === DATA_MIGRATIONS.length, '/capabilities: schema up to date, every migration applied');
   ok(c.body.integrity?.ok === true && c.body.integrity.violations === 0, 'integrity: no violations in the seeded snapshot');
   ok(c.body.events?.registered === EVENT_NAMES.length, 'events: the registry size is reported');
   ok(c.body.faultInjection?.state === 'available', 'fault injection is available in this development boot');
@@ -751,7 +759,7 @@ section('§41 — a second boot on the same database applies no migration twice'
   await sleep(800);
   serverProc = await boot(ENV, BASE);
   const c = await j('GET', '/capabilities');
-  ok(c.body.schema.migrationsApplied === MIGRATIONS.length && c.body.schema.upToDate === true, `still ${MIGRATIONS.length} migrations applied — not ${MIGRATIONS.length * 2}`);
+  ok(c.body.schema.migrationsApplied === DATA_MIGRATIONS.length && c.body.schema.upToDate === true, `still ${DATA_MIGRATIONS.length} migrations applied — not ${DATA_MIGRATIONS.length * 2}`);
   ok(c.body.integrity.ok === true, 'integrity still clean after a real save/load cycle');
   const m2 = await login('org-eastport', 'Maria Keane', 'Head of Recruitment');
   const room = await j('GET', `/org/rooms/${globalThis.ROOM.roomId}`, undefined, m2.token);
@@ -760,40 +768,8 @@ section('§41 — a second boot on the same database applies no migration twice'
   ok(tomPrefs.categories.find((x) => x.id === 'mentions').enabled === true, "Tom's preference survived the restart");
 }
 
-// ================================================= §42 prior-schema upgrade
-section('§42 — a snapshot written before M18.2 upgrades in place');
-{
-  serverProc.kill('SIGTERM');
-  await sleep(800);
-  const store = openStore(DATA_DIR);
-  const snap = store.load();
-  ok(snap?.db?.schema?.version === SCHEMA_VERSION, 'fixture: the saved snapshot carries the schema record');
-  // Regress it to a pre-M18.2 shape.
-  // The store upserts collections and never deletes one, so a "removed"
-  // collection is expressed as its pre-M18.2 value.
-  snap.db.schema = { version: 0, migrations: [] };
-  snap.db.notificationPrefs = [];
-  // (A Room's rev is a typed NOT NULL column since S8b: a case cannot be regressed to a rev-less Room any more; the pure
-  // backfill of an in-memory pre-M18.2 snapshot is proved above.)
-  // (A brief's rev is a typed NOT NULL column since S12c, like a Room's since S8b: neither can be regressed to a rev-less
-  // record any more, and the snapshot save refuses one, naming it — proved in scripts/testDiscovery.mjs.)
-  for (const n of snap.db.notifications ?? []) delete n.repeatCount;
-  store.save(snap);
-  serverProc = await boot(ENV, BASE);
-  const c = await j('GET', '/capabilities');
-  ok(c.body.schema.version === SCHEMA_VERSION && c.body.schema.migrationsApplied === MIGRATIONS.length, 'the old snapshot was migrated to the current version on boot');
-  const m3 = await login('org-eastport', 'Maria Keane', 'Head of Recruitment');
-  const listed = [...((await j('GET', '/org/rooms', undefined, m3.token)).body.items ?? []), ...((await j('GET', '/org/rooms?view=archived', undefined, m3.token)).body.items ?? [])];
-  const revs = [];
-  for (const r of listed) revs.push((await j('GET', `/org/rooms/${r.roomId ?? r.id}`, undefined, m3.token)).body.room?.rev);
-  ok(revs.length > 0 && revs.every((v) => Number.isInteger(v) && v >= 1), `every listed Room reads with an explicit rev ≥ 1 again (${revs.join(',')})`);
-  const one = await j('GET', `/org/rooms/${globalThis.ROOM.roomId}`, undefined, m3.token);
-  ok(one.status === 200 && Number.isInteger(one.body.room?.rev) && one.body.room.rev >= 1, `the fixture Room reads with rev ${one.body.room?.rev} after the backfill`);
-  ok(c.body.integrity.ok === true, `and integrity is clean — the backfill left nothing invalid (${JSON.stringify(c.body.integrity.byCode)})`);
-  const prefs = await j('GET', '/org/notification-preferences', undefined, m3.token);
-  ok(prefs.status === 200, 'the preferences collection was recreated');
-  neg(c.body.schema.migrationsApplied === MIGRATIONS.length, `exactly ${MIGRATIONS.length} steps recorded, none duplicated`);
-}
+// §42 (a snapshot written before M18.2 upgrading in place) was removed in S14a: it regressed the retired blob store's
+// schema record, and there is no compatibility with files written by earlier dev builds.
 
 // ===================================================== §43 production boot
 section('§43 — a production boot refuses simulated faults and exposes no fault control');

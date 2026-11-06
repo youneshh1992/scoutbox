@@ -34,7 +34,6 @@
 
 export function registerSourceChanges(ctx) {
   const { db, nextId, persistNow, safetyAudit } = ctx;
-  db.sourceChanges ??= [];
   const CAP = 20_000;
 
   /**

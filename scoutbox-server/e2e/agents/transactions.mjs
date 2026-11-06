@@ -46,9 +46,8 @@ import { CONTEXT_TYPES, PARTY_ROLES as ENGINE_PARTY_ROLES, PERMITTED_WITH_CONSEN
 import { EVENT_REGISTRY } from '../../domains/platform/eventRegistry.mjs';
 import { RATE_LIMIT_POLICY } from '../../domains/platform/rateLimit.mjs';
 import { TYPE_CATEGORY, CATEGORIES } from '../../domains/platform/notificationPrefs.mjs';
-import { MIGRATIONS, SCHEMA_VERSION, PRODUCTION_REQUIRED_STORES } from '../../domains/platform/migrations.mjs';
-import { guaranteeFor } from '../../storeContract.mjs';
-import { TABLE_BACKED } from '../../repositories/index.mjs';
+import { DATA_MIGRATIONS, TABLE_BACKED } from '../../repositories/index.mjs';
+import { AGENT_TRANSACTIONS_MIGRATION, AGENT_TRANSACTIONS_TABLES } from '../../repositories/agentTransactions.mjs';
 import { openStore } from '../../store.mjs';
 
 const PORT = 6900 + Math.floor(Math.random() * 200);
@@ -243,18 +242,17 @@ section('pure §66/§67/§68 — the error contract conceals, and never carries 
 section('pure AA/AC/AD — stores, migration, events, notifications, rate policies, permissions');
 {
   // S11c: the three stores are tables (migration 0029, repositories/agentTransactions.mjs), not collections.
-  for (const s of ['agentTransactions', 'transactionRepresentations', 'transactionDocuments']) ok(guaranteeFor(s) !== 'migration' && !PRODUCTION_REQUIRED_STORES.includes(s) && TABLE_BACKED.includes(s), `AA1 ${s} is a table of the agent transactions repository, not a collection`);
-  const step = MIGRATIONS.find((m) => m.id === 'm260_001_transaction_stores');
-  ok(step?.version === 2307 && MIGRATIONS.filter((m) => m.version === 2307).length === 1, 'AA2 exactly one step advances the schema to 2307');
-  // P7 (m280_001_signing_workflow) is the ONE step above it: the current schema is 2308.
-  neg(SCHEMA_VERSION === 2308 && MIGRATIONS.filter((m) => m.version > 2307).length === 1 && MIGRATIONS.find((m) => m.version > 2307)?.version === 2308, 'AA3 and exactly one step above it — P7\'s signing workflow at 2308');
-  const src = String(step.up);
-  neg(!/recruitmentCases|complianceContexts|signings|offers/.test(src), 'AA4 the step reinterprets no existing record as a transaction and creates no offer or signing store (§3, §5)');
-  // S11c: the step is a recorded no-op; the tables start empty (migration 0029 is DDL only).
-  const fresh = {}; step.up(fresh);
-  ok(Object.keys(fresh).length === 0, 'AA5 the step creates nothing and backfills nothing (the stores are tables)');
-  const keep = { agentTransactions: [{ id: 'x' }] }; step.up(keep); step.up(keep);
-  ok(keep.agentTransactions.length === 1 && Object.keys(keep).length === 1, 'AA6 replaying the step is harmless and destroys nothing');
+  // Rewritten in S14a: AA1–AA6 described the retired snapshot registry (step m260_001 at 2307, P7 at 2308) and the
+  // store contract. They now check the table migration and what a clean database holds.
+  for (const s of ['agentTransactions', 'transactionRepresentations', 'transactionDocuments']) ok(TABLE_BACKED.includes(s), `AA1 ${s} is a table of the agent transactions repository, not a collection`);
+  ok(DATA_MIGRATIONS.filter((m) => m.id === AGENT_TRANSACTIONS_MIGRATION).length === 1, `AA2 exactly one migration creates the transaction tables (${AGENT_TRANSACTIONS_MIGRATION})`);
+  neg(!AGENT_TRANSACTIONS_TABLES.some((t) => /offer|signing|recruitment_case|compliance_context/.test(t)), 'AA4 the migration reinterprets no existing record as a transaction and creates no offer or signing table (§3, §5)');
+  const freshDir = mkdtempSync(path.join(tmpdir(), 'sbx-m26-fresh-'));
+  const fresh = openStore(freshDir).load().db;
+  ok(fresh.agentTransactions.length === 0 && fresh.transactionRepresentations.length === 0 && fresh.transactionDocuments.length === 0, 'AA5 a clean database holds no transaction: the migration backfills nothing');
+  const reopened = openStore(freshDir);
+  ok(reopened.load().db.agentTransactions.length === 0 && reopened.sqlite.prepare('SELECT COUNT(*) AS n FROM data_migrations WHERE id = ?').get(AGENT_TRANSACTIONS_MIGRATION).n === 1, 'AA6 reopening the file records the migration once and creates nothing');
+  reopened.sqlite.close();
   const EVENTS = ['agent_transaction_created', 'agent_transaction_party_changed', 'agent_transaction_compliance_updated', 'agent_transaction_status_changed', 'agent_transaction_document_added', 'agent_transaction_message_linked', 'agent_transaction_held', 'agent_transaction_cancelled', 'agent_transaction_closed'];
   for (const e of EVENTS) {
     const reg = EVENT_REGISTRY[e];

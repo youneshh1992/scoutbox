@@ -60,10 +60,10 @@ const invoice = (over = {}) => ({
 
 function serverOpen(dir, db0 = {}) {
   const store = openStore(dir, { tableBacked: TABLE_BACKED });
-  const db = { ...(store.load()?.db ?? {}), players: [], guardians: [], ...db0 };
-  const layer = attachDataLayer({ db, store, nextId, persist: () => {}, sessionTtlMs: TTL, now: () => NOW, warn: () => {} });
-  const snapshot = () => ({ savedAt: NOW, idCounter: 1000, db });
-  return { store, db, repo: layer.operations, unit: (w) => store.unitOfWork(w, { snapshot }), close: () => store.sqlite.close() };
+  const db = {};
+  // S14a: a first installation's records are the `seed` (imported only while the file is new); a fixture-saved file ignores it.
+  const layer = attachDataLayer({ db, seed: { players: [], guardians: [], ...db0 }, store, nextId, sessionTtlMs: TTL, now: () => NOW, warn: () => {} });
+  return { store, db, repo: layer.operations, unit: (w) => store.unitOfWork(w), close: () => store.sqlite.close() };
 }
 const seeded = (label) => { const dir = tempDir(label); saveFixture(dir, FIX()); return { dir, s: serverOpen(dir) }; };
 

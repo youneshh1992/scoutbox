@@ -1,38 +1,29 @@
-// SQLite-backed snapshot store (node:sqlite, no native deps). The working set
-// stays in memory — the API's data model is unchanged — but every save is an
-// atomic transaction into data/scoutbox.db, one row per collection, so a crash
-// mid-write can never corrupt state the way a half-written JSON file could.
+// The SQLite store (node:sqlite, no native deps): one database file, data/scoutbox.db, holding every domain's tables.
+// Since S14a there is no blob: the `collections` table (one JSON row per collection) is gone, and the id counter is a
+// row of `counters`.
 //
 // node:sqlite is REQUIRED, with its transaction state (`isTransaction`):
 // Node.js 22.16 or later on the 22 line, or 24.0 or later (runtime.mjs is the
 // one definition of that contract). There is no JSON fallback: `openStore`
 // throws a compatibility error (SQLITE_REQUIRED / NODE_UNSUPPORTED) before
 // touching the data directory, and server.mjs lets that error end the process.
-// Sessions (plan step S2) are stored only as token hashes in a table, which a
-// JSON snapshot could not hold without keeping plain tokens again.
 //
-// The data layer under repositories/ moves collections out of this blob store
-// one domain at a time, into real tables in the same database file. The store
-// has two modes for them:
+// Two modes:
 //
-//   server mode   openStore(dir, { tableBacked: [...] }) — the running server.
-//                 Those collections belong to their repositories: `save` skips
-//                 them and `load` hands back only what is still a blob.
-//   snapshot mode openStore(dir) — tools, fixtures and the persistence
-//                 suites, which treat the file as one snapshot. The file is
-//                 brought up to the current table schema when it is opened;
-//                 `load` merges each table-backed collection in from its table
-//                 and `save` writes it into that table (validated: junk is
-//                 refused and nothing is written), so the database reads and
-//                 writes as the single shape the server sees.
+//   server mode   openStore(dir, { tableBacked: [...] }) — the running server. The repositories own their tables;
+//                 the store gives them the unit of work and runs the save hooks of the repositories that still stage
+//                 their writes (`save()`).
+//   snapshot mode openStore(dir) — tools, fixtures and the persistence suites, which treat the file as one
+//                 snapshot. The file is brought up to the current table schema when it is opened; `load` reads every
+//                 table-backed collection from its table and `save` writes it into that table (validated: junk is
+//                 refused and nothing is written). A collection with no table is refused: there is nowhere to put it.
 //
 // A backup is a copy of the database file (`copyTo`, VACUUM INTO); a restore
 // boots a new, empty DATA_DIR holding the copy.
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { readTableBacked, writeTableBacked, migrateForSnapshot } from './repositories/index.mjs';
-import { captureGraph, restoreGraph } from './repositories/memento.mjs';
+import { readTableBacked, writeTableBacked, migrateForSnapshot, TABLE_BACKED } from './repositories/index.mjs';
 import { requireRuntime, CONTRACT } from './runtime.mjs';
 
 let DatabaseSync = null;
@@ -55,7 +46,6 @@ export function openStore(dataDir, { tableBacked = null } = {}) {
   requireRuntime();
   fs.mkdirSync(dataDir, { recursive: true });
   const serverMode = Array.isArray(tableBacked);
-  const skip = new Set(serverMode ? tableBacked : []);
 
   const databaseFile = path.join(dataDir, 'scoutbox.db');
   // SQLite treats an empty file as a new database, so a backup emptied in
@@ -74,20 +64,15 @@ export function openStore(dataDir, { tableBacked = null } = {}) {
   // command's read-only open, a persistence suite) waits for a writer to
   // finish instead of failing with SQLITE_BUSY.
   sqlite.exec('PRAGMA busy_timeout = 5000;');
-  sqlite.exec('CREATE TABLE IF NOT EXISTS collections (name TEXT PRIMARY KEY, value TEXT NOT NULL);');
-  sqlite.exec('CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);');
-  // Snapshot mode: the file is brought up to the current table schema first (see migrateForSnapshot).
+  // Snapshot mode: the file is brought up to the current table schema first (see migrateForSnapshot). In server
+  // mode the data layer runs the migrations when it attaches.
   if (!serverMode) migrateForSnapshot(sqlite);
-  const upsertCollection = sqlite.prepare('INSERT INTO collections (name, value) VALUES (?, ?) ON CONFLICT(name) DO UPDATE SET value = excluded.value');
-  const deleteCollection = sqlite.prepare('DELETE FROM collections WHERE name = ?');
-  const upsertMeta = sqlite.prepare('INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value');
-  const readSaveSeq = sqlite.prepare('SELECT value FROM meta WHERE key = ?');
+  const knownCollections = new Set(TABLE_BACKED);
 
   // Server mode only: save hooks the data layer registers. `flush` runs inside
-  // every save transaction, before the blob rows are written, so a repository
-  // that keeps part of its records in memory between saves (the organisations'
-  // transitional facets, S3) persists them atomically with the rest of the
-  // snapshot. A flush failure fails the save: nothing half-written. After the
+  // every save transaction, so a repository that keeps part of its records in
+  // memory between saves (the organisations' transitional facets, S3) persists
+  // them atomically. A flush failure fails the save: nothing half-written. After the
   // transaction ends the outcome is reported to every hook — `commit` once
   // COMMIT returned, `rollback` once ROLLBACK ran (for a failure after the
   // flush, in a later write or in COMMIT itself) — so a hook's change tracking
@@ -143,28 +128,24 @@ export function openStore(dataDir, { tableBacked = null } = {}) {
     });
   }
 
-  /** Everything a save transaction writes between BEGIN and COMMIT (flush hooks, blobs, meta, optional projection). */
+  /**
+   * Everything a save transaction writes between BEGIN and COMMIT. Server mode: the staged repositories' flush hooks.
+   * Snapshot mode: every collection into its table (a collection with no table is refused before anything is
+   * written), and the id counter.
+   */
   function writeBody(snapshot, { asSnapshot }) {
-    if (!asSnapshot) for (const hook of hooks) hook.flush?.();
-    const inTables = new Set(asSnapshot ? writeTableBacked(sqlite, snapshot.db) : []);
-    for (const [name, value] of Object.entries(snapshot.db)) {
-      if ((!asSnapshot && skip.has(name)) || inTables.has(name)) { deleteCollection.run(name); continue; }
-      upsertCollection.run(name, JSON.stringify(value));
-    }
-    upsertMeta.run('idCounter', String(snapshot.idCounter));
-    upsertMeta.run('savedAt', String(snapshot.savedAt ?? Date.now()));
-    // The save revision is what ties a shadow projection to the snapshot
-    // it was taken from: wall-clock savedAt can repeat, this cannot.
-    const saveSeq = (Number(readSaveSeq.get('saveSeq')?.value) || 0) + 1;
-    upsertMeta.run('saveSeq', String(saveSeq));
+    if (!asSnapshot) { for (const hook of hooks) hook.flush?.(); return; }
+    if (!snapshot || typeof snapshot !== 'object' || !snapshot.db || typeof snapshot.db !== 'object') throw new TypeError('a snapshot-mode save needs { db, idCounter? } with db an object of collections; nothing was written');
+    const unknown = Object.keys(snapshot.db ?? {}).filter((name) => snapshot.db[name] !== undefined && !knownCollections.has(name));
+    if (unknown.length) throw Object.assign(new Error(`SNAPSHOT_COLLECTION_UNKNOWN: ${unknown.join(', ')} ${unknown.length === 1 ? 'has' : 'have'} no table (the blob store is retired, S14a); the save was rolled back and nothing was written`), { code: 'SNAPSHOT_COLLECTION_UNKNOWN' });
+    writeTableBacked(sqlite, snapshot.db ?? {});
+    if (snapshot.idCounter !== undefined) sqlite.prepare("UPDATE counters SET value = MAX(value, ?) WHERE name = 'id'").run(Number(snapshot.idCounter) || 0);
   }
 
   /**
-   * One save transaction. `asSnapshot` writes every collection the way snapshot
-   * mode does — into its table when the domain has cut over, as a blob
-   * otherwise — regardless of the mode the store was opened in. Server-mode
-   * saves pass false and skip table-backed collections (their repositories
-   * write their tables row by row).
+   * One save transaction. `asSnapshot` writes every collection into its table
+   * (snapshot mode); a server-mode save passes false and runs only the staged
+   * repositories' flush hooks (every other repository writes its rows at once).
    *
    * Contract of an ORDINARY save (unchanged since S3): memory is the intended
    * state. A failed save leaves memory as it is, the hooks discard what they
@@ -183,7 +164,7 @@ export function openStore(dataDir, { tableBacked = null } = {}) {
       writeBody(snapshot, { asSnapshot });
       sqlite.exec('COMMIT');
     } catch (err) {
-      // A failure anywhere above — a flush, a blob write, COMMIT itself — ends
+      // A failure anywhere above — a flush, a table write, COMMIT itself — ends
       // the transaction; the hooks learn that nothing they wrote exists.
       try { if (sqlite.isTransaction) sqlite.exec('ROLLBACK'); } finally { if (!asSnapshot) report('rollback'); }
       throw err;
@@ -193,21 +174,18 @@ export function openStore(dataDir, { tableBacked = null } = {}) {
 
   /**
    * An explicit UNIT OF WORK: run `work()` so that every repository row write
-   * it performs, every facet change, every in-memory blob mutation and the
-   * snapshot save commit or roll back TOGETHER, in one SQLite transaction.
+   * it performs, and the staged repositories' flush, commit or roll back
+   * TOGETHER, in one SQLite transaction.
    *
    * Contract (different from an ordinary save, on purpose):
-   *  - On any failure — inside `work`, in a flush, in a blob write, at COMMIT —
-   *    the transaction is rolled back AND memory is restored to the state it had
-   *    when the unit began: every blob collection, every record, every nested
-   *    array and object is put back IN PLACE (repositories/memento.mjs), so
-   *    references callers hold stay valid and show the pre-operation values;
-   *    each participating repository restores its own records, views and
-   *    change tracking. A later ordinary save therefore persists NO fragment of
+   *  - On any failure — inside `work`, in a flush, at COMMIT — the transaction
+   *    is rolled back and each participating repository restores its own
+   *    in-memory records, views and change tracking to the state they had when
+   *    the unit began. A later ordinary save therefore persists NO fragment of
    *    the failed operation. Retrying means calling `unitOfWork` again with the
    *    whole operation. The error carries `unitOfWork = 'rolled_back'`.
    *  - Edits that were pending BEFORE the unit began (an unsaved facet change,
-   *    an unsaved blob edit) are part of the restored state: they stay in
+   *    a staged write) are part of the restored state: they stay in
    *    memory, still pending, exactly as an ordinary save failure leaves them.
    *  - `work` must be synchronous: a SQLite transaction never spans an await
    *    or a network call. An `async function` is identifiable and is REFUSED
@@ -224,24 +202,21 @@ export function openStore(dataDir, { tableBacked = null } = {}) {
    *    caller catches the error: the outer unit then fails at its end with the
    *    inner error as `cause`, and everything is rolled back and restored.
    *    A unit cannot start inside a foreign open transaction.
-   *  - `save()` called inside a unit is absorbed: the unit's commit writes the
-   *    blobs once. `afterCommit(fn)` defers a side effect (a broadcast, a push)
+   *  - `save()` called inside a unit is absorbed: the unit's commit flushes
+   *    once. `afterCommit(fn)` defers a side effect (a broadcast, a push)
    *    until COMMIT returned; a side effect never fails the operation: a
    *    synchronous throw or a rejected returned promise is counted and
    *    reported (`unitOfWorkState()`), and is NOT a rollback — the data is
    *    committed. Later callbacks still run. Outside a unit `afterCommit`
    *    runs the callback immediately, observed the same way.
    *  - Setup and teardown are exception-safe: a failed BEGIN opens no unit and
-   *    runs no work; a failing cleanup step (ROLLBACK, the memento, a
-   *    participant's restore) is recorded (`restoreFailures`, attached to the
+   *    runs no work; a failing cleanup step (ROLLBACK, a participant's
+   *    restore) is recorded (`restoreFailures`, attached to the
    *    error as `unitOfWorkCleanup`) and still closes the unit.
    *  - Participants are the registered save hooks that implement
    *    `snapshotState()` / `restoreState()`; a repository without them must
    *    refuse writes while a unit is open (`store.unit.active()`), or its
    *    bookkeeping would survive a rollback.
-   * `snapshot()` supplies `{ savedAt, idCounter, db }` for the blob write and
-   * `db` is the root of the memento (table-backed collections on it are views
-   * and are skipped; their repositories restore themselves).
    */
   const asyncRefusal = (kind, nested) => new TypeError(`a unit of work must be synchronous: the ${nested ? 'nested ' : ''}work is an ${kind} and was not invoked (a SQLite transaction never spans an await; nothing of it ran)`);
   const thenableRefusal = () => new Error('a unit of work must be synchronous: the work returned a promise/thenable, so the unit was rolled back; its continuation is not cancelled and whatever it does later happens outside any unit (counted in unitOfWorkState().strayAsyncWork)');
@@ -261,12 +236,11 @@ export function openStore(dataDir, { tableBacked = null } = {}) {
   }
 
   /** Close a failed unit: ROLLBACK, restore memory and the participants, tell the hooks — each step attempted even when another fails, and the unit is closed whatever happens. */
-  function abort(memento, states, err) {
+  function abort(states, err) {
     const cleanup = [];
     const attempt = (label, fn) => { try { fn(); } catch (e) { cleanup.push(`${label}: ${String(e?.message ?? e).slice(0, 200)}`); } };
     try {
       attempt('ROLLBACK', () => { if (sqlite.isTransaction) sqlite.exec('ROLLBACK'); });
-      attempt('memento', () => restoreGraph(memento));
       hooks.forEach((hook, i) => { if (hook.restoreState) attempt(`participant ${i} restoreState`, () => hook.restoreState(states[i])); });
       attempt('hooks rollback', () => report('rollback'));
     } finally {
@@ -283,15 +257,13 @@ export function openStore(dataDir, { tableBacked = null } = {}) {
     }
   }
 
-  function unitOfWork(work, { snapshot } = {}) {
+  function unitOfWork(work) {
     if (!serverMode) throw new Error('unitOfWork is a server mode operation; a snapshot tool writes whole snapshots with save()');
-    if (typeof work !== 'function' || typeof snapshot !== 'function') throw new TypeError('unitOfWork(work, { snapshot }) needs a synchronous work function and a snapshot provider');
+    if (typeof work !== 'function') throw new TypeError('unitOfWork(work) needs a synchronous work function');
     if (unit) return runJoined(work); // nested: join the enclosing unit
     if (sqlite.isTransaction) throw new Error('a unit of work cannot start inside an open transaction');
     const kind = asyncKind(work);
     if (kind) throw asyncRefusal(kind, false); // before anything is captured or begun: nothing to undo
-    const before = snapshot();
-    const memento = captureGraph([before.db]);
     const states = hooks.map((hook) => (hook.snapshotState ? hook.snapshotState() : null));
     // BEGIN first: if it fails, no unit was ever open, the work does not run and
     // the error propagates as it is (nothing to roll back or restore). IMMEDIATE,
@@ -303,10 +275,10 @@ export function openStore(dataDir, { tableBacked = null } = {}) {
       result = work();
       if (isThenable(result)) { observeStrayAsync(result); throw thenableRefusal(); }
       if (unit.failure) throw new Error(`the unit of work cannot commit: a nested (joined) unit failed inside it and its caller swallowed the error — ${String(unit.failure?.message ?? unit.failure).slice(0, 200)}`, { cause: unit.failure });
-      writeBody(snapshot(), { asSnapshot: false });
+      writeBody(null, { asSnapshot: false });
       sqlite.exec('COMMIT');
     } catch (err) {
-      abort(memento, states, err);
+      abort(states, err);
       throw err;
     }
     const deferred = unit.afterCommit;
@@ -325,24 +297,15 @@ export function openStore(dataDir, { tableBacked = null } = {}) {
       else if (hook && (typeof hook.flush === 'function' || typeof hook.snapshotState === 'function')) hooks.push(hook);
       else throw new TypeError('a save hook is { flush?, commit?, rollback?, snapshotState?, restoreState? } with a flush or a snapshotState, or a flush function');
     },
+    /** Snapshot mode: every table-backed collection, as plain arrays in the shape the server sees, and the id counter. */
     load() {
-      const rows = sqlite.prepare('SELECT name, value FROM collections').all();
-      // "Never saved" is the absence of blob rows AND of a save record: since
-      // S4a every core collection can live in a table, so a database whose
-      // only collections are table-backed has no blob row at all yet was saved.
-      const everSaved = !!sqlite.prepare('SELECT 1 FROM meta WHERE key IN (?, ?) LIMIT 1').get('savedAt', 'saveSeq');
-      if (rows.length === 0 && !everSaved) return null; // a first installation: the caller runs from its seed
-      const db = {};
-      for (const row of rows) db[row.name] = JSON.parse(row.value);
-      if (!serverMode) Object.assign(db, readTableBacked(sqlite));
-      const idCounter = Number(sqlite.prepare('SELECT value FROM meta WHERE key = ?').get('idCounter')?.value) || 0;
-      const savedAt = Number(sqlite.prepare('SELECT value FROM meta WHERE key = ?').get('savedAt')?.value) || null;
-      const saveSeq = Number(sqlite.prepare('SELECT value FROM meta WHERE key = ?').get('saveSeq')?.value) || 0;
-      return { db, idCounter, savedAt, saveSeq };
+      if (serverMode) throw new Error('load is a snapshot mode operation; the server reads through its repositories');
+      const idCounter = Number(sqlite.prepare("SELECT value FROM counters WHERE name = 'id'").get()?.value) || 0;
+      return { db: readTableBacked(sqlite), idCounter };
     },
     /**
      * Write a consistent copy of the whole database to `file` (VACUUM INTO): every
-     * table and every remaining blob, as committed. This is the backup format; a
+     * table, as committed. This is the backup format; a
      * restore boots a new, empty DATA_DIR holding the copy. Refused inside an open
      * transaction (a unit of work), whose writes are not committed yet.
      */
@@ -351,8 +314,6 @@ export function openStore(dataDir, { tableBacked = null } = {}) {
       if (fs.existsSync(file)) throw new Error(`copyTo: ${file} already exists`);
       sqlite.prepare('VACUUM INTO ?').run(file);
     },
-    /** The persisted save revision: incremented by every save of the snapshot, in either mode. */
-    revision() { return Number(readSaveSeq.get('saveSeq')?.value) || 0; },
     /**
      * TEST SEAM (reached only through the development fault layer, see
      * server.mjs `unit`): make the REAL COMMIT of the open transaction fail. A
@@ -368,8 +329,11 @@ export function openStore(dataDir, { tableBacked = null } = {}) {
       sqlite.exec('CREATE TABLE fault_commit_parent (id TEXT PRIMARY KEY); CREATE TABLE fault_commit_child (parent_id TEXT NOT NULL REFERENCES fault_commit_parent(id))');
       sqlite.prepare('INSERT INTO fault_commit_child (parent_id) VALUES (?)').run('missing-on-purpose');
     },
-    /** An ordinary save. Inside an open unit of work it is absorbed: the unit's commit writes the blobs once. */
-    save(snapshot) { if (unit) return; write(snapshot, { asSnapshot: !serverMode }); },
+    /**
+     * Server mode: flush the staged repositories (no argument). Snapshot mode: write `{ db, idCounter }` into the
+     * tables. Inside an open unit of work it is absorbed: the unit's commit flushes once.
+     */
+    save(snapshot = null) { if (unit) return; write(snapshot, { asSnapshot: !serverMode }); },
     unitOfWork,
     /**
      * The participant API for repositories. `active()`: whether a unit of work

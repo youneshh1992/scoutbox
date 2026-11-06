@@ -26,6 +26,7 @@ import { fileURLToPath } from 'node:url';
 import { buildSeed } from './seed.mjs';
 import { openStore } from './store.mjs';
 import { attachDataLayer, TABLE_BACKED } from './repositories/index.mjs';
+import { createIdCounter } from './repositories/counters.mjs';
 import { GRASSROOTS_LIMITS, boxAround } from './repositories/grassroots.mjs';
 import { CLUB_SETUP_LIMITS, LOOKING_FOR_POSITIONS } from './repositories/clubSetup.mjs';
 import { TRANSITION_LIMITS, vouchCodeHash } from './repositories/transitionsVouches.mjs';
@@ -42,7 +43,7 @@ import { registerSavedSearches } from './domains/discovery/savedSearches.mjs';
 import { removeUploadChunks } from './domains/media/uploads.mjs';
 import { registerAnalytics } from './m20/index.mjs';
 import { registerDevelopment } from './domains/development/hub/index.mjs';
-import { registerM23, migrateM23 } from './domains/recruitment/lifecycle/index.mjs';
+import { registerM23 } from './domains/recruitment/lifecycle/index.mjs';
 import { registerAgent } from './domains/agents/core/index.mjs';
 import { registerCompliance } from './domains/agents/compliance/index.mjs';
 import { registerTransactions } from './domains/agents/transactions/index.mjs';
@@ -60,7 +61,6 @@ import { buildCapabilityReport, demoSeedEnabled, devLoginsEnabled, productionCon
 import { isLeadRole } from './roles.mjs';
 import { parseTrustProxy } from './httpTrust.mjs';
 import { minimizePayload, assertEventRegistry, EVENT_NAMES } from './domains/platform/eventRegistry.mjs';
-import { runMigrations, schemaReport, SCHEMA_VERSION } from './domains/platform/migrations.mjs';
 import { registerNotificationPrefs } from './domains/platform/notificationPrefs.mjs';
 import { registerAudit } from './domains/platform/audit.mjs';
 import { createFaultLayer } from './domains/platform/faults.mjs';
@@ -123,43 +123,17 @@ function dateOnlyOrRefuse(res, value, field) {
 }
 
 const PORT = process.env.PORT || 4000;
-const db = buildSeed({ demo: demoSeedEnabled() });
+// `db` holds the read-only views of the repositories that still keep a mirror (the staged ones, see
+// repositories/index.mjs) and a throwing name for every retired collection. It holds no data of its own.
+const db = {};
 
 // ------------------------------------------------------------- persistence
-// SQLite-backed snapshot store (store.mjs): the working set stays in memory,
-// every save is an atomic transaction into data/scoutbox.db. Saves are
-// debounced and flushed on shutdown.
-// DATA_DIR override keeps destructive tests on isolated throwaway databases.
+// One SQLite file, data/scoutbox.db (store.mjs). DATA_DIR override keeps destructive tests on isolated throwaway
+// databases. The staged repositories' writes land at the next save, debounced and flushed on shutdown.
 const DATA_DIR = process.env.DATA_DIR
   ? path.resolve(process.env.DATA_DIR)
   : path.join(path.dirname(fileURLToPath(import.meta.url)), 'data');
 const store = openStore(DATA_DIR, { tableBacked: TABLE_BACKED });
-let snapshotLoaded = false;
-let snapshotIdCounter = 0; // applied when the id counter initialises below
-
-function loadSnapshot() {
-  try {
-    const raw = store.load();
-    // `null` means nothing was ever saved here: a first
-    // installation, run from the seed. Anything else is a saved snapshot and is
-    // never mistaken for a new installation — since S4a the players and
-    // guardians are table-backed and are NOT in the blobs, so their absence
-    // says nothing; the identity repositories decide authority from the cutover
-    // record and the explicit initialisation state (repositories/identity.mjs).
-    // A snapshot that carries a players collection that is not an array is a
-    // malformed file and is refused loudly, never read as "no snapshot".
-    if (!raw) return;
-    if (raw.db?.players !== undefined && !Array.isArray(raw.db.players)) throw Object.assign(new Error(`SNAPSHOT_INVALID: the saved players collection is ${raw.db.players === null ? 'null' : typeof raw.db.players}, not an array; refusing to run from the seed over a saved snapshot`), { code: 'SNAPSHOT_INVALID' });
-    for (const key of Object.keys(db)) delete db[key];
-    Object.assign(db, raw.db);
-    snapshotIdCounter = Number(raw.idCounter) || 0;
-    snapshotLoaded = true;
-    console.log(`snapshot loaded (${store.engine}): ${Array.isArray(db.players) ? `${db.players.length} players in the blob` : 'players table-backed'}, ${Array.isArray(db.ledger) ? `${db.ledger.length} ledger rows in the blob` : 'ledger table-backed'}`);
-  } catch (err) {
-    if (err?.code === 'SNAPSHOT_INVALID') throw err;
-    console.error('snapshot load failed — running from seed:', err.message);
-  }
-}
 
 let saveTimer = null;
 const SAVE_DEBOUNCE_MS = saveDebounceMs(); // 2000 ms; shorter only in a test environment (domains/platform/capabilities.mjs)
@@ -168,9 +142,9 @@ function persist() {
   saveTimer = setTimeout(() => {
     saveTimer = null;
     try {
-      store.save({ savedAt: Date.now(), idCounter: currentIdCounter(), db });
+      store.save();
     } catch (err) {
-      console.error('snapshot save failed:', err.message);
+      console.error('save failed:', err.message);
     }
   }, SAVE_DEBOUNCE_MS);
 }
@@ -178,9 +152,9 @@ function persist() {
 function persistNow() {
   if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
   try {
-    store.save({ savedAt: Date.now(), idCounter: currentIdCounter(), db });
+    store.save();
   } catch (err) {
-    console.error('snapshot save failed:', err.message);
+    console.error('save failed:', err.message);
   }
 }
 
@@ -188,20 +162,10 @@ for (const sig of ['SIGINT', 'SIGTERM']) {
   process.on(sig, () => { persistNow(); process.exit(0); });
 }
 
-loadSnapshot();
-// M18.2 — versioned, idempotent, recorded migrations run against the loaded
-// snapshot BEFORE anything is saved. A failing step throws here and the
-// process exits with the on-disk snapshot untouched; it is never saved as
-// healthy. Module-level `db.x ??= []` defaults still run after this, which is
-// fine: they are the same idempotent shape this registry now records.
-const migrationResult = runMigrations(db, { log: (m) => { if (process.env.M13_QUIET_LOGS !== '1') console.log(m); } });
-if (migrationResult.ran.length) console.log(`schema ${migrationResult.from} → ${migrationResult.to}: applied ${migrationResult.ran.join(', ')}`);
-// The relational data layer (repositories/): table migrations, then each migrated
-// domain's repository takes over its collection. From here on `db.users` is
-// the staff repository's read-only view; writes go through `users`. The id
-// generator is passed lazily because it is initialised further down.
+// The data layer (repositories/): the table migrations, then every domain's repository. A first installation imports
+// the seed's organisations, players and guardians once. The id generator is passed lazily: it needs the counters table.
 const dataLayer = attachDataLayer({
-  db, store, persist,
+  db, seed: buildSeed({ demo: demoSeedEnabled() }), store,
   nextId: (prefix) => nextId(prefix),
   sessionTtlMs: (Number(process.env.SESSION_TTL_DAYS) > 0 ? Number(process.env.SESSION_TTL_DAYS) : 30) * 24 * 3600 * 1000,
   log: (m) => { if (process.env.M13_QUIET_LOGS !== '1') console.log(m); },
@@ -241,9 +205,9 @@ if (dataLayer.boot.users.imported) console.log(`data layer: ${dataLayer.boot.use
 if (dataLayer.boot.identity.imported) console.log(`data layer: ${dataLayer.boot.identity.players} player(s) and ${dataLayer.boot.identity.guardians} guardian(s) initialised from the first installation's records`);
 
 /**
- * One UNIT OF WORK (store.unitOfWork): every repository row write, facet edit,
- * blob edit and session change inside `work` commits or rolls back together,
- * memory included; a side effect registered with store.afterCommit runs only
+ * One UNIT OF WORK (store.unitOfWork): every repository row write, facet edit
+ * and session change inside `work` commits or rolls back together, the
+ * repositories' memory included; a side effect registered with store.afterCommit runs only
  * after COMMIT. `work` must be synchronous — prepare asynchronous things
  * before, publish after.
  */
@@ -257,87 +221,36 @@ function unit(work) {
     // `internal:unit.sqlite_commit`: the REAL COMMIT of this unit fails (store.failCommitOfOpenTransaction).
     if (seams.shouldFail('unit.sqlite_commit')) store.failCommitOfOpenTransaction();
     return result;
-  }, { snapshot: () => ({ savedAt: Date.now(), idCounter: currentIdCounter(), db }) });
+  });
 }
 /** A named seam inside a unit: throws when a development fault rule names it, so the rollback path is proven with a real failure after a real write. */
 function seam(step) {
   if (seams.shouldFail(step)) throw new Error(`simulated failure at ${step} (development fault layer)`);
 }
-// Sessions are table-backed (S2): rows carry hashed tokens and a sid; there is
-// nothing to backfill on the in-memory copy, which is a read-only view now.
-
 // M18.2 — integrity is reported at boot, never repaired. A violation is
 // logged as codes and ids (no names) and counted on /capabilities; the
 // process still starts, because a running server that says "two open Rooms
 // for one player" is more useful than a dead one that says nothing.
-// Runs AFTER the data layer attached (S3): `db.orgs` is a table-backed view
-// from here on, so a report taken earlier would see no organisations on any
-// boot after the cutover and call every Room an orphan.
 const integrity = integrityReport(db, { cases: recruitmentCases.cases.withRoom() });
 for (const v of integrity.violations) console.error(`INTEGRITY ${v.code} key=${v.key} ids=${v.ids.join(',')}`);
-if (integrity.violations.length) console.error(`INTEGRITY ${integrity.violations.length} violation(s) in the loaded snapshot — nothing was repaired.`);
-// M23-D2 — a required collection absent AFTER migrations means the registry
-// did not run or a step was removed. Reported loudly and never repaired here:
-// creating it at this point would mask which of those two happened.
-if (!integrity.stores.ok) {
-  console.error(`INTEGRITY STORE_MISSING ${integrity.stores.missing.join(', ')} — required collection(s) absent after migration; nothing was repaired.`);
-}
-
-// Player defaults (firstTeamSeeker, notificationPrefs, programme) are set when a player is created
-// (repositories/identity.mjs PLAYER_CREATION_DEFAULTS); a media item reads back from its row with every field. No boot
-// pass over the players (migration.md §4.3.1).
-// Saved searches are a table of repositories/operations.mjs since S13e (domains/discovery/savedSearches.mjs).
-// db.signings: no db collection since §4.3 step 2 — the signings repository's queries (signingsFollowUps.signings.*).
-// db.pairingCodes: the data layer's hash-free read-only view since S6a (rows of pairing_codes; repositories/oneTimeCodes.mjs) — never assigned here.
-// db.notifications, db.notificationPrefs: the data layer's read-only views since S7a (rows of notifications / notification_prefs; repositories/notifications.mjs) — never assigned here; writes go through `notifications`.
-db.sessions ??= [];        // bearer-token sessions (all roles): already the data layer's read-only view since S2, so this never assigns; kept as the store's inventory line
-// S7c: db.outbox, db.pushLog and db.pushTokens are read-only views over the
-// outbox / push_log / push_tokens tables (repositories/outboxPush.mjs, migration
-// 0011) since attachDataLayer ran above; the three `??=` below are no-ops on
-// this build and stay as the containers every earlier build created.
-db.outbox ??= [];          // mailer dev transport (+ delivery audit when live)
-db.pushLog ??= [];         // push dev transport (+ delivery audit when live)
-db.pushTokens ??= [];      // device push tokens, registered per user
-// S7d: db.channels is a read-only view over the channels / messages /
-// message_attachments tables (repositories/channels.mjs, migration 0012) since
-// attachDataLayer ran above — never assigned here; writes go through `channels`
-// (openChannel, postMessage, the receipt routes, deletePlayerData).
-// S6b: db.blocks, db.reports, db.moderationLog, db.orgNotes, db.ledger,
-// db.opsEvents, db.sourceChanges and db.idvQueue are read-only views over the
-// blocks / reports / moderation_log / org_notes / ledger / ops_events /
-// source_changes / idv_queue tables (repositories/safetyAudit.mjs, migration
-// 0013) since attachDataLayer ran above — never assigned here; writes go through
-// `safetyAudit` (ledgerAppend, moderateOrRefuse, handleReport, the block, note,
-// IDV, resolve and lift routes, the m13 ops events and m181's source changes).
-// Invoices, upload sessions and the delivery centre's bookkeeping are tables of repositories/operations.mjs since S13e.
-// db.emailChallenges: the data layer's hash-free read-only view since S6a (rows of email_challenges) — never assigned here.
-// Open days, match days and friendlies are tables of repositories/grassroots.mjs since S13d (grassrootsReads).
-// Coach references (vouches) are a table of repositories/transitionsVouches.mjs since S10c (verificationReads.vouches).
-db.mediaBlobs ??= {};
-// S9c: a club's squad is rows of org_squad_members (repositories/clubSetup.mjs), not an organisation facet.
+if (integrity.violations.length) console.error(`INTEGRITY ${integrity.violations.length} violation(s) in the database — nothing was repaired.`);
 
 // ---------------------------------------------------- production adapters
-// S7c: the records go through the repositories (staged into the next save, as
-// the blob entries were); the provider calls, the `secrets` withholding, the
-// dev full-text memory and `nextId`'s persist() are unchanged.
+// The mail, push and invoice records go through their repositories; the provider calls happen here.
 const mailer = createMailer(db, (p) => nextId(p), { outbox });
 const pushSender = createPushSender(db, (p) => nextId(p), { pushLog, pushTokens });
 const idv = createIdvProvider();
 const billing = createBilling({ invoices: operations.invoices, nextId: (p) => nextId(p) });
 const storage = createStorage(DATA_DIR);
 
-// Media blobs migrate out of the database onto object storage (local disk in
-// dev). The db keeps only ids; /media/:id streams from storage.
-for (const [id, blob] of Object.entries(db.mediaBlobs)) {
-  if (blob?.dataUrl) storage.saveDataUrl(id, blob.dataUrl);
-}
+// Media bytes live on object storage (local disk in dev); the database keeps only ids and /media/:id streams them.
 // Media files whose removal was committed but not completed (a crash between
 // COMMIT and the unlink, a storage error): retried at boot and every minute.
 mediaDeletions.process(storage);
 setInterval(() => { try { mediaDeletions.process(storage); } catch (err) { console.error(`media deletions sweep failed: ${err?.message ?? err}`); } }, 60_000).unref();
-db.mediaBlobs = {};
 
-if (!snapshotLoaded) {
+// A first installation gets the demo players' sample clips.
+if (dataLayer.firstInstallation) {
   const ASSETS_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), 'assets');
   const SAMPLE_CLIPS = [
     { file: 'clip-sprint.webm', playerId: 'pl-adeyemi', title: 'Sprint & finishing session', verify: true },
@@ -411,7 +324,7 @@ app.use((_req, res, next) => {
 // accident.
 // M18.2 — the HTTP contract wraps res.json BEFORE the body parser, so a
 // malformed-body 400 carries the same retry/schema headers as every other error.
-app.use(httpContractMiddleware({ ratePolicy: RATE_LIMIT_POLICY, schemaVersion: () => db.schema?.version ?? 0 }));
+app.use(httpContractMiddleware({ ratePolicy: RATE_LIMIT_POLICY, schemaVersion: () => dataLayer.schemaVersion() }));
 app.use(express.json({ limit: '20mb' }));
 // M18.2 — the HTTP contract headers (Retry-After on 429, retryability on every
 // error, the schema version on every response) and the development-only
@@ -693,12 +606,12 @@ app.get('/events', (req, res) => {
 });
 
 // ------------------------------------------------------------------ helpers
-let idCounter = Math.max(1000, snapshotIdCounter);
+// The id counter is a row of `counters` (repositories/counters.mjs), written through at every mint.
+const idCounter = createIdCounter({ sqlite: store.sqlite });
 const nextId = (prefix) => {
-  persist(); // any id mint means state changed somewhere
-  return `${prefix}-${++idCounter}`;
+  persist(); // any id mint means state changed somewhere: a staged repository's write lands at the next save
+  return `${prefix}-${idCounter.next()}`;
 };
-function currentIdCounter() { return idCounter; }
 
 function orgSafe(o) {
   const { password: _pw, ...safe } = o;
@@ -4535,7 +4448,7 @@ adminRouter.get('/overview', (_req, res) => {
     sessions: sessions.count(),
     storageEngine: store.engine,
     groomingEscalations: db.moderationLog.filter((m) => m.severity === 'grooming').length,
-    persisted: snapshotLoaded,
+    persisted: true, // every write is in the database (there is no unsaved snapshot since S14a)
   });
 });
 
@@ -4755,10 +4668,11 @@ const m13Ctx = registerM13({
   groups, groupReads, // S13c: group workspaces and group grants are explicit repository writes
   integrations, integrationReads, // S13a: imports, prospects, identity reviews, API keys and webhooks are explicit repository writes
   operations, // S13e: the delivery centre's callback ids, start and injected failures are explicit repository writes
+  schemaVersion: () => dataLayer.schemaVersion(),
   findPlayer, isBlocked, moderateOrRefuse, playerViewForOrg, sessionFor,
   storage, mailer, orgSafe, recordActivity, revokeOrgUserAccess,
   grassrootsOrgOnly, guardianManagedOnly, safeguardingCertified,
-  createSession, currentIdCounter, DATA_DIR, backupDatabase: (file) => store.copyTo(file),
+  createSession, DATA_DIR, backupDatabase: (file) => store.copyTo(file),
 });
 
 // ------------------------------------------------------------ Milestone 14
@@ -4773,7 +4687,7 @@ const m14Ctx = registerM14({
   findPlayer, isBlocked, moderateOrRefuse, playerViewForOrg, sessionFor,
   storage, mailer, orgSafe, recordActivity, revokeOrgUserAccess,
   grassrootsOrgOnly, guardianManagedOnly, safeguardingCertified,
-  createSession, currentIdCounter, DATA_DIR,
+  createSession, DATA_DIR,
 });
 
 // M18.1 — canonical source-change events. Registered before the systems that
@@ -4945,7 +4859,6 @@ void m21Ctx;
 // projection over the records that already exist. It writes status only
 // through M17's single writer (ctx.applyLifecycleTransition), so `case.stage`
 // and `room.status` still cannot disagree, and it stores nothing of its own.
-migrateM23(db);
 
 // The evidence provider is attached to the M17 context as well as handed to
 // M23, because M17's own status route can name an evidence-bearing status. One
@@ -5164,7 +5077,7 @@ app.get('/capabilities', (_req, res) => {
     trustProxy: TRUST_PROXY,
     // M18.2 — states only, as before. Counts are counts, never subjects.
     extra: {
-      schema: schemaReport(db),
+      schema: dataLayer.schemaReport(),
       dataLayer: { ...dataLayer.report(), note: 'Collections that have moved from the snapshot blob into tables of their own. Counts are counts, never subjects.' },
       integrity: { ...integritySummary(integrity), note: 'Checked once at boot; violations are reported, never repaired.' },
       events: {
@@ -5314,5 +5227,5 @@ app.use((err, req, res, _next) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`scoutbox-server listening on :${PORT} — ${db.players.length} players, ${db.orgs.length} orgs seeded`);
+  console.log(`scoutbox-server listening on :${PORT} — ${db.players.length} players, ${db.orgs.length} orgs`);
 });

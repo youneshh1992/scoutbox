@@ -30,7 +30,7 @@ import {
   ALL_REASON_CODES,
 } from '../../domains/recruitment/rooms/shared.mjs';
 import { M23_ERROR_HTTP, httpStatusFor, publicErrorBody } from '../../domains/recruitment/lifecycle/errors.mjs';
-import { guaranteeFor, MIGRATION_GUARANTEED, MODULE_GUARANTEED } from '../../storeContract.mjs';
+import { DATA_MIGRATIONS, TABLE_BACKED } from '../../repositories/index.mjs';
 import { FUNNEL_STAGES, stagesReached } from '../../m20/funnels.mjs';
 import { buildRecruitmentJourney, createEvidenceProvider } from '../../scripts/recruitmentReadsFixture.mjs'; // §4.3 step 2: the contacts/offers queries over the plain arrays
 
@@ -1566,17 +1566,13 @@ section('Z — what P2 deliberately does NOT ship, asserted rather than assumed'
   const jz = await j('GET', `/org/rooms/${ROOM}/journey`, undefined, maria.token);
   ok(jz.status === 200, 'Z1 the journey projects with no offers store present at all');
 
-  // M23 P6 shipped the canonical Offer store. The classification P2 reserved
-  // ('optional': "we cannot answer that yet") is now 'module', owned by m28
-  // and created at registration — NOT by a migration, so the schema stays at
-  // 2307 and no lifecycle state is reinterpreted as an Offer (P6 §4, §60).
-  // §4.3 step 2 (rewritten: Z2–Z4 described the old storage). The offers are rows of their tables, read through SQL;
-  // there is no db.recruitmentOffers to classify, and the journey's offers stay optional through its `reads`.
-  ok(guaranteeFor('recruitmentOffers') === null,
-    'Z2 the store contract has no db collection for the offers (a table since 0017, read through SQL)');
-  neg(MIGRATION_GUARANTEED.includes('recruitmentOffers') === false
-    && MODULE_GUARANTEED.includes('recruitmentOffers') === false,
-  'Z3 and neither the migration registry nor a module creates one, so the schema did not move for it');
+  // M23 P6 shipped the canonical Offer; no lifecycle state is reinterpreted as an Offer (P6 §4, §60). The offers are
+  // rows of their tables, read through SQL, and the journey's offers stay optional through its `reads`.
+  // Z2–Z3 rewritten in S14a: they read the store contract (the blob's collection classifications).
+  ok(TABLE_BACKED.includes('recruitmentOffers'),
+    'Z2 the offers are a table (since 0017), read through SQL');
+  neg(DATA_MIGRATIONS.filter((m) => /offer/i.test(m.id)).map((m) => m.id).join() === '0017_recruitment_contacts_offers',
+  'Z3 and no other migration was added for them');
   const noOffers = buildRecruitmentJourney({ recruitmentCases: [{ id: 'z-case', orgId: 'o1', playerId: 'p1', room: { status: 'shortlisted' }, history: [] }], roomDecisions: [], requests: [], trials: [], assessments: [], signings: [], recruitmentContacts: [] }, 'z-case', { kind: 'org_staff', orgId: 'o1', role: 'room_lead' });
   neg(JOURNEY_REQUIRED_STORES.includes('recruitmentOffers') === false
     && noOffers.ok === true && noOffers.offer?.available === false,

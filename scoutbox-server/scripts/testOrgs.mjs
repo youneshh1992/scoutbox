@@ -14,6 +14,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { runDataMigrations, transaction } from '../repositories/database.mjs';
 import { createOrgsRepository, validateOrgRecord, toRow, fromRow, ORGS_TABLE, ORGS_CUTOVER_MIGRATION, MIGRATED_KEYS } from '../repositories/orgs.mjs';
 import { attachDataLayer, DATA_MIGRATIONS, TABLE_BACKED } from '../repositories/index.mjs';
+import { hasBlobTable } from './coreIdentityTestFixtures.mjs';
 import * as m0001 from '../repositories/migrations/0001_org_users.mjs';
 import * as m0002 from '../repositories/migrations/0002_core_identity_shadow.mjs';
 import * as m0003 from '../repositories/migrations/0003_sessions_live.mjs';
@@ -41,6 +42,8 @@ let counter = 9000;
 const nextId = (p) => `${p}-${++counter}`;
 const tempDir = (tag) => fs.mkdtempSync(path.join(os.tmpdir(), `sb-${tag}-`));
 const openRaw = (dir) => { const s = new DatabaseSync(path.join(dir, 'scoutbox.db')); s.exec('PRAGMA foreign_keys = ON;'); return s; };
+/** Every table's rows: "nothing was written" is "the dump did not change". */
+const dump = (sqlite) => Object.fromEntries(sqlite.prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").all().map(({ name }) => [name, sqlite.prepare(`SELECT * FROM "${name}" ORDER BY rowid`).all().map((r) => ({ ...r }))]));
 const fileDigest = (dir) => { const s = new DatabaseSync(path.join(dir, 'scoutbox.db')); s.exec('PRAGMA wal_checkpoint(TRUNCATE)'); s.close(); return sha256(fs.readFileSync(path.join(dir, 'scoutbox.db'))); };
 
 /** Organisation records in every shape the application writes. */
@@ -156,9 +159,9 @@ test('migration 0004 on a new database: org_users is rebuilt STRICT with the org
 test('repository: insert and update write migrated fields immediately; a migrated field on the view throws; facet fields are mutable in place and persisted by flush, atomically with a save', () => {
   const dir = tempDir('s3-repo');
   let store = openStore(dir, { tableBacked: TABLE_BACKED });
-  const db = { orgs: ORGS(), guardians: [], players: [PLAYER_1()], sessions: [], users: [] };
-  let layer = attachDataLayer({ db, store, nextId, persist: () => {}, sessionTtlMs: TTL });
-  assert.deepEqual(layer.boot.orgs, { engine: 'sqlite', loaded: 3, imported: 3 }, 'a first boot imports the in-memory records (seed / fixture)');
+  const db = {};
+  let layer = attachDataLayer({ db, seed: { orgs: ORGS(), guardians: [], players: [PLAYER_1()] }, store, nextId, persist: () => {}, sessionTtlMs: TTL });
+  assert.deepEqual(layer.boot.orgs, { engine: 'sqlite', loaded: 3, imported: 3 }, 'a first boot imports the seed');
   assert.equal(db.orgs.length, 3);
   assert.equal(JSON.stringify(db.orgs), JSON.stringify(ORGS()), 'the view renders the records exactly');
   // Migrated fields: refused on the view, written through update.
@@ -188,12 +191,12 @@ test('repository: insert and update write migrated fields immediately; a migrate
   grass.tags = ['GK'];
   delete grass.memos;
   assert.equal(JSON.parse(store.sqlite.prepare("SELECT facets_json FROM orgs WHERE id = 'org-pro'").get().facets_json).memos.length, 0, 'not yet persisted');
-  store.save({ savedAt: 2, idCounter: 1000, db });
+  store.save();
   layer.orgs.update('org-pro', { verificationRevokedAt: 123 }); // a scalar column since S10a
   const facets = JSON.parse(store.sqlite.prepare("SELECT facets_json FROM orgs WHERE id = 'org-pro'").get().facets_json);
   assert.equal(facets.memos.length, 1); assert.deepEqual(facets.agencyNotes, { formation: '4-3-3' });
   assert.equal(store.sqlite.prepare("SELECT verification_revoked_at FROM orgs WHERE id = 'org-pro'").get().verification_revoked_at, 123, 'the revocation is the column');
-  assert.equal(store.sqlite.prepare("SELECT COUNT(*) AS n FROM collections WHERE name = 'orgs'").get().n, 0, 'no blob');
+  assert.equal(hasBlobTable(store.sqlite), false, 'no blob (rewritten in S14a: there is no blob table)');
   // Insert: a new organisation is a row from the first byte.
   const created = layer.orgs.insert({ id: 'org-new', name: 'New FC', type: 'club', level: 'grassroots', location: { lat: 1, lng: 2, city: '' }, federationRef: { federation: 'FA', registrationId: 'R' }, plan: 'Grassroots', trustedPartner: false, country: 'GB', verified: false, verifiedDomain: null, safeguardingContractSigned: false });
   assert.equal(db.orgs.length, 4); assert.equal(db.orgs[3], created); assert.equal(layer.orgs.byId('org-new'), created);
@@ -203,7 +206,7 @@ test('repository: insert and update write migrated fields immediately; a migrate
   store.sqlite.close();
   // Restart: scalar changes and facet changes come back together.
   store = openStore(dir, { tableBacked: TABLE_BACKED });
-  const db2 = { orgs: [], guardians: [], players: [], sessions: [], users: [] };
+  const db2 = {};
   layer = attachDataLayer({ db: db2, store, nextId, persist: () => {}, sessionTtlMs: TTL });
   assert.deepEqual(layer.boot.orgs, { engine: 'sqlite', loaded: 4, imported: 0 });
   const pro2 = db2.orgs.find((o) => o.id === 'org-pro');
@@ -237,23 +240,25 @@ test('repository: authority is the cutover record — attach refuses without it;
 test('facet change tracking reflects committed state only — a save that fails after the flush, inside the flush or at commit leaves every pending change eligible for retry; the retry persists them and a restart reads them', () => {
   const dir = tempDir('s3-c1');
   let store = openStore(dir, { tableBacked: TABLE_BACKED });
-  const db = { orgs: ORGS(), guardians: [], players: [PLAYER_1()], sessions: [], users: [] };
-  attachDataLayer({ db, store, nextId, persist: () => {}, sessionTtlMs: TTL });
-  store.save({ savedAt: 1, idCounter: 1000, db });
+  const db = {};
+  attachDataLayer({ db, seed: { orgs: ORGS(), guardians: [], players: [PLAYER_1()] }, store, nextId, persist: () => {}, sessionTtlMs: TTL });
+  // A later write of the same save that fails once on request (rewritten in S14a: this was an unserialisable blob).
+  let failLater = false;
+  store.setSaveHook({ flush() { if (failLater) { failLater = false; throw new Error('a later write of the save failed'); } } });
+  store.save();
   const facetsOf = (id) => JSON.parse(store.sqlite.prepare('SELECT facets_json FROM orgs WHERE id = ?').get(id).facets_json);
   const pro = db.orgs.find((o) => o.id === 'org-pro');
   const grass = db.orgs.find((o) => o.id === 'org-grass');
   assert.deepEqual(facetsOf('org-pro').memos, []); assert.deepEqual(facetsOf('org-grass').tags, ['ST', 'CB']);
-  // (a) The failure is in a LATER write of the same save: an unrelated collection that cannot be serialised.
+  // (a) The failure is in a LATER write of the same save.
   pro.memos.push({ id: 'sq-1', name: 'A', position: 'ST', playerId: null, source: 'manual', addedAt: 1 });
   grass.tags = ['GK'];
-  db.unrelated = [1n]; // a blob collection JSON cannot serialise
-  assert.throws(() => store.save({ savedAt: 2, idCounter: 1000, db }), /BigInt/);
+  failLater = true;
+  assert.throws(() => store.save(), /a later write of the save failed/);
   assert.equal(store.sqlite.isTransaction, false, 'the transaction was rolled back');
   assert.deepEqual(facetsOf('org-pro').memos, [], 'the flushed memos change was rolled back with the rest of the save');
   assert.deepEqual(facetsOf('org-grass').tags, ['ST', 'CB'], 'so was the second organisation');
-  db.unrelated = [];
-  store.save({ savedAt: 3, idCounter: 1000, db });
+  store.save();
   assert.equal(facetsOf('org-pro').memos.length, 1, 'the retry persists the change the failed save had already flushed');
   assert.deepEqual(facetsOf('org-grass').tags, ['GK'], 'for every organisation that had a pending change');
   // (b) The failure is at COMMIT.
@@ -261,28 +266,29 @@ test('facet change tracking reflects committed state only — a save that fails 
   const exec = store.sqlite.exec.bind(store.sqlite);
   let explodeAtCommit = true;
   store.sqlite.exec = (sql) => { if (explodeAtCommit && sql === 'COMMIT') { explodeAtCommit = false; throw new Error('disk full at commit'); } return exec(sql); };
-  assert.throws(() => store.save({ savedAt: 4, idCounter: 1000, db }), /disk full at commit/);
+  assert.throws(() => store.save(), /disk full at commit/);
   assert.equal(store.sqlite.isTransaction, false);
   assert.equal(facetsOf('org-pro').agencyNotes, null, 'nothing committed');
-  store.save({ savedAt: 5, idCounter: 1000, db });
+  store.save();
   assert.deepEqual(facetsOf('org-pro').agencyNotes, { formation: '4-4-2' }, 'the retry persists the change');
   // (c) The failure is INSIDE the flush, after the first organisation's row was already written in the transaction.
   pro.memos.push({ id: 'sq-2', name: 'B', position: 'GK', playerId: null, source: 'manual', addedAt: 2 });
   grass.agencyNotes = { n: 1n };
-  assert.throws(() => store.save({ savedAt: 6, idCounter: 1000, db }), /BigInt/);
+  assert.throws(() => store.save(), /BigInt/);
   assert.equal(facetsOf('org-pro').memos.length, 1, 'the first organisation\'s UPDATE was rolled back');
   grass.agencyNotes = { n: 1 };
-  store.save({ savedAt: 7, idCounter: 1000, db });
+  store.save();
   assert.equal(facetsOf('org-pro').memos.length, 2); assert.deepEqual(facetsOf('org-grass').agencyNotes, { n: 1 });
   // A save with nothing pending writes no organisation row; a successful save is not re-flushed.
+  // (Rewritten in S14a: this counted the save revision, which is gone; the dump is compared instead.)
   store.sqlite.exec = exec;
-  const seq = store.revision();
-  store.save({ savedAt: 8, idCounter: 1000, db });
-  assert.equal(store.revision(), seq + 1);
+  const quiet = dump(store.sqlite);
+  store.save();
+  assert.deepEqual(dump(store.sqlite), quiet, 'nothing was written');
   store.sqlite.close();
   // Restart: everything the retries persisted is there.
   store = openStore(dir, { tableBacked: TABLE_BACKED });
-  const db2 = { orgs: [], guardians: [], players: [], sessions: [], users: [] };
+  const db2 = {};
   attachDataLayer({ db: db2, store, nextId, persist: () => {}, sessionTtlMs: TTL });
   const pro2 = db2.orgs.find((o) => o.id === 'org-pro'); const grass2 = db2.orgs.find((o) => o.id === 'org-grass');
   assert.deepEqual(pro2.memos.map((m) => m.id), ['sq-1', 'sq-2']); assert.deepEqual(pro2.agencyNotes, { formation: '4-4-2' });
@@ -292,8 +298,8 @@ test('facet change tracking reflects committed state only — a save that fails 
 test('nested migrated fields are protected — assigning, deleting or defining a property inside location or federationRef throws, the view never diverges from the table, and a repository update of a composite persists across a restart', () => {
   const dir = tempDir('s3-c2');
   let store = openStore(dir, { tableBacked: TABLE_BACKED });
-  const db = { orgs: ORGS(), guardians: [], players: [PLAYER_1()], sessions: [], users: [] };
-  let layer = attachDataLayer({ db, store, nextId, persist: () => {}, sessionTtlMs: TTL });
+  const db = {};
+  let layer = attachDataLayer({ db, seed: { orgs: ORGS(), guardians: [], players: [PLAYER_1()] }, store, nextId, persist: () => {}, sessionTtlMs: TTL });
   const pro = db.orgs.find((o) => o.id === 'org-pro');
   const grass = db.orgs.find((o) => o.id === 'org-grass');
   assert.throws(() => { pro.location.lat = 9; }, /organisations repository/);
@@ -302,7 +308,7 @@ test('nested migrated fields are protected — assigning, deleting or defining a
   assert.throws(() => { Object.defineProperty(pro.location, 'lat', { value: 9 }); }, /organisations repository/);
   assert.throws(() => { Object.assign(grass.federationRef, { federation: 'X' }); }, /organisations repository/);
   assert.equal(pro.location.lat, 51.889); assert.equal(pro.location.city, 'Eastport'); assert.equal(grass.federationRef.registrationId, 'LFA-1');
-  store.save({ savedAt: 1, idCounter: 1000, db });
+  store.save();
   assert.equal(store.sqlite.prepare("SELECT lat FROM orgs WHERE id = 'org-pro'").get().lat, 51.889);
   assert.equal(store.sqlite.prepare("SELECT federation_registration_id FROM orgs WHERE id = 'org-grass'").get().federation_registration_id, 'LFA-1');
   assert.equal(JSON.stringify(ORGS_TABLE.read(store.sqlite)), JSON.stringify(db.orgs), 'the view and the table agree record for record');
@@ -319,7 +325,7 @@ test('nested migrated fields are protected — assigning, deleting or defining a
   assert.throws(() => { pro.location.lat = 10; }, /organisations repository/, 'the replaced composite is guarded too');
   store.sqlite.close();
   store = openStore(dir, { tableBacked: TABLE_BACKED });
-  const db2 = { orgs: [], guardians: [], players: [], sessions: [], users: [] };
+  const db2 = {};
   layer = attachDataLayer({ db: db2, store, nextId, persist: () => {}, sessionTtlMs: TTL });
   assert.equal(JSON.stringify(db2.orgs.find((o) => o.id === 'org-pro').location), '{"lat":9,"lng":1.02,"city":"Eastport"}', 'the update survived the restart with the sub-key order kept');
   assert.deepEqual(db2.orgs.find((o) => o.id === 'org-grass').federationRef, { federation: 'London FA', registrationId: 'NEW' });
@@ -341,27 +347,26 @@ test('initialisation is explicit state, never a row count — an empty initialis
   assert.match(warnings[0], /ignored/);
   assert.equal(repo.initState(), 'done', 'the initialisation was recorded');
   s.close();
-  // The same through the data layer with a seed-shaped array, as a server booting from the seed would pass.
+  // The same through the data layer with the seed, as a server booting from the seed would pass.
+  // (S14a: on an initialised file the data layer ignores the seed outright, so there is no stale-array warning.)
   let store = openStore(dirA, { tableBacked: TABLE_BACKED });
-  let db = { orgs: ORGS(), guardians: [], players: [], sessions: [], users: [] };
-  warnings = [];
-  let layer = attachDataLayer({ db, store, nextId, persist: () => {}, sessionTtlMs: TTL, warn: (m) => warnings.push(m) });
+  let db = {};
+  let layer = attachDataLayer({ db, seed: { orgs: ORGS(), guardians: [], players: [] }, store, nextId, persist: () => {}, sessionTtlMs: TTL });
   assert.deepEqual(layer.boot.orgs, { engine: 'sqlite', loaded: 0, imported: 0 }); assert.equal(db.orgs.length, 0);
   assert.equal(store.sqlite.prepare('SELECT COUNT(*) AS n FROM orgs').get().n, 0);
-  assert.match(warnings.join('\n'), /3 organisation\(s\) the table does not hold was ignored/);
   store.sqlite.close(); fs.rmSync(dirA, { recursive: true, force: true });
   // (b) A genuine first installation: nothing was ever saved, so the migration leaves initialisation pending and the seed is imported once.
   const dirB = tempDir('s3-c3b');
   store = openStore(dirB, { tableBacked: TABLE_BACKED });
-  db = { orgs: ORGS(), guardians: [], players: [], sessions: [], users: [] };
-  layer = attachDataLayer({ db, store, nextId, persist: () => {}, sessionTtlMs: TTL });
+  db = {};
+  layer = attachDataLayer({ db, seed: { orgs: ORGS(), guardians: [], players: [] }, store, nextId, persist: () => {}, sessionTtlMs: TTL });
   assert.deepEqual(layer.boot.orgs, { engine: 'sqlite', loaded: 3, imported: 3 });
   assert.equal(layer.orgs.initState(), 'done');
   assert.equal(store.sqlite.prepare("SELECT value FROM meta WHERE key = 'orgsInit'").get().value, 'done');
   store.sqlite.close();
   store = openStore(dirB, { tableBacked: TABLE_BACKED });
-  db = { orgs: ORGS(), guardians: [], players: [], sessions: [], users: [] }; // the seed again: a restart before the first snapshot save
-  layer = attachDataLayer({ db, store, nextId, persist: () => {}, sessionTtlMs: TTL });
+  db = {};
+  layer = attachDataLayer({ db, seed: { orgs: ORGS(), guardians: [], players: [] }, store, nextId, persist: () => {}, sessionTtlMs: TTL });
   assert.deepEqual(layer.boot.orgs, { engine: 'sqlite', loaded: 3, imported: 0 }, 'initialised once, then the table');
   store.sqlite.close(); fs.rmSync(dirB, { recursive: true, force: true });
   // (c) Interrupted initialisation: the rows and the state change are one transaction, so the next boot retries.
@@ -413,7 +418,7 @@ test('initialise refuses a collection that is not an array — an object, null, 
   }
   // The data layer refuses the same way at boot (a malformed seed is a fatal error, not an empty installation).
   const dir = tempDir('s3-init-shape'); const store = openStore(dir, { tableBacked: TABLE_BACKED });
-  assert.throws(() => attachDataLayer({ db: { orgs: { id: 'not-an-array' }, guardians: [], players: [], sessions: [], users: [] }, store, nextId, persist: () => {}, sessionTtlMs: TTL }), /organisations as an array/);
+  assert.throws(() => attachDataLayer({ db: {}, seed: { orgs: { id: 'not-an-array' }, guardians: [], players: [] }, store, nextId, persist: () => {}, sessionTtlMs: TTL }), /organisations as an array/);
   assert.equal(store.sqlite.prepare("SELECT value FROM meta WHERE key = 'orgsInit'").get().value, 'pending');
   store.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
   // A valid retry, and an explicitly empty installation, still work.
@@ -429,22 +434,23 @@ test('initialise refuses a collection that is not an array — an object, null, 
 test('snapshot mode: a fixture saved into a new directory goes into the tables and reads back as the same records; shape and row validation reject the whole save', () => {
   const dir = tempDir('s3-snap');
   let tool = openStore(dir);
-  tool.save({ savedAt: 1, idCounter: 1000, db: { orgs: ORGS(), users: fixtureUsers(), sessions: fixtureSessions(), players: [PLAYER_1()], guardians: [] } });
-  assert.equal(tool.sqlite.prepare("SELECT COUNT(*) AS n FROM collections WHERE name = 'orgs'").get().n, 0, 'no blob');
+  tool.save({ idCounter: 1000, db: { orgs: ORGS(), users: fixtureUsers(), sessions: fixtureSessions(), players: [PLAYER_1()], guardians: [] } });
+  assert.equal(hasBlobTable(tool.sqlite), false, 'no blob');
   assert.equal(tool.sqlite.prepare('SELECT COUNT(*) AS n FROM orgs').get().n, 3);
   tool.sqlite.close();
   let store, layer;
   tool = openStore(dir); let snap = tool.load();
   assert.equal(JSON.stringify(snap.db.orgs), JSON.stringify(ORGS()), 'the table, rendered as the same records');
   const before = tool.load();
+  const beforeDump = dump(tool.sqlite);
   const untouched = () => {
     const now = tool.load();
     assert.equal(JSON.stringify(now.db.orgs), JSON.stringify(before.db.orgs), 'organisations unchanged');
     assert.equal(JSON.stringify(now.db.users), JSON.stringify(before.db.users), 'staff unchanged');
     assert.equal(JSON.stringify(now.db.sessions), JSON.stringify(before.db.sessions), 'sessions unchanged');
     assert.equal(now.db.players[0].name, 'P', 'the unrelated change was rolled back');
-    assert.equal(now.saveSeq, before.saveSeq);
-    assert.equal(tool.sqlite.prepare("SELECT COUNT(*) AS n FROM collections WHERE name = 'orgs'").get().n, 0, 'no blob written');
+    // Rewritten in S14a: these compared the save revision and looked for a blob row.
+    assert.deepEqual(dump(tool.sqlite), beforeDump, 'nothing was written');
   };
   const attempt = (mutate, pattern) => { const x = tool.load(); x.db.players[0].name = 'Changed'; mutate(x); assert.throws(() => tool.save(x), pattern); untouched(); };
   attempt((x) => { x.db.orgs = { id: 'obj' }; }, /orgs: the snapshot collection must be an array/);
@@ -472,7 +478,7 @@ test('snapshot mode: a fixture saved into a new directory goes into the tables a
   tool.sqlite.close();
   // The server reads the tool's result.
   store = openStore(dir, { tableBacked: TABLE_BACKED });
-  const db2 = { orgs: [], guardians: [], players: [], sessions: [], users: [] };
+  const db2 = {};
   layer = attachDataLayer({ db: db2, store, nextId, persist: () => {}, sessionTtlMs: TTL });
   assert.deepEqual(db2.orgs.map((o) => o.id), ['org-pro', 'org-grass', 'org-tool']); assert.equal(db2.orgs[0].suspended, true);
   assert.ok(layer.sessions.byToken('legacy-maria-token') && layer.sessions.byToken('legacy-sam-token'), 'staff sessions survived every refused and accepted save');
@@ -491,7 +497,7 @@ await atest('server: a fixture database boots; registration, settings, suspensio
   // before the data layer attached and called every Room an orphan).
   seed.recruitmentCases = [{ id: 'case-s3', orgId: 'org-eastport', playerId: seed.players[0].id, playerName: seed.players[0].name, ownerUserId: 'usr-legacy', ownerName: 'Maria Keane', stage: 'identified', priority: 'medium', deadline: null, restricted: false, assignments: [], tasks: [], approvals: [], decision: null, links: { requestIds: [], trialIds: [], signingId: null }, createdAt: 1, history: [], room: { status: 'watching', priority: 'normal', tags: [], leadScoutUserId: 'usr-legacy', sourceContext: 'direct', sourceRef: null, openedBy: { userId: 'usr-legacy', name: 'Maria Keane' }, updatedAt: 1, archivedAt: null, closedAt: null, rev: 1, revAt: 1, revBy: { userId: 'usr-legacy', name: 'Maria Keane' } } }]; // S8b: the case literal the room route writes
   // The fixture, saved by the snapshot store into the tables.
-  { const t = openStore(dir); t.save({ savedAt: Date.now(), idCounter: 1000, db: seed }); t.sqlite.close(); }
+  { const t = openStore(dir); t.save({ idCounter: 1000, db: seed }); t.sqlite.close(); }
   const port = await freePort();
   const boot = () => new Promise((resolve, reject) => {
     const proc = spawnChild(process.execPath, [path.join(HERE, '..', 'server.mjs')], { env: { ...process.env, PORT: String(port), DATA_DIR: dir, M13_QUIET_LOGS: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
@@ -514,7 +520,7 @@ await atest('server: a fixture database boots; registration, settings, suspensio
     const maria = seed.sessions[0].token;
     assert.equal((await j('GET', '/org/notifications', undefined, maria)).status, 200, 'the fixture staff session works');
     const cap = await j('GET', '/capabilities');
-    assert.deepEqual(cap.body.dataLayer.migrations, ['0001_org_users', '0002_core_identity_shadow', '0003_sessions_live', '0004_orgs_live', '0005_core_identity_live', '0006_media_deletions', '0007_player_subrecords', '0008_one_time_codes', '0009_notifications', '0010_dispatches', '0011_outbox_push', '0012_channels', '0013_safety_audit', '0014_player_erasure', '0015_recruitment', '0016_recruitment_cases', '0017_recruitment_contacts_offers', '0018_signings_follow_ups', '0019_scouting_evidence', '0020_scouting_assessments', '0021_club_setup', '0022_opportunities_campaigns', '0023_verification', '0024_passport', '0025_transitions_vouches', '0026_agent_core', '0027_compliance_policies', '0028_compliance_records', '0029_agent_transactions', '0030_development', '0031_box_cam', '0032_discovery', '0033_insight_coverage', '0034_integrations', '0035_enterprise', '0036_groups', '0037_grassroots', '0038_operations']);
+    assert.deepEqual(cap.body.dataLayer.migrations, ['0001_org_users', '0002_core_identity_shadow', '0003_sessions_live', '0004_orgs_live', '0005_core_identity_live', '0006_media_deletions', '0007_player_subrecords', '0008_one_time_codes', '0009_notifications', '0010_dispatches', '0011_outbox_push', '0012_channels', '0013_safety_audit', '0014_player_erasure', '0015_recruitment', '0016_recruitment_cases', '0017_recruitment_contacts_offers', '0018_signings_follow_ups', '0019_scouting_evidence', '0020_scouting_assessments', '0021_club_setup', '0022_opportunities_campaigns', '0023_verification', '0024_passport', '0025_transitions_vouches', '0026_agent_core', '0027_compliance_policies', '0028_compliance_records', '0029_agent_transactions', '0030_development', '0031_box_cam', '0032_discovery', '0033_insight_coverage', '0034_integrations', '0035_enterprise', '0036_groups', '0037_grassroots', '0038_operations', '0039_retire_blob']);
     assert.equal(cap.body.dataLayer.domains.orgs.mode, 'live'); assert.equal(cap.body.dataLayer.domains.orgs.rows, 5);
     assert.equal(cap.body.integrity.ok, true, `the boot integrity report sees the live organisations: ${JSON.stringify(cap.body.integrity.byCode)}`);
     assert.ok(cap.body.integrity.checked >= 6, 'the report counted the organisations and the Room');
@@ -526,7 +532,7 @@ await atest('server: a fixture database boots; registration, settings, suspensio
     // Registration: a new grassroots organisation is a table row at once.
     const reg = await j('POST', '/auth/org/register-grassroots', { name: 'Test Rovers', scoutName: 'Pat', role: 'Manager', country: 'GB', city: 'Leeds', lat: 53.8, lng: -1.5, federation: 'West Riding FA', registrationId: 'WR-9', password: 'rovers-pass-123' });
     assert.equal(reg.status, 201, JSON.stringify(reg.body)); newOrgId = reg.body.org.id;
-    { const raw = openRaw(dir); assert.equal(raw.prepare('SELECT level FROM orgs WHERE id = ?').get(newOrgId).level, 'grassroots'); assert.equal(raw.prepare("SELECT COUNT(*) AS n FROM collections WHERE name = 'orgs'").get().n, 0); raw.close(); }
+    { const raw = openRaw(dir); assert.equal(raw.prepare('SELECT level FROM orgs WHERE id = ?').get(newOrgId).level, 'grassroots'); assert.equal(hasBlobTable(raw), false); raw.close(); }
     const login = await j('POST', '/auth/org/login', { orgId: newOrgId, scoutName: 'Pat', platform: 'grassroots', password: 'rovers-pass-123' });
     assert.equal(login.status, 200, JSON.stringify(login.body)); regToken = login.body.token;
     assert.equal((await j('POST', '/auth/org/login', { orgId: newOrgId, scoutName: 'Pat', platform: 'grassroots', password: 'wrong-password' })).status, 401, 'the stored password hash is checked');
@@ -580,7 +586,7 @@ await atest('server: a fixture database boots; registration, settings, suspensio
     const clubs = await r.json();
     assert.equal(clubs.length, 6); assert.equal(clubs.find((o) => o.id === newOrgId).verifiedDomain, 'rovers.example'); assert.equal(clubs.find((o) => o.id === 'org-eastport').memos[0].name, 'Seeded');
     assert.equal((await fetch(`http://127.0.0.1:${port2}/org/notifications`, { headers: { authorization: `Bearer ${regToken}` } })).status, 200, 'the session survives backup and restore');
-    const raw = openRaw(restoreDir); assert.equal(raw.prepare("SELECT COUNT(*) AS n FROM collections WHERE name = 'orgs'").get().n, 0); assert.deepEqual(raw.prepare('PRAGMA foreign_key_check').all(), []); raw.close();
+    const raw = openRaw(restoreDir); assert.equal(hasBlobTable(raw), false); assert.deepEqual(raw.prepare('PRAGMA foreign_key_check').all(), []); raw.close();
   } finally {
     await new Promise((resolve) => { restored.on('exit', () => resolve()); restored.kill('SIGTERM'); });
     fs.rmSync(restoreDir, { recursive: true, force: true }); fs.rmSync(dir, { recursive: true, force: true });

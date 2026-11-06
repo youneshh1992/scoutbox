@@ -1,9 +1,9 @@
 // M23 P7 — persistence, migration, restart and corruption audit for the signing workflow.
 //
-//   1  the migration: a 2307 snapshot upgrades to 2308 with exactly one step
-//      (`m280_001_signing_workflow`); a fresh store boots at 2308; a second
-//      boot applies nothing; no signing, package, party or actor is fabricated
-//      from a `signed` case, an `under_contract` player or a legacy row
+//   1  the migration: a fresh store boots at schema 39 with the signing tables
+//      (0018) applied once; a later boot applies nothing; no signing, package,
+//      party or actor is fabricated from a `signed` case, an `under_contract`
+//      player or a legacy row
 //   2  a real journey — DRAFT, READY, IN_PROGRESS, COMPLETED, CANCELLED,
 //      VOIDED, a SUPERSEDED revision, a lazily EXPIRED package — survives
 //      SIGTERM byte-faithfully: revisions, parties, evidence refs, document
@@ -22,10 +22,10 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
-import { MIGRATIONS, SCHEMA_VERSION } from '../../domains/platform/migrations.mjs';
 import { openStore } from '../../store.mjs';
-import { guaranteeFor } from '../../storeContract.mjs';
+import { DATA_MIGRATIONS, TABLE_BACKED } from '../../repositories/index.mjs';
 import { signingIntegrity } from '../../domains/recruitment/signings/signing.mjs';
+const LATEST_SCHEMA = Number(DATA_MIGRATIONS.map((m) => m.id).sort().at(-1).slice(0, 4)); // S14a: the latest table migration's number
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SERVER = path.join(HERE, '..', '..', 'server.mjs');
@@ -73,6 +73,9 @@ async function bootOn(dataDir, port) {
   return { up, j, stop, log: () => log };
 }
 
+// The table-migration ledger of a stopped server's file: every id with the time it was applied.
+const ledger = (dir) => { const st = openStore(dir); try { return st.sqlite.prepare('SELECT id, applied_at FROM data_migrations ORDER BY id').all().map((r) => `${r.id}@${r.applied_at}`); } finally { st.sqlite.close(); } };
+
 const PORT = 5700 + Math.floor(Math.random() * 200);
 const T0 = Date.now();
 const at = (ms) => ({ 'x-scoutbox-test-clock': String(ms) });
@@ -80,21 +83,21 @@ const TERMS = { role: 'Central midfielder', squad: 'Under-23s', startDate: '2027
 const S_NOTE = 'PRIVATE_SIGNING_NOTE_PERSISTS_7719';
 
 // ------------------------------------------------------------- 1 — migration
-section('1 — the migration: 2307 → 2308 exactly once, fresh boot 2308, replay applies nothing, no fabrication');
+// Rewritten in S14a: 1.1–1.5 described the blob's 2307 → 2308 upgrade (an in-memory upgrade path, ground rule 1: no
+// compatibility with earlier dev files). The table-migration equivalents are below; the legacy world is kept.
+section('1 — the migration: fresh boot at schema 39 with the signing tables once, a later boot applies nothing, no fabrication');
 {
-  ok(SCHEMA_VERSION === 2308 && MIGRATIONS.length === 18 && MIGRATIONS.at(-1).id === 'm280_001_signing_workflow' && MIGRATIONS.at(-1).version === 2308, '1.1 schema 2308, 18 migrations, the last is the signing store');
-  ok(guaranteeFor('signingPackages') === null, '1.2 signingPackages is no db collection: a table read through SQL (§4.3 step 2; rewritten, it described the old storage)');
+  ok(DATA_MIGRATIONS.length === LATEST_SCHEMA && DATA_MIGRATIONS.some((m) => m.id === '0018_signings_follow_ups'), '1.1 every table migration; the signing tables are 0018');
+  ok(TABLE_BACKED.includes('signingPackages') && TABLE_BACKED.includes('signings'), '1.2 signingPackages and signings are tables read through SQL (§4.3 step 2)');
   const DIR = mkdtempSync(path.join(tmpdir(), 'sbx-m23sp-1-'));
   const s1 = await bootOn(DIR, PORT);
-  ok(s1.up && (await s1.j('GET', '/healthz')).body.schemaVersion === 2308 && /applied .*m280_001_signing_workflow/.test(s1.log()), '1.3 a fresh store boots at 2308 with the signing step applied once');
+  const fresh = s1.up && (await s1.j('GET', '/healthz')).body.schemaVersion === LATEST_SCHEMA;
   // the legacy case below needs a real owner row (S8b: recruitment_cases.owner_user_id is a key to org_users): Maria logs in once so her row exists
   await s1.j('POST', '/auth/org/login', { orgId: 'org-eastport', scoutName: 'Maria Keane', role: 'Head of Recruitment' });
   const db1 = await s1.stop();
+  const L1 = ledger(DIR);
+  ok(fresh && L1.length === DATA_MIGRATIONS.length && L1.filter((e) => e.startsWith('0018_signings_follow_ups@')).length === 1, '1.3 a fresh store boots at schema 39 with the signing step applied once');
   ok(Array.isArray(db1.signingPackages) && db1.signingPackages.length === 0, '1.4 the snapshot carries an empty signingPackages list');
-  // A 2307 snapshot: the store absent and the schema record at 2307 without the step.
-  delete db1.signingPackages;
-  db1.schema.version = 2307;
-  db1.schema.migrations = db1.schema.migrations.filter((m) => m.id !== 'm280_001_signing_workflow');
   // A legacy world: a case at signed with a legacy signing row, and a player under_contract with no signing at all.
   const maria = db1.users.find((u) => u.orgId === 'org-eastport' && u.name === 'Maria Keane');
   // The whole case literal the Room route writes (the typed table refuses a partial one), moved to signed long ago.
@@ -106,21 +109,22 @@ section('1 — the migration: 2307 → 2308 exactly once, fresh boot 2308, repla
   const signingsBefore = JSON.stringify(db1.signings);
   openStore(DIR).save({ db: db1 });
   const s2 = await bootOn(DIR, PORT);
-  const ran = (s2.log().match(/applied ([^\n]+)/) ?? [])[1] ?? '';
-  ok(s2.up && ran.trim() === 'm280_001_signing_workflow' && (await s2.j('GET', '/healthz')).body.schemaVersion === 2308, `1.5 the 2307 snapshot upgraded with exactly one step (${ran.trim() || 'none'})`);
+  ok(s2.up && (await s2.j('GET', '/healthz')).body.schemaVersion === LATEST_SCHEMA, '1.5 the planted legacy file boots at schema 39');
   const m = (await s2.j('POST', '/auth/org/login', { orgId: 'org-eastport', scoutName: 'Maria Keane', role: 'Head of Recruitment' })).body;
   const room = await s2.j('GET', '/org/rooms/case-legacy-signed/signing', undefined, m.token);
   neg(room.status === 200 && room.body.packages.length === 0 && room.body.legacySigning?.id === 'sign-legacy-p7' && room.body.legacySigning.method === 'LEGACY_RECORDED', '1.6 the legacy signed case: no package fabricated; the legacy row reported as what it is');
   const jr = (await s2.j('GET', '/org/rooms/case-legacy-signed/journey', undefined, m.token)).body;
   neg(jr.lifecycle?.currentStage === 'signed' && jr.outcome?.signing?.id === 'sign-legacy-p7' && jr.outcome.signing.method === 'LEGACY_RECORDED' && jr.outcome.signingPackages.length === 0, '1.7 the journey: signed, the legacy row a fact with no package behind it');
   const db2 = await s2.stop();
+  ok(JSON.stringify(ledger(DIR)) === JSON.stringify(L1), '1.5b and no migration ran again (the ledger is unchanged)');
   // S8d: the legacy row is a typed row now — its facts are kept as written and the typed shape adds only what the
   // columns need (method LEGACY_RECORDED, the absent fields as null); nothing is inferred about a package or a case
   const legacyKept = (() => { const before = JSON.parse(signingsBefore); const after = db2.signings; return before.length === after.length && before.every((b) => { const a = after.find((x) => x.id === b.id); return !!a && Object.entries(b).every(([k, v]) => JSON.stringify(a[k]) === JSON.stringify(v)) && (b.method !== undefined || a.method === 'LEGACY_RECORDED') && a.signingPackageId === (b.signingPackageId ?? null); }); })();
-  neg(db2.signingPackages.length === 0 && legacyKept && JSON.stringify(db2.recruitmentCases.map((c) => [c.id, c.room?.status ?? null])) === casesBefore && db2.players.find((p) => p.id === 'pl-kim').contractStatus === 'under_contract', '1.8 after the upgrade: no package, the legacy row kept fact for fact (S8d: typed, method LEGACY_RECORDED, no package), every case untouched, the under_contract player untouched — nothing inferred');
+  neg(db2.signingPackages.length === 0 && legacyKept && JSON.stringify(db2.recruitmentCases.map((c) => [c.id, c.room?.status ?? null])) === casesBefore && db2.players.find((p) => p.id === 'pl-kim').contractStatus === 'under_contract', '1.8 after the reboot: no package, the legacy row kept fact for fact (S8d: typed, method LEGACY_RECORDED, no package), every case untouched, the under_contract player untouched — nothing inferred');
   const s3 = await bootOn(DIR, PORT);
-  ok(s3.up && !/applied/.test(s3.log()) && (await s3.j('GET', '/healthz')).body.schemaVersion === 2308, '1.9 a second boot applies nothing: replay-safe');
+  const third = s3.up && (await s3.j('GET', '/healthz')).body.schemaVersion === LATEST_SCHEMA;
   await s3.stop();
+  ok(third && JSON.stringify(ledger(DIR)) === JSON.stringify(L1), '1.9 a third boot applies nothing: replay-safe');
 }
 
 // ------------------------------------------------------------ 2 — journey

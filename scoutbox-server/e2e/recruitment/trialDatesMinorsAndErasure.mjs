@@ -37,7 +37,9 @@ import {
 } from '../../domain.mjs';
 import { CATEGORIES, TYPE_CATEGORY, categoryOf } from '../../domains/platform/notificationPrefs.mjs';
 import { RATE_LIMIT_POLICY } from '../../domains/platform/rateLimit.mjs';
-import { SCHEMA_VERSION } from '../../domains/platform/migrations.mjs';
+import { DATA_MIGRATIONS } from '../../repositories/index.mjs';
+
+const SCHEMA_VERSION = Number(DATA_MIGRATIONS.map((m) => m.id).sort().at(-1).slice(0, 4)); // the latest table migration's number
 import { openStore } from '../../store.mjs';
 
 const PORT = 6200 + Math.floor(Math.random() * 200);
@@ -593,9 +595,10 @@ section('L — legacy rows in the store: read-side defence, signed invariant, re
   snap.db.requests.push({ id: 'req-legacy-5', playerId: 'pl-carvalho', playerName: 'Mateus Carvalho', orgId: 'org-eastport', orgName: 'Eastport FC', orgType: 'club', orgVerified: true, orgSafeguardingCertified: true, userId: mariaId /* S8a-core: the real staff id (a request names its staff member by a key) */, scoutName: 'Maria Keane', scoutRole: 'Head of Recruitment', type: 'trial', message: 'legacy pending invitation', trialDetails: { proposedDate: '2026-13-01', altSlots: ['2026-02-30'], venue: null, notes: '' }, status: 'pending', createdAt: Date.now() - 3 * DAY, routedTo: 'player', guardianId: null, contactChannel: null });
   for (const junk of unstorable) {
     const copy = { ...snap, db: { ...snap.db, trials: [...snap.db.trials.filter((t) => t.requestId !== junk.requestId), junk] } };
-    let refused = null; const rev = store.revision();
+    // Rewritten in S14a: "nothing written" compared store.revision() (the blob's save sequence); now the file's contents.
+    let refused = null; const dumpBefore = JSON.stringify(store.load());
     try { store.save(copy); } catch (e) { refused = e; }
-    neg(refused?.code === 'RECRUITMENT_INPUT_INVALID' && refused.message.includes(junk.id) && store.revision() === rev, `L1b a trial the typed row cannot hold (${junk.id}) is refused by the save with its id; nothing written`);
+    neg(refused?.code === 'RECRUITMENT_INPUT_INVALID' && refused.message.includes(junk.id) && JSON.stringify(store.load()) === dumpBefore, `L1b a trial the typed row cannot hold (${junk.id}) is refused by the save with its id; nothing written`);
   }
   store.save(snap);
   server = await boot();
@@ -603,7 +606,7 @@ section('L — legacy rows in the store: read-side defence, signed invariant, re
   mateus = await playerLogin('pl-carvalho');
   harbour = await login('org-harbour', 'Dan Okoro', 'Head of Recruitment');
   ok(!!maria.token && !!mateus.token, 'L2 the server boots on the edited snapshot');
-  ok((await j('GET', '/healthz')).body.schemaVersion === SCHEMA_VERSION, `L2b schema ${SCHEMA_VERSION} — no migration was needed or added for the closure`);
+  ok((await j('GET', '/healthz')).body.schemaVersion === SCHEMA_VERSION && DATA_MIGRATIONS.length === SCHEMA_VERSION, `L2b schema ${SCHEMA_VERSION} — no migration was needed or added for the closure`);
   const survived = (await orgTrials(maria.token)).find((t) => t.id === mt.id);
   const survivedReq = (await j('GET', '/org/requests', undefined, maria.token)).body.items.find((r) => r.id === D.mateusReq);
   neg(!!survived && survivedReq?.status === 'accepted' && !!survivedReq.contactChannel,

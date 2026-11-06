@@ -16,16 +16,20 @@ const out = { node: process.version, steps: [], ok: false };
 try {
   const store = openStore(dir, { tableBacked: TABLE_BACKED });
   out.steps.push('opened');
-  const db = { orgs: [{ id: 'org-1', name: 'One FC', type: 'club', level: 'grassroots', plan: 'Grassroots', memos: [] }], guardians: [], players: [{ id: 'pl-1', name: 'P', dob: '2001-01-01', country: 'GB' }], sessions: [], users: [] };
-  attachDataLayer({ db, store, nextId, persist: () => {}, sessionTtlMs: 30 * 86_400_000 });
-  store.save({ savedAt: 1, idCounter: 1000, db });
+  const db = {};
+  const seed = { orgs: [{ id: 'org-1', name: 'One FC', type: 'club', level: 'grassroots', plan: 'Grassroots', memos: [] }], guardians: [], players: [{ id: 'pl-1', name: 'P', dob: '2001-01-01', country: 'GB' }] };
+  attachDataLayer({ db, seed, store, nextId, persist: () => {}, sessionTtlMs: 30 * 86_400_000 });
+  // A save hook registered after the data layer's: its flush runs after the facets were flushed, and fails once on
+  // request. (Rewritten in S14a: the failure used to be an unserialisable blob.)
+  let failNext = false;
+  store.setSaveHook({ flush() { if (failNext) { failNext = false; throw new Error('injected failure after the facet flush'); } } });
+  store.save();
   out.steps.push('saved');
   db.orgs[0].memos.push({ id: 'sq-1', name: 'Kid', position: 'ST', playerId: null, source: 'manual', addedAt: 1 });
-  db.unrelated = [1n]; // JSON cannot serialise a BigInt: the blob write fails after the facets were flushed
-  try { store.save({ savedAt: 2, idCounter: 1000, db }); out.steps.push('failed-save-did-not-throw'); } catch (err) { out.steps.push(`failed-save-threw: ${String(err.message).slice(0, 60)}`); }
+  failNext = true;
+  try { store.save(); out.steps.push('failed-save-did-not-throw'); } catch (err) { out.steps.push(`failed-save-threw: ${String(err.message).slice(0, 60)}`); }
   out.rolledBack = JSON.parse(store.sqlite.prepare("SELECT facets_json FROM orgs WHERE id = 'org-1'").get().facets_json).memos.length === 0;
-  db.unrelated = [];
-  store.save({ savedAt: 3, idCounter: 1000, db });
+  store.save();
   out.steps.push('retried');
   out.squadRows = JSON.parse(store.sqlite.prepare("SELECT facets_json FROM orgs WHERE id = 'org-1'").get().facets_json).memos.length;
   store.sqlite.close();

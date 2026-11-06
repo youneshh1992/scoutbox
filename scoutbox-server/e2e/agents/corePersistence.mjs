@@ -1,11 +1,10 @@
 // M23 P5.6B — persistence, migration and restart audit for the Agent core.
-// S11a: the profiles, affiliations and agreements are typed tables (migration 0026); the blob step 2305 is a recorded
-// no-op, and a snapshot save types every record.
+// S11a: the profiles, affiliations and agreements are typed tables (migration 0026), and a snapshot save types every
+// record. S14a: the blob store and its snapshot registry (step 2305) are retired; schema checks read data_migrations.
 //
-//   1  step 2305: still exactly one step, a recorded no-op that creates no collection; the three stores are tables of
-//      the agent core, not collections a migration guarantees
-//   2  upgrade from a 2304 snapshot: nothing is bootstrapped or mirrored (no staff can exist before their login)
-//   3  a real boot over that snapshot: the first member into the agency becomes its administrator and can administer
+//   1  migration 0026: registered once; a clean database holds no agent record, and reopening it changes nothing
+//   2  a database of staff with no agent rows: nothing is bootstrapped or mirrored (no staff exist before their login)
+//   3  a real boot over that database: the first member into the agency becomes its administrator and can administer
 //   4  clean boot → a full relationship → stop → snapshot → reboot: bytes survive (keys, revs, provenance, history)
 //   5  junk is refused by the typed save, naming the record; an odd row a typed table CAN hold (an active agreement
 //      nobody confirmed) grants nothing and is never "repaired" on boot
@@ -17,14 +16,10 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { MIGRATIONS, SCHEMA_VERSION, runMigrations, PRODUCTION_REQUIRED_STORES } from '../../domains/platform/migrations.mjs';
-
-/** Every step above the frozen 2304 baseline, in declared order. */
-const ABOVE_2304 = MIGRATIONS.filter((m) => m.version > 2304).map((m) => m.id);
 import { openStore } from '../../store.mjs';
-import { guaranteeFor } from '../../storeContract.mjs';
 import { effectiveFacetState, agreementGrantsAccess, clientTransitionAllowed, agentTransitionAllowed, verificationGap, newFacets } from '../../domains/agents/core/shared.mjs';
-import { TABLE_BACKED } from '../../repositories/index.mjs';
+import { DATA_MIGRATIONS, TABLE_BACKED } from '../../repositories/index.mjs';
+import { AGENT_CORE_MIGRATION } from '../../repositories/agentCore.mjs';
 import { pickPort } from '../../scripts/testPort.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -68,13 +63,19 @@ async function bootOn(dataDir, port) {
 }
 
 const PORT = pickPort(6500, 200, [0, 1, 3]); // TH-6: never a fetch-blocked port
+const SCHEMA_VERSION = Number(DATA_MIGRATIONS.map((m) => m.id).sort().at(-1).slice(0, 4));
+/** The table migrations recorded in a data directory's file, with when each ran. */
+const appliedMigrations = (dir) => {
+  const st = openStore(dir);
+  try { return st.sqlite.prepare('SELECT id, applied_at FROM data_migrations ORDER BY id').all().map((r) => ({ id: r.id, at: r.applied_at })); } finally { st.sqlite.close(); }
+};
 const T0 = 1_700_000_000_000; // 2023-11-14 — firmly in the past, so createdAt-based windows have started
 
 // ------------------------------------------------------------- fixtures
 
-/** A 2304 database: one club, one agency with three staff (one lead, one removed), two agencies, two adult players. */
-function snapshot2304() {
-  const db = {
+/** One club, one agency with three staff (one lead, one removed), two agencies, two adult players; no agent rows. */
+function staffSnapshot() {
+  return {
     players: [
       { id: 'pl-a', name: 'Adult A', dob: '1999-01-01', country: 'GB', city: 'London', media: [], attendance: [], trialReports: [], badges: [], timeline: [], medical: { shared: false, records: [], conditionStatus: 'unknown' }, level: 'amateur', location: { lat: 51.5, lng: -0.1 } },
       { id: 'pl-b', name: 'Adult B', dob: '1998-01-01', country: 'GB', city: 'London', media: [], attendance: [], trialReports: [], badges: [], timeline: [], medical: { shared: false, records: [], conditionStatus: 'unknown' }, level: 'amateur', location: { lat: 51.5, lng: -0.1 } },
@@ -94,66 +95,50 @@ function snapshot2304() {
       { id: 'usr-ag2-b', orgId: 'org-ag2', name: 'Second B', role: 'Scout', createdAt: T0 + 6 },
     ],
   };
-  runMigrations(db);
-  // Now REWIND to a 2304 snapshot: drop every step above 2304 and the stores they
-  // create, so the upgrade path is genuinely re-run. Written as "everything above
-  // 2304" rather than a list of step ids, so a later milestone's step cannot be
-  // left behind in the fixture and quietly make the rewind a no-op.
-  db.schema.version = 2304;
-  db.schema.migrations = db.schema.migrations.filter((m) => !ABOVE_2304.includes(m.id));
-  delete db.agentProfiles; delete db.agencyAffiliations; delete db.representationAgreements;
-  delete db.tsReviewers; delete db.jurisdictionPolicies; delete db.regulatoryReviews; delete db.regulatoryConsents; delete db.complianceContexts;
-  delete db.agentTransactions; delete db.transactionRepresentations; delete db.transactionDocuments;
-  return db;
 }
 
-// ======================================================= 1 — the step
-section('1 — schema 2305: one step, a recorded no-op since S11a');
+// ======================================================= 1 — the migration
+// Rewritten in S14a: sections 1 and 2 described the retired snapshot registry (step m240_001 at 2305, runMigrations
+// over in-memory snapshots, the store contract). They now check the table migration and what a database holds.
+section('1 — migration 0026: registered once; a clean database holds no agent record');
 {
-  const step = MIGRATIONS.find((m) => m.id === 'm240_001_agent_core_stores');
-  ok(step?.version === 2305 && SCHEMA_VERSION >= 2306, `m240_001_agent_core_stores is frozen at 2305, and the schema has only moved forward since (now ${SCHEMA_VERSION})`);
-  ok(MIGRATIONS.filter((m) => m.version === 2305).length === 1 && ABOVE_2304.length >= 2, `exactly one step at 2305, and ${ABOVE_2304.length} steps above 2304 in all (${ABOVE_2304.join(', ')})`);
-  neg(!MIGRATIONS.some((m) => m.version > SCHEMA_VERSION), `and no step claims a version above the declared schema (${SCHEMA_VERSION})`);
-  const fresh = {};
-  const up = runMigrations(fresh);
-  ok(up.to === SCHEMA_VERSION && fresh.agentProfiles === undefined && fresh.agencyAffiliations === undefined && fresh.representationAgreements === undefined, 'a clean database gets no agent collection: the agent core is tables (migration 0026)');
-  neg(fresh.agentAuth === undefined && fresh.agentSessions === undefined && fresh.agentUsers === undefined && fresh.offers === undefined, 'no agent auth database and no offers store was invented');
-  const { schema: _s1, ...storesBefore } = fresh;
-  const idsBefore = fresh.schema.migrations.map((m) => m.id).join();
-  const before = stableJson(storesBefore);
-  const again = runMigrations(fresh);
-  const { schema: _s2, ...storesAfter } = fresh;
-  ok(again.ran.length === 0 && stableJson(storesAfter) === before && fresh.schema.migrations.map((m) => m.id).join() === idsBefore && fresh.schema.version === SCHEMA_VERSION, 'running again changes no store and adds no migration record');
-  for (const s2 of ['agentProfiles', 'agencyAffiliations', 'representationAgreements']) ok(guaranteeFor(s2) !== 'migration' && !PRODUCTION_REQUIRED_STORES.includes(s2) && TABLE_BACKED.includes(s2), `${s2} is a table of the agent core, not a collection a migration guarantees`);
+  const ids = DATA_MIGRATIONS.map((m) => m.id);
+  ok(ids.filter((id) => id === AGENT_CORE_MIGRATION).length === 1 && SCHEMA_VERSION >= 26, `${AGENT_CORE_MIGRATION} is registered once, and the schema has only moved forward since (now ${SCHEMA_VERSION})`);
+  neg(new Set(ids.map((id) => id.slice(0, 4))).size === ids.length && ids.every((id) => Number(id.slice(0, 4)) <= SCHEMA_VERSION), `every schema version is reached by exactly one migration, none above the reported schema (${SCHEMA_VERSION})`);
+  const freshDir = mkdtempSync(path.join(tmpdir(), 'sbx-m24p1-'));
+  const fresh = openStore(freshDir).load().db;
+  ok(fresh.agentProfiles.length === 0 && fresh.agencyAffiliations.length === 0 && fresh.representationAgreements.length === 0, 'a clean database holds no agent record: the agent core is tables (migration 0026)');
+  neg(!['agentAuth', 'agentSessions', 'agentUsers', 'offers'].some((n) => TABLE_BACKED.includes(n)), 'no agent auth database and no offers store exists');
+  const recordsBefore = appliedMigrations(freshDir);
+  ok(stableJson(openStore(freshDir).load().db) === stableJson(fresh) && stableJson(appliedMigrations(freshDir)) === stableJson(recordsBefore), 'reopening the file changes no table and records no migration again');
+  for (const s2 of ['agentProfiles', 'agencyAffiliations', 'representationAgreements']) ok(TABLE_BACKED.includes(s2), `${s2} is a table of the agent core, not a collection`);
 }
 
-// ======================================================= 2 — upgrade
-section('2 — upgrade from 2304: nothing bootstrapped, nothing mirrored');
+// ======================================================= 2 — staff, no agent rows
+section('2 — a database of staff: nothing bootstrapped, nothing mirrored');
 {
-  const db = snapshot2304();
-  ok(db.schema.version === 2304 && db.agencyAffiliations === undefined && db.representations === undefined, 'the fixture is a 2304 snapshot with no agent store (and no F10 lane: removed in S11a)');
-  const usersBefore = stableJson(db.users);
-  const up = runMigrations(db);
-  ok(up.ran.join(',') === ABOVE_2304.join(',') && up.to === SCHEMA_VERSION, `a 2304 snapshot runs exactly the steps above 2304, in order (${up.ran.join(', ')})`);
-  neg(db.agencyAffiliations === undefined && db.agentProfiles === undefined && db.representationAgreements === undefined, 'the upgrade creates no agent record: staff exist only from their first login, after every step ran');
+  const dir = mkdtempSync(path.join(tmpdir(), 'sbx-m24p2-'));
+  const db = staffSnapshot();
+  openStore(dir).save({ db });
+  const back = openStore(dir).load().db;
+  neg(back.agencyAffiliations.length === 0 && back.agentProfiles.length === 0 && back.representationAgreements.length === 0, 'no agent record is created: staff exist only from their first login');
   const mirror = { id: 'rep-x', agentUserId: null, clientId: 'pl-a', status: 'active', confirmedAt: T0 + 10, startAt: T0 + 10, endAt: T0 + 400 * 24 * 3600 * 1000 };
   neg(!agreementGrantsAccess(mirror, null, T0 + 20) && !agreementGrantsAccess(mirror, 'usr-lead', T0 + 20) && !agreementGrantsAccess(mirror, undefined, T0 + 20), 'an ACTIVE agreement naming no agent grants access to nobody — null, the admin, undefined');
-  neg(stableJson(db.users) === usersBefore, 'no user row was touched');
-  const again = runMigrations(db);
-  ok(again.ran.length === 0 && db.agencyAffiliations === undefined, 'running again adds nothing');
+  const staffFacts = (users) => users.map((u) => `${u.id}:${u.orgId}:${u.name}:${u.role}:${u.removedAt ?? ''}`).sort().join();
+  neg(staffFacts(back.users) === staffFacts(db.users), 'no user row was touched');
 }
 
 // ======================================================= 3 — boot over it
-section('3 — a real boot over the upgraded snapshot: the first member becomes the administrator');
+section('3 — a real boot over it: the first member becomes the administrator');
 {
   const dir = mkdtempSync(path.join(tmpdir(), 'sbx-m24p3-'));
-  const db = snapshot2304();
+  const db = staffSnapshot();
   openStore(dir).save({ db });
   const s = await bootOn(dir, PORT);
-  ok(s.up, 'the server boots over a 2304 snapshot');
+  ok(s.up, 'the server boots over a database of staff with no agent rows');
   if (s.up) {
     const h = await s.j('GET', '/healthz');
-    ok(h.body.schemaVersion === SCHEMA_VERSION && /m240_001_agent_core_stores/.test(s.log()), `and reports ${h.body.schemaVersion} having applied the Agent step (and every later step) at boot`);
+    ok(h.body.schemaVersion === SCHEMA_VERSION && appliedMigrations(dir).some((r) => r.id === AGENT_CORE_MIGRATION), `and reports ${h.body.schemaVersion}, with the agent core migration recorded`);
     const lead = (await s.j('POST', '/auth/org/login', { orgId: 'org-ag', scoutName: 'Lead Person', role: 'Managing Director', platform: 'agent' })).body;
     const staff = (await s.j('POST', '/auth/org/login', { orgId: 'org-ag', scoutName: 'Staff Person', role: 'Scout', platform: 'agent' })).body;
     const me = await s.j('GET', '/org/agent/me', undefined, lead.token);
@@ -161,7 +146,7 @@ section('3 — a real boot over the upgraded snapshot: the first member becomes 
     const staffMe = await s.j('GET', '/org/agent/me', undefined, staff.token);
     neg(staffMe.status === 403 && staffMe.body.error === 'AGENCY_MEMBERSHIP_REQUIRED', 'a second person is not a member until an administrator adds them');
     const agency = await s.j('GET', '/org/agent/agency', undefined, lead.token);
-    ok(agency.body.relationships.active === 0 && agency.body.relationships.pending === 0, 'the agency overview counts no relationship: none came from the upgrade');
+    ok(agency.body.relationships.active === 0 && agency.body.relationships.pending === 0, 'the agency overview counts no relationship: none was invented');
     const list = await s.j('GET', '/org/agent/clients', undefined, lead.token);
     ok(list.status === 200 && list.body.items.length === 0, 'and the administrator sees no client row');
     const add = await s.j('POST', '/org/agent/agency/team', { name: 'Second Admin', tiers: ['agency_admin'] }, lead.token);
@@ -198,14 +183,15 @@ section('4 — clean boot → relationship → stop → snapshot → reboot');
     team: (await s.j('GET', '/org/agent/agency/team', undefined, tomas.token)).body.members,
   };
   const snap = await s.stop();
-  ok(snap && snap.schema.version === SCHEMA_VERSION && snap.representationAgreements.length === 1 && snap.agentProfiles.length === 1 && snap.agencyAffiliations.length === 2, 'the snapshot holds one agreement, one profile, two affiliations (read from the tables)');
+  const recordsAtStop = appliedMigrations(dir);
+  ok(snap && Number(recordsAtStop.at(-1)?.id.slice(0, 4)) === SCHEMA_VERSION && snap.representationAgreements.length === 1 && snap.agentProfiles.length === 1 && snap.agencyAffiliations.length === 2, 'the snapshot holds one agreement, one profile, two affiliations (read from the tables)');
   const row = snap.representationAgreements[0];
   ok(row.keys.request.key === 'rt-1' && row.keys.confirm.key === 'rt-c' && row.rev === 2 && row.history.length === 2 && row.confirmedBy?.id === 'pl-adeyemi', 'keys, rev, history and confirmation are on disk');
   ok(snap.agentProfiles[0].facets.fifa_licence.provenance.provider === 'local-synthetic-test-provider', 'provenance is on disk');
   neg(!('trust' in row) && !('passport' in row) && !('offer' in row), 'the row carries no trust, passport or offer field');
   s = await bootOn(dir, port + 1);
   ok(s.up && (await s.j('GET', '/healthz')).body.schemaVersion === SCHEMA_VERSION, `reboot at ${SCHEMA_VERSION}`);
-  neg(!/m240_001_agent_core_stores/.test(s.log()), 'the 2305 step did NOT run again');
+  neg(stableJson(appliedMigrations(dir)) === stableJson(recordsAtStop), 'no migration ran again (every record keeps its original time)');
   const tomas2 = (await s.j('POST', '/auth/org/login', { orgId: 'org-northstar', scoutName: 'Tomás Rivera', role: 'Director', platform: 'agent' })).body;
   const after = {
     rel: (await s.j('GET', `/org/agent/clients/${req.body.relationship.id}`, undefined, tomas2.token)).body,
@@ -217,15 +203,14 @@ section('4 — clean boot → relationship → stop → snapshot → reboot');
   ok(stableJson(after.team) === stableJson(beforeStop.team), 'the team projects identically');
   ok((await s.j('POST', '/org/agent/clients/request', { playerId: 'pl-adeyemi', clientKey: 'rt-1', termMonths: 6 }, tomas2.token)).body.idempotent === true, 'the request key replays after the restart');
   const snap2 = await s.stop();
-  ok(snap2.schema.migrations.filter((m) => m.id === 'm240_001_agent_core_stores').length === 1, 'one migration record, still');
+  ok(appliedMigrations(dir).filter((r) => r.id === AGENT_CORE_MIGRATION).length === 1 && snap2.representationAgreements.length === 1, 'one migration record, still');
 }
 
 // ======================================================= 5 — corruption
 section('5 — junk is refused by the typed save; what a typed row can hold is judged on read, never repaired');
 {
   const dir = mkdtempSync(path.join(tmpdir(), 'sbx-m24p5-'));
-  const db = snapshot2304();
-  runMigrations(db);
+  const db = staffSnapshot();
   const profile = {
     id: 'agp-x', userId: 'usr-lead', agencyOrgId: 'org-ag', displayName: 'Lead Person', declared: { fifaLicenceNumber: null, jurisdictions: ['INT'] },
     facets: { ...newFacets(), fifa_licence: { ...newFacets().fifa_licence, state: 'approved', reference: 'X' } },
@@ -275,8 +260,7 @@ section('5 — junk is refused by the typed save; what a typed row can hold is j
 section('6 — the sweep tells a current member once that a relationship is ending; an agent who left is not told');
 {
   const dir = mkdtempSync(path.join(tmpdir(), 'sbx-m24p6-'));
-  const db = snapshot2304();
-  runMigrations(db);
+  const db = staffSnapshot();
   const aff = (id, userId, over = {}) => ({ id, agencyOrgId: 'org-ag', userId, tiers: ['agency_admin', 'licensed_agent'], startedAt: T0, endedAt: null, endedReason: null, createdAt: T0, rev: 1, revAt: T0, revBy: null, keys: {}, history: [], ...over });
   const ending = (id, agentUserId, clientId) => ({
     id, agentUserId, agencyOrgId: 'org-ag', clientKind: 'player', clientId, jurisdiction: 'INT', exclusive: false, termMonths: 12, startAt: T0, endAt: Date.now() + 10 * 86_400_000,

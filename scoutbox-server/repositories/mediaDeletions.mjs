@@ -75,11 +75,6 @@ export function liveMediaReferences(sqlite, { records = [] } = {}) {
     }
   } else if (migrationApplied(sqlite, CORE_IDENTITY_LIVE_MIGRATION)) {
     for (const r of sqlite.prepare(`SELECT ${PLAYER_COLUMNS.join(', ')} FROM players WHERE deleted_at IS NULL`).all()) add(playerFromRow(r)); // S4b-R: a retained row owns nothing
-  } else if (tableExists(sqlite, 'collections')) {
-    const b = sqlite.prepare("SELECT value FROM collections WHERE name = 'players'").get();
-    let arr = null;
-    if (b) { try { arr = JSON.parse(b.value); } catch { arr = null; } }
-    if (Array.isArray(arr)) for (const p of arr) add(p);
   }
   for (const p of records) add(p);
   return refs;

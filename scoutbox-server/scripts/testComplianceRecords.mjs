@@ -88,7 +88,7 @@ const PLAYER = { kind: 'player', userId: 'pl-1', name: 'Kola' };
 
 function serverOpen(dir) {
   const store = openStore(dir, { tableBacked: TABLE_BACKED });
-  const db = { ...store.load().db, players: [], guardians: [] };
+  const db = {}; // S14a: a fixture-saved file is not a first installation, so there is nothing to hand in
   const layer = attachDataLayer({ db, store, nextId, persist: () => {}, sessionTtlMs: TTL, now: () => NOW, warn: () => {} });
   layer.compliancePolicies.reviewers.create({ id: 'tsr-a', name: 'Priya', role: 'trust_safety_admin', status: 'active', secretHash: 'h', createdAt: NOW, createdBy: { kind: 'system', userId: null, name: 'test' }, revokedAt: null, revokedBy: null, rev: 1, revAt: NOW, revBy: null, history: [] });
   const snapshot = () => ({ savedAt: NOW, idCounter: 1000, db });

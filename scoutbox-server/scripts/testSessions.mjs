@@ -14,6 +14,8 @@ import { runDataMigrations } from '../repositories/database.mjs';
 import { createSessionsRepository, validateSessionRow, SESSIONS_TABLE, SESSIONS_CUTOVER_MIGRATION } from '../repositories/sessions.mjs';
 import { attachDataLayer, DATA_MIGRATIONS, TABLE_BACKED } from '../repositories/index.mjs';
 import { openStore } from '../store.mjs';
+import { createStorage } from '../adapters.mjs';
+import { hasBlobTable } from './coreIdentityTestFixtures.mjs';
 // The checks below that drive the runner on a raw connection are about the S2/S3
 // steps (0001–0004): they run exactly those. The S4a steps that follow them
 // (0005 core identity, 0006 media deletions) have their own suites
@@ -38,6 +40,20 @@ const ORG_A = { id: 'org-a', name: 'Org A', type: 'club', level: 'pro', plan: 'P
 const PLAYER_1 = (name = 'P') => ({ id: 'pl-1', name, dob: '2001-01-01', country: 'GB' });
 const seedOrg = (s, id = 'org-a') => s.prepare("INSERT OR IGNORE INTO orgs (id, name, type, level, plan) VALUES (?, 'Org', 'club', 'pro', 'Pro')").run(id);
 const seedUser = (s, id = 'usr-1', org = 'org-a') => { seedOrg(s, org); s.prepare("INSERT INTO org_users (id, org_id, name, role, created_at) VALUES (?, ?, 'Staff', 'Scout', 1)").run(id, org); };
+
+/**
+ * A fixture written in snapshot mode (staff with fixed ids included: S14a has no users import), then the server-mode
+ * data layer attached to it. Returns the server-mode store and the layer.
+ */
+function bootWith(dir, db) {
+  const tool = openStore(dir); tool.save({ idCounter: 1000, db }); tool.sqlite.close();
+  const store = openStore(dir, { tableBacked: TABLE_BACKED });
+  return { store, layer: attachDataLayer({ db: {}, store, nextId, persist: () => {}, sessionTtlMs: TTL }) };
+}
+/** Every table's rows: "nothing was written" is "the dump did not change". */
+const dump = (sqlite) => Object.fromEntries(sqlite.prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").all().map(({ name }) => [name, sqlite.prepare(`SELECT * FROM "${name}" ORDER BY rowid`).all().map((r) => ({ ...r }))]));
+/** Write a fixture media file into the data directory's storage, as an upload would. */
+const storeClip = (dir, id, bytes) => createStorage(dir).saveDataUrl(id, `data:video/webm;base64,${bytes.toString('base64')}`);
 
 const openRaw = (dir) => { const s = new DatabaseSync(path.join(dir, 'scoutbox.db')); s.exec('PRAGMA foreign_keys = ON;'); return s; };
 
@@ -169,11 +185,9 @@ test('repository: every revocation path removes exactly its own sessions; users 
 // ------------------------------------------------------------- snapshot round trips
 test('snapshot mode: load exposes hashed rows, save writes them back unchanged, a fabricated plain-token row is hashed, and the server reads the round trip', () => {
   const dir = tempDir('s2-snap');
-  let store = openStore(dir, { tableBacked: TABLE_BACKED });
-  const db = { orgs: [ORG_A], guardians: [], players: [], sessions: [], users: [{ id: 'usr-1', orgId: 'org-a', name: 'Staff', role: 'Scout', createdAt: 1 }] };
-  const layer = attachDataLayer({ db, store, nextId, persist: () => {}, sessionTtlMs: TTL });
+  let { store, layer } = bootWith(dir, { orgs: [ORG_A], guardians: [], players: [], sessions: [], users: [{ id: 'usr-1', orgId: 'org-a', name: 'Staff', role: 'Scout', createdAt: 1 }] });
   const a = layer.sessions.create('player', 'pl-1'), b = layer.sessions.create('org', 'org-a', { userId: 'usr-1' });
-  store.save({ savedAt: 1, idCounter: 1000, db }); store.sqlite.close();
+  store.save(); store.sqlite.close();
   const tool = openStore(dir);
   const snap = tool.load();
   assert.equal(snap.db.sessions.length, 2);
@@ -191,24 +205,23 @@ test('snapshot mode: load exposes hashed rows, save writes them back unchanged, 
   tool.sqlite.close();
   // The server reads the round-tripped rows and the original tokens still work.
   store = openStore(dir, { tableBacked: TABLE_BACKED });
-  const layer2 = attachDataLayer({ db: { orgs: [], guardians: [], players: [], users: [] }, store, nextId, persist: () => {}, sessionTtlMs: TTL });
+  const layer2 = attachDataLayer({ db: {}, store, nextId, persist: () => {}, sessionTtlMs: TTL });
   assert.ok(layer2.sessions.byToken(a.token) && layer2.sessions.byToken(b.token) && layer2.sessions.byToken('fixture-token'));
   store.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
 });
 test('snapshot mode: an invalid or conflicting session row rejects the whole save; sessions and unrelated data are untouched', () => {
   const dir = tempDir('s2-snap-reject');
-  let store = openStore(dir, { tableBacked: TABLE_BACKED });
-  const db = { orgs: [ORG_A], guardians: [], players: [PLAYER_1('Original')], sessions: [], users: [{ id: 'usr-1', orgId: 'org-a', name: 'A', role: 'Scout', createdAt: 1 }, { id: 'usr-2', orgId: 'org-a', name: 'B', role: 'Scout', createdAt: 1 }] };
-  const layer = attachDataLayer({ db, store, nextId, persist: () => {}, sessionTtlMs: TTL });
+  let { store, layer } = bootWith(dir, { orgs: [ORG_A], guardians: [], players: [PLAYER_1('Original')], sessions: [], users: [{ id: 'usr-1', orgId: 'org-a', name: 'A', role: 'Scout', createdAt: 1 }, { id: 'usr-2', orgId: 'org-a', name: 'B', role: 'Scout', createdAt: 1 }] });
   const a = layer.sessions.create('player', 'pl-1'), b = layer.sessions.create('org', 'org-a', { userId: 'usr-2' });
-  store.save({ savedAt: 1, idCounter: 1000, db }); store.sqlite.close();
+  store.save(); store.sqlite.close();
   const tool = openStore(dir);
   const before = tool.load();
+  const beforeDump = dump(tool.sqlite);
   const untouched = () => {
     const now = tool.load();
     assert.deepEqual(now.db.sessions, before.db.sessions, 'the sessions are exactly what they were');
     assert.equal(now.db.players[0].name, 'Original', 'the unrelated player change was rolled back with the rest of the save');
-    assert.equal(now.saveSeq, before.saveSeq, 'no save revision was spent');
+    assert.deepEqual(dump(tool.sqlite), beforeDump, 'nothing was written (rewritten in S14a: this compared the save revision)');
     assert.deepEqual(now.db.users.map((u) => u.id), ['usr-1', 'usr-2']);
   };
   const attempt = (mutate, pattern) => {
@@ -242,27 +255,26 @@ test('snapshot mode: an invalid or conflicting session row rejects the whole sav
   assert.deepEqual(tool.load().db.sessions, before.db.sessions);
   tool.sqlite.close();
   store = openStore(dir, { tableBacked: TABLE_BACKED });
-  const layer2 = attachDataLayer({ db: { orgs: [], guardians: [], players: [], users: [] }, store, nextId, persist: () => {}, sessionTtlMs: TTL });
+  const layer2 = attachDataLayer({ db: {}, store, nextId, persist: () => {}, sessionTtlMs: TTL });
   assert.ok(layer2.sessions.byToken(a.token) && layer2.sessions.byToken(b.token), 'both sessions survived every refused save');
   store.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
 });
 test('snapshot mode: writing the users collection back does not cascade-delete valid sessions; a removed user still takes theirs', () => {
   const dir = tempDir('s2-cascade');
-  let store = openStore(dir, { tableBacked: TABLE_BACKED });
   const db = { orgs: [ORG_A], guardians: [], players: [], sessions: [], users: [{ id: 'usr-1', orgId: 'org-a', name: 'A', role: 'Scout', createdAt: 1 }, { id: 'usr-2', orgId: 'org-a', name: 'B', role: 'Scout', createdAt: 1 }] };
-  const layer = attachDataLayer({ db, store, nextId, persist: () => {}, sessionTtlMs: TTL });
+  let { store, layer } = bootWith(dir, db);
   const s1 = layer.sessions.create('org', 'org-a', { userId: 'usr-1' }), s2 = layer.sessions.create('org', 'org-a', { userId: 'usr-2' });
-  store.save({ savedAt: 1, idCounter: 1000, db }); store.sqlite.close();
+  store.save(); store.sqlite.close();
   // A tool writes a snapshot that carries users but no sessions key at all.
   const tool = openStore(dir);
-  tool.save({ savedAt: 2, idCounter: 1000, db: { orgs: [ORG_A], players: [], guardians: [], users: [...db.users].map((u) => ({ ...u })) } });
+  tool.save({ idCounter: 1000, db: { orgs: [ORG_A], players: [], guardians: [], users: [...db.users].map((u) => ({ ...u })) } });
   assert.equal(tool.sqlite.prepare('SELECT COUNT(*) AS n FROM sessions').get().n, 2, 'both staff sessions survive a users write');
   // A snapshot in which usr-2 no longer exists: only usr-2's session goes.
-  tool.save({ savedAt: 3, idCounter: 1000, db: { orgs: [ORG_A], players: [], guardians: [], users: [{ ...db.users[0] }] } });
+  tool.save({ idCounter: 1000, db: { orgs: [ORG_A], players: [], guardians: [], users: [{ ...db.users[0] }] } });
   assert.deepEqual(tool.sqlite.prepare('SELECT sid FROM sessions').all().map((r) => r.sid), [s1.session.sid]);
   tool.sqlite.close();
   store = openStore(dir, { tableBacked: TABLE_BACKED });
-  const layer2 = attachDataLayer({ db: { orgs: [], guardians: [], players: [], users: [] }, store, nextId, persist: () => {}, sessionTtlMs: TTL });
+  const layer2 = attachDataLayer({ db: {}, store, nextId, persist: () => {}, sessionTtlMs: TTL });
   assert.ok(layer2.sessions.byToken(s1.token)); assert.equal(layer2.sessions.byToken(s2.token), null);
   store.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
 });
@@ -271,8 +283,9 @@ test('snapshot mode: writing the users collection back does not cascade-delete v
 await atest('busy timeout: a save waits for a concurrent writer in another process instead of failing; without the pragma the same situation fails at once', async () => {
   const dir = tempDir('s2-busy');
   const store = openStore(dir, { tableBacked: TABLE_BACKED });
-  attachDataLayer({ db: { orgs: [ORG_A], guardians: [], players: [], users: [] }, store, nextId, persist: () => {}, sessionTtlMs: TTL });
-  store.save({ savedAt: 1, idCounter: 1000, db: { orgs: [], players: [], guardians: [] } });
+  const db = {};
+  attachDataLayer({ db, seed: { orgs: [ORG_A] }, store, nextId, persist: () => {}, sessionTtlMs: TTL });
+  store.save();
   const holdMs = 1200;
   const holder = spawnChild(process.execPath, ['--input-type=module', '-e', `
     import { DatabaseSync } from 'node:sqlite';
@@ -288,10 +301,12 @@ await atest('busy timeout: a save waits for a concurrent writer in another proce
     assert.throws(() => raw.exec("INSERT INTO meta (key, value) VALUES ('x', '1')"), /SQLITE_BUSY|database is locked/, 'a connection without the pragma fails immediately');
     raw.close();
     const t0 = Date.now();
-    store.save({ savedAt: 2, idCounter: 1000, db: { orgs: [], players: [], guardians: [], notes: [{ id: 'p' }] } }); // notes: a blob collection (players are table-backed since S4a)
+    // Rewritten in S14a: the save used to write a blob; now it flushes a staged organisation facet.
+    db.orgs[0].tags = ['waited'];
+    store.save();
     const waited = Date.now() - t0;
     assert.ok(waited >= holdMs - 300, `the store waited for the lock (${waited} ms)`);
-    assert.deepEqual(store.load().db.notes, [{ id: 'p' }]);
+    assert.deepEqual(JSON.parse(store.sqlite.prepare("SELECT facets_json FROM orgs WHERE id = 'org-a'").get().facets_json).tags, ['waited']);
   };
   // Awaited by the harness: the check counts only once every assertion above has passed.
   try { await run(); } finally { try { holder.kill(); } catch { /* done */ } store.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true }); }
@@ -307,14 +322,14 @@ await atest('server: plain-token sessions in a fixture are stored as hashes, the
     { token: 'legacy-kola-token-000000000000000000000000000', sid: 'sid-kola', kind: 'player', refId: 'pl-adeyemi', createdAt: Date.now() - DAY },
     { token: 'legacy-maria-token-00000000000000000000000000', sid: 'sid-maria', kind: 'org', refId: 'org-eastport', userId: 'usr-legacy', createdAt: Date.now() - DAY },
   ];
-  // A deterministic media fixture: one of Kola's clips has a stored file (the
-  // snapshot carries it as a data URL, which the server moves onto storage at
-  // boot), so a signed media link must resolve to 200 with these bytes.
+  // A deterministic media fixture: one of Kola's clips has a stored file, so a
+  // signed media link must resolve to 200 with these bytes. (S14a: written to
+  // storage directly; the mediaBlobs collection is gone.)
   const clip = seed.players.find((p) => p.id === 'pl-adeyemi').media[0];
   const clipBytes = Buffer.from('synthetic-webm-bytes-for-the-sessions-suite');
   clip.url = `/media/${clip.id}`;
-  seed.mediaBlobs = { [clip.id]: { dataUrl: `data:video/webm;base64,${clipBytes.toString('base64')}` } };
-  { const t = openStore(dir); t.save({ savedAt: Date.now(), idCounter: 1000, db: seed }); t.sqlite.close(); } // snapshot mode: the sessions go into their table, hashed
+  storeClip(dir, clip.id, clipBytes);
+  { const t = openStore(dir); t.save({ idCounter: 1000, db: seed }); t.sqlite.close(); } // snapshot mode: the sessions go into their table, hashed
   const port = await freePort();
   const boot = () => new Promise((resolve, reject) => {
     const proc = spawnChild(process.execPath, [path.join(HERE, '..', 'server.mjs')], { env: { ...process.env, PORT: String(port), DATA_DIR: dir, M13_QUIET_LOGS: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
@@ -338,7 +353,7 @@ await atest('server: plain-token sessions in a fixture are stored as hashes, the
     assert.equal(notif.status, 200, 'the fixture staff token works');
     // The file holds no plain token and no sessions blob.
     const raw = openRaw(dir);
-    assert.equal(raw.prepare("SELECT COUNT(*) AS n FROM collections WHERE name = 'sessions'").get().n, 0, 'no sessions blob');
+    assert.equal(hasBlobTable(raw), false, 'no blob table (rewritten in S14a: this checked for a sessions blob)');
     assert.ok(raw.prepare('SELECT 1 FROM sessions WHERE token_hash = ?').get(sha256(kola)), 'the session is in the table by hash');
     assert.equal(JSON.stringify(raw.prepare('SELECT * FROM sessions').all()).includes('legacy-kola-token'), false, 'no plain token in the table');
     raw.close();
@@ -391,8 +406,8 @@ await atest('server: media links are signed with MEDIA_SECRET only — a link su
   const seed = buildSeed();
   const clip = seed.players.find((p) => p.id === 'pl-adeyemi').media[0];
   clip.url = `/media/${clip.id}`;
-  seed.mediaBlobs = { [clip.id]: { dataUrl: `data:video/webm;base64,${Buffer.from('synthetic-media-secret-bytes').toString('base64')}` } };
-  { const t = openStore(dir); t.save({ savedAt: Date.now(), idCounter: 1000, db: seed }); t.sqlite.close(); }
+  storeClip(dir, clip.id, Buffer.from('synthetic-media-secret-bytes'));
+  { const t = openStore(dir); t.save({ idCounter: 1000, db: seed }); t.sqlite.close(); }
   const port = await freePort();
   const boot = (env) => new Promise((resolve, reject) => {
     const proc = spawnChild(process.execPath, [path.join(HERE, '..', 'server.mjs')], { env: { ...process.env, MEDIA_SECRET: '', ...env, PORT: String(port), DATA_DIR: dir, M13_QUIET_LOGS: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
@@ -419,9 +434,11 @@ await atest('server: media links are signed with MEDIA_SECRET only — a link su
     await stop(S); S = await boot({ SCOUTBOX_MEDIA_SECRET: SECRET });
     assert.equal(await status(url), 401, 'the old variable name is not read: development signs with a fresh per-process key');
     await stop(S); S = null;
+    // Rewritten in S14a: this looked for a secrets blob; now the whole file is searched for the key.
     const raw = openRaw(dir);
-    assert.equal(raw.prepare("SELECT COUNT(*) AS n FROM collections WHERE name = 'secrets'").get().n, 0, 'no secrets collection is saved');
-    raw.close();
+    assert.equal(hasBlobTable(raw), false);
+    raw.exec('PRAGMA wal_checkpoint(TRUNCATE)'); raw.close();
+    assert.ok(!fs.readFileSync(path.join(dir, 'scoutbox.db'), 'latin1').includes(SECRET), 'no signing key is written to the database');
   } finally {
     if (S) await stop(S);
     fs.rmSync(dir, { recursive: true, force: true });
@@ -436,7 +453,7 @@ await atest('server (review correction 2): player and org sessions survive the a
     { token: 'dbjson-kola-token-000000000000000000000000000', sid: 'sid-json-kola', kind: 'player', refId: 'pl-adeyemi', createdAt: Date.now() - DAY },
     { token: 'dbjson-maria-token-00000000000000000000000000', sid: 'sid-json-maria', kind: 'org', refId: 'org-eastport', userId: 'usr-legacy', createdAt: Date.now() - DAY },
   ];
-  { const t = openStore(dir); t.save({ savedAt: Date.now(), idCounter: 1000, db: seed }); t.sqlite.close(); }
+  { const t = openStore(dir); t.save({ idCounter: 1000, db: seed }); t.sqlite.close(); }
   const port = await freePort();
   const proc = spawnChild(process.execPath, [path.join(HERE, '..', 'server.mjs')], { env: { ...process.env, PORT: String(port), DATA_DIR: dir, M13_QUIET_LOGS: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
   let log = '';
@@ -490,21 +507,21 @@ await atest('server (review correction 2): player and org sessions survive the a
 // ------------------------------------------------------------- collection shape (review correction 5)
 test('snapshot mode: a table-backed collection that is not an array is refused whole; an omitted collection is a partial snapshot', () => {
   const dir = tempDir('s2-shape');
-  let store = openStore(dir, { tableBacked: TABLE_BACKED });
-  const db = { orgs: [ORG_A], guardians: [], players: [PLAYER_1('Original')], sessions: [], users: [{ id: 'usr-1', orgId: 'org-a', name: 'A', role: 'Scout', createdAt: 1 }] };
-  const layer = attachDataLayer({ db, store, nextId, persist: () => {}, sessionTtlMs: TTL });
+  let { store, layer } = bootWith(dir, { orgs: [ORG_A], guardians: [], players: [PLAYER_1('Original')], sessions: [], users: [{ id: 'usr-1', orgId: 'org-a', name: 'A', role: 'Scout', createdAt: 1 }] });
   const a = layer.sessions.create('player', 'pl-1');
-  store.save({ savedAt: 1, idCounter: 1000, db }); store.sqlite.close();
+  store.save(); store.sqlite.close();
   const tool = openStore(dir);
   const before = tool.load();
+  const beforeDump = dump(tool.sqlite);
   const PLAIN = 'synthetic-plaintext-token-that-must-never-be-written';
   const untouched = () => {
     const now = tool.load();
     assert.deepEqual(now.db.sessions, before.db.sessions, 'the stored sessions are exactly what they were');
     assert.deepEqual(now.db.users, before.db.users);
     assert.equal(now.db.players[0].name, 'Original', 'the unrelated player change was rolled back');
-    assert.equal(now.saveSeq, before.saveSeq, 'no save revision was spent');
-    assert.equal(tool.sqlite.prepare("SELECT COUNT(*) AS n FROM collections WHERE name IN ('sessions', 'users')").get().n, 0, 'no blob was written for a table-backed collection');
+    // Rewritten in S14a: these compared the save revision and looked for blob rows.
+    assert.deepEqual(dump(tool.sqlite), beforeDump, 'nothing was written');
+    assert.equal(hasBlobTable(tool.sqlite), false);
     assert.equal(tool.sqlite.prepare('SELECT COUNT(*) AS n FROM sessions').get().n, 1, 'the live table still holds the session');
     tool.sqlite.exec('PRAGMA wal_checkpoint(TRUNCATE)');
     assert.ok(!fs.readFileSync(path.join(dir, 'scoutbox.db'), 'latin1').includes(PLAIN), 'the plaintext token is nowhere in the file');
@@ -532,7 +549,7 @@ test('snapshot mode: a table-backed collection that is not an array is refused w
   tool.sqlite.close();
   // The server still reads the untouched session.
   store = openStore(dir, { tableBacked: TABLE_BACKED });
-  const layer2 = attachDataLayer({ db: { orgs: [], guardians: [], players: [], users: [] }, store, nextId, persist: () => {}, sessionTtlMs: TTL });
+  const layer2 = attachDataLayer({ db: {}, store, nextId, persist: () => {}, sessionTtlMs: TTL });
   assert.ok(layer2.sessions.byToken(a.token));
   store.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
 });

@@ -86,21 +86,22 @@ A trust-weights total other than 100 is also fatal (`TRUST_WEIGHTS_INVALID`).
 
 ## Data layer contract
 
-`DATA_DIR/scoutbox.db` holds two kinds of data:
+`DATA_DIR/scoutbox.db` holds tables only, each owned by one repository in `repositories/`. There is no blob store
+(S14a dropped the `collections` table). Besides the domain tables: `data_migrations` (the schema history), `meta`
+(the first installation's initialisation states, the session lifetime) and `counters` (the id counter, written at
+every mint).
 
-1. **Tables** owned by repositories in `repositories/`. Players, guardians, orgs, staff,
-   sessions, recruitment, messaging, notifications, audit and the other migrated domains
-   live here. Each change is written as rows inside a transaction.
-2. **Blobs.** Every collection that has not moved yet is stored as one JSON row in the
-   `collections` table. The whole snapshot is saved on a 2-second debounce
-   (`persist()`), or immediately with `persistNow()`.
+Most repositories write their rows at once. The staged ones (organisations' facets, players and guardians,
+notifications, dispatches, outbox and push, message threads, the safety and audit tables) keep a mirror in memory and
+write what changed at the next save: a 2-second debounce (`persist()`), immediately with `persistNow()`, or in the
+commit of the unit of work they joined.
 
 `GET /capabilities` → `dataLayer` lists the tables, the applied migrations and each
 domain's counts.
 
-**Boot order** (`server.mjs`): `buildSeed` → `loadSnapshot` → snapshot migrations
-(`domains/platform/migrations.mjs`) → `attachDataLayer` (table migrations, then repositories) →
-module registration → integrity report → listen.
+**Boot order** (`server.mjs`): open the store → `attachDataLayer` (table migrations, then repositories; a first
+installation imports `buildSeed()`'s organisations, players and guardians once) → integrity report → module
+registration → listen.
 
 ### Rules when writing server code
 
@@ -134,13 +135,12 @@ module registration → integrity report → listen.
   repository that asks for one row more than the page). Each record is a fresh,
   deep-frozen decode; a query inside a unit of work sees the unit's own writes. Pure
   projectors take the queries as an argument (`reads`) rather than reading `db`.
-- **Units of work.** If one operation touches more than one table, or a table plus a
-  blob, wrap it in `unit(() => { ... })` (`store.unitOfWork`). Inside the unit:
+- **Units of work.** If one operation touches more than one table, wrap it in `unit(() => { ... })` (`store.unitOfWork`). Inside the unit:
   - The callback must be **synchronous**. An `async` function is refused before it runs.
     A returned promise is not cancelled and counts as a stray. Prepare async work before
     the unit and publish it after.
-  - Everything commits or rolls back together, including memory. On failure, in-memory
-    records are restored in place and the error is rethrown with
+  - Everything commits or rolls back together, including the staged repositories' mirrors.
+    On failure, they restore their in-memory records and the error is rethrown with
     `err.unitOfWork = 'rolled_back'`. Nothing is left pending for a later save.
   - A nested unit joins the outer one. An inner failure fails the whole unit even if the
     caller catches it. Repository refusals do the same (participant failure).
@@ -154,7 +154,7 @@ module registration → integrity report → listen.
   a unit it runs immediately. A notification's push and `notify` event run through
   `notifications.afterDurable`, only after the save that carried the row commits.
 - **Ordinary saves.** If a debounced save fails, memory stays the intended state and the
-  next save writes it. The log line `snapshot save failed:` means a retry is pending, not
+  next save writes it. The log line `save failed:` means a retry is pending, not
   that data was lost. Every save and unit begins with `BEGIN IMMEDIATE`, and every
   connection sets `busy_timeout = 5000`.
 - **Responses use allowlists.** Player and guardian responses are built in
@@ -169,33 +169,25 @@ module registration → integrity report → listen.
 
 ### Migrations
 
-There are two registries:
-
-- **Snapshot migrations** (`domains/platform/migrations.mjs`) shape the in-memory blob collections.
-  They are idempotent, versioned in `db.schema` and exposed as `X-ScoutBox-Schema`. A
-  failing step aborts the boot before anything is saved.
-- **Table migrations** (`repositories/migrations/NNNN_name.mjs`, registered in
-  `repositories/index.mjs`) export `{ id, note, up(sqlite) }`. They run once, in id order,
+**Table migrations** (`repositories/migrations/NNNN_name.mjs`, registered in
+  `repositories/index.mjs`) are the one registry. They export `{ id, note, up(sqlite) }`. They run once, in id order,
   each inside a transaction. Each is recorded in **`data_migrations`** (`id`,
   `applied_at`). A step that rebuilds a referenced table
   sets `foreignKeysOff` and must leave `PRAGMA foreign_key_check` empty before it
   commits. A failure rolls the step back and aborts the boot with the file unchanged.
+  The schema version is the number of the latest one (`0039_retire_blob` → 39), reported on
+  `/healthz`, in `/capabilities` → `schema` and on every response as `X-ScoutBox-Schema`.
 
-When you move a blob domain to tables:
+A migration's `up()` is its DDL (plus any table rebuild the step needs). It does not carry
+data over: there is no production data, and rollback means re-seed.
 
-- The migration's `up()` is its DDL (plus any table rebuild the step needs). It does not
-  import the domain's blob rows: there is no production data, and rollback means re-seed.
-- Whether a domain reads from its table or its blob depends on its `data_migrations`
-  record, never on whether the table exists or has rows.
-- After attach, an in-memory array (seed, `??= []` default, stale copy) is never imported
-  into a live table.
-
-The latest table migration is `0025_transitions_vouches`.
+The latest table migration is `0039_retire_blob`.
 
 **Snapshot mode.** `openStore(dir)` without options is for tools and fixtures. It runs the
 table migrations when it opens the file, then reads and writes the whole database in the
-shape the server sees, tables included. A saved snapshot is never a first installation. A snapshot
-write is strict: a malformed collection or any invalid row rejects the whole save. An
+shape the server sees. A saved snapshot is never a first installation. A snapshot
+write is strict: a malformed collection, a collection with no table (`SNAPSHOT_COLLECTION_UNKNOWN`) or any invalid
+row rejects the whole save. An
 omitted collection leaves its table alone. An explicit `[]` empties it. Snapshot mode has
 no units of work.
 

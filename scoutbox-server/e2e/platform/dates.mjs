@@ -40,8 +40,10 @@ import { resolveWindow, previousWindow } from '../../m20/metrics.mjs';
 import { briefIsLiveOn, validateRecruitmentBrief } from '../../domains/discovery/shared.mjs';
 import { normWhen } from '../../domains/verification/passport/shared.mjs';
 import { parseDate as devParseDate } from '../../domains/development/hub/shared.mjs';
-import { SCHEMA_VERSION } from '../../domains/platform/migrations.mjs';
+import { DATA_MIGRATIONS } from '../../repositories/index.mjs';
 import { openStore } from '../../store.mjs';
+
+const SCHEMA_VERSION = Number(DATA_MIGRATIONS.map((m) => m.id).sort().at(-1).slice(0, 4));
 
 const PORT = 7600 + Math.floor(Math.random() * 150);
 const BASE = `http://localhost:${PORT}`;
@@ -568,7 +570,7 @@ section('S/live — authorization is decided before a date is read (§29 error p
 
 section('T/live — persistence and restart: normalised values survive as what they are');
 {
-  ok((await j('GET', '/healthz')).headers.get('x-scoutbox-schema') === String(SCHEMA_VERSION) && SCHEMA_VERSION === 2308, 'T1 schema 2308 — P5.7 adds no migration (the one step past 2307 is P7\'s signing store)');
+  ok((await j('GET', '/healthz')).headers.get('x-scoutbox-schema') === String(SCHEMA_VERSION), 'T1 schema 39, the latest table migration (rewritten in S14a: it named the retired snapshot registry\'s 2308)');
   await stop(server);
   server = await boot();
   const maria = await login('org-eastport', 'Maria Keane', 'Head of Recruitment');

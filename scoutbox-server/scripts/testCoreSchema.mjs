@@ -18,7 +18,7 @@ import { IDENTITY_SNAPSHOT } from '../repositories/identity.mjs';
 import { attachDataLayer, DATA_MIGRATIONS, TABLE_BACKED } from '../repositories/index.mjs';
 import { openStore } from '../store.mjs';
 import * as m0002 from '../repositories/migrations/0002_core_identity_shadow.mjs';
-import { failRunAt } from './coreIdentityTestFixtures.mjs';
+import { failRunAt, hasBlobTable, dump } from './coreIdentityTestFixtures.mjs';
 
 let passed = 0;
 function test(name, fn) { fn(); passed++; console.log(`  ✓ ${name}`); }
@@ -156,20 +156,20 @@ const GUARDIAN_2 = () => ({ id: 'gd-2', name: 'Guardian Two', email: 'two@exampl
 /** A consistent synthetic snapshot: two players, a primary and a co-guardian, three organisations, one staff member. */
 function cleanSnapshot() {
   const s = syntheticSnapshot();
-  return { orgs: s.orgs.filter((o) => o.id !== 'org-bad'), guardians: [GUARDIAN_1(), GUARDIAN_2()], players: [PLAYER_ADULT(), PLAYER_MINOR()], sessions: [], users: [{ id: 'usr-9001', orgId: 'org-a', name: 'Maria Keane', role: 'Head of Recruitment', createdAt: 1 }], notes: [{ id: 'n1' }] };
+  return { orgs: s.orgs.filter((o) => o.id !== 'org-bad'), guardians: [GUARDIAN_1(), GUARDIAN_2()], players: [PLAYER_ADULT(), PLAYER_MINOR()], sessions: [] }; // S14a: no blob-only `notes`, and the staff list is no longer imported from the records
 }
 const NOW = Date.UTC(2026, 9, 11, 12);
 const rows = (s, sql) => s.prepare(sql).all().map((r) => ({ ...r }));
-const identityState = (s) => JSON.stringify({ players: rows(s, 'SELECT * FROM players ORDER BY rowid'), guardians: rows(s, 'SELECT * FROM guardians ORDER BY rowid'), links: rows(s, 'SELECT * FROM guardian_children ORDER BY rowid'), blobs: rows(s, 'SELECT name, value FROM collections ORDER BY name') });
+const identityState = (s) => JSON.stringify({ players: rows(s, 'SELECT * FROM players ORDER BY rowid'), guardians: rows(s, 'SELECT * FROM guardians ORDER BY rowid'), links: rows(s, 'SELECT * FROM guardian_children ORDER BY rowid') });
+/** A first installation of `records` through the data layer (the seed is imported once), then the server-mode save. */
+const firstInstallation = (server, records, extra = {}) => { const layer = attachDataLayer({ db: {}, seed: { orgs: records.orgs, players: records.players, guardians: records.guardians }, store: server, nextId, sessionTtlMs: TTL, now: () => NOW, ...extra }); server.save(); return layer; };
 
 test('identity snapshot (tool mode): a tool reads players and guardians from the live tables as the records the server sees (childIds from the links, in order, roles per side), writes a changed snapshot back through the tables — inserts, updates, link changes and removals — and the next server boot attaches to exactly that', () => {
   const dir = tempDir('s4-snap');
   const server = openStore(dir, { tableBacked: TABLE_BACKED });
-  const db = cleanSnapshot();
-  const layer = attachDataLayer({ db, store: server, nextId, persist: () => {}, sessionTtlMs: TTL, now: () => NOW });
+  const layer = firstInstallation(server, cleanSnapshot());
   assert.deepEqual(layer.boot.identity, { engine: 'sqlite', players: 2, guardians: 2, links: 2, imported: 4 }, 'a first installation initialises from the records once (imported counts players and guardians)');
-  server.save({ savedAt: 1, idCounter: 1000, db });
-  assert.deepEqual(rows(server.sqlite, 'SELECT name FROM collections ORDER BY name').map((r) => r.name), ['notes'], 'no identity blob is ever written again');
+  assert.equal(hasBlobTable(server.sqlite), false, 'no blob table: the records are rows (rewritten in S14a: it listed the blob rows)');
   server.sqlite.close();
   // The tool reads the tables as records.
   let tool = openStore(dir);
@@ -189,33 +189,31 @@ test('identity snapshot (tool mode): a tool reads players and guardians from the
   assert.deepEqual(rows(tool.sqlite, 'SELECT id FROM guardians ORDER BY rowid').map((r) => r.id), ['gd-1', 'gd-3']);
   assert.deepEqual(rows(tool.sqlite, 'SELECT guardian_id, player_id, role FROM guardian_children ORDER BY rowid'), [{ guardian_id: 'gd-1', player_id: 'pl-minor', role: 'primary' }, { guardian_id: 'gd-3', player_id: 'pl-new', role: 'primary' }], 'the links are rewritten from the snapshot: the removed co-guardian\'s link is gone');
   assert.deepEqual(tool.sqlite.prepare('PRAGMA foreign_key_check').all(), []);
-  assert.deepEqual(rows(tool.sqlite, 'SELECT name FROM collections ORDER BY name').map((r) => r.name), ['notes']);
+  assert.equal(hasBlobTable(tool.sqlite), false);
   tool.sqlite.close();
-  // The server attaches to exactly that; the array in memory (a stale copy) imports nothing.
+  // The server attaches to exactly that; stale records handed in as a seed import nothing.
   const again = openStore(dir, { tableBacked: TABLE_BACKED });
-  const db2 = { ...again.load().db, players: [PLAYER_ADULT()], guardians: [GUARDIAN_1(), GUARDIAN_2()] };
-  const layer2 = attachDataLayer({ db: db2, store: again, nextId, persist: () => {}, sessionTtlMs: TTL, now: () => NOW });
+  const db2 = {};
+  const layer2 = attachDataLayer({ db: db2, seed: { players: [PLAYER_ADULT()], guardians: [GUARDIAN_1(), GUARDIAN_2()] }, store: again, nextId, sessionTtlMs: TTL, now: () => NOW });
   assert.deepEqual(layer2.boot.identity, { engine: 'sqlite', players: 3, guardians: 2, links: 2, imported: 0 });
   assert.equal(db2.players.find((p) => p.id === 'pl-adult').name, 'Adult Renamed'); assert.deepEqual([...db2.players.find((p) => p.id === 'pl-adult').badges], ['Finisher', 'Captain']);
   assert.equal(db2.guardians.find((g) => g.id === 'gd-2'), undefined, 'the stale in-memory guardian was not resurrected');
   again.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
 });
 
-test('identity snapshot (tool mode): a malformed collection, a refused record, a dangling relationship, a legacy minor without any guardian link, or one collection without the other refuse the WHOLE save — no row, no link, no blob, no meta changes; a snapshot that carries neither collection leaves the tables alone; explicit empty arrays empty them on purpose', () => {
+test('identity snapshot (tool mode): a malformed collection, a refused record, a dangling relationship, a legacy minor without any guardian link, or one collection without the other refuse the WHOLE save — no row, no link, no meta changes; a snapshot that carries neither collection leaves the tables alone; explicit empty arrays empty them on purpose', () => {
   const dir = tempDir('s4-snap-refuse');
   const server = openStore(dir, { tableBacked: TABLE_BACKED });
-  const db = cleanSnapshot();
-  attachDataLayer({ db, store: server, nextId, persist: () => {}, sessionTtlMs: TTL, now: () => NOW });
-  server.save({ savedAt: 1, idCounter: 1000, db });
+  firstInstallation(server, cleanSnapshot());
   server.sqlite.close();
   const tool = openStore(dir);
-  const before = identityState(tool.sqlite); const seqBefore = tool.revision();
+  const before = identityState(tool.sqlite); const all = dump(tool.sqlite);
   const refuse = (label, mutate, re) => {
     const snap = tool.load(); mutate(snap.db);
     assert.throws(() => tool.save(snap), re, label);
     assert.equal(tool.sqlite.isTransaction, false, `${label}: the transaction is closed`);
     assert.equal(identityState(tool.sqlite), before, `${label}: nothing changed`);
-    assert.equal(tool.revision(), seqBefore, `${label}: the save revision did not advance`);
+    assert.equal(dump(tool.sqlite), all, `${label}: nothing was written anywhere`); // rewritten in S14a: it compared the save sequence
   };
   refuse('players not an array', (d) => { d.players = { id: 'pl-adult' }; }, /players: the snapshot collection must be an array/);
   refuse('guardians null', (d) => { d.guardians = null; }, /guardians: the snapshot collection must be an array/);
@@ -227,30 +225,27 @@ test('identity snapshot (tool mode): a malformed collection, a refused record, a
   refuse('a removed guardian still referenced', (d) => { d.guardians = d.guardians.filter((g) => g.id !== 'gd-1'); }, /players pl-minor: guardianId names no record \(gd-1\)/);
   refuse('a childIds entry naming nobody', (d) => { d.guardians[0].childIds.push('pl-ghost'); }, /guardians gd-1: childIds names no record \(pl-ghost\)/);
   refuse('a legacy minor without any guardian link (the Founder\'s decision)', (d) => { d.players.push({ id: 'pl-orphan', name: 'Orphan', dob: '2013-04-04', country: 'GB', guardianId: null, medical: { shared: false, records: [], conditionStatus: 'unknown' } }); }, /players pl-orphan: a minor on the evaluation date with no guardian link at all .*Founder's decision/);
-  // Partial snapshot: neither collection → the tables are untouched, other blobs are written.
-  { const snap = tool.load(); delete snap.db.players; delete snap.db.guardians; snap.db.notes = [{ id: 'n2' }]; tool.save(snap); }
-  assert.equal(identityState(tool.sqlite).replace(/"blobs":.*$/, ''), before.replace(/"blobs":.*$/, ''), 'the identity tables are exactly as before');
-  assert.equal(tool.sqlite.prepare("SELECT value FROM collections WHERE name = 'notes'").get().value, '[{"id":"n2"}]');
-  assert.equal(tool.sqlite.prepare("SELECT COUNT(*) AS n FROM collections WHERE name IN ('players', 'guardians')").get().n, 0, 'no blob appeared for an omitted table-backed collection');
+  // Partial snapshot: neither collection → the identity tables are untouched (rewritten in S14a: the other collection written alongside was a blob).
+  { const snap = tool.load(); delete snap.db.players; delete snap.db.guardians; tool.save(snap); }
+  assert.equal(identityState(tool.sqlite), before, 'the identity tables are exactly as before');
+  assert.equal(hasBlobTable(tool.sqlite), false);
   // Explicit empty arrays: intentional, the tables are emptied (players before guardians: no foreign key is left broken).
   { const snap = tool.load(); snap.db.players = []; snap.db.guardians = []; tool.save(snap); }
   assert.equal(tool.sqlite.prepare('SELECT COUNT(*) AS n FROM players').get().n + tool.sqlite.prepare('SELECT COUNT(*) AS n FROM guardians').get().n + tool.sqlite.prepare('SELECT COUNT(*) AS n FROM guardian_children').get().n, 0);
   tool.sqlite.close();
   const again = openStore(dir, { tableBacked: TABLE_BACKED });
-  const layer = attachDataLayer({ db: { ...again.load().db, players: [PLAYER_ADULT()], guardians: [] }, store: again, nextId, persist: () => {}, sessionTtlMs: TTL, now: () => NOW, warn: () => {} });
-  assert.deepEqual(layer.boot.identity, { engine: 'sqlite', players: 0, guardians: 0, links: 0, imported: 0 }, 'an intentionally emptied domain stays empty: the array in memory is never imported');
+  const layer = attachDataLayer({ db: {}, seed: { players: [PLAYER_ADULT()], guardians: [] }, store: again, nextId, sessionTtlMs: TTL, now: () => NOW, warn: () => {} });
+  assert.deepEqual(layer.boot.identity, { engine: 'sqlite', players: 0, guardians: 0, links: 0, imported: 0 }, 'an intentionally emptied domain stays empty: a seed handed in is never imported');
   again.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
 });
 
 test('identity snapshot (tool mode): a VALID full replacement is accepted whatever the obsolete rows or the input order — a removed guardian\'s e-mail reused by its replacement, two retained guardians swapping e-mails, retained players moving to the replacement, co-guardian references, each also with the collections in reversed order; actual duplicates, missing references and the legacy-minor rule stay refused; a failure in the middle of the rewrite and a failure of the REAL COMMIT leave every row, link, facet and other collection intact and a correct retry succeeds', () => {
   const dir = tempDir('s4-snap-order');
   const server = openStore(dir, { tableBacked: TABLE_BACKED });
-  const db = cleanSnapshot(); // gd-1 one@ (primary of pl-minor), gd-2 two@ (co of gd-1, co link to pl-minor), pl-adult, pl-minor
-  attachDataLayer({ db, store: server, nextId, persist: () => {}, sessionTtlMs: TTL, now: () => NOW });
-  server.save({ savedAt: 1, idCounter: 1000, db });
+  firstInstallation(server, cleanSnapshot()); // gd-1 one@ (primary of pl-minor), gd-2 two@ (co of gd-1, co link to pl-minor), pl-adult, pl-minor
   server.sqlite.close();
   const tool = openStore(dir);
-  const otherState = () => JSON.stringify({ blobs: rows(tool.sqlite, 'SELECT name, value FROM collections ORDER BY name'), orgs: rows(tool.sqlite, 'SELECT id, name FROM orgs ORDER BY id'), staff: rows(tool.sqlite, 'SELECT id FROM org_users ORDER BY id') });
+  const otherState = () => JSON.stringify({ orgs: rows(tool.sqlite, 'SELECT id, name FROM orgs ORDER BY id'), staff: rows(tool.sqlite, 'SELECT id FROM org_users ORDER BY id') });
   const links = () => rows(tool.sqlite, 'SELECT guardian_id, player_id, role FROM guardian_children ORDER BY guardian_id, player_id');
   const apply = (mutate) => { const snap = tool.load(); mutate(snap.db); tool.save(snap); return tool.load().db; };
   const byId = (arr, id) => arr.find((r) => r.id === id);
@@ -281,15 +276,15 @@ test('identity snapshot (tool mode): a VALID full replacement is accepted whatev
   assert.deepEqual(links(), [{ guardian_id: 'gd-2', player_id: 'pl-minor', role: 'co' }, { guardian_id: 'gd-co2', player_id: 'pl-minor', role: 'co' }, { guardian_id: 'gd-new', player_id: 'pl-minor', role: 'primary' }]);
   // A round trip without changes keeps the order the tool read.
   { const snap = tool.load(); const order = snap.db.guardians.map((g) => g.id); tool.save(snap); assert.deepEqual(tool.load().db.guardians.map((g) => g.id), order, 'an unchanged snapshot keeps its order'); }
-  assert.equal(otherState(), others, 'no other table or blob changed');
+  assert.equal(otherState(), others, 'no other table changed');
   // 4. Real problems stay refused, whole: a duplicate final e-mail (case-insensitive) across a retained and a new guardian, a removed guardian still referenced, a legacy minor without a link.
-  const before = identityState(tool.sqlite); const seqBefore = tool.revision();
+  const before = identityState(tool.sqlite); const all = dump(tool.sqlite);
   const refuse = (label, mutate, re) => {
     const snap = tool.load(); mutate(snap.db);
     assert.throws(() => tool.save(snap), re, label);
     assert.equal(tool.sqlite.isTransaction, false, `${label}: the transaction is closed`);
     assert.equal(identityState(tool.sqlite), before, `${label}: nothing changed`);
-    assert.equal(tool.revision(), seqBefore, `${label}: the save revision did not advance`);
+    assert.equal(dump(tool.sqlite), all, `${label}: nothing was written anywhere`); // rewritten in S14a: it compared the save sequence
   };
   refuse('a duplicate final e-mail (case-insensitive) between a retained and a new guardian', (x) => { x.guardians.push({ id: 'gd-dup', name: 'Dup', email: 'ONE@example.com', childIds: [] }); }, /shares its e-mail/);
   refuse('a removed guardian still referenced by a retained player', (x) => { x.guardians = x.guardians.filter((g) => g.id !== 'gd-new'); x.players.reverse(); }, /guardianId names no record \(gd-new\)/);
@@ -299,32 +294,31 @@ test('identity snapshot (tool mode): a VALID full replacement is accepted whatev
   { const probe = failRunAt(tool.sqlite, (sql) => /^INSERT INTO players/.test(sql), 2, 'injected failure writing the second player row');
     try { const snap = tool.load(); change(snap.db); assert.throws(() => tool.save(snap), /injected failure writing the second player row/); } finally { probe.restore(); }
     assert.equal(probe.fired, 1, 'the injected failure happened');
-    assert.equal(tool.sqlite.isTransaction, false); assert.equal(identityState(tool.sqlite), before, 'mid-rewrite failure: every row, link and facet as before'); assert.equal(otherState(), others); assert.equal(tool.revision(), seqBefore); }
+    assert.equal(tool.sqlite.isTransaction, false); assert.equal(identityState(tool.sqlite), before, 'mid-rewrite failure: every row, link and facet as before'); assert.equal(otherState(), others); assert.equal(dump(tool.sqlite), all, 'nothing was written anywhere'); }
   // 6. A failure of the REAL COMMIT: a deferred foreign-key violation planted inside the transaction makes SQLite refuse the COMMIT statement itself.
   { const exec = tool.sqlite.exec.bind(tool.sqlite); let fired = 0;
     tool.sqlite.exec = (sql) => { if (sql === 'COMMIT' && !fired) { fired += 1; exec('PRAGMA defer_foreign_keys = ON'); exec('CREATE TABLE fault_parent (id TEXT PRIMARY KEY); CREATE TABLE fault_child (parent_id TEXT NOT NULL REFERENCES fault_parent(id))'); tool.sqlite.prepare('INSERT INTO fault_child (parent_id) VALUES (?)').run('missing'); } return exec(sql); };
     try { const snap = tool.load(); change(snap.db); assert.throws(() => tool.save(snap), /FOREIGN KEY constraint failed/); } finally { tool.sqlite.exec = exec; }
     assert.equal(fired, 1, 'the COMMIT statement was the one that failed');
-    assert.equal(tool.sqlite.isTransaction, false); assert.equal(identityState(tool.sqlite), before, 'COMMIT failure: every row, link and facet as before'); assert.equal(otherState(), others); assert.equal(tool.revision(), seqBefore);
+    assert.equal(tool.sqlite.isTransaction, false); assert.equal(identityState(tool.sqlite), before, 'COMMIT failure: every row, link and facet as before'); assert.equal(otherState(), others); assert.equal(dump(tool.sqlite), all, 'nothing was written anywhere');
     assert.equal(tool.sqlite.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE name LIKE 'fault_%'").get().n, 0, 'the rollback took the planted tables with it'); }
   d = apply(change);
   assert.equal(byId(d.players, 'pl-adult').name, 'Adult Twice'); assert.deepEqual(d.guardians.map((g) => [g.id, g.email]).sort(), [['gd-2', 'one@example.com'], ['gd-co2', 'co2@example.com'], ['gd-new', 'two@example.com']], 'the retry lands the whole replacement');
-  assert.equal(tool.revision(), seqBefore + 1);
   tool.sqlite.close();
   // The server attaches to exactly that.
   const again = openStore(dir, { tableBacked: TABLE_BACKED });
-  const db2 = { ...again.load().db, players: [], guardians: [] };
-  const layer = attachDataLayer({ db: db2, store: again, nextId, persist: () => {}, sessionTtlMs: TTL, now: () => NOW, warn: () => {} });
+  const db2 = {};
+  const layer = attachDataLayer({ db: db2, store: again, nextId, sessionTtlMs: TTL, now: () => NOW, warn: () => {} });
   assert.deepEqual(layer.boot.identity, { engine: 'sqlite', players: 2, guardians: 3, links: 3, imported: 0 });
   assert.equal(db2.players.find((p) => p.id === 'pl-minor').guardianId, 'gd-new'); assert.deepEqual([...db2.guardians.find((g) => g.id === 'gd-new').childIds], ['pl-minor']);
   again.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
 });
 
-test('identity snapshot: before the cutover record exists (a pre-S4 file read by a tool) the blobs are authoritative and the tables are ignored; the store contract lists every live collection', () => {
+test('identity snapshot: before the cutover record exists the tables are neither read nor written; TABLE_BACKED lists every live collection', () => {
   const s = new DatabaseSync(':memory:'); s.exec('PRAGMA foreign_keys = ON;');
-  runDataMigrations(s, DATA_MIGRATIONS.filter((m) => !/^00(0[56789]|1[0-9]|2[0-9]|3[012345678])_/.test(m.id))); // S6a: 0008 needs 0005 too; S7a: 0009 needs 0008; S7b: 0010 needs 0009; S7c: 0011 needs 0010; S7d: 0012 needs 0011; S6b: 0013 needs 0012; S4b-R: 0014 needs 0013; S8a: 0015 needs 0014; S8b: 0016 needs 0015; S8c: 0017 needs 0016; and so on: each later step needs its predecessor
+  runDataMigrations(s, DATA_MIGRATIONS.filter((m) => !/^00(0[56789]|1[0-9]|2[0-9]|3[0-9])_/.test(m.id))); // S6a: 0008 needs 0005 too; S7a: 0009 needs 0008; S7b: 0010 needs 0009; S7c: 0011 needs 0010; S7d: 0012 needs 0011; S6b: 0013 needs 0012; S4b-R: 0014 needs 0013; S8a: 0015 needs 0014; S8b: 0016 needs 0015; S8c: 0017 needs 0016; and so on: each later step needs its predecessor
   assert.equal(IDENTITY_SNAPSHOT.read(s), null, 'nothing to read from the tables before the cutover');
-  assert.equal(transaction(s, () => IDENTITY_SNAPSHOT.replace(s, { players: [PLAYER_ADULT()], guardians: [] }, { now: NOW })), false, 'nothing is written to the tables before the cutover (the caller writes the blob)');
+  assert.equal(transaction(s, () => IDENTITY_SNAPSHOT.replace(s, { players: [PLAYER_ADULT()], guardians: [] }, { now: NOW })), false, 'nothing is written to the tables before the cutover');
   assert.equal(s.prepare('SELECT COUNT(*) AS n FROM players').get().n, 0);
   assert.equal(IDENTITY_SNAPSHOT.replace(s, { players: [], guardians: [] }), false, 'before the cutover the answer is false even outside a transaction (nothing is touched)');
   // After the cutover (here: a first installation, nothing saved) the dispatcher writes only inside the caller's transaction.

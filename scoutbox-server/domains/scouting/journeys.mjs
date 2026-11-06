@@ -378,8 +378,8 @@ export function registerJourneys(ctx) {
     if (!media) issues.push(FILE_CHECK_ISSUES.media_missing);
     else {
       if (media.kind !== 'video') issues.push(FILE_CHECK_ISSUES.not_video);
-      if (!media.url && !db.mediaBlobs?.[media.id] && !media.id.startsWith('media-seed')) {
-        // url null AND no stored blob → metadata-only entry
+      if (!media.url && !media.id.startsWith('media-seed')) {
+        // no url → metadata-only entry (the bytes were never uploaded)
         issues.push(FILE_CHECK_ISSUES.not_uploaded);
       }
     }

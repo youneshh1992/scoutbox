@@ -69,10 +69,11 @@ async function boot(dir, env = {}, server = SERVER) {
 const snap = (dir, fn) => { const s = new DatabaseSync(path.join(dir, 'scoutbox.db'), { readOnly: true }); try { s.exec('BEGIN'); try { return fn({ get: (sql, ...p) => { const r = s.prepare(sql).get(...p); return r ? { ...r } : r; }, all: (sql, ...p) => s.prepare(sql).all(...p).map((r) => ({ ...r })) }); } finally { s.exec('COMMIT'); } } finally { s.close(); } };
 const q1 = (dir, sql, ...p) => snap(dir, (c) => c.get(sql, ...p));
 const live = (dir) => !!q1(dir, 'SELECT 1 AS one FROM data_migrations WHERE id = ?', MIGRATION);
-const seqOf = (dir) => Number(q1(dir, "SELECT value FROM meta WHERE key = 'saveSeq'")?.value) || 0;
-// S6b: the ledger is a table since 0013 — read in the writer's literal through the repository's own reader when the blob is retired.
-const ledgerRows = (dir) => { const t = AUDIT_SNAPSHOT_TABLES.find((x) => x.name === 'ledger'); const s = new DatabaseSync(path.join(dir, 'scoutbox.db'), { readOnly: true }); try { const r = s.prepare("SELECT value FROM collections WHERE name = 'ledger'").get(); if (r) return JSON.parse(r.value); return s.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'ledger'").get() ? t.read(s) : []; } finally { s.close(); } };
-// S8a: the requests are rows of recruitment_requests since 0015 — read the columns the assertions need when the blob is retired.
+/** Whether the file still has the retired blob table (dropped by migration 0039, S14a). */
+const hasBlobTable = (dir) => !!q1(dir, "SELECT 1 AS one FROM sqlite_master WHERE type = 'table' AND name = 'collections'");
+// S6b: the ledger is a table since 0013 — read in the writer's literal through the repository's own reader.
+const ledgerRows = (dir) => { const t = AUDIT_SNAPSHOT_TABLES.find((x) => x.name === 'ledger'); const s = new DatabaseSync(path.join(dir, 'scoutbox.db'), { readOnly: true }); try { return s.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'ledger'").get() ? t.read(s) : []; } finally { s.close(); } };
+// S8a: the requests are rows of recruitment_requests since 0015 — read the columns the assertions need.
 const requestRows = (c) => c.all('SELECT id, status, contact_channel_id AS contactChannel FROM recruitment_requests ORDER BY rowid');
 const requestsOf = (dir) => snap(dir, (c) => requestRows(c) ?? []);
 const attachmentOf = (r) => (r.kind === 'clip' ? { kind: 'clip', mediaId: r.media_id, title: r.title, url: r.url, verifiedClip: r.verified_clip === 1 } : { kind: 'trial_report', reportId: r.report_id, orgName: r.org_name, summary: r.summary });
@@ -251,20 +252,19 @@ await test('[compat] account deletion reproduces today\'s behaviour (D-B, as app
 });
 
 // ============================================================= [cutover] the tables, the save points, the crash windows
-await test('[cutover] the cutover and the save points: a fresh boot records 0012_channels after 0011 and creates channels, messages and message_attachments with no blob behind them (the data layer reports the domain); the thread opened by an acceptance is in the SAME revision as the request\'s answer and survives a SIGKILL right after the response; a message is in the file before the sender hears 201 (SIGKILL right after); a FAILED ORDINARY SAVE at the REAL COMMIT (internal:save.sqlite_commit) leaves the message in memory and absent from the table while the route answered 201, and the next save (a receipt) lands the message and the receipt ONCE — a later save does not replay; rows carry seq/position in post order', async () => {
+await test('[cutover] the cutover and the save points: a fresh boot records 0012_channels after 0011 and creates channels, messages and message_attachments and the file has no blob table (the data layer reports the domain); the thread opened by an acceptance is committed with the request\'s answer and survives a SIGKILL right after the response; a message is in the file before the sender hears 201 (SIGKILL right after); a FAILED ORDINARY SAVE at the REAL COMMIT (internal:save.sqlite_commit) leaves the message in memory and absent from the table while the route answered 201, and the next save (a receipt) lands the message and the receipt ONCE — a later save does not replay; rows carry seq/position in post order', async () => {
   const dir = tempDir('s7d-cutover'); let S = await boot(dir, { M13_FAST_RETRY: '' });
   assert.ok(live(dir), 'the boot recorded 0012'); // fails on b67bce5: no such record
   assert.deepEqual(snap(dir, (c) => c.all('SELECT id FROM data_migrations ORDER BY applied_at, id').map((r) => r.id).filter((id) => id < '0019').slice(-8)), ['0011_outbox_push', MIGRATION, '0013_safety_audit', '0014_player_erasure', '0015_recruitment', '0016_recruitment_cases', '0017_recruitment_contacts_offers', '0018_signings_follow_ups']); // S6b: 0013 follows on the same boot; S4b-R, S8a, S8b and S8c after it
   for (const t of ['channels', 'messages', 'message_attachments']) assert.ok(q1(dir, "SELECT 1 AS one FROM sqlite_master WHERE type = 'table' AND name = ?", t), `${t} exists`);
-  assert.equal(q1(dir, "SELECT COUNT(*) AS n FROM collections WHERE name = 'channels'").n, 0, 'no channels blob');
+  assert.equal(hasBlobTable(dir), false, 'no blob table (rewritten in S14a)');
   const cap = (await S.j('GET', '/capabilities')).body; const domains = cap?.persistence?.dataLayer?.domains ?? cap?.dataLayer?.domains ?? {}; assert.ok(domains.channels, `the data layer reports the channels domain (${Object.keys(domains).join(', ')})`);
   const maria = await orgLogin(S); let kola = await playerLogin(S, 'pl-adeyemi');
   const req = await S.j('POST', '/org/players/pl-adeyemi/request', { type: 'contact', message: 'Synthetic contact request.' }, maria); assert.equal(req.status, 201);
-  const seqBefore = seqOf(dir);
   const ans = await S.j('POST', `/player/requests/${req.body.requestId}/respond`, { accept: true }, kola); assert.equal(ans.status, 200, ans.text);
   await S.kill();
-  const afterKill = snap(dir, (c) => ({ seq: Number(c.get("SELECT value FROM meta WHERE key = 'saveSeq'").value), threads: c.all('SELECT seq, id, request_id FROM channels ORDER BY seq'), request: requestRows(c).find((r) => r.id === req.body.requestId) }));
-  assert.equal(afterKill.threads.length, 1, 'the thread is in the file although the process was killed right after the answer'); assert.equal(afterKill.threads[0].request_id, req.body.requestId); assert.equal(afterKill.request.status, 'accepted'); assert.equal(afterKill.request.contactChannel, afterKill.threads[0].id); assert.ok(afterKill.seq > seqBefore, 'one later revision carries both');
+  const afterKill = snap(dir, (c) => ({ threads: c.all('SELECT seq, id, request_id FROM channels ORDER BY seq'), request: requestRows(c).find((r) => r.id === req.body.requestId) }));
+  assert.equal(afterKill.threads.length, 1, 'the thread is in the file although the process was killed right after the answer'); assert.equal(afterKill.threads[0].request_id, req.body.requestId); assert.equal(afterKill.request.status, 'accepted'); assert.equal(afterKill.request.contactChannel, afterKill.threads[0].id, 'the answer and the thread it opened are both in the file');
   const channelId = afterKill.threads[0].id;
   S = await boot(dir, { M13_FAST_RETRY: '' }); kola = await playerLogin(S, 'pl-adeyemi'); const maria2 = await orgLogin(S);
   assert.deepEqual((await S.j('GET', '/player/channels', undefined, kola)).body.map((c) => c.id), [channelId]);
@@ -274,23 +274,23 @@ await test('[cutover] the cutover and the save points: a fresh boot records 0012
   assert.equal(q1(dir, 'SELECT kind FROM message_attachments WHERE message_id = ?', m1.body.id).kind, 'clip');
   // The real COMMIT failure.
   S = await boot(dir, { M13_FAST_RETRY: '' }); kola = await playerLogin(S, 'pl-adeyemi'); const maria3 = await orgLogin(S);
-  const logBefore = S.log().length; const seq0 = seqOf(dir);
+  const logBefore = S.log().length;
   assert.equal((await S.j('POST', '/__faults', { rules: 'internal:save.sqlite_commit:1' })).status, 200);
   const m2 = await S.j('POST', `/org/channels/${channelId}/messages`, { text: 'Synthetic message whose save fails at COMMIT.' }, maria3); assert.equal(m2.status, 201, 'the route answers although its save failed');
-  assert.ok(await until(async () => /snapshot save failed: FOREIGN KEY constraint failed/.test(S.log().slice(logBefore)), 5000), 'the save failed at the real COMMIT');
+  assert.ok(await until(async () => /save failed: FOREIGN KEY constraint failed/.test(S.log().slice(logBefore)), 5000), 'the save failed at the real COMMIT');
   assert.equal((await S.j('POST', '/__faults', { rules: '' })).status, 200);
-  assert.deepEqual(snap(dir, (c) => c.all('SELECT id FROM messages WHERE channel_id = ? ORDER BY position', channelId)).map((r) => r.id), [m1.body.id], 'the message did not land'); assert.equal(seqOf(dir), seq0);
+  assert.deepEqual(snap(dir, (c) => c.all('SELECT id FROM messages WHERE channel_id = ? ORDER BY position', channelId)).map((r) => r.id), [m1.body.id], 'the message did not land'); assert.equal(q1(dir, 'SELECT read_by_org_at AS r FROM channels WHERE id = ?', channelId).r, null, 'nothing of the failed save is in the file');
   assert.deepEqual((await S.j('GET', '/org/channels', undefined, maria3)).body[0].messages.map((m) => m.id), [m1.body.id, m2.body.id], 'memory is the intended state');
   const rc = await S.j('POST', `/org/channels/${channelId}/read`, {}, maria3); assert.equal(rc.status, 200);
-  const landed = snap(dir, (c) => ({ messages: c.all('SELECT id, position FROM messages WHERE channel_id = ? ORDER BY position', channelId), read: c.get('SELECT read_by_org_at FROM channels WHERE id = ?', channelId).read_by_org_at, seq: Number(c.get("SELECT value FROM meta WHERE key = 'saveSeq'").value) }));
-  assert.deepEqual(landed.messages, [{ id: m1.body.id, position: 0 }, { id: m2.body.id, position: 1 }], 'the next save landed the message once, at the next position'); assert.equal(landed.read, rc.body.readBy.org); assert.equal(landed.seq, seq0 + 1);
+  const landed = snap(dir, (c) => ({ messages: c.all('SELECT id, position FROM messages WHERE channel_id = ? ORDER BY position', channelId), read: c.get('SELECT read_by_org_at FROM channels WHERE id = ?', channelId).read_by_org_at }));
+  assert.deepEqual(landed.messages, [{ id: m1.body.id, position: 0 }, { id: m2.body.id, position: 1 }], 'the next save landed the message once, at the next position'); assert.equal(landed.read, rc.body.readBy.org, 'with the receipt');
   assert.equal((await S.j('POST', `/player/channels/${channelId}/read`, {}, kola)).status, 200);
   assert.deepEqual(snap(dir, (c) => c.all('SELECT id FROM messages WHERE channel_id = ?', channelId)).length, 2, 'a later save does not replay');
   void maria; void maria2;
   await S.stop(); rm(dir);
 });
 
-await test('[cutover] the admin backup and a restore: the backup\'s database copy holds the stored threads exactly; a restore into a NEW directory boots with them row for row (no blob), the admin audit shows them, and a message appends after the restored ones', async () => {
+await test('[cutover] the admin backup and a restore: the backup\'s database copy holds the stored threads exactly; a restore into a NEW directory boots with them row for row (no blob table), the admin audit shows them, and a message appends after the restored ones', async () => {
   const dir = tempDir('s7d-backup'); let S = await boot(dir);
   const maria = await orgLogin(S); let kola = await playerLogin(S, 'pl-adeyemi'); const amara = await guardianLogin(S, 'gd-amara');
   const { channel: adult } = await adultThread(S, maria, kola); const { channel: guardian } = await guardianThread(S, maria, amara);
@@ -304,7 +304,7 @@ await test('[cutover] the admin backup and a restore: the backup\'s database cop
   await S.stop();
   const restored = tempDir('s7d-restored'); fs.cpSync(bk.body.dir, restored, { recursive: true });
   S = await boot(restored); assert.ok(live(restored));
-  assert.equal(JSON.stringify(stored(restored)), JSON.stringify(original), 'row for row'); assert.equal(q1(restored, "SELECT COUNT(*) AS n FROM collections WHERE name = 'channels'").n, 0, 'no blob');
+  assert.equal(JSON.stringify(stored(restored)), JSON.stringify(original), 'row for row'); assert.equal(hasBlobTable(restored), false, 'no blob table');
   const audit = (await S.j('GET', '/admin/channels', undefined, null, A)).body;
   assert.equal(JSON.stringify(audit), JSON.stringify(original), 'the admin audit shows the restored threads');
   kola = await playerLogin(S, 'pl-adeyemi'); const m = await S.j('POST', `/player/channels/${adult.id}/messages`, { text: 'Synthetic after the restore.' }, kola); assert.equal(m.status, 201, m.text);

@@ -36,11 +36,13 @@ import { PERMISSIONS, can, FACETS } from '../../domains/agents/core/shared.mjs';
 import { EVENT_REGISTRY } from '../../domains/platform/eventRegistry.mjs';
 import { RATE_LIMIT_POLICY } from '../../domains/platform/rateLimit.mjs';
 import { TYPE_CATEGORY, CATEGORIES } from '../../domains/platform/notificationPrefs.mjs';
-import { MIGRATIONS, SCHEMA_VERSION, PRODUCTION_REQUIRED_STORES } from '../../domains/platform/migrations.mjs';
-import { guaranteeFor } from '../../storeContract.mjs';
-import { TABLE_BACKED } from '../../repositories/index.mjs';
+import { DATA_MIGRATIONS, TABLE_BACKED } from '../../repositories/index.mjs';
+import { COMPLIANCE_POLICIES_MIGRATION, COMPLIANCE_POLICIES_TABLES } from '../../repositories/compliancePolicies.mjs';
+import { COMPLIANCE_RECORDS_MIGRATION, COMPLIANCE_RECORDS_TABLES } from '../../repositories/complianceRecords.mjs';
 import { openStore } from '../../store.mjs';
 import { pickPort } from '../../scripts/testPort.mjs';
+
+const SCHEMA_VERSION = Number(DATA_MIGRATIONS.map((m) => m.id).sort().at(-1).slice(0, 4));
 
 const PORT = pickPort(6500, 200, [0]); // TH-6: never a fetch-blocked port
 const BASE = `http://localhost:${PORT}`;
@@ -250,17 +252,11 @@ section('Z — error contract, permissions, registry, notifications, rate polici
   ok(CATEGORIES.compliance.mandatory === true && CATEGORIES.compliance.default === true, 'AF2 the compliance category is mandatory — a regulatory obligation cannot be muted');
   for (const [k, scope] of [['compliance_context_write', 'actor'], ['compliance_consent_request', 'actor'], ['compliance_consent_response', 'actor'], ['ts_review_decision', 'actor'], ['ts_policy_publish', 'actor']]) ok(RATE_LIMIT_POLICY[k]?.scope === scope && RATE_LIMIT_POLICY[k].max > 0, `Z8 rate policy ${k}`);
   // S11b: the five stores are tables (migrations 0027 and 0028), not collections.
-  for (const s of ['tsReviewers', 'jurisdictionPolicies', 'regulatoryReviews', 'regulatoryConsents', 'complianceContexts']) ok(guaranteeFor(s) !== 'migration' && !PRODUCTION_REQUIRED_STORES.includes(s) && TABLE_BACKED.includes(s), `AD1 ${s} is a table of the compliance repositories, not a collection`);
-  const step = MIGRATIONS.find((m) => m.id === 'm250_001_compliance_stores');
-  // P5.6C's own step is 2306 and is still the ONLY step at 2306. The current
-  // schema has moved past it (P5.6D is 2307), which is what a later milestone
-  // advancing the schema exactly once looks like from here.
-  ok(step?.version === 2306 && MIGRATIONS.filter((m) => m.version === 2306).length === 1 && SCHEMA_VERSION >= 2306, 'AD2 exactly one step advances the schema to 2306, and the current schema is at or past it');
-  // P5.6C created no transaction store. `agentTransactions` and
-  // `transactionRepresentations` exist from P5.6D onward — created by step
-  // m260_001, never by m250_001, which is the assertion that still matters.
-  neg(!/agentTransactions|transactionRepresentations|transactionDocuments|offers|signings|agencyInvoices/.test(String(step?.up ?? '')), 'AD3 the P5.6C migration step creates no transaction, offer, signing or invoice store — P5.6C owns evaluation, not the Transaction Room');
-  neg(guaranteeFor('offers') !== 'migration' && guaranteeFor('agencyInvoices') !== 'migration' && guaranteeFor('recruitmentOffers') !== 'migration', 'AD3b no offer or agency-invoice store is migration-guaranteed anywhere in the repository');
+  // Rewritten in S14a: these described the retired snapshot registry (step m250_001 at 2306) and the store contract.
+  for (const s of ['tsReviewers', 'jurisdictionPolicies', 'regulatoryReviews', 'regulatoryConsents', 'complianceContexts']) ok(TABLE_BACKED.includes(s), `AD1 ${s} is a table of the compliance repositories, not a collection`);
+  const compliance = [COMPLIANCE_POLICIES_MIGRATION, COMPLIANCE_RECORDS_MIGRATION];
+  ok(compliance.every((id) => DATA_MIGRATIONS.filter((m) => m.id === id).length === 1) && SCHEMA_VERSION >= 28, 'AD2 exactly one migration each creates the compliance tables (0027, 0028), and the current schema is at or past them');
+  neg(![...COMPLIANCE_POLICIES_TABLES, ...COMPLIANCE_RECORDS_TABLES].some((t) => /transaction|offer|signing|invoice/i.test(t)), 'AD3 the compliance migrations create no transaction, offer, signing or invoice table — P5.6C owns evaluation, not the Transaction Room');
   ok(COMPLIANCE_AUDIT_ACTIONS.has('regulatory_review_resolved') && COMPLIANCE_AUDIT_ACTIONS.has('regulatory_consent_revoked') && !COMPLIANCE_AUDIT_ACTIONS.has('offer_made'), 'AE3 the audit projection lists review, consent and context actions and no offer action');
 }
 function TIERS_ALL() { return ['licensed_agent', 'agency_admin', 'analyst', 'assistant', 'finance']; }
@@ -301,7 +297,7 @@ const collect = (label, r) => { if (r.status >= 400) ERROR_BODIES.push({ label, 
 section('A — G-C0: reviewer identity is authenticated, derived by the server, and never the shared key');
 let PRIYA, MARCUS, LEA;
 {
-  ok((await j('GET', '/healthz')).body.schemaVersion === SCHEMA_VERSION && SCHEMA_VERSION >= 2306, `A0 schema ${SCHEMA_VERSION} (P5.6C required at least 2306)`);
+  ok((await j('GET', '/healthz')).body.schemaVersion === SCHEMA_VERSION && SCHEMA_VERSION >= 28, `A0 schema ${SCHEMA_VERSION} (P5.6C requires the compliance tables, 0028)`);
   neg(expect(collect('A1', await j('GET', '/ts/compliance/reviews', undefined, null, ADMIN)), 401, 'REVIEWER_AUTH_REQUIRED'), 'A1 the shared admin key alone gets no reviewer lane (#1)');
   neg(expect(collect('A2', await j('POST', '/ts/compliance/reviews/rrv-1/resolve', { outcome: 'APPROVED' }, null, ADMIN)), 401, 'REVIEWER_AUTH_REQUIRED'), 'A2 …and cannot resolve anything');
   PRIYA = (await reviewerLogin('tsr-dev-admin', 'dev-reviewer-admin')).body;

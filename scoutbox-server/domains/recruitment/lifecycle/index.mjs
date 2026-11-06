@@ -199,8 +199,3 @@ export function registerM23(rawCtx) {
   return ctx;
 }
 
-export function migrateM23() {
-  // P2 introduced no store. The contacts (P3) and offers (P6) live in their
-  // typed tables (migration 0017) and are read through SQL, the contacts/offers
-  // repository's queries (§4.3 step 2): there is no db.* collection for them.
-}

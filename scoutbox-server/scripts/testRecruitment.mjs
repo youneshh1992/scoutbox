@@ -16,7 +16,7 @@ import path from 'node:path';
 import { DatabaseSync, StatementSync } from 'node:sqlite';
 import { attachDataLayer, DATA_MIGRATIONS, TABLE_BACKED } from '../repositories/index.mjs';
 import { openStore } from '../store.mjs';
-import { NOW, TTL, tempDir } from './coreIdentityTestFixtures.mjs';
+import { NOW, TTL, tempDir, hasBlobTable } from './coreIdentityTestFixtures.mjs';
 import { legacyTrialRequest, contactRequest, openDayRequest, p4bInvitation, minorInvitation, acceptedRequest, scheduledTrial, acceptedTrial, session, preP4bTrial, workedTrial, cancelledTrial, report, CASES, persisted, T, saveFixture, fixtureDb } from './recruitmentTestFixtures.mjs';
 
 let passed = 0;
@@ -56,21 +56,19 @@ const refused = (fn, pattern, label = '') => { let err = null; try { fn(); } cat
 /** Save the fixtures, with `over`, into a new database and expect the save refused, atomically, twice. */
 const refusedSave = (tag, fixture, pattern) => {
   const d = tempDir(`s8a-ref-${tag}`); const st = openStore(d); const before = fullDump(st.sqlite);
-  for (const label of [tag, `${tag} (again)`]) { refused(() => st.save({ savedAt: NOW, idCounter: 1000, db: fixtureDb(fixtureCollections(fixture)) }), pattern, label); assert.equal(st.sqlite.isTransaction, false); assert.equal(fullDump(st.sqlite), before, `${label}: nothing written`); assert.equal(st.revision(), 0); }
+  for (const label of [tag, `${tag} (again)`]) { refused(() => st.save({ savedAt: NOW, idCounter: 1000, db: fixtureDb(fixtureCollections(fixture)) }), pattern, label); assert.equal(st.sqlite.isTransaction, false); assert.equal(fullDump(st.sqlite), before, `${label}: nothing written`); }
   st.sqlite.close(); rm(d);
 };
 function serverOpen(dir) {
   const store = openStore(dir, { tableBacked: TABLE_BACKED });
-  const loaded = store.load();
-  const db = { ...loaded.db, players: [], guardians: [] };
-  const layer = attachDataLayer({ db, store, nextId, persist: () => {}, sessionTtlMs: TTL, now: () => NOW, warn: () => {} });
-  const snapshot = () => ({ savedAt: NOW, idCounter: 1000, db });
-  return { store, layer, db, snapshot, save: () => store.save(snapshot()), unit: (w) => store.unitOfWork(w, { snapshot }), revision: () => store.revision(), repo: layer.recruitment, close: () => store.sqlite.close() };
+  const db = {}; // S14a: a fixture-saved file is not a first installation, so there is nothing to hand in
+  const layer = attachDataLayer({ db, store, nextId, sessionTtlMs: TTL, now: () => NOW, warn: () => {} });
+  return { store, layer, db, save: () => store.save(), unit: (w) => store.unitOfWork(w), repo: layer.recruitment, close: () => store.sqlite.close() };
 }
 function snapshotOpen(dir) {
   const store = openStore(dir); const db = store.load().db;
   const save = (over = {}, { omit = [] } = {}) => { const d = { ...db, ...over }; for (const k of omit) delete d[k]; return store.save({ savedAt: NOW, idCounter: 1000, db: d }); };
-  return { store, db, save, revision: () => store.revision(), close: () => store.sqlite.close() };
+  return { store, db, save, close: () => store.sqlite.close() };
 }
 
 test('[schema] migration 0015 is registered before 0016–0018 and creates the sixteen typed STRICT tables (no lossless side column, the vocabulary CHECKs, the case key immediate and the trial key deferred to COMMIT) and channels with the real request key; a fresh database holds no row and no blob', () => {
@@ -86,7 +84,7 @@ test('[schema] migration 0015 is registered before 0016–0018 and creates the s
   assert.match(ddlOf(f, 'trials'), /request_id TEXT NOT NULL UNIQUE REFERENCES recruitment_requests\(id\) ON DELETE RESTRICT/);
   assert.match(ddlOf(f, 'recruitment_requests'), /status IN \('pending','accepted','declined','suspended'\)/); assert.match(ddlOf(f, 'trials'), /workflow_state IN \('legacy_accepted'/); assert.match(ddlOf(f, 'trial_attendance'), /source IN \('checkin','manual'\)/);
   assert.deepEqual(f.prepare('PRAGMA foreign_key_list(channels)').all().map((x) => [x.from, x.table, x.on_delete]).sort(), [['org_id', 'orgs', 'RESTRICT'], ['request_id', 'recruitment_requests', 'RESTRICT']]);
-  for (const n of rec.RECRUITMENT_COLLECTIONS) assert.equal(col(f, 'SELECT count(*) FROM collections WHERE name = ?', n), 0, `no ${n} blob`);
+  assert.equal(hasBlobTable(f), false, 'no blob table'); // rewritten in S14a: it described the blob
   f.close(); rm(d);
 });
 
@@ -103,7 +101,7 @@ test('[snapshot][typed] every writer shape is typed into its columns and reads b
   const before = withRo(d, recDump); S.save(); assert.equal(withRo(d, recDump), before, 'an unchanged snapshot re-saved writes the same rows'); S.close(); rm(d);
 });
 
-test('[snapshot][typed] a save STOPS with the ids on a record the tables cannot hold — nothing written, the revision unchanged, the same save refused again: an unknown field (top level and nested), a status outside the vocabulary, an off-type rev, a trial without its request, a request naming no case, a missing guardian, a request naming a trial that does not name it back, two open trials in one case, alien entries (each one named)', () => {
+test('[snapshot][typed] a save STOPS with the ids on a record the tables cannot hold — nothing written, the same save refused again: an unknown field (top level and nested), a status outside the vocabulary, an off-type rev, a trial without its request, a request naming no case, a missing guardian, a request naming a trial that does not name it back, two open trials in one case, alien entries (each one named)', () => {
   const fix = FIX();
   refusedSave('unknown field', { ...fix, requests: [{ ...fix.requests[0], legacyFlag: true }, ...fix.requests.slice(1)] }, /RECRUITMENT_INPUT_INVALID[\s\S]*req-p4b\.record\.legacyFlag is not a field/);
   refusedSave('unknown nested field', { ...fix, trials: [scheduledTrial({ blockedBy: null, keys: { accept: { key: null, fp: 'x' } } }), fix.trials[1]] }, /trial-1\.record\.blockedBy|trial-1\.keys\.accept/);

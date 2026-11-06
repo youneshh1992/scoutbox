@@ -18,7 +18,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
-import { SCHEMA_VERSION, MIGRATIONS } from '../../domains/platform/migrations.mjs';
+import { DATA_MIGRATIONS } from '../../repositories/index.mjs';
 import { openStore } from '../../store.mjs';
 import { ROOM_STATUSES, TERMINAL_ROOM_STATUSES } from '../../domains/recruitment/rooms/shared.mjs';
 import {
@@ -28,6 +28,7 @@ import {
 } from '../../domains/recruitment/lifecycle/journeyModel.mjs';
 import { JOURNEY_VIEWERS } from '../../domains/recruitment/lifecycle/journey.mjs';
 import { buildRecruitmentJourney, createEvidenceProvider } from '../../scripts/recruitmentReadsFixture.mjs'; // §4.3 step 2: the contacts/offers queries over the plain arrays
+const LATEST_SCHEMA = Number(DATA_MIGRATIONS.map((m) => m.id).sort().at(-1).slice(0, 4)); // S14a: the latest table migration's number
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SERVER = path.join(HERE, '..', '..', 'server.mjs');
@@ -65,7 +66,8 @@ const at = (ms) => ({ 'x-scoutbox-test-clock': String(ms) });
 // ================================================================ A — model (pure)
 section('A — the model: stages, selectors, next actions, validator, visibility (pure)');
 {
-  ok(SCHEMA_VERSION === 2308 && MIGRATIONS.length === 18, 'A1 schema stays 2308 with 18 migrations: P8 adds no store');
+  // Rewritten in S14a: it compared the blob's schema numbers.
+  ok(DATA_MIGRATIONS.length === LATEST_SCHEMA && !DATA_MIGRATIONS.some((m) => /journey/i.test(m.id)), 'A1 every table migration, none for a journey: P8 adds no store');
   ok(JOURNEY_STAGES.length === 13 && PIPELINE_STAGES.length === 10 && PIPELINE_STAGES.every((s) => JOURNEY_STAGES.includes(s)), 'A2 thirteen stage words, ten pipeline stages');
   neg(ROOM_STATUSES.length === 18 && JOURNEY_STAGES.every((s) => !ROOM_STATUSES.includes(s) || s === 'watching' || s === 'signed'), 'A3 the frozen lifecycle still has 18 states; a stage word is not a lifecycle state (only `watching` and `signed` coincide by name)');
   ok(canonicalStageFor('trial_completed', { assessed: false }) === 'assessment' && canonicalStageFor('trial_completed', { assessed: true }) === 'decision' && canonicalStageFor('offer_accepted', {}) === 'acceptance' && canonicalStageFor('offer_accepted', { signingOpened: true }) === 'signing' && canonicalStageFor('on_hold', {}) === 'paused' && canonicalStageFor('archived', {}) === 'ended', 'A4 stage refinements: assessed → decision, package → signing, hold → paused, terminal → ended');
@@ -662,12 +664,12 @@ section('Z — the boundaries, read from the source: one writer per truth, no au
   neg(!/applyLifecycleTransition|room\.status|recordCompletedSigning/.test(strip(src('domains/discovery/matching/index.mjs'))) && files('domains/development/boxcam/cv').every((f) => !/applyLifecycleTransition|room\.status|rejectCase|archived/.test(strip(src(f)))) && !/applyLifecycleTransition|room\.status/.test(strip(src('domains/verification/trust/shared.mjs'))), '#15 #16 #17 Z5 matching (M19), Box Cam / CV (M22) and Trust (M16.2) never touch the lifecycle');
   neg(!/db\.signings\.push/.test(strip(src('domains/recruitment/offers/index.mjs'))) && !/'signed'/.test(strip(src('domains/recruitment/offers/index.mjs')).replace(/ROOM_STATUS_LABELS/g, '')) && !/db\.signingPackages\.push/.test(strip(src('domains/recruitment/offers/index.mjs'))), '#11 Z6 the Offer domain writes no signing row, no package, no signed');
   neg(!/db\.recruitmentOffers\.push/.test(strip(src('domains/recruitment/lifecycle/decisionRoutes.mjs'))), '#9 Z7 the decision domain writes no Offer');
-  neg(!/db\.recruitmentJourneys|recruitmentJourneyStates/.test(serverFiles.map((f) => strip(src(f))).join('')) && !/recruitmentJourneys|recruitmentJourneyStates/.test(src('domains/platform/migrations.mjs')), '#83 Z8 there is no journey store and no migration names one');
+  neg(!/db\.recruitmentJourneys|recruitmentJourneyStates/.test(serverFiles.map((f) => strip(src(f))).join('')) && files('repositories/migrations').every((f) => !/recruitmentJourneys|recruitmentJourneyStates|recruitment_journey/.test(src(f))), '#83 Z8 there is no journey store and no migration names one');
   neg(!/\.push\(|\.splice\(|\s=\s(?!==)/.test(strip(src('domains/recruitment/lifecycle/journeyModel.mjs')).replace(/const |let |\w+\s*=\s*\(|=>|===|!==|<=|>=|\?\?=/g, '')) || true, 'Z9 the model is read-only by construction (no store access)');
   neg(!/\bdb\b/.test(strip(src('domains/recruitment/lifecycle/journeyModel.mjs'))), 'Z9b the model never receives a database');
   neg(/registerJourneyRoutes/.test(src('server.mjs')) && !/\.push\(|persist/.test(strip(src('domains/recruitment/lifecycle/journeyRoutes.mjs')).replace(/items\.push|out\.push|grants\.push/g, '')), 'Z10 the journey routes write nothing');
   // S4a: the completion is one unit of work (store.unitOfWork) — the case lifecycle, the signings row, the player's
-  // columns and the blobs roll back together through the store's memento and participants, never by a hand-written
+  // columns roll back together through the unit's participants, never by a hand-written
   // restore in the signing module; the lifecycle writer keeps its own snapshot for its own failures (M17).
   neg(!/lifecycleSnapshot|restoreLifecycle/.test(src('domains/recruitment/rooms/rooms.mjs')) && /unit\(\(\) => \{[\s\S]{0,400}recordCompletedSigning\(/.test(src('domains/recruitment/signings/index.mjs')) && !/kase\.room\.status = snapshot/.test(src('domains/recruitment/signings/index.mjs')) && !/restoreLifecycle/.test(src('domains/recruitment/signings/index.mjs')), 'Z11 the signing completion rolls back as one unit of work (S4a), not through a hand-written restore (S8b: the lifecycle writer has none left)');
   neg(/pkg\.caseId !== kase\.id/.test(src('domains/recruitment/lifecycle/evidence.mjs')) && /ts < opened/.test(src('domains/recruitment/lifecycle/evidence.mjs')), 'Z12 the signed rule names the case (canonical) and the opening (legacy)');

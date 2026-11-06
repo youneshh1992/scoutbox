@@ -762,6 +762,14 @@ CREATE TABLE media_deletions (
 ) STRICT;
 CREATE INDEX media_deletions_queued ON media_deletions (queued_at);
 
+-- S14a: IMPLEMENTED, migration 0039_retire_blob REGISTERED (repositories/counters.mjs). The blob store's
+-- `collections` table is dropped; the id counter behind every `<prefix>-<n>` id is a row here ('id'), written
+-- through at each mint. (`meta` keeps the boot's initialisation states; `data_migrations` is the schema history.)
+CREATE TABLE counters (
+  name  TEXT PRIMARY KEY CHECK (length(name) BETWEEN 1 AND 40),
+  value INTEGER NOT NULL CHECK (value >= 0)
+) STRICT;
+
 
 -- =====================================================================
 -- not tables:

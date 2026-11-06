@@ -58,9 +58,11 @@ other worktrees (`/home/user/scoutbox` on `claude/desktop-project-migration-wyk3
 
 ---
 
-## 2. Storage today, and the review's claims checked against the code
+## 2. Storage before the migration, and the review's claims checked against the code
 
-### 2.1 How persistence works on this branch (FACT)
+*Historical: this section records the blob store as it was when the migration was planned (the blob was retired in S14a; see migration.md §4.6 for what remains). The line numbers are of that time.*
+
+### 2.1 How persistence worked when the plan was written (FACT)
 
 - `scoutbox-server/store.mjs` opens `DATA_DIR/scoutbox.db` with `node:sqlite`
   (`DatabaseSync`), sets `PRAGMA journal_mode = WAL` and `PRAGMA foreign_keys = ON`
@@ -772,25 +774,20 @@ DECISIONs, some already in force:
 
 ## 8. Schema versioning
 
-- **Two registries, one order.** `domains/platform/migrations.mjs` (`SCHEMA_VERSION 2308`) migrates the
-  JSON snapshot in memory and records itself in `db.schema`. `repositories/database.mjs`
-  migrates tables with SQL and records each migration id in the `data_migrations (id TEXT
-  PRIMARY KEY, applied_at INTEGER)` table in the database itself, so a restored file carries
-  its own history. Order at boot: snapshot migrations first, then table migrations
-  (`attachDataLayer`), then modules.
+- **One registry.** `repositories/database.mjs` migrates tables with SQL and records each migration id in the
+  `data_migrations (id TEXT PRIMARY KEY, applied_at INTEGER)` table in the database itself, so a restored file
+  carries its own history. The schema version is the latest migration's number (`0039_retire_blob` → 39). The
+  in-memory snapshot registry (`db.schema`, version 2308) was retired with the blob in S14a.
 - **Migration modules** live in `scoutbox-server/repositories/migrations/NNNN_name.mjs` and
   export `{ id, note, up(sqlite) }`. Ids sort lexically; a migration runs once, in a
   transaction, and a failure aborts the boot without modifying the file. There is no `down`:
   rollback is a re-seed (there is no production data).
-- **Applied today:** `0001_org_users` (S0), `0002_core_identity_shadow` (S1), `0003_sessions_live` (S2), `0004_orgs_live` (S3), `0005_core_identity_live` and `0006_media_deletions` (S4a), `0007_player_subrecords` (S5).
+- **Applied today:** `0001`–`0039` (`DATA_MIGRATIONS` in `repositories/index.mjs`; migration.md §3 maps them to steps).
 - **Rule.** The DDL in `docs/architecture/sql/` is the design; the migration files are what
   runs. `testSchemaDdl.mjs` asserts the two agree for every table a migration has created, so
   the document cannot drift from the code without a failing test.
-- **Snapshot version after cutover.** When a collection becomes table-backed, the blob is
-  deleted from `collections` on the next save and the snapshot migration steps that touched it
-  become no-ops (they already tolerate a repository view). At S14 `db.schema` is replaced by
-  `data_migrations` and `meta.idCounter` moves to a `counters` table.
-
+- **The blob is gone (S14a).** Migration `0039_retire_blob` dropped the `collections` table and moved the id
+  counter into `counters`.
 ---
 
 ## 9. Tenancy, guardianship and safeguarding in the schema

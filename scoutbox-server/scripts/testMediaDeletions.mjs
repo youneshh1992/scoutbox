@@ -62,24 +62,22 @@ test('storage adapter: delete() returns the number of files removed, 0 for an ab
 test('transaction coupling: an entry queued inside a unit of work that rolls back is gone with everything else; one queued inside a unit that commits is processed only after COMMIT, and the row stays across a reopen while the file could not be removed', () => {
   const dir = tempDir('media-unit'); const storageDir = tempDir('media-unit-files'); const storage = createStorage(storageDir);
   let store = openStore(dir, { tableBacked: TABLE_BACKED });
-  const db = { orgs: [], users: [], sessions: [], players: [adult()], guardians: [], requests: [], blobNotes: [] };
-  let layer = attachDataLayer({ db, store, nextId, persist: () => {}, sessionTtlMs: TTL, now: () => NOW });
-  const snapshot = () => ({ savedAt: NOW, idCounter: 1000, db });
+  let layer = attachDataLayer({ db: {}, seed: { orgs: [], players: [adult()], guardians: [] }, store, nextId, sessionTtlMs: TTL, now: () => NOW });
   storage.saveDataUrl('media-x', 'data:video/webm;base64,AAAA');
-  // Rolled back: the queue entry, the player removal and the blob edit all go.
-  assert.throws(() => store.unitOfWork(() => { layer.mediaDeletions.enqueue(['media-x'], { playerId: 'pl-adult', at: NOW }); layer.players.remove('pl-adult'); db.blobNotes.push({ id: 'r' }); throw new Error('boom'); }, { snapshot }), /boom/);
-  assert.equal(layer.mediaDeletions.count(), 0); assert.equal(layer.players.count(), 1); assert.equal(db.blobNotes.length, 0);
+  // Rolled back: the queue entry and the player removal both go (S14a: the blob edit that went with them is gone).
+  assert.throws(() => store.unitOfWork(() => { layer.mediaDeletions.enqueue(['media-x'], { playerId: 'pl-adult', at: NOW }); layer.players.remove('pl-adult'); throw new Error('boom'); }), /boom/);
+  assert.equal(layer.mediaDeletions.count(), 0); assert.equal(layer.players.count(), 1); assert.equal(store.sqlite.prepare("SELECT COUNT(*) AS n FROM players WHERE id = 'pl-adult'").get().n, 1);
   assert.ok(fs.existsSync(path.join(storageDir, 'media', 'media-x.webm')), 'the file was never touched');
   // Committed: the entry exists after COMMIT; processing then removes the file and clears the entry.
   let seenInside = null;
-  store.unitOfWork(() => { layer.mediaDeletions.enqueue(['media-x'], { playerId: 'pl-adult', at: NOW }); layer.players.remove('pl-adult'); seenInside = layer.mediaDeletions.isQueued('media-x'); }, { snapshot });
+  store.unitOfWork(() => { layer.mediaDeletions.enqueue(['media-x'], { playerId: 'pl-adult', at: NOW }); layer.players.remove('pl-adult'); seenInside = layer.mediaDeletions.isQueued('media-x'); });
   assert.equal(seenInside, true); assert.equal(layer.mediaDeletions.count(), 1); assert.equal(layer.players.count(), 0);
   // A failure at the filesystem boundary (a directory now sits where the file was): the entry survives a reopen.
   fs.rmSync(path.join(storageDir, 'media', 'media-x.webm')); fs.mkdirSync(path.join(storageDir, 'media', 'media-x.webm'));
   assert.deepEqual(layer.mediaDeletions.process(storage), { removed: 0, absent: 0, failed: 1, conflicts: 0 });
   store.sqlite.close();
   store = openStore(dir, { tableBacked: TABLE_BACKED });
-  layer = attachDataLayer({ db: { ...store.load().db, players: [], guardians: [] }, store, nextId, persist: () => {}, sessionTtlMs: TTL, now: () => NOW });
+  layer = attachDataLayer({ db: {}, store, nextId, sessionTtlMs: TTL, now: () => NOW });
   assert.equal(layer.mediaDeletions.isQueued('media-x'), true); assert.equal(layer.report().mediaDeletions.queued, 1);
   fs.rmdirSync(path.join(storageDir, 'media', 'media-x.webm'));
   assert.deepEqual(layer.mediaDeletions.process(storage), { removed: 0, absent: 1, failed: 0, conflicts: 0 }, 'absent now: cleared');
@@ -87,7 +85,7 @@ test('transaction coupling: an entry queued inside a unit of work that rolls bac
   store.sqlite.close(); rm(dir, storageDir);
 });
 
-test('snapshot tools: the queue is the mediaDeletions collection — a snapshot tool reads it from the table and writes it back through the table, validated whole (a path instead of an id, an unknown field, a duplicate, a bad time or a non-array refuses the save with nothing written); a stale in-memory array at boot is dropped and any blob row of that name deleted — the queue never imports from memory', () => {
+test('snapshot tools: the queue is the mediaDeletions collection — a snapshot tool reads it from the table and writes it back through the table, validated whole (a path instead of an id, an unknown field, a duplicate, a bad time or a non-array refuses the save with nothing written); a stale array handed in at boot is ignored — the queue never imports from memory', () => {
   // (a) A migrated file, snapshot mode: read from the table, written back through it.
   const dir = tempDir('media-snap'); savedFile(dir);
   let tool = openStore(dir);
@@ -99,8 +97,7 @@ test('snapshot tools: the queue is the mediaDeletions collection — a snapshot 
   snap.db.mediaDeletions[0].attempts = 2; snap.db.mediaDeletions.push({ media_id: 'media-r', player_id: null, queued_at: NOW + 1 });
   tool.save(snap);
   assert.deepEqual(tool.sqlite.prepare('SELECT media_id, attempts FROM media_deletions ORDER BY queued_at').all().map((r) => [r.media_id, r.attempts]), [['media-q', 2], ['media-r', 0]], 'written back through the table');
-  assert.equal(tool.sqlite.prepare("SELECT COUNT(*) AS n FROM collections WHERE name = 'mediaDeletions'").get().n, 0, 'never a blob once the table is live');
-  const before = dump(tool.sqlite); const seq = tool.revision();
+  const before = dump(tool.sqlite);
   for (const [label, bad, re] of [
     ['a path instead of an id', [{ media_id: '../../etc/passwd', queued_at: 1 }], /MEDIA_QUEUE_IMPORT_BLOCKED.*is not a media id/],
     ['an unknown field', [{ media_id: 'media-x', queued_at: 1, path: '/tmp/x' }], /unknown field\(s\) path/],
@@ -109,18 +106,15 @@ test('snapshot tools: the queue is the mediaDeletions collection — a snapshot 
   ]) {
     snap = tool.load(); snap.db.mediaDeletions = bad;
     assert.throws(() => tool.save(snap), re, label);
-    assert.equal(tool.sqlite.isTransaction, false, `${label}: the transaction is closed`); assert.equal(dump(tool.sqlite), before, `${label}: nothing changed`); assert.equal(tool.revision(), seq);
+    assert.equal(tool.sqlite.isTransaction, false, `${label}: the transaction is closed`); assert.equal(dump(tool.sqlite), before, `${label}: nothing changed`);
   }
   snap = tool.load(); snap.db.mediaDeletions = { media_id: 'media-q' };
   assert.throws(() => tool.save(snap), /mediaDeletions: the snapshot collection must be an array/); assert.equal(dump(tool.sqlite), before);
   tool.sqlite.close();
-  // (b) A stale in-memory array at boot (server mode): dropped, its blob row deleted, the table untouched.
+  // (b) A stale array handed in at boot (server mode): ignored, the table untouched (rewritten in S14a: the blob row it deleted no longer exists).
   { const store = openStore(dir, { tableBacked: TABLE_BACKED });
-    store.sqlite.prepare("INSERT INTO collections (name, value) VALUES ('mediaDeletions', '[]')").run();
-    const db = { ...store.load().db, players: [], guardians: [], mediaDeletions: [{ media_id: 'media-stale', queued_at: 1 }] };
-    const layer = attachDataLayer({ db, store, nextId, persist: () => {}, sessionTtlMs: TTL, now: () => NOW });
-    assert.equal(Object.hasOwn(db, 'mediaDeletions'), false, 'the array is dropped from memory');
-    assert.equal(store.sqlite.prepare("SELECT COUNT(*) AS n FROM collections WHERE name = 'mediaDeletions'").get().n, 0, 'the blob row is deleted');
+    const layer = attachDataLayer({ db: {}, seed: { players: [], guardians: [], mediaDeletions: [{ media_id: 'media-stale', queued_at: 1 }] }, store, nextId, sessionTtlMs: TTL, now: () => NOW });
+    assert.equal(layer.mediaDeletions.isQueued('media-stale'), false, 'never imported');
     assert.deepEqual(layer.mediaDeletions.pending().map((r) => r.media_id), ['media-q', 'media-r'], 'the table is untouched');
     store.sqlite.close(); }
   rm(dir);
@@ -168,33 +162,32 @@ test('ownership guard: a queue entry naming a clip a live player still reference
 test('ownership guard: a snapshot whose FINAL state has a queue entry naming a live-referenced clip is refused whole — a queue-only write against the retained players, and an identity-only write that adds the reference against the retained queue; a consistent whole replacement that removes the owner and queues the file is accepted; a failure of the real COMMIT where the check participated leaves everything unchanged and the retry succeeds', () => {
   const dir = tempDir('media-own-snap'); savedFile(dir);
   const tool = openStore(dir);
-  const before = dump(tool.sqlite); const seq = tool.revision();
+  const before = dump(tool.sqlite);
   const refused = (label, mutate, re) => {
-    const snap = tool.load(); mutate(snap.db); snap.db.notes = [{ id: 'unrelated-change-in-the-same-save' }];
+    const snap = tool.load(); mutate(snap.db); snap.db.orgs[0].name = 'Unrelated change in the same save'; // S14a: an organisation edit replaces the blob-only `notes`
     assert.throws(() => tool.save(snap), re, label);
     assert.equal(tool.sqlite.isTransaction, false, `${label}: the transaction is closed`);
     assert.equal(dump(tool.sqlite), before, `${label}: nothing changed, the unrelated change included`);
-    assert.equal(tool.revision(), seq, `${label}: the save revision did not advance`);
   };
   // Queue-only write: the entry names med-1, which pl-seeded still carries.
   refused('queue only', (d) => { d.mediaDeletions = [{ media_id: 'med-1', player_id: 'pl-unrelated', queued_at: NOW }]; }, /MEDIA_QUEUE_OWNERSHIP_CONFLICT.*med-1.*pl-seeded/);
   // Identity-only write against a retained queue: the queue holds a legitimate entry; the new players give it an owner.
   { const s = openRaw(dir); s.prepare('INSERT INTO media_deletions (media_id, player_id, queued_at) VALUES (?, ?, ?)').run('media-q', 'pl-gone', NOW); s.close(); }
   const withQueue = dump(tool.sqlite);
-  { const snap = tool.load(); delete snap.db.mediaDeletions; snap.db.players.find((p) => p.id === 'pl-adult').media.push({ id: 'media-q', title: 'now mine', kind: 'video' }); snap.db.notes = [{ id: 'x' }];
+  { const snap = tool.load(); delete snap.db.mediaDeletions; snap.db.players.find((p) => p.id === 'pl-adult').media.push({ id: 'media-q', title: 'now mine', kind: 'video' }); snap.db.orgs[0].name = 'Unrelated change';
     assert.throws(() => tool.save(snap), /MEDIA_QUEUE_OWNERSHIP_CONFLICT.*media-q.*pl-adult/, 'identity-only write against the retained queue');
-    assert.equal(dump(tool.sqlite), withQueue); assert.equal(tool.revision(), seq); }
+    assert.equal(dump(tool.sqlite), withQueue); }
   // Both supplied and consistent: pl-seeded is removed and its clip queued in the same snapshot — accepted.
   { const snap = tool.load(); snap.db.players = snap.db.players.filter((p) => p.id !== 'pl-seeded'); snap.db.mediaDeletions.push({ media_id: 'med-1', player_id: 'pl-seeded', queued_at: NOW }); tool.save(snap);
     assert.deepEqual(tool.sqlite.prepare('SELECT media_id FROM media_deletions ORDER BY media_id').all().map((r) => r.media_id), ['med-1', 'media-q']);
     assert.equal(tool.sqlite.prepare("SELECT COUNT(*) AS n FROM players WHERE id = 'pl-seeded'").get().n, 0); }
   // The real COMMIT fails on a valid write in which the check took part: nothing changes, the retry succeeds.
-  const settled = dump(tool.sqlite); const seq2 = tool.revision();
+  const settled = dump(tool.sqlite);
   { const exec = tool.sqlite.exec.bind(tool.sqlite); let fired = 0;
     tool.sqlite.exec = (sql) => { if (sql === 'COMMIT' && !fired) { fired += 1; exec('PRAGMA defer_foreign_keys = ON'); exec('CREATE TABLE fault_parent (id TEXT PRIMARY KEY); CREATE TABLE fault_child (parent_id TEXT NOT NULL REFERENCES fault_parent(id))'); tool.sqlite.prepare('INSERT INTO fault_child (parent_id) VALUES (?)').run('missing'); } return exec(sql); };
     try { const snap = tool.load(); snap.db.mediaDeletions.push({ media_id: 'media-r', player_id: null, queued_at: NOW + 1 }); snap.db.players[0].name = 'Renamed'; assert.throws(() => tool.save(snap), /FOREIGN KEY constraint failed/); } finally { tool.sqlite.exec = exec; }
-    assert.equal(fired, 1); assert.equal(tool.sqlite.isTransaction, false); assert.equal(dump(tool.sqlite), settled); assert.equal(tool.revision(), seq2); }
-  { const snap = tool.load(); snap.db.mediaDeletions.push({ media_id: 'media-r', player_id: null, queued_at: NOW + 1 }); snap.db.players[0].name = 'Renamed'; tool.save(snap); assert.equal(tool.sqlite.prepare("SELECT COUNT(*) AS n FROM media_deletions WHERE media_id = 'media-r'").get().n, 1); assert.equal(tool.revision(), seq2 + 1); }
+    assert.equal(fired, 1); assert.equal(tool.sqlite.isTransaction, false); assert.equal(dump(tool.sqlite), settled); }
+  { const snap = tool.load(); snap.db.mediaDeletions.push({ media_id: 'media-r', player_id: null, queued_at: NOW + 1 }); snap.db.players[0].name = 'Renamed'; tool.save(snap); assert.equal(tool.sqlite.prepare("SELECT COUNT(*) AS n FROM media_deletions WHERE media_id = 'media-r'").get().n, 1); }
   tool.sqlite.close();
   rm(dir);
 });

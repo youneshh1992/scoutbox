@@ -52,7 +52,7 @@ A domain that is in tables but still loaded whole into memory is only part-way t
 
 ## 3. Status
 
-38 migrations are registered in `repositories/index.mjs` (`DATA_MIGRATIONS`). The next free id is `0039`. Each step
+39 migrations are registered in `repositories/index.mjs` (`DATA_MIGRATIONS`). The next free id is `0040`. Each step
 takes the next free id; the placeholder ids in `sqlite-schema.md` mean nothing.
 
 | Step | Domain | Migration | Repository | Status |
@@ -74,7 +74,9 @@ takes the next free id; the placeholder ids in `sqlite-schema.md` mean nothing.
 | S13c | group workspaces and group grants | `0036` | `groups` | done |
 | S13d | grassroots operations: open days, match days, the friendlies board | `0037` | `grassroots` | done |
 | S13e | uploads, saved searches, invoices, the demo reputation seed, the delivery centre's bookkeeping (plans and archetypes became constants) | `0038` | `operations` | done |
-| S14 | retire the blob | | | **next** |
+| S14a | retire the blob itself: the `collections` table, `db.schema` and the snapshot migration registry, the store contract, the `??=` and `migrateMxx` lines; the id counter becomes a table | `0039` | `counters` | done |
+| S14b… | the staged repositories become explicit, one per step (§4.6) | | | **next** |
+| S14 last | the save path, `db` and snapshot mode go (§4.6) | | | |
 
 Steps before S8 were staged (written at save) rather than explicit; S4a's identity writes are explicit since §4.3.1.
 
@@ -121,8 +123,8 @@ and the DDL, so these cannot drift, and include a `date` type for football dates
   `session.org` explicitly. A whole-replace save of a list with dependants diffs by id, so kept rows keep their
   dependants.
 - **Seeded catalogues** (templates, policy versions) are inserted by the migration.
-- **Clean-up.** The `m182` steps that created or shaped the collections become recorded no-ops; the
-  `*_STORE_MISSING` codes go with the collections.
+- **Clean-up.** Nothing creates a collection in memory any more (S14a); a step deletes its domain's old names
+  from whatever still mentions them.
 
 **Lessons.**
 
@@ -190,10 +192,9 @@ and player and guardian writes are explicit repository operations, so a write or
 player. `scripts/testUnitOfWork.mjs` holds that line: a player write costs the same number of SQL statements with 20
 and 2,000 players. Players get their defaults at creation (`PLAYER_CREATION_DEFAULTS`), not by a boot backfill.
 
-**Left:** an empty unit of work costs about 23 ms at 30k players, mostly the organisations (captured and flushed
-whole per unit, because their remaining facets are still edited in place) and the blob collections' memento. Both go
-as the remaining facets and collections move into tables, or sooner by making the organisations' facet writes
-explicit like identity's.
+**Left:** an empty unit of work cost about 23 ms at 30k players, mostly the organisations (captured and flushed
+whole per unit, because their remaining facets are still edited in place) and the blob collections' memento. The
+memento went with the blob (S14a); the organisations' part goes when their facet writes become explicit (S14b on).
 
 ### 4.4 Code and test layout
 
@@ -224,12 +225,23 @@ code, not derived from claims; assessment templates are shared by every club unt
 
 ### 4.6 S14: retire the blob
 
-Depends on S2–S13. The `collections` table ends up empty. `meta.idCounter` moves to a `counters` table, and
-`db.schema` is replaced by `data_migrations`. The `m182` snapshot migrations become no-ops. `mediaBlobs` and
-`NOT_A_STORE` leave `storeContract.mjs` (`boxSessionEvents` left with S12b). The `db.x ??= []` and `migrateMxx` lines are deleted,
-as is the blob fallback `readTrialsCollection` in `repositories/identity.mjs`. The contract test asserts zero blob
-collections. The six `recruitment/*Persistence` batteries' checks that name the old storage go. The migrations
-`0001`–`00NN` may be squashed into one baseline, if that helps.
+Split in parts, like S12 and S13.
+
+- **S14a (done, `0039`).** The `collections` table is dropped and the id counter is a row of `counters`, written at
+  every mint; `meta` keeps only the initialisation states and the session lifetime. The snapshot migration registry
+  (`domains/platform/migrations.mjs`, `db.schema`), `storeContract.mjs`, the `db.x ??= []` and `migrateMxx` lines,
+  `db.mediaBlobs` and the blob fallbacks (`readTrialsCollection`, the media-deletion queue's) are deleted. The boot no
+  longer loads a snapshot: `attachDataLayer` takes the seed as `seed` and imports it only on a first installation.
+  The schema version is the latest table migration's number. A snapshot-mode save refuses a collection that has no
+  table (`SNAPSHOT_COLLECTION_UNKNOWN`). `e2e/platform/storeGuarantees.mjs` asserts there is no blob table.
+- **S14b onwards: the staged repositories become explicit**, one per step, the S8 way: safety and audit, message
+  threads, outbox and push with dispatches, notifications, staff and sessions, the organisations' remaining facets,
+  players and guardians. Each loses its mirror, its `db.<name>` view and its save hook, and its reads become queries.
+  This is also what closes §4.3.1's cost of an empty unit of work.
+- **S14 last: the save path goes.** `persist()`, `persistNow()`, the debounced save, the save hooks,
+  `repositories/memento.mjs`, `repositories/readonly.mjs` and `db` itself; then snapshot mode (`openStore(dir)`
+  with whole-file `load`/`save`) and every domain's `*_SNAPSHOT`, with the suites setting up their data through the
+  repositories or SQL. The migrations `0001`–`00NN` may be squashed into one baseline, if that helps.
 
 ## 5. How to do a step
 
@@ -258,9 +270,9 @@ of a design note's content, though longer than necessary.
   records `(id, applied_at)` in `data_migrations`, and aborts the boot on failure. Under `foreignKeysOff`,
   `foreign_key_check` must be empty before commit. A domain is authoritative because its migration is recorded, never
   because a table exists.
-- **Boot.** `server.mjs` runs `buildSeed()`, `loadSnapshot()`, the `m182` snapshot migrations, then
-  `attachDataLayer`, which deletes the in-memory `db[name]` for table-backed collections and installs a throwing
-  view (`repositories/readonly.mjs`).
+- **Boot.** `server.mjs` opens the store and runs `attachDataLayer({ db, seed: buildSeed(), … })`: the table
+  migrations, then every repository; a first installation imports the seed once. `db` receives the staged
+  repositories' read-only views and a throwing name for every retired collection.
 - **Seed data.** `seed.mjs` fills only orgs, guardians and players. Other domains start empty and get rows through
   routes. Tests write their setup through the repositories, SQL, or a snapshot-mode save (`openStore(dir).save(…)`),
   using fixtures in the writers' shapes (e.g. `scripts/signingsFollowUpsTestFixtures.mjs`). They don't plant blob rows.

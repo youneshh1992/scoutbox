@@ -1,26 +1,13 @@
 /**
- * The data layer: real tables in the same SQLite file as the snapshot store,
- * one domain at a time. `attachDataLayer` runs the table migrations, attaches
- * each domain repository, and replaces that domain's `db.<collection>` with
- * the repository's read-only view. Everything else in `db` is still the blob
- * snapshot until its domain moves here.
+ * The data layer: every domain's tables in one SQLite file, each owned by one repository. `attachDataLayer` runs the
+ * table migrations and attaches the repositories (see its comment).
  *
- * LIVE tables, owned by repositories (docs/architecture/sqlite-migration-plan.md):
- *   org_users (step S0), sessions (S2, hashed tokens), orgs (S3), and since
- *   S4a players, guardians and guardian_children (repositories/identity.mjs,
- *   migration 0005). Writes go through the repositories and the blobs are
- *   never written again. The S1 shadow projection is retired: every table it
- *   shadowed is live, so there is nothing left to project or to validate.
- *   media_deletions (migration 0006) is the crash-safe queue of media files
- *   to remove after a player deletion commits (repositories/mediaDeletions.mjs).
+ * Order at boot (server.mjs): open the store → attachDataLayer (migrations, then organisations → identity → staff →
+ * sessions → the rest, so every repository that references another finds its rows in place on a first
+ * installation) → module registration → listen.
  *
- * Order at boot (server.mjs): seed → loadSnapshot → snapshot migrations →
- * attachDataLayer → module registration → listen. A migrated collection is
- * therefore a plain array (seed or legacy blob) while the snapshot migrations
- * run, and a repository view from this point on. Inside attachDataLayer the
- * order is organisations → identity (guardians before players: the FK) →
- * staff → sessions, so every repository that references another finds its
- * rows in place on a first installation.
+ * Whole-database access for tools and the persistence suites (snapshot mode, `openStore(dir)`): `readTableBacked`
+ * and `writeTableBacked` read and write every collection as plain arrays in the shape the server sees.
  *
  * This directory is `repositories/`, not `data/`: `data/` is the server's
  * runtime data directory (DATA_DIR), which tests delete between runs.
@@ -69,6 +56,7 @@ import * as m0035 from './migrations/0035_enterprise.mjs';
 import * as m0036 from './migrations/0036_groups.mjs';
 import * as m0037 from './migrations/0037_grassroots.mjs';
 import * as m0038 from './migrations/0038_operations.mjs';
+import * as m0039 from './migrations/0039_retire_blob.mjs';
 import { trialReportsFor } from './playerSubrecords.mjs';
 import { createRecruitmentRepository, RECRUITMENT_SNAPSHOT, RECRUITMENT_COLLECTIONS, RECRUITMENT_MIGRATION, assertRecruitmentConsistent, unresolvedPlayerReferences as unresolvedRecruitmentPlayers, retainedPlayerReferences as retainedRecruitmentPlayers } from './recruitment.mjs';
 import { createRecruitmentCasesRepository, RECRUITMENT_CASES_SNAPSHOT, RECRUITMENT_CASES_COLLECTIONS, RECRUITMENT_CASES_MIGRATION, unresolvedPlayerReferences as unresolvedCasePlayers, retainedPlayerReferences as retainedCasePlayers } from './recruitmentCases.mjs';
@@ -101,7 +89,7 @@ import { createOutboxPushRepository, OUTBOX_PUSH_SNAPSHOT_TABLES, OUTBOX_PUSH_MI
 import { createChannelsRepository, CHANNELS_TABLE, CHANNELS_MIGRATION, assertChannelReferencesConsistent } from './channels.mjs';
 import { createSafetyAuditRepository, AUDIT_COLLECTIONS, AUDIT_SNAPSHOT_TABLES, SAFETY_AUDIT_MIGRATION, assertIdvQueueGuardiansConsistent, unresolvedPlayerReferences, retainedPlayerReferences } from './safetyAudit.mjs';
 
-export const DATA_MIGRATIONS = Object.freeze([m0001, m0002, m0003, m0004, m0005, m0006, m0007, m0008, m0009, m0010, m0011, m0012, m0013, m0014, m0015, m0016, m0017, m0018, m0019, m0020, m0021, m0022, m0023, m0024, m0025, m0026, m0027, m0028, m0029, m0030, m0031, m0032, m0033, m0034, m0035, m0036, m0037, m0038]);
+export const DATA_MIGRATIONS = Object.freeze([m0001, m0002, m0003, m0004, m0005, m0006, m0007, m0008, m0009, m0010, m0011, m0012, m0013, m0014, m0015, m0016, m0017, m0018, m0019, m0020, m0021, m0022, m0023, m0024, m0025, m0026, m0027, m0028, m0029, m0030, m0031, m0032, m0033, m0034, m0035, m0036, m0037, m0038, m0039]);
 
 // Single-collection dispatchers, in snapshot-write order: organisations first
 // (staff reference them), then staff (sessions reference them), then
@@ -111,47 +99,7 @@ export const DATA_MIGRATIONS = Object.freeze([m0001, m0002, m0003, m0004, m0005,
 // staff (see `writeTableBacked`).
 const TABLES = Object.freeze([ORGS_TABLE, USERS_TABLE, SESSIONS_TABLE]);
 
-/**
- * Collections the data layer owns; the server's store never writes these blobs
- * again. `mediaDeletions` is the media-removal queue: not a record collection
- * the server holds in memory, but part of every whole-database snapshot
- * (backups, restores) in its stored row form, so a restored server keeps the
- * intent to remove a file (review of 9656a4b, finding 2). `emailChallenges`
- * and `pairingCodes` (S6a, migration 0008) are the one-time-code tables in
- * their stored, hashed row form (repositories/oneTimeCodes.mjs).
- * `notifications` and `notificationPrefs` (S7a, migration 0009) are the
- * notification tables in the legacy collection shape, in insertion order
- * (repositories/notifications.mjs). `dispatches` (S7b, migration 0010) is the
- * delivery dispatch table with its attempts nested, in the eighteen-key shape
- * every build since M13 wrote, in insertion order (repositories/dispatches.mjs).
- * `outbox`, `pushLog` and `pushTokens` (S7c, migration 0011) are the mail
- * outbox (two writer literals, told apart structurally), the push log and the
- * device push tokens (a string token), typed columns only, each in its
- * legacy shape, in insertion order (repositories/outboxPush.mjs). `channels`
- * (S7d, migration 0012) are the message threads — the openChannel literal with
- * its messages nested in the postMessage literal and their attachments — in
- * insertion order, typed columns only
- * (repositories/channels.mjs). The eight audit collections `blocks`, `reports`,
- * `moderationLog`, `orgNotes`, `ledger`, `opsEvents`, `sourceChanges` and `idvQueue`
- * (S6b, migration 0013) are the audit tables in their writers' literals, in insertion
- * order, with unknown fields, absent keys and off-type values kept
- * (repositories/safetyAudit.mjs). `requests` and `trials` (S8a-core, migration
- * 0015) are the recruitment requests with their slots and the accepted trials
- * with their eleven owned child tables and the idempotency keys, each record in
- * its writer's literal, in insertion order, children in list order, with absence,
- * null, off-type and unknown fields kept losslessly (repositories/recruitment.mjs).
- * `recruitmentCases`, `roomComments`, `roomSnapshots`, `roomDecisions` and
- * `roomEvidenceState` (S8b, migration 0016) are the recruitment cases — the M12
- * case with its M17 Room facet, M23 decision draft, M27 transaction handoff and
- * M13 budget — and the four room collections, twenty-five typed tables written by
- * explicit operations; a record the columns cannot hold is refused
- * (repositories/recruitmentCases.mjs).
- * `recruitmentContacts` and `recruitmentOffers` (S8c, migration 0017) are the
- * recruitment contacts and the offers with their revisions, documents,
- * responses, receipts, history and keys, ten typed tables written by explicit
- * operations; a record the columns cannot hold is refused
- * (repositories/recruitmentContactsOffers.mjs).
- */
+/** Every collection that has a table: what a snapshot-mode save may carry, and what `readTableBacked` returns. */
 export const TABLE_BACKED = Object.freeze(['orgs', ...IDENTITY_COLLECTIONS, PLAYERS_RETAINED.name, 'users', 'sessions', MEDIA_DELETIONS_TABLE.name, EMAIL_CHALLENGES_TABLE.name, PAIRING_CODES_TABLE.name, NOTIFICATIONS_TABLE.name, NOTIFICATION_PREFS_TABLE.name, DISPATCHES_TABLE.name, ...OUTBOX_PUSH_SNAPSHOT_TABLES.map((t) => t.name), CHANNELS_TABLE.name, ...AUDIT_COLLECTIONS, ...RECRUITMENT_COLLECTIONS, ...RECRUITMENT_CASES_COLLECTIONS, ...RECRUITMENT_CONTACTS_OFFERS_COLLECTIONS, ...SIGNINGS_FOLLOWUPS_COLLECTIONS, ...SCOUTING_EVIDENCE_COLLECTIONS, ...SCOUTING_ASSESSMENTS_COLLECTIONS, ...CLUB_SETUP_COLLECTIONS, ...OPPORTUNITIES_CAMPAIGNS_COLLECTIONS, ...VERIFICATION_COLLECTIONS, ...PASSPORT_COLLECTIONS, ...TRANSITIONS_COLLECTIONS, ...AGENT_CORE_COLLECTIONS, ...COMPLIANCE_POLICIES_COLLECTIONS, ...COMPLIANCE_RECORDS_COLLECTIONS, ...AGENT_TRANSACTIONS_COLLECTIONS, ...DEVELOPMENT_COLLECTIONS, ...BOX_CAM_COLLECTIONS, ...DISCOVERY_COLLECTIONS, ...INSIGHT_COVERAGE_COLLECTIONS, ...INTEGRATIONS_COLLECTIONS, ...ENTERPRISE_COLLECTIONS, ...GROUPS_COLLECTIONS, ...GRASSROOTS_COLLECTIONS, ...OPERATIONS_COLLECTIONS]);
 /** The one-time-code tables, dispatched after the organisations are pruned (the challenge references its organisation) and after the identity pair (the final-state check reads the players). */
 const CODE_TABLES = Object.freeze([EMAIL_CHALLENGES_TABLE, PAIRING_CODES_TABLE]);
@@ -163,8 +111,8 @@ const NOTIFICATION_TABLE_DISPATCH = Object.freeze([NOTIFICATIONS_TABLE, NOTIFICA
  * unit: backups, restores and the persistence suites. `readTableBacked` returns
  * every table-backed collection whose table is authoritative, as plain arrays
  * in the shape the server sees; `writeTableBacked` replaces the contents of
- * every such table from `db` and returns the names it wrote, so the caller
- * writes the remaining collections as blobs. The caller owns the transaction.
+ * every such table from `db` and returns the names it wrote. The caller owns
+ * the transaction (store.mjs refuses a collection with no table first).
  */
 export function readTableBacked(sqlite) {
   const out = {};
@@ -236,13 +184,12 @@ const describe = (v) => (v === null ? 'null' : Array.isArray(v) ? 'an array' : t
 
 /**
  * Check the shape of every table-backed collection a snapshot carries, before
- * anything is dispatched to a table or written as a blob. A collection that
+ * anything is dispatched to a table. A collection that
  * is absent (or `undefined`, which JSON cannot carry) is OMITTED: a partial
  * snapshot that leaves that domain alone. A collection that is present but
  * not an array — an object, null, a string, a number — is an explicitly
  * supplied invalid value and THROWS, so the caller's transaction rolls back
- * with nothing written: no table row, and no blob that could carry whatever
- * the value held (a plaintext token, say). The identity pair is coupled: a
+ * with nothing written. The identity pair is coupled: a
  * snapshot that carries `players` must carry `guardians` and vice versa (the
  * link rows derive from both), so one without the other THROWS too. Returns
  * the names that are present.
@@ -264,11 +211,9 @@ export function writeTableBacked(sqlite, snapshot, { now = Date.now() } = {}) {
   const written = [];
   const present = checkTableBackedShapes(snapshot);
   const single = (name) => TABLES.find((t) => t.name === name);
-  // `replace` is false before the domain's cutover record exists (the blob
-  // is still authoritative, so the caller writes it) and THROWS on a row the
-  // table refuses, which rolls the caller's whole transaction back.
+  // `replace` THROWS on a row the table refuses, which rolls the caller's whole transaction back.
   if (present.includes('orgs') && single('orgs').replace(sqlite, snapshot.orgs)) written.push('orgs');
-  // S5: the `trials` the snapshot carries (written as a blob below, in the same transaction) judge every `trialReports` claim on its players; a snapshot without them is judged by the retained blob.
+  // S5: the `trials` the snapshot carries (written below, in the same transaction) judge every `trialReports` claim on its players; a snapshot without them is judged by the stored trials.
   if (IDENTITY_COLLECTIONS.every((n) => present.includes(n)) && IDENTITY_SNAPSHOT.replace(sqlite, { players: snapshot.players, guardians: snapshot.guardians }, { now, trials: Object.hasOwn(snapshot, 'trials') && snapshot.trials !== undefined ? snapshot.trials : undefined })) written.push(...IDENTITY_COLLECTIONS);
   // S4b-R: the retained records go right after the identity pair (which carried the
   // existing ones through its rewrite). PROTECTED (review of 6d66655, F1): a supplied
@@ -281,15 +226,15 @@ export function writeTableBacked(sqlite, snapshot, { now = Date.now() } = {}) {
   // the staff, are written after that prune so a session of a staff member the snapshot
   // no longer lists is refused with its id, as before.
   if (present.includes('users') && single('users').replace(sqlite, snapshot.users, { prune: false })) written.push('users');
-  // The media-removal queue: validated entry by entry and rewritten (false before migration 0006, so the caller writes the blob the migration imports).
+  // The media-removal queue: validated entry by entry and rewritten.
   if (present.includes(MEDIA_DELETIONS_TABLE.name) && MEDIA_DELETIONS_TABLE.replace(sqlite, snapshot[MEDIA_DELETIONS_TABLE.name])) written.push(MEDIA_DELETIONS_TABLE.name);
   // S7d: the message threads are dispatched after the identity pair and the staff
   // (their guardians and organisations are then the snapshot's) and BEFORE the
   // organisation prune, so an organisation the snapshot removed while a thread
   // still names it is refused by the org foreign key at the prune (below) rather
   // than vanishing under its thread. The incoming rows' request references are
-  // checked against the snapshot's `requests` when it carries them, the retained
-  // blob otherwise (false before the 0012 record exists: the caller writes the blob).
+  // checked against the snapshot's `requests` when it carries them, the stored
+  // requests otherwise.
   const requestsSupplied = Object.hasOwn(snapshot, 'requests') && snapshot.requests !== undefined;
   const trialsSupplied = Object.hasOwn(snapshot, 'trials') && snapshot.trials !== undefined;
   const casesSupplied = Object.hasOwn(snapshot, 'recruitmentCases') && snapshot.recruitmentCases !== undefined;
@@ -424,11 +369,11 @@ export function writeTableBacked(sqlite, snapshot, { now = Date.now() } = {}) {
   // review of 8330f08): whenever this snapshot wrote the channels, carries the
   // requests, or rewrote the identity pair, every thread row the file now holds
   // must name a request in the final requests (the supplied collection, or the
-  // retained blob when omitted — never an empty set for an omission), an existing
+  // stored requests when omitted — never an empty set for an omission), an existing
   // guardian when it names one (the code-validated reference: the guardians table
   // was rewritten above and carries no foreign key from channels) and an existing
   // organisation. A miss throws inside the caller's transaction: the whole save
-  // rolls back, unrelated collections and the save revision included.
+  // rolls back, unrelated collections included.
   if (written.includes(CHANNELS_TABLE.name) || requestsSupplied || written.some((n) => IDENTITY_COLLECTIONS.includes(n))) {
     assertChannelReferencesConsistent(sqlite, { requests: requestsSupplied ? snapshot.requests : undefined, label: 'the snapshot (channels, requests and guardians together)' });
   }
@@ -494,7 +439,7 @@ export function writeTableBacked(sqlite, snapshot, { now = Date.now() } = {}) {
  * Snapshot mode (`openStore(dir)` without options: tools and fixtures) brings
  * the file up to the current table schema when it opens it, exactly as a boot
  * would, so a snapshot save writes every table-backed collection into its
- * table. There is no blob path for those collections any more.
+ * table.
  */
 export function migrateForSnapshot(sqlite, { now = Date.now() } = {}) {
   return runDataMigrations(sqlite, DATA_MIGRATIONS, { now });
@@ -505,213 +450,84 @@ export function migrateForSnapshot(sqlite, { now = Date.now() } = {}) {
  * repository, so a reader that was missed fails loudly instead of seeing (or `??=`-creating) an empty list. Not
  * enumerable, so a walk over `db` (a snapshot, the memento) never meets it.
  */
+const schemaVersionOf = (sqlite) => Number(sqlite.prepare('SELECT MAX(id) AS id FROM data_migrations').get()?.id?.slice(0, 4)) || 0;
+
 function retireCollection(db, name, repository) {
   Object.defineProperty(db, name, { get() { throw new TypeError(`db.${name} is gone: read it through the ${repository} repository`); }, set() { throw new TypeError(`db.${name} is gone: write it through the ${repository} repository`); }, configurable: false, enumerable: false });
 }
 
-export function attachDataLayer({ db, store, nextId, sessionTtlMs, now = Date.now, log = () => {}, warn = (m) => console.warn(m) }) {
+/**
+ * Attach every domain repository to the store's database: run the table migrations, then create the repositories.
+ * `seed` is a first installation's records (`orgs`, `players`, `guardians`, `reputationSeed`; buildSeed() in
+ * seed.mjs, or a fixture), imported once while the organisations and the identity pair are still `pending`, and
+ * ignored on every later boot. `db` receives the read-only views of the repositories that still keep a mirror, and a
+ * throwing name for every retired collection.
+ */
+export function attachDataLayer({ db, seed = {}, store, nextId, sessionTtlMs, now = Date.now, log = () => {}, warn = (m) => console.warn(m) }) {
   const sqlite = store?.sqlite ?? null;
   if (!sqlite) throw new TypeError('the data layer needs a store with a SQLite connection (node:sqlite); there is no in-memory or JSON fallback');
   const migrations = runDataMigrations(sqlite, DATA_MIGRATIONS, { now: now(), log, context: { sessionTtlMs } });
 
-  // Organisations (S3) attach before staff: `org_users.org_id` references
-  // `orgs`, so a first installation must have its organisations in the table
-  // before a staff row can be inserted. Initialisation is explicit state the
-  // cutover migration recorded: only while it is `pending` (a database that
-  // had never been saved to) are the in-memory records — the seed — imported,
-  // once, atomically with the state change. Every other boot attaches to the
-  // table as it is, empty or not; the array in memory is never imported.
-  // Facet changes made on the records between saves are flushed inside every
-  // save transaction and counted as persisted only once it committed.
-  // `unit` is the store's participant API ({ active(), join(work) }): inside a
-  // unit of work a repository's row writes join its transaction through the
-  // poisoning boundary and its bookkeeping is staged; the staff repository
-  // refuses (not integrated yet).
+  // The staged repositories (organisations, players and guardians, notifications, dispatches, outbox and push,
+  // message threads, the safety and audit tables) keep a mirror in memory, expose it as a read-only `db.<name>` view
+  // and write what changed at the next save (`store.save()`, scheduled by persist()) or the unit of work's commit.
+  // Every other repository writes its rows at once and reads through SQL; its old `db.<name>` throws.
+  // The organisations attach first: org_users, and most tables after them, reference orgs.
   const orgs = createOrgsRepository({ sqlite, log, warn, unit: store.unit });
-  const orgsBoot = orgs.initState() === 'pending' ? orgs.initialize(db.orgs) : orgs.attach(db.orgs);
+  const orgsBoot = orgs.initState() === 'pending' ? orgs.initialize(seed.orgs ?? []) : orgs.attach();
   Object.defineProperty(db, 'orgs', { value: orgs.view, writable: false, configurable: false, enumerable: true });
   store.setSaveHook?.(orgs.saveHook());
 
-  // Players and guardians (S4a): one repository pair, one unit-of-work
-  // participant. The same explicit initialisation state as the organisations
-  // (`meta.coreIdentityInit`, written by migration 0005): `pending` only for a
-  // genuinely new database, whose seed is imported once through the reviewed
-  // preflight (a refused seed — the Founder's legacy-minor rule included —
-  // aborts the boot and the next boot retries); `done` attaches to the tables
-  // as they are and never imports an array, so a stale blob or seed can never
-  // replace live data. Guardians load before players (the foreign key) inside
-  // the repositories.
-  // S5: the player arrays are rows of the `player_*` tables (migration 0007) and
-  // `trialReports` is derived from the trials collection, read live: since
-  // S8a-core from the recruitment repository (attached below; the accessor is
-  // late-bound). Before it attaches, a first installation's initialisation
-  // checks the players' trialReports against the trials it was handed (the
-  // seed's or a fixture's plain array, not a mirror).
+  // The identity pair: a first installation's players are checked against the trials handed in with them (none in
+  // the seed); afterwards their trial reports come from the recruitment repository, attached below.
   let recruitment = null;
   /** A collection the caller handed in before its table took over (the seed's or a fixture's plain array), or []. */
-  const handedIn = (name) => (Object.hasOwn(db, name) && Array.isArray(db[name]) ? db[name] : []);
+  const handedIn = (name) => (Object.hasOwn(seed, name) && Array.isArray(seed[name]) ? seed[name] : []);
   const identity = createIdentityRepositories({ sqlite, log, warn, unit: store.unit, now, trialReports: (playerId) => (recruitment ? recruitment.trialReportsFor(playerId) : trialReportsFor(handedIn('trials'), playerId)) });
   const identityWasPending = identity.initState() === 'pending'; // a first installation: its seed is imported once (S13e: the demo reputation rows too)
   const identityBoot = identityWasPending
-    ? identity.initialize({ players: db.players, guardians: db.guardians }, { now: now() })
-    : identity.attach(db.players, db.guardians);
+    ? identity.initialize({ players: seed.players ?? [], guardians: seed.guardians ?? [] }, { now: now() })
+    : identity.attach();
   Object.defineProperty(db, 'players', { value: identity.players.view, writable: false, configurable: false, enumerable: true });
   Object.defineProperty(db, 'guardians', { value: identity.guardians.view, writable: false, configurable: false, enumerable: true });
   store.setSaveHook?.(identity.saveHook());
 
   const users = createUsersRepository({ sqlite, nextId, log, warn, unit: store.unit });
-  const usersBoot = users.attach(db.users);
+  const usersBoot = users.attach();
   Object.defineProperty(db, 'users', { value: users.view, writable: false, configurable: false, enumerable: true });
 
-  // Sessions (S2): live table, hashed tokens. The in-memory blob copy loaded
-  // before the migrations ran is discarded here; the migration imported the
-  // authoritative blob from the file inside its own transaction.
   const sessions = createSessionsRepository({ sqlite, sessionTtlMs, log });
   const sessionsBoot = sessions.attach();
   Object.defineProperty(db, 'sessions', { value: sessions.view, writable: false, configurable: false, enumerable: true });
 
-  // The media-deletion queue (migration 0006): rows are written inside the
-  // deletion's unit of work; the server processes them after commit and at boot.
-  // The live records the server holds count as references too (an upload whose facet is not flushed yet).
   const mediaDeletions = createMediaDeletionsQueue({ sqlite, log, warn, now, liveRecords: () => identity.players.view });
-  // The queue is its table and nothing else. A `mediaDeletions` array the
-  // caller holds in memory is either the blob migration 0006 just imported
-  // from the file (a restored backup: the array is dropped, the table is the
-  // queue) or a stale copy (reported, dropped, and its blob row deleted so no
-  // save can bring it back). The queue never imports from memory.
-  if (Object.hasOwn(db, MEDIA_DELETIONS_TABLE.name)) {
-    delete db[MEDIA_DELETIONS_TABLE.name];
-    sqlite.prepare('DELETE FROM collections WHERE name = ?').run(MEDIA_DELETIONS_TABLE.name);
-  }
 
-  // One-time codes (S6a, migration 0008): the two tables are the codes and
-  // nothing else. An `emailChallenges` / `pairingCodes` array the caller holds
-  // in memory is either the blob the migration just imported from the file (a
-  // restored backup, a pre-S6a file: the array is dropped, the table is the
-  // record) or a stale copy — the seed's empty containers, a server-side
-  // `??= []` — which is reported when it is not empty, dropped, and its blob
-  // row deleted so no save can bring it back. The repository never imports
-  // from memory. From here on `db.emailChallenges` / `db.pairingCodes` are
-  // hash-free read-only views. The repository takes part in the store's unit
-  // of work through the participant API: inside a unit its mutations join the
-  // unit (a failure poisons it even when caught); outside one they run in a
-  // transaction of their own.
   const codes = createOneTimeCodesRepository({ sqlite, log, now, unit: store.unit });
   const codesBoot = codes.attach({ at: now() });
   for (const [name, view] of [[EMAIL_CHALLENGES_TABLE.name, codes.emailChallengesView], [PAIRING_CODES_TABLE.name, codes.pairingCodesView]]) {
-    if (Object.hasOwn(db, name)) {
-      delete db[name];
-      sqlite.prepare('DELETE FROM collections WHERE name = ?').run(name);
-    }
     Object.defineProperty(db, name, { value: view, writable: false, configurable: false, enumerable: true });
   }
 
-  // Notifications and category preferences (S7a, migration 0009): the three
-  // tables are the record. The repository runs in its STAGED mode here (see
-  // repositories/notifications.mjs): a standalone write lands inside the next
-  // snapshot save together with the blob edits made alongside it, a write
-  // inside a unit of work lands in the unit's commit, and the save hook
-  // registered below is how both happen. A `notifications` /
-  // `notificationPrefs` array the caller holds in memory is either the blob the
-  // migration just imported from the file (a restored backup, a pre-S7a file:
-  // dropped, the table is the record) or a stale copy — the seed's empty
-  // container, the snapshot migrations' `??= []` — which is reported when it is
-  // not empty, dropped, and its blob row deleted so no save can bring it back.
-  // The repository never imports from memory and never infers initialisation
-  // from row counts. From here on `db.notifications` / `db.notificationPrefs`
-  // are read-only views over the mirror the repository keeps current.
-  // `runEffect` is the store's afterCommit: at the moment the repository runs an
-  // effect no unit is open (the store closes the unit before it reports the
-  // commit), so the effect runs at once, counted and logged, never thrown.
   const notifications = createNotificationsRepository({ sqlite, log, warn, now, nextId, unit: store.unit, staged: true, runEffect: (fn) => store.afterCommit(fn) });
   const notificationsBoot = notifications.attach();
   store.setSaveHook?.(notifications.saveHook());
   for (const [name, view] of [[NOTIFICATIONS_TABLE.name, notifications.view], [NOTIFICATION_PREFS_TABLE.name, notifications.prefsView]]) {
-    if (Object.hasOwn(db, name)) {
-      delete db[name];
-      sqlite.prepare('DELETE FROM collections WHERE name = ?').run(name);
-    }
     Object.defineProperty(db, name, { value: view, writable: false, configurable: false, enumerable: true });
   }
 
-  // Delivery dispatches (S7b, migration 0010): the two tables are the record.
-  // The repository runs in its STAGED mode here (see repositories/dispatches.mjs):
-  // a sweep's rows, attempts and status changes land inside the next snapshot
-  // save together with the blob edits made alongside them (the outbox row, the
-  // failure-injection counter, the ops event, the webhook delivery intent); an
-  // acknowledgment's changes land in the unit's commit with the notification's
-  // contract. A `dispatches` array the caller holds in memory is either the
-  // blob the migration just imported from the file (a restored backup, a
-  // pre-S7b file: dropped, the table is the record) or a stale copy
-  // (migrateM13's `??= []`), reported when it is not empty, dropped, and its
-  // blob row deleted so no save can bring it back. The repository never imports
-  // from memory. From here on `db.dispatches` is a read-only view over the
-  // mirror. There is no effects queue: a dispatch has no push and no live event.
   const dispatches = createDispatchesRepository({ sqlite, log, now, unit: store.unit, staged: true });
   const dispatchesBoot = dispatches.attach();
   store.setSaveHook?.(dispatches.saveHook());
-  if (Object.hasOwn(db, DISPATCHES_TABLE.name)) {
-    delete db[DISPATCHES_TABLE.name];
-    sqlite.prepare('DELETE FROM collections WHERE name = ?').run(DISPATCHES_TABLE.name);
-  }
   Object.defineProperty(db, DISPATCHES_TABLE.name, { value: dispatches.view, writable: false, configurable: false, enumerable: true });
 
-  // The mail outbox, the push log and the device push tokens (S7c, migration
-  // 0011): the three tables are the record, one participant. STAGED mode here
-  // (see repositories/outboxPush.mjs): a mailer record lands in the save the
-  // route's persistNow() or the debounced save would have carried its blob
-  // entry in; a delivery record in the sweep's save with the dispatch rows of
-  // the pass; a push record — written by the after-durable effect AFTER the
-  // notification's save committed — in the later save the sender's nextId()
-  // already schedules (nothing new is scheduled here); a token in the route's
-  // persist(). An `outbox` / `pushLog` / `pushTokens` array the caller holds
-  // in memory is either the blob the migration just imported from the file (a
-  // restored backup, a pre-S7c file: dropped, the table is the record) or a
-  // stale copy (the seed's empty containers, server.mjs's `??= []`), reported
-  // when it is not empty, dropped, and its blob row deleted so no save can
-  // bring it back. The repository never imports from memory. From here on the
-  // three `db.*` names are read-only views over the mirrors.
   const outboxPush = createOutboxPushRepository({ sqlite, log, now, unit: store.unit, staged: true });
   const outboxPushBoot = outboxPush.attach();
   store.setSaveHook?.(outboxPush.saveHook());
   for (const [name, view] of [['outbox', outboxPush.outbox.view], ['pushLog', outboxPush.pushLog.view], ['pushTokens', outboxPush.pushTokens.view]]) {
-    if (Object.hasOwn(db, name)) {
-      delete db[name];
-      sqlite.prepare('DELETE FROM collections WHERE name = ?').run(name);
-    }
     Object.defineProperty(db, name, { value: view, writable: false, configurable: false, enumerable: true });
   }
 
-  // Message threads (S7d, migration 0012): the three tables are the record, one
-  // participant. STAGED mode here (see repositories/channels.mjs): a thread lands
-  // in the acceptance route's own save with the request's answer, a message in
-  // postMessage's persistNow() before the sender hears 201, a receipt in its
-  // route's save; a deletion joins the account-deletion unit (D-B). The
-  // TRANSITIONAL CHECKED REFERENCE (D-A): `open` checks the request against the
-  // live `requests` blob, read at the call (the modules replace that array). A
-  // `channels` array the caller holds in memory is either the blob the migration
-  // just imported from the file (a restored backup, a pre-S7d file: dropped, the
-  // tables are the record) or a stale copy (the seed's empty container, the
-  // snapshot migrations' `??= []`), reported when it is not empty, dropped, and
-  // its blob row deleted so no save can bring it back. The repository never
-  // imports from memory. From here on `db.channels` is a read-only view over the
-  // mirror; the message arrays inside it are read-only too.
-  //
-  // S8a (migration 0015), S8b (0016) and S8c (0017) — the recruitment requests
-  // and accepted trials (sixteen typed tables, repositories/recruitment.mjs),
-  // the recruitment cases with the four room collections (twenty-five,
-  // repositories/recruitmentCases.mjs) and the contacts and offers (ten,
-  // repositories/recruitmentContactsOffers.mjs), all with EXPLICIT writes: the
-  // views are read-only arrays over the mirrors; every change is a repository
-  // operation (create / update and the deletion unit's tombstones) that writes
-  // its rows at once — inside the route's unit of work when one is open. No
-  // flush; each participant hook restores its mirrors when a unit rolls back.
-  // The case keys of requests, trials, contacts and offers are immediate. An
-  // in-memory array of one of these collections is a stale copy (the seed's
-  // empty containers, the snapshot migrations' `??= []`): dropped, its blob row
-  // deleted. The repositories never import from memory. Contacts and offers
-  // have no view and no mirror at all (§4.3 step 2): every read is a SQL query
-  // of their repository.
+  // The explicit repositories, in dependency order. Each retires its old collection names on `db`.
   const recruitmentContactsOffers = createRecruitmentContactsOffersRepository({ sqlite, log, now, unit: store.unit });
   const recruitmentContactsOffersBoot = recruitmentContactsOffers.attach();
   const recruitmentCases = createRecruitmentCasesRepository({ sqlite, log, now, unit: store.unit });
@@ -719,298 +535,129 @@ export function attachDataLayer({ db, store, nextId, sessionTtlMs, now = Date.no
   recruitment = createRecruitmentRepository({ sqlite, log, now, unit: store.unit });
   const recruitmentBoot = recruitment.attach();
   for (const name of RECRUITMENT_CASES_COLLECTIONS) {
-    if (Object.hasOwn(db, name)) {
-      delete db[name];
-      sqlite.prepare('DELETE FROM collections WHERE name = ?').run(name);
-    }
     retireCollection(db, name, 'recruitmentCases');
   }
   for (const name of RECRUITMENT_CONTACTS_OFFERS_COLLECTIONS) {
-    if (Object.hasOwn(db, name)) {
-      delete db[name];
-      sqlite.prepare('DELETE FROM collections WHERE name = ?').run(name);
-    }
-    // §4.3 step 2: read through SQL (recruitmentContactsOffers.contacts / .offers). There is no view; a reader that
-    // still names db.<collection> throws here instead of seeing an empty list or creating one with `??= []`.
     retireCollection(db, name, 'recruitmentContactsOffers');
   }
-  // S8d (migration 0018; docs/architecture/s8d-design-note.md): the four typed tables are the record; EXPLICIT writes
-  // and SQL reads (repositories/signingsFollowUps.mjs, §4.3 step 2): every change is a repository operation that writes
-  // its rows at once (joined into the open unit, a transaction of its own otherwise); every read is a query. No mirror,
-  // no view, no flush. The player references are tolerant and counted (Q7a/Q8a/Q8c-a applied); the organisation, case,
-  // offer, staff, package, revision, signing and follow-up keys are real. An in-memory array of one of the four
-  // collections is a stale copy (the seed's containers): dropped, its blob row deleted. The repository never imports
-  // from memory.
   const signingsFollowUps = createSigningsFollowUpsRepository({ sqlite, log, now, unit: store.unit });
   const signingsFollowUpsBoot = signingsFollowUps.attach();
   for (const name of SIGNINGS_FOLLOWUPS_COLLECTIONS) {
-    if (Object.hasOwn(db, name)) {
-      delete db[name];
-      sqlite.prepare('DELETE FROM collections WHERE name = ?').run(name);
-    }
     retireCollection(db, name, 'signingsFollowUps');
   }
-  // S9a (migration 0019): evidence, coach affiliations and squad invitations — explicit writes, SQL reads, no mirror and
-  // no view (repositories/scoutingEvidence.mjs). An in-memory array (the seed's or migrateM12's container) is dropped.
   const scoutingEvidence = createScoutingEvidenceRepository({ sqlite, log, now, unit: store.unit });
   const scoutingEvidenceBoot = scoutingEvidence.attach();
   for (const name of SCOUTING_EVIDENCE_COLLECTIONS) {
-    if (Object.hasOwn(db, name)) {
-      delete db[name];
-      sqlite.prepare('DELETE FROM collections WHERE name = ?').run(name);
-    }
     retireCollection(db, name, 'scoutingEvidence');
   }
-  // S9b (migration 0020): assessment templates, assessments, video segments and playlists, the same way
-  // (repositories/scoutingAssessments.mjs). The v1 templates are the migration's rows, not a module's push.
   const scoutingAssessments = createScoutingAssessmentsRepository({ sqlite, log, now, unit: store.unit });
   const scoutingAssessmentsBoot = scoutingAssessments.attach();
   for (const name of SCOUTING_ASSESSMENTS_COLLECTIONS) {
-    if (Object.hasOwn(db, name)) {
-      delete db[name];
-      sqlite.prepare('DELETE FROM collections WHERE name = ?').run(name);
-    }
     retireCollection(db, name, 'scoutingAssessments');
   }
-  // S9c (migration 0021): a club's setup (repositories/clubSetup.mjs). The organisation facets tactical, squad,
-  // lookingFor and federationCheck are retired on the records (repositories/orgs.mjs); db.vacancies throws.
   const clubSetup = createClubSetupRepository({ sqlite, log, now, unit: store.unit });
   const clubSetupBoot = clubSetup.attach();
   for (const name of CLUB_SETUP_COLLECTIONS) {
-    if (Object.hasOwn(db, name)) {
-      delete db[name];
-      sqlite.prepare('DELETE FROM collections WHERE name = ?').run(name);
-    }
     retireCollection(db, name, 'clubSetup');
   }
-  // S9d (migration 0022): opportunities, applications, campaigns, campaign submissions and player preferences
-  // (repositories/opportunitiesCampaigns.mjs); each db.* name throws.
   const opportunitiesCampaigns = createOpportunitiesCampaignsRepository({ sqlite, log, now, unit: store.unit });
   const opportunitiesCampaignsBoot = opportunitiesCampaigns.attach();
   for (const name of OPPORTUNITIES_CAMPAIGNS_COLLECTIONS) {
-    if (Object.hasOwn(db, name)) {
-      delete db[name];
-      sqlite.prepare('DELETE FROM collections WHERE name = ?').run(name);
-    }
     retireCollection(db, name, 'opportunitiesCampaigns');
   }
-  // S10a (migration 0023): the verification domain (repositories/verification.mjs); each db.ver* name throws, and the
-  // organisation facet `verification` is retired on the records (repositories/orgs.mjs).
   const verification = createVerificationRepository({ sqlite, log, now, unit: store.unit });
   const verificationBoot = verification.attach();
   for (const name of [...VERIFICATION_COLLECTIONS, ...VERIFICATION_RETIRED]) {
-    if (Object.hasOwn(db, name)) {
-      delete db[name];
-      sqlite.prepare('DELETE FROM collections WHERE name = ?').run(name);
-    }
     retireCollection(db, name, 'verification');
   }
-  // S10b (migration 0024): the Passport's own records (repositories/passport.mjs); each db.passport* name throws.
   const passport = createPassportRepository({ sqlite, log, now, unit: store.unit });
   const passportBoot = passport.attach();
   for (const name of PASSPORT_COLLECTIONS) {
-    if (Object.hasOwn(db, name)) {
-      delete db[name];
-      sqlite.prepare('DELETE FROM collections WHERE name = ?').run(name);
-    }
     retireCollection(db, name, 'passport');
   }
-  // S10c (migration 0025): transition cases and coach references (repositories/transitionsVouches.mjs); each db.* name throws.
   const transitionsVouches = createTransitionsVouchesRepository({ sqlite, log, now, unit: store.unit });
   const transitionsVouchesBoot = transitionsVouches.attach();
   for (const name of TRANSITIONS_COLLECTIONS) {
-    if (Object.hasOwn(db, name)) {
-      delete db[name];
-      sqlite.prepare('DELETE FROM collections WHERE name = ?').run(name);
-    }
     retireCollection(db, name, 'transitionsVouches');
   }
-  // S11b-1 (migration 0027): Trust & Safety reviewers and policy versions (repositories/compliancePolicies.mjs); each
-  // db.* name throws.
   const compliancePolicies = createCompliancePoliciesRepository({ sqlite, log, now, unit: store.unit });
   const compliancePoliciesBoot = compliancePolicies.attach();
   for (const name of COMPLIANCE_POLICIES_COLLECTIONS) {
-    if (Object.hasOwn(db, name)) {
-      delete db[name];
-      sqlite.prepare('DELETE FROM collections WHERE name = ?').run(name);
-    }
     retireCollection(db, name, 'compliancePolicies');
   }
-  // S11a (migration 0026): the agent core (repositories/agentCore.mjs); each db.* name throws. A request's policy
-  // versions are checked against the policy versions (S11b-1).
   const agentCore = createAgentCoreRepository({ sqlite, log, now, unit: store.unit, policyVersionKnown: (id) => compliancePolicies.policies.exists(id) });
   const agentCoreBoot = agentCore.attach();
   for (const name of AGENT_CORE_COLLECTIONS) {
-    if (Object.hasOwn(db, name)) {
-      delete db[name];
-      sqlite.prepare('DELETE FROM collections WHERE name = ?').run(name);
-    }
     retireCollection(db, name, 'agentCore');
   }
-  // S11b-2 (migration 0028): compliance contexts and evaluations, reviews and consents (repositories/complianceRecords.mjs);
-  // each db.* name throws.
   const complianceRecords = createComplianceRecordsRepository({ sqlite, log, now, unit: store.unit });
   const complianceRecordsBoot = complianceRecords.attach();
   for (const name of COMPLIANCE_RECORDS_COLLECTIONS) {
-    if (Object.hasOwn(db, name)) {
-      delete db[name];
-      sqlite.prepare('DELETE FROM collections WHERE name = ?').run(name);
-    }
     retireCollection(db, name, 'complianceRecords');
   }
-  // S11c (migration 0029): transactions, representation bindings and documents (repositories/agentTransactions.mjs); each
-  // db.* name throws.
   const agentTransactions = createAgentTransactionsRepository({ sqlite, log, now, unit: store.unit });
   const agentTransactionsBoot = agentTransactions.attach();
   for (const name of AGENT_TRANSACTIONS_COLLECTIONS) {
-    if (Object.hasOwn(db, name)) {
-      delete db[name];
-      sqlite.prepare('DELETE FROM collections WHERE name = ?').run(name);
-    }
     retireCollection(db, name, 'agentTransactions');
   }
-  // S12a (migration 0030): development objectives, drill-guidance reviews and the Development Hub
-  // (repositories/development.mjs); each db.* name throws.
   const development = createDevelopmentRepository({ sqlite, log, now, unit: store.unit });
   const developmentBoot = development.attach();
   for (const name of DEVELOPMENT_COLLECTIONS) {
-    if (Object.hasOwn(db, name)) {
-      delete db[name];
-      sqlite.prepare('DELETE FROM collections WHERE name = ?').run(name);
-    }
     retireCollection(db, name, 'development');
   }
-  // S12b (migration 0031): Box Cam, the At-Home Combine and the production CV results (repositories/boxCam.mjs); each
-  // db.* name throws, boxSessionEvents (reserved since M16, never written) with them.
   const boxCam = createBoxCamRepository({ sqlite, log, now, unit: store.unit });
   const boxCamBoot = boxCam.attach();
   for (const name of [...BOX_CAM_COLLECTIONS, ...BOX_CAM_RETIRED]) {
-    if (Object.hasOwn(db, name)) {
-      delete db[name];
-      sqlite.prepare('DELETE FROM collections WHERE name = ?').run(name);
-    }
     retireCollection(db, name, 'boxCam');
   }
-  // S12c (migration 0032): Recruitment Briefs, Nobody Missed, Second Look and Dynamic Watchlists (repositories/discovery.mjs);
-  // each db.* name throws.
   const discovery = createDiscoveryRepository({ sqlite, log, now, unit: store.unit });
   const discoveryBoot = discovery.attach();
   for (const name of DISCOVERY_COLLECTIONS) {
-    if (Object.hasOwn(db, name)) {
-      delete db[name];
-      sqlite.prepare('DELETE FROM collections WHERE name = ?').run(name);
-    }
     retireCollection(db, name, 'discovery');
   }
-  // S12d (migration 0033): exposure events, review-later deferrals, evidence suggestions, calibration sessions, fixtures,
-  // coverage plans and assignments (repositories/insightCoverage.mjs); each db.* name throws.
   const insightCoverage = createInsightCoverageRepository({ sqlite, log, now, unit: store.unit });
   const insightCoverageBoot = insightCoverage.attach();
   for (const name of INSIGHT_COVERAGE_COLLECTIONS) {
-    if (Object.hasOwn(db, name)) {
-      delete db[name];
-      sqlite.prepare('DELETE FROM collections WHERE name = ?').run(name);
-    }
     retireCollection(db, name, 'insightCoverage');
   }
-  // S13a (migration 0034): import batches, prospects, identity reviews, API keys, webhook endpoints and deliveries
-  // (repositories/integrations.mjs); each db.* name throws.
   const integrations = createIntegrationsRepository({ sqlite, log, now, unit: store.unit });
   const integrationsBoot = integrations.attach();
   for (const name of INTEGRATIONS_COLLECTIONS) {
-    if (Object.hasOwn(db, name)) {
-      delete db[name];
-      sqlite.prepare('DELETE FROM collections WHERE name = ?').run(name);
-    }
     retireCollection(db, name, 'integrations');
   }
-  // S13b (migration 0035): staff invites, SSO configurations and states, support tickets and support access grants
-  // (repositories/enterprise.mjs); each db.* name throws.
   const enterprise = createEnterpriseRepository({ sqlite, log, now, unit: store.unit });
   const enterpriseBoot = enterprise.attach();
   for (const name of ENTERPRISE_COLLECTIONS) {
-    if (Object.hasOwn(db, name)) {
-      delete db[name];
-      sqlite.prepare('DELETE FROM collections WHERE name = ?').run(name);
-    }
     retireCollection(db, name, 'enterprise');
   }
-  // S13c (migration 0036): group workspaces and group grants (repositories/groups.mjs); each db.* name throws.
   const groups = createGroupsRepository({ sqlite, log, now, unit: store.unit });
   const groupsBoot = groups.attach();
   for (const name of GROUPS_COLLECTIONS) {
-    if (Object.hasOwn(db, name)) {
-      delete db[name];
-      sqlite.prepare('DELETE FROM collections WHERE name = ?').run(name);
-    }
     retireCollection(db, name, 'groups');
   }
-  // S13d (migration 0037): open days, match days and friendlies (repositories/grassroots.mjs); each db.* name throws.
   const grassroots = createGrassrootsRepository({ sqlite, log, now, unit: store.unit });
   const grassrootsBoot = grassroots.attach();
   for (const name of GRASSROOTS_COLLECTIONS) {
-    if (Object.hasOwn(db, name)) {
-      delete db[name];
-      sqlite.prepare('DELETE FROM collections WHERE name = ?').run(name);
-    }
     retireCollection(db, name, 'grassroots');
   }
-  // S13e (migration 0038): upload sessions, saved searches, invoices, the demo reputation seed and the delivery centre's
-  // bookkeeping (repositories/operations.mjs); each db.* name throws. A first installation's demo reputation rows (the
-  // seed's) are imported once, with its players.
   const operations = createOperationsRepository({ sqlite, log, now, unit: store.unit });
   const operationsBoot = operations.attach({ seedReputation: identityWasPending ? handedIn('reputationSeed') : [] });
   for (const name of [...OPERATIONS_COLLECTIONS, ...OPERATIONS_SINGLETONS]) {
-    if (Object.hasOwn(db, name)) {
-      delete db[name];
-      sqlite.prepare('DELETE FROM collections WHERE name = ?').run(name);
-    }
     retireCollection(db, name, 'operations');
   }
   for (const name of ['requests', 'trials']) {
-    if (Object.hasOwn(db, name)) {
-      delete db[name];
-      sqlite.prepare('DELETE FROM collections WHERE name = ?').run(name);
-    }
     retireCollection(db, name, 'recruitment');
   }
 
   const channels = createChannelsRepository({ sqlite, log, now, unit: store.unit, staged: true, requestExists: (id) => !!recruitment.requests.byId(id) });
   const channelsBoot = channels.attach();
   store.setSaveHook?.(channels.saveHook());
-  if (Object.hasOwn(db, CHANNELS_TABLE.name)) {
-    delete db[CHANNELS_TABLE.name];
-    sqlite.prepare('DELETE FROM collections WHERE name = ?').run(CHANNELS_TABLE.name);
-  }
   Object.defineProperty(db, CHANNELS_TABLE.name, { value: channels.view, writable: false, configurable: false, enumerable: true });
 
-  // The eight audit collections (S6b, migration 0013): the tables are the record, one
-  // participant. STAGED mode here (see repositories/safetyAudit.mjs): a block and its
-  // ledger row land in the next save, a moderation hit in moderateOrRefuse's persist(),
-  // a report in the next save with its suspension blocks and frozen requests, a note
-  // in the next save, a source change in m181's persistNow(), an ops event in its
-  // caller's save; the IDV entry and the admin toggle join their units of work. An
-  // audit array the caller holds in memory is either the blob the migration just
-  // imported from the file (a restored backup, a pre-S6b file: dropped, the tables are
-  // the record) or a stale copy (the seed's empty containers, the snapshot migrations'
-  // `??= []`), reported when it is not empty, dropped, and its blob row deleted so no
-  // save can bring it back. The repository never imports from memory. From here on the
-  // eight `db.*` names are read-only views over the mirrors.
   const safetyAudit = createSafetyAuditRepository({ sqlite, log, unit: store.unit, staged: true });
   const safetyAuditBoot = safetyAudit.attach();
   store.setSaveHook?.(safetyAudit.saveHook());
-  // S4b-R (migration 0014): the retained player records. A `playersRetained` array the
-  // caller holds in memory is the blob the migration just imported (a restored backup, a
-  // rollback copy re-upgraded) or stale; dropped, its blob row deleted; the rows are the record.
-  if (Object.hasOwn(db, PLAYERS_RETAINED.name)) {
-    delete db[PLAYERS_RETAINED.name];
-    sqlite.prepare('DELETE FROM collections WHERE name = ?').run(PLAYERS_RETAINED.name);
-  }
   for (const name of AUDIT_COLLECTIONS) {
-    if (Object.hasOwn(db, name)) {
-      delete db[name];
-      sqlite.prepare('DELETE FROM collections WHERE name = ?').run(name);
-    }
     Object.defineProperty(db, name, { value: safetyAudit.views[name], writable: false, configurable: false, enumerable: true });
   }
 
@@ -1056,6 +703,17 @@ export function attachDataLayer({ db, store, nextId, sessionTtlMs, now = Date.no
     grassroots,
     operations,
     migrations,
+    /** True when this boot imported the seed: a first installation. */
+    firstInstallation: identityWasPending,
+    /** The schema version: the number of the latest applied table migration (`0039_…` → 39). */
+    schemaVersion: () => schemaVersionOf(sqlite),
+    /** Operator-facing view of the schema: the version, the migrations applied and known, whether it is current. */
+    schemaReport: () => {
+      const version = schemaVersionOf(sqlite);
+      const expected = Number(DATA_MIGRATIONS.map((m) => m.id).sort().at(-1).slice(0, 4));
+      const applied = sqlite.prepare('SELECT COUNT(*) AS n FROM data_migrations').get().n;
+      return { version, expected, migrationsApplied: applied, migrationsKnown: DATA_MIGRATIONS.length, upToDate: version === expected && applied === DATA_MIGRATIONS.length };
+    },
     boot: { orgs: orgsBoot, identity: identityBoot, users: usersBoot, sessions: sessionsBoot, codes: codesBoot, notifications: notificationsBoot, dispatches: dispatchesBoot, outboxPush: outboxPushBoot, channels: channelsBoot, safetyAudit: safetyAuditBoot, recruitment: recruitmentBoot, recruitmentCases: recruitmentCasesBoot, recruitmentContactsOffers: recruitmentContactsOffersBoot, signingsFollowUps: signingsFollowUpsBoot, scoutingEvidence: scoutingEvidenceBoot, scoutingAssessments: scoutingAssessmentsBoot, clubSetup: clubSetupBoot, opportunitiesCampaigns: opportunitiesCampaignsBoot, verification: verificationBoot, passport: passportBoot, transitionsVouches: transitionsVouchesBoot, agentCore: agentCoreBoot, compliancePolicies: compliancePoliciesBoot, complianceRecords: complianceRecordsBoot, agentTransactions: agentTransactionsBoot, development: developmentBoot, boxCam: boxCamBoot, discovery: discoveryBoot, insightCoverage: insightCoverageBoot, integrations: integrationsBoot, enterprise: enterpriseBoot, groups: groupsBoot, grassroots: grassrootsBoot, operations: operationsBoot },
     /** `details: true` is accepted for the admin report; the report carries counts and states, never rows. */
     report: () => ({
@@ -1067,9 +725,9 @@ export function attachDataLayer({ db, store, nextId, sessionTtlMs, now = Date.no
         users: { rows: users.count(), mode: 'live' },
         sessions: { rows: sessions.count(), mode: 'live', lifetimeMs: sessions.ttlMs },
         oneTimeCodes: { mode: 'live', rows: codes.counts(), outstanding: codes.outstanding(), lifetimesMs: { emailChallenge: codes.emailChallengeTtlMs, pairingCode: codes.pairingCodeTtlMs }, maxEmailAttempts: codes.maxEmailAttempts },
-        notifications: { mode: 'live', rows: notifications.counts(), pendingWrites: notifications.pending(), pendingEffects: notifications.pendingEffects(), coalesceMs: notifications.coalesceMs, writeMode: 'staged: a standalone write lands in the next snapshot save with the blobs it announces; a write inside a unit of work lands in its commit; its push and live event run only once that save committed' },
-        dispatches: { mode: 'live', rows: dispatches.count(), byStatus: dispatches.countsByStatus(), backlog: dispatches.backlogCount(), pendingWrites: dispatches.pending(), writeMode: 'staged: a sweep\'s rows, attempts and status changes land in the next snapshot save with the outbox row, the injection counter and the ops/webhook rows written alongside; an acknowledgment lands in its unit\'s commit', notificationReference: 'indexed, no foreign key, no cascade (orphans after an ordinary deletion are retained; retention is an open decision)' },
-        outboxPush: { mode: 'live', rows: outboxPush.counts(), pendingWrites: outboxPush.pending(), writeMode: 'staged: a mailer record lands in the save its route would have carried the blob in; a delivery record in the sweep\'s save with the dispatch rows; a push record — written after the notification\'s save committed — in the later save the sender\'s nextId() already schedules; a token in the route\'s persist()', tokens: 'a non-empty string (the route refuses anything else with 400 TOKEN_INVALID); no uniqueness constraint (re-registering the same token for the same session owner replaces its earlier rows)', destinations: 'a string address in to_address, or null (the routes refuse a non-string e-mail with 400)', typing: 'typed columns only: no extra_json; unknown keys are not stored; a wrong-typed field is refused by name; the cutover dropped unknown fields and normalised or dropped non-string destinations and tokens, each reported by id (meta.outboxPushCutover.notes)' },
+        notifications: { mode: 'live', rows: notifications.counts(), pendingWrites: notifications.pending(), pendingEffects: notifications.pendingEffects(), coalesceMs: notifications.coalesceMs, writeMode: 'staged: a standalone write lands in the next save with the rows it announces; a write inside a unit of work lands in its commit; its push and live event run only once that save committed' },
+        dispatches: { mode: 'live', rows: dispatches.count(), byStatus: dispatches.countsByStatus(), backlog: dispatches.backlogCount(), pendingWrites: dispatches.pending(), writeMode: 'staged: a sweep\'s rows, attempts and status changes land in the next save with the outbox row, the injection counter and the ops/webhook rows written alongside; an acknowledgment lands in its unit\'s commit', notificationReference: 'indexed, no foreign key, no cascade (orphans after an ordinary deletion are retained; retention is an open decision)' },
+        outboxPush: { mode: 'live', rows: outboxPush.counts(), pendingWrites: outboxPush.pending(), writeMode: 'staged: a mailer record lands in the save of its route; a delivery record in the sweep\'s save with the dispatch rows; a push record — written after the notification\'s save committed — in the later save the sender\'s nextId() already schedules; a token in the route\'s persist()', tokens: 'a non-empty string (the route refuses anything else with 400 TOKEN_INVALID); no uniqueness constraint (re-registering the same token for the same session owner replaces its earlier rows)', destinations: 'a string address in to_address, or null (the routes refuse a non-string e-mail with 400)', typing: 'typed columns only: no extra_json; unknown keys are not stored; a wrong-typed field is refused by name; the cutover dropped unknown fields and normalised or dropped non-string destinations and tokens, each reported by id (meta.outboxPushCutover.notes)' },
         channels: { mode: 'live', rows: channels.counts(), pendingWrites: channels.pending(), writeMode: 'staged: a thread lands in the acceptance route\'s save with the request\'s answer; a message in postMessage\'s save before the sender hears 201; a receipt in its route\'s save; a deletion in the account-deletion unit', references: 'request_id unique and, since migration 0015 (S8a-core), a real foreign key to recruitment_requests (RESTRICT) — the D-A conversion — still checked in code at open; guardian_id checked in code at open and on every snapshot\'s final state (no foreign key, by bounded choice); org_id a foreign key (RESTRICT); player_id no lifecycle clause — the deleted player\'s threads are deleted explicitly, as before (D-B); messages and attachments cascade with their thread' },
         recruitment: { mode: 'live', rows: recruitment.counts(), pendingWrites: recruitment.pending(), unresolvedPlayerReferences: unresolvedRecruitmentPlayers(sqlite), retainedPlayerReferences: retainedRecruitmentPlayers(sqlite), writeMode: 'explicit and typed: requests.create / update, trials.create / update and tombstoneForPlayer write a record\'s rows at once (inside the route\'s unit of work) and re-read it; the views are read-only; a record the typed columns cannot hold is refused with its id', references: 'player_id (both tables) no foreign key, TOLERANT (Q7a): live, retained and historically missing ids resolve, are counted here and never refused, fabricated or deleted. case_id (both tables) → recruitment_cases (RESTRICT, immediate); recruitment_requests.trial_id → trials DEFERRABLE INITIALLY DEFERRED (a snapshot writes a request before its trial). guardian_id and recipient_guardian_id no foreign key, STRICT in code (Q7c): checked at every write and on every snapshot\'s final state. trials.request_id NOT NULL UNIQUE → recruitment_requests (RESTRICT); org_id and user_id → orgs / org_users (RESTRICT); the child tables cascade with their owner. The direct request route keeps its REQUEST_PENDING rule (D2)' },
         recruitmentCases: { mode: 'live', rows: recruitmentCases.counts(), pendingWrites: 0, unresolvedPlayerReferences: unresolvedCasePlayers(sqlite), retainedPlayerReferences: retainedCasePlayers(sqlite), writeMode: 'explicit: every change is a repository operation (cases.create / update / redactPlayer; comments, decisions and evidenceStates create / update; snapshots.create) that writes its rows at once — inside the route\'s unit of work when one is open, in a transaction of its own otherwise — and re-reads the record from the tables; the views hold read-only records (an in-place edit throws); no flush, no fingerprint', typing: 'typed columns only (file 02): the vocabulary and length CHECKs; one case history entry shape; a decision\'s snapshot is the room_snapshots row it names; the idempotency keys as columns; no absent_keys_json, offtype_json, extra_json or raw_json; a record the columns cannot hold (an unknown field included) is refused with its id', references: 'player_id (recruitment_cases, room_snapshots, room_decisions, case_transaction_handoffs) no foreign key, TOLERANT (Q8a): live, retained and historically missing ids resolve, are counted here and never refused. org_id → orgs and the staff ids (owner, lead scout, M12 decision maker, assignee, comment author) → org_users (RESTRICT); room_id (the four room tables) → recruitment_cases (RESTRICT); a decision\'s snapshot_id → room_snapshots (RESTRICT); case_request_links → recruitment_requests and case_trial_links → trials (RESTRICT); the case_id of requests, trials, contacts and offers → recruitment_cases (RESTRICT, immediate). The decision chain and a decision\'s snapshot stay inside its room, checked at every write. The children cascade with their owner. The one-open-room rule is the routes\'' },

@@ -2,9 +2,9 @@
 //
 // THE INVARIANTS
 //
-//   1. `db.recruitmentContacts` exists after a clean migration, after an
-//      upgrade from any older snapshot, and after a restart — never only
-//      because a module registered or a request arrived.
+//   1. The contacts are rows of recruitment_contacts (table migration 0017),
+//      there after a clean boot and after a restart — never only because a
+//      module registered or a request arrived.
 //   2. A snapshot that carries Contact rows restores them byte-faithfully.
 //      Nothing is rewritten, re-ordered or "repaired" on boot.
 //   3. A corrupt Contact row is NAMED and OMITTED, never fabricated into a
@@ -22,13 +22,12 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { MIGRATIONS, SCHEMA_VERSION, runMigrations, PRODUCTION_REQUIRED_STORES } from '../../domains/platform/migrations.mjs';
 import { integrityReport } from '../../domains/platform/integrity.mjs';
 import { openStore } from '../../store.mjs';
-import { JOURNEY_REQUIRED_STORES } from '../../domains/recruitment/lifecycle/journey.mjs';
 import { contactIntegrity, CONTACT_STATUSES } from '../../domains/recruitment/lifecycle/contact.mjs';
-import { guaranteeFor } from '../../storeContract.mjs';
+import { DATA_MIGRATIONS, TABLE_BACKED } from '../../repositories/index.mjs';
 import { buildRecruitmentJourney, createEvidenceProvider } from '../../scripts/recruitmentReadsFixture.mjs'; // §4.3 step 2: the contacts/offers queries over the plain arrays
+const LATEST_SCHEMA = Number(DATA_MIGRATIONS.map((m) => m.id).sort().at(-1).slice(0, 4)); // S14a: the latest table migration's number
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SERVER = path.join(HERE, '..', '..', 'server.mjs');
@@ -92,7 +91,6 @@ function baseDb() {
       createdAt: 1000, history: [{ id: 'aud-1', at: 1000, byKind: 'org', byId: 'usr-owner', byName: 'Owner', action: 'room_created', detail: { status: 'watching' } }, { id: 'aud-2', at: 1001, byKind: 'org', byId: 'usr-owner', byName: 'Owner', action: 'room_status_changed', detail: { from: 'watching', to: 'contact_planned', reasonCodes: [] } }],
     }],
   };
-  runMigrations(db);
   return db;
 }
 
@@ -109,39 +107,17 @@ const soundContact = (over = {}) => ({
   ...over,
 });
 
-const stableJson = (db) => { const { schema, ...rest } = db; const { updatedAt, ...s } = schema ?? {}; return JSON.stringify({ ...rest, schema: s }); };
+// The table-migration ledger of a stopped server's file: every id with the time it was applied.
+const ledger = (dir) => { const st = openStore(dir); try { return JSON.stringify(st.sqlite.prepare('SELECT id, applied_at FROM data_migrations ORDER BY id').all()); } finally { st.sqlite.close(); } };
 
 // ======================================================= §100 — the guarantee
 section('§100/§101 — the store is guaranteed by the registry, on every path');
 {
-  // §4.3 step 2 (rewritten: these described the old storage). The contacts are rows of recruitment_contacts, read
-  // through SQL; there is no db collection to guarantee, and the registry step that created one is a recorded no-op.
-  ok(guaranteeFor('recruitmentContacts') === null, 'recruitmentContacts is not a db collection in the store contract (a table since 0017, read through SQL)');
-  ok(!PRODUCTION_REQUIRED_STORES.includes('recruitmentContacts'), 'and is not in the derived required list');
+  // Rewritten in S14a: the store-contract, runMigrations and 2302/2303 upgrade cases described the blob (an in-memory
+  // upgrade path, ground rule 1). The contacts are rows of recruitment_contacts, created by table migration 0017.
+  ok(TABLE_BACKED.includes('recruitmentContacts') && DATA_MIGRATIONS.filter((m) => m.id === '0017_recruitment_contacts_offers').length === 1, 'recruitmentContacts is a table, created by migration 0017 (read through SQL)');
   const noContacts = buildRecruitmentJourney({ recruitmentCases: [], roomDecisions: [], requests: [], trials: [], assessments: [], signings: [] }, 'k', { kind: 'org_staff', orgId: 'o1' });
   ok(noContacts.ok === false && noContacts.error === 'JOURNEY_STORE_MISSING' && noContacts.missing.includes('recruitmentContacts'), 'the journey still requires the contacts: without their queries it reports the store missing');
-  const fresh = {};
-  const r = runMigrations(fresh);
-  ok(r.to === SCHEMA_VERSION && !Object.hasOwn(fresh, 'recruitmentContacts'), `a clean database migrates to ${SCHEMA_VERSION} and creates no db.recruitmentContacts`);
-  ok(MIGRATIONS.find((m) => m.id === 'm230_004_recruitment_contacts')?.version === 2303, 'the step is numbered 2303');
-
-  // A pre-P3 snapshot (schema 2302) gains the store and nothing else moves.
-  const old = { players: [], orgs: [], guardians: [], users: [], sessions: [], ledger: [], notifications: [] };
-  runMigrations(old);
-  old.schema.version = 2302; old.schema.migrations = old.schema.migrations.filter((m) => m.id !== 'm230_004_recruitment_contacts'); delete old.recruitmentContacts;
-  const beforeOthers = stableJson({ ...old, schema: undefined });
-  const up = runMigrations(old);
-  ok(up.ran[0] === 'm230_004_recruitment_contacts' && up.ran.every((id) => /^m230_00[4-9]/.test(id)) && up.to === SCHEMA_VERSION, `a P2.5-era snapshot (2302) runs the Contact step first, then only later M23 steps (${up.ran.join(', ')})`);
-  ok(!Object.hasOwn(old, 'recruitmentContacts'), 'and creates no db collection (the step is a recorded no-op since §4.3 step 2)');
-  const afterOthers = stableJson({ ...old, recruitmentContacts: undefined, schema: undefined });
-  neg(beforeOthers === afterOthers, 'and no other collection changed');
-  const again = runMigrations(old);
-  neg(again.ran.length === 0, 'a second run applies nothing — idempotent');
-
-  // Existing rows are never overwritten.
-  const withRows = { players: [], orgs: [], guardians: [], users: [], sessions: [], ledger: [], notifications: [], recruitmentContacts: [soundContact()] };
-  runMigrations(withRows);
-  neg(withRows.recruitmentContacts.length === 1 && withRows.recruitmentContacts[0].id === 'rct-1', 'a snapshot that already holds contacts keeps them exactly');
 }
 
 // ======================================================= §144 — byte-faithful restore
@@ -166,7 +142,8 @@ const RESTORE_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-cp-restore-'));
     { id: 'req-1', playerId: 'pl-x', playerName: 'Xavier Adult', orgId: 'org-x', orgName: 'X FC', orgType: 'club', orgVerified: true, orgSafeguardingCertified: true, userId: 'usr-owner', scoutName: 'Owner', scoutRole: 'Head of Recruitment', type: 'contact', message: 'Hi Xavier.', status: 'pending', createdAt: 2001, routedTo: 'player', guardianId: null, contactId: 'rct-1', contactChannel: null },
     { id: 'req-4', playerId: 'pl-x', playerName: 'Xavier Adult', orgId: 'org-x', orgName: 'X FC', orgType: 'club', orgVerified: true, orgSafeguardingCertified: true, userId: 'usr-owner', scoutName: 'Owner', scoutRole: 'Head of Recruitment', type: 'contact', message: 'Hi Xavier.', status: 'accepted', createdAt: 2001, respondedAt: 4000, respondedBy: 'player', routedTo: 'player', guardianId: null, contactId: 'rct-4', contactChannel: null },
   ];
-  openStore(RESTORE_DIR).save({ savedAt: Date.now(), idCounter: 500, db });
+  openStore(RESTORE_DIR).save({ idCounter: 500, db });
+  const L0 = ledger(RESTORE_DIR);
   // S8c: the rows are read back from the tables, every key and value identical, the keys in the stored shape's order (the
   // documented table-read property; m23DecisionPersistence compares the same way since S8b) — key-order-insensitive here.
   const canon = (v) => (Array.isArray(v) ? v.map(canon) : v && typeof v === 'object' ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, canon(v[k])])) : v);
@@ -177,7 +154,7 @@ const RESTORE_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-cp-restore-'));
   ok(s.up, 'the server boots on the restored snapshot');
   if (!s.up) { console.error(`   the server did not come up; its log ends:\n${s.log().slice(-1500)}`); process.exit(1); }
   const health = (await s.j('GET', '/healthz')).body;
-  ok(health.schemaVersion === SCHEMA_VERSION, `and reports schema ${SCHEMA_VERSION}`);
+  ok(health.schemaVersion === LATEST_SCHEMA, 'and reports the current schema');
   neg(!/STORE_MISSING|INTEGRITY/.test(s.log()), 'no missing store and no integrity violation was logged');
   const owner = (await s.j('POST', '/auth/org/login', { orgId: 'org-x', scoutName: 'Owner', role: 'Head of Recruitment' })).body;
   const list = await s.j('GET', '/org/rooms/case-x/contacts', undefined, owner.token);
@@ -193,7 +170,7 @@ const RESTORE_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-cp-restore-'));
   const after = await s.stop();
   ok(after !== null, 'the server shut down and wrote the snapshot back');
   neg(stable(after.recruitmentContacts) === before, 'the four Contact rows came back IDENTICAL in every key and value — reads, replays and a boot rewrote nothing');
-  neg(after.schema.migrations.length === MIGRATIONS.length, 'and the migration record did not churn');
+  neg(JSON.parse(L0).length === DATA_MIGRATIONS.length && ledger(RESTORE_DIR) === L0, 'and the migration record did not churn'); // rewritten in S14a: it read db.schema
 }
 function expect422(r) { return r.status === 409 && r.body?.error === 'CONTACT_IDEMPOTENCY_CONFLICT'; }
 
@@ -210,6 +187,10 @@ const CORRUPT_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-cp-corrupt-'));
   const REQ = { playerId: 'pl-x', playerName: 'Xavier Adult', orgId: 'org-x', orgName: 'X FC', orgType: 'club', orgVerified: true, orgSafeguardingCertified: true, userId: 'usr-owner', scoutName: 'Owner', scoutRole: 'Head of Recruitment', type: 'contact', message: 'Hi Xavier.', status: 'pending', createdAt: 2001, routedTo: 'player', guardianId: null, contactChannel: null };
   // Since §4.2 a snapshot is written straight into the tables (store.mjs, snapshot mode): the save itself refuses such a
   // file, names the entry, and writes nothing; there is no blob for a later boot to import.
+  // What a fresh file holds (the migrations' reference rows only, by id: their timestamps are the time of creation):
+  // the yardstick for "nothing was written".
+  const rowIds = (db) => JSON.stringify(Object.fromEntries(Object.entries(db).map(([k, rows]) => [k, rows.map((r) => r?.id ?? JSON.stringify(r))])));
+  const FRESH_DB = rowIds(openStore(mkdtempSync(path.join(tmpdir(), 'sbx-cp-fresh-'))).load().db);
   const refusedAtCutover = async (label, port, contacts, requests, pattern) => {
     const dir = mkdtempSync(path.join(tmpdir(), 'sbx-cp-refused-'));
     const fixture = baseDb(); fixture.recruitmentContacts = contacts; fixture.requests = requests;
@@ -218,7 +199,8 @@ const CORRUPT_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-cp-corrupt-'));
     const msg = String(refused?.message ?? '');
     neg(!!refused && pattern.test(msg), `${label}: the save refuses the snapshot and names the entry (${(pattern.exec(msg) ?? ['NOT named'])[0]})`);
     if (!refused || !pattern.test(msg)) console.error(`   ${label}: refused=${!!refused}; ${msg.slice(0, 700)}`);
-    neg(openStore(dir).load() === null, `${label}: nothing was written — nothing imported, dropped or repaired`);
+    // Rewritten in S14a: load() returned null when no blob existed; now the file must hold exactly what a fresh one does.
+    neg(rowIds(openStore(dir).load().db) === FRESH_DB, `${label}: nothing was written — nothing imported, dropped or repaired`);
     if (port) {
       const s = await bootOn(dir, port);
       neg(s.up, `${label}: a server started on the directory boots from its seed (the refused snapshot left nothing behind)`);
@@ -297,8 +279,9 @@ const CORRUPT_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-cp-corrupt-'));
   const after = await s.stop();
   neg(JSON.stringify(canon(after.recruitmentContacts)) === before, 'shutdown wrote the corrupt rows back UNCHANGED in every key and value — reported, never repaired (the missing recipient and the impossible state carried as written)');
   // Boot-time integrity: contacts are not part of the M18.2 report's subject, and must not make it lie.
+  // Rewritten in S14a: the report has no store list any more (it described the blob's required stores).
   const rep = integrityReport(after, { cases: after.recruitmentCases ?? [] });
-  ok(rep.stores.ok === true, 'the boot integrity report still finds every required store present');
+  ok(rep.ok === true && rep.violations.length === 0, 'the boot integrity report is clean');
 }
 
 // ======================================================= §100 — clean boot, empty

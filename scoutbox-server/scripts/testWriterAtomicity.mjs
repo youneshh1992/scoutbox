@@ -1,7 +1,7 @@
 // The coupled writers of S4a through the REAL server (server.mjs booted as a
 // child process on temporary data directories, synthetic records only). A
 // request that changes a column AND something else — a facet on the same
-// record, a blob collection, an audit entry, another domain's facet — must
+// record, another table of the same domain, an audit entry, another domain's facet — must
 // commit the whole change before it answers: a second connection sees all of
 // it at once, a SIGKILL right after the response loses none of it, and an
 // injected failure — after the first row write (a named seam) or of the REAL
@@ -53,8 +53,9 @@ async function boot(dir) {
 // Every database read below goes through a SECOND connection (read-only), never the server's: what it sees is what is committed.
 const q1 = (dir, sql, ...p) => { const s = new DatabaseSync(path.join(dir, 'scoutbox.db'), { readOnly: true }); try { return s.prepare(sql).get(...p); } finally { s.close(); } };
 const facets = (dir, table, id) => JSON.parse(q1(dir, `SELECT facets_json FROM ${table} WHERE id = ?`, id).facets_json);
-// S6b: the eight audit collections are tables since 0013 — read in the writer's literal through the repository's own reader when the blob is retired.
-const blob = (dir, name) => { const r = q1(dir, 'SELECT value FROM collections WHERE name = ?', name); if (r) return JSON.parse(r.value); const t = AUDIT_SNAPSHOT_TABLES.find((x) => x.name === name); if (!t) return []; const s = new DatabaseSync(path.join(dir, 'scoutbox.db'), { readOnly: true }); try { return s.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(t.table) ? t.read(s) : []; } finally { s.close(); } };
+// The audit collections (idvQueue, ledger, …) read in the writer's literal through the repository's own reader.
+// (Rewritten in S14a: this looked for a blob row first; there is no blob.)
+const auditRows = (dir, name) => { const t = AUDIT_SNAPSHOT_TABLES.find((x) => x.name === name); assert.ok(t, `${name} is an audit table`); const s = new DatabaseSync(path.join(dir, 'scoutbox.db'), { readOnly: true }); try { return t.read(s) ?? []; } finally { s.close(); } };
 const orgLogin = async (S, orgId, scoutName, role, platform) => { const r = await S.j('POST', '/auth/org/login', { orgId, scoutName, role, ...(platform ? { platform } : {}) }); assert.equal(r.status, 200, `org login ${orgId}: ${JSON.stringify(r.body)}`); return r.body.token; };
 const signupAdult = async (S, name, extra = {}) => { const r = await S.j('POST', '/auth/player/signup', { name, dob: '2000-01-01', country: 'GB', password: 'synthetic-pass-1', ...extra }); assert.equal(r.status, 201, JSON.stringify(r.body)); return { pid: r.body.playerId, token: r.body.token }; };
 const count = (text, re) => (text.match(re) ?? []).length;
@@ -120,7 +121,7 @@ await test('medical record: the condition column and the record (a facet) commit
 });
 
 // ------------------------------------------------------------- guardian ID verification + its audit entry
-await test('guardian ID verification: the provider is asked first, outside any transaction; then the idVerified column and the audit-queue entry (a blob) commit together before the 200 — second connection, SIGKILL, both failure seams, retry', async () => {
+await test('guardian ID verification: the provider is asked first, outside any transaction; then the idVerified column and the audit-queue entry (an idv_queue row) commit together before the 200 — second connection, SIGKILL, both failure seams, retry', async () => {
   const dir = tempDir('s4wa-idv'); let S = await boot(dir);
   const gs = await S.j('POST', '/auth/guardian/signup', { name: 'Audit Parent', email: 'audit@example.test', password: 'synthetic-pass-1' }); assert.equal(gs.status, 201, JSON.stringify(gs.body));
   const gid = gs.body.guardianId; const token = gs.body.token;
@@ -128,7 +129,7 @@ await test('guardian ID verification: the provider is asked first, outside any t
   S = await coupled(S, dir, {
     seam: 'guardian.verify_id.after_row',
     act: () => S.j('POST', '/guardian/verify-id', { documentType: 'passport', documentRef: 'P1234567' }, token),
-    dbState: () => ({ idVerified: q1(dir, 'SELECT id_verified AS v FROM guardians WHERE id = ?', gid).v, audit: blob(dir, 'idvQueue').filter((e) => e.guardianId === gid).map((e) => e.status) }),
+    dbState: () => ({ idVerified: q1(dir, 'SELECT id_verified AS v FROM guardians WHERE id = ?', gid).v, audit: auditRows(dir, 'idvQueue').filter((e) => e.guardianId === gid).map((e) => e.status) }),
     before: { idVerified: 0, audit: [] }, after: { idVerified: 1, audit: ['approved'] },
     view: async (X) => { const me = (await X.j('GET', '/guardian/me', undefined, token)).body; const admin = (await X.j('GET', '/admin/guardians', undefined, null, A)).body; return [me.idVerified, admin.idvQueue.filter((e) => e.guardianId === gid).map((e) => e.status)]; },
     viewBefore: [false, []], viewAfter: [true, ['approved']],
@@ -205,7 +206,7 @@ await test('squad release: the squad row (org_squad_members since S9c), the play
     act: () => S.j('POST', `/org/squad/${entryId}/release`, { referenceText: 'A reliable, committed player all season.' }, grass),
     dbState: () => {
       const p = q1(dir, 'SELECT availability AS a, contract_status AS c FROM players WHERE id = ?', pid);
-      return { availability: p.a, contract: p.c, onSquad: onSquadInDb(), vouches: q1(dir, 'SELECT COUNT(*) AS n FROM vouches WHERE player_id = ?', pid).n, ledger: blob(dir, 'ledger').filter((l) => l.playerId === pid && l.type === 'released_by_club').length };
+      return { availability: p.a, contract: p.c, onSquad: onSquadInDb(), vouches: q1(dir, 'SELECT COUNT(*) AS n FROM vouches WHERE player_id = ?', pid).n, ledger: auditRows(dir, 'ledger').filter((l) => l.playerId === pid && l.type === 'released_by_club').length };
     },
     before: { availability: 'not_seeking', contract: 'unknown', onSquad: true, vouches: 0, ledger: 0 },
     after: { availability: 'available_now', contract: 'free_agent', onSquad: false, vouches: 1, ledger: 1 },
@@ -218,7 +219,7 @@ await test('squad release: the squad row (org_squad_members since S9c), the play
 // ============================================================= S5: the sub-record tables
 // Since S5 every array of the player record is rows of its own table. The
 // writers below couple a row of one sub-record table with rows of others (and
-// with blobs); the same contract as above is proven through the real routes.
+// with audit rows); the same contract as above is proven through the real routes.
 const qAll = (dir, sql, ...p) => { const s = new DatabaseSync(path.join(dir, 'scoutbox.db'), { readOnly: true }); try { return s.prepare(sql).all(...p).map((r) => ({ ...r })); } finally { s.close(); } };
 const rows = (dir, table, pid) => q1(dir, `SELECT COUNT(*) AS n FROM ${table} WHERE player_id = ?`, pid).n;
 
@@ -245,7 +246,7 @@ await test('media upload (S5): the clip row (player_media) and the activity row 
   // The club tags the clip: tag rows + ledger row in one unit.
   const pro = await orgLogin(S, 'org-eastport', 'Maria Keane', 'Head of Recruitment');
   const tagAct = () => S.j('POST', `/org/players/${pid}/media/${mediaId.id}/tags`, { tags: ['pace', 'vision', 'pace'] }, pro);
-  const tagState = () => ({ tags: qAll(dir, 'SELECT tag, count FROM player_media_tags WHERE media_id = ? ORDER BY position', mediaId.id), ledger: blob(dir, 'ledger').filter((l) => l.type === 'clip_tagged' && l.playerId === pid).length });
+  const tagState = () => ({ tags: qAll(dir, 'SELECT tag, count FROM player_media_tags WHERE media_id = ? ORDER BY position', mediaId.id), ledger: auditRows(dir, 'ledger').filter((l) => l.type === 'clip_tagged' && l.playerId === pid).length });
   const tagView = async (X) => (await X.j('GET', '/player/me', undefined, token)).body.media[0].tags;
   await refusedBy(S, COMMIT_SEAM, tagAct, async (label) => { assert.deepEqual(tagState(), { tags: [], ledger: 0 }, `${label}: no tag row, no ledger row`); assert.deepEqual(await tagView(S), {}, `${label}: memory restored`); }, COMMIT_LOG);
   const tagged = await tagAct(); assert.equal(tagged.status, 200, JSON.stringify(tagged.body)); assert.deepEqual(tagged.body.tags, { pace: 2, vision: 1 });
@@ -267,7 +268,7 @@ await test('verified attendance (S5): the attendance row (GPS kept), the activit
     seam: 'attendance.after_row',
     act: () => S.j('POST', '/player/attendance', { fixture: 'Synthetic FC v Test Town', venue: 'Test Park', date: '2026-10-10', gps: { lat: 51.5, lng: -0.1 }, deviceId: 'dev-synthetic' }, token),
     okStatus: 201,
-    dbState: () => ({ attendance: qAll(dir, 'SELECT fixture, lat, lng, verified, device_confirmed FROM player_attendance WHERE player_id = ? ORDER BY position', pid), activity: rows(dir, 'player_activity_log', pid), badges: qAll(dir, 'SELECT badge FROM player_badges WHERE player_id = ? ORDER BY position', pid).map((b) => b.badge), ledger: blob(dir, 'ledger').filter((l) => l.type === 'attendance_verified' && l.playerId === pid).length }),
+    dbState: () => ({ attendance: qAll(dir, 'SELECT fixture, lat, lng, verified, device_confirmed FROM player_attendance WHERE player_id = ? ORDER BY position', pid), activity: rows(dir, 'player_activity_log', pid), badges: qAll(dir, 'SELECT badge FROM player_badges WHERE player_id = ? ORDER BY position', pid).map((b) => b.badge), ledger: auditRows(dir, 'ledger').filter((l) => l.type === 'attendance_verified' && l.playerId === pid).length }),
     before: { attendance: [], activity: 0, badges: [], ledger: 0 },
     after: { attendance: [{ fixture: 'Synthetic FC v Test Town', lat: 51.5, lng: -0.1, verified: 1, device_confirmed: 1 }], activity: 1, badges: ['Turnstile'], ledger: 1 },
     view: async (X) => { const me = (await X.j('GET', '/player/me', undefined, token)).body; return [me.attendance.map((a) => [a.fixture, a.gps]), me.badges]; },

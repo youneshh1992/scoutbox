@@ -71,7 +71,7 @@ const gCo = () => ({ id: 'gd-co', name: 'Co Parent', email: 'co@example.test', i
 const gSignup = () => ({ id: 'gd-signup', name: 'Signup Parent', email: 'signup@example.test', password: 'scrypt$cc$dd', emailVerified: false, emailCode: 'K7Q2ZP', idVerified: false, disclaimerAccepted: false, childIds: [] });
 const FIXTURE = () => ({ players: [adult(), child('pl-child1', 'gd-primary', '2014-03-03'), seeded(), child('pl-child2', 'gd-primary', '2016-08-08')], guardians: [gPrimary(), gCo(), gSignup()] });
 const ORGS = () => [{ id: 'org-pro', name: 'Eastport FC', type: 'club', level: 'pro', plan: 'Pro', country: 'GB', memos: [] }];
-const baseDb = (players, guardians) => ({ orgs: ORGS(), users: [{ id: 'usr-1', orgId: 'org-pro', name: 'Maria', role: 'Head of Recruitment', createdAt: 1 }], sessions: [], players, guardians, blobNotes: [{ id: 'vch-1', status: 'pending', history: [] }] });
+const baseSeed = (players, guardians) => ({ orgs: ORGS(), players, guardians });
 
 /**
  * A store in server mode on a NEW directory with the data layer attached the way
@@ -80,25 +80,22 @@ const baseDb = (players, guardians) => ({ orgs: ORGS(), users: [{ id: 'usr-1', o
  * initialise from the fixture once and become the store's unit-of-work participant.
  */
 function boot(dir, { players = [], guardians = [], warnings = [] } = {}) {
-  const db = baseDb(clone(players), clone(guardians));
+  const db = {};
   const store = openStore(dir, { tableBacked: TABLE_BACKED });
-  const layer = attachDataLayer({ db, store, nextId, persist: () => {}, sessionTtlMs: TTL, now: () => NOW, warn: (m) => warnings.push(m) });
+  const layer = attachDataLayer({ db, seed: baseSeed(clone(players), clone(guardians)), store, nextId, sessionTtlMs: TTL, now: () => NOW, warn: (m) => warnings.push(m) });
   return wire({ store, layer, identity: layer.identity, db, bootResult: layer.boot.identity, warnings });
 }
-/** Reopen an existing directory the way a restart would: load, attach the data layer (the repositories attach to the tables; the arrays in memory are never imported). */
+/** Reopen an existing directory the way a restart would: attach the data layer (the repositories attach to the tables; a seed handed in is never imported). */
 function reopen(dir, { stalePlayers = null, staleGuardians = null, warnings = [] } = {}) {
   const store = openStore(dir, { tableBacked: TABLE_BACKED });
-  const loaded = store.load();
-  const db = { ...loaded.db, players: stalePlayers ?? [], guardians: staleGuardians ?? [] };
-  const layer = attachDataLayer({ db, store, nextId, persist: () => {}, sessionTtlMs: TTL, now: () => NOW, warn: (m) => warnings.push(m) });
+  const db = {};
+  const layer = attachDataLayer({ db, seed: baseSeed(stalePlayers ?? [], staleGuardians ?? []), store, nextId, sessionTtlMs: TTL, now: () => NOW, warn: (m) => warnings.push(m) });
   return wire({ store, layer, identity: layer.identity, db, bootResult: layer.boot.identity, warnings });
 }
 function wire({ store, layer, identity, db, bootResult, warnings }) {
-  const snapshot = () => ({ savedAt: NOW, idCounter: 1000, db });
-  store.save(snapshot());
+  store.save();
   const raw = (sql, ...p) => store.sqlite.prepare(sql).get(...p);
   const all = (sql, ...p) => store.sqlite.prepare(sql).all(...p);
-  const blob = (name) => { const r = raw('SELECT value FROM collections WHERE name = ?', name); return r ? JSON.parse(r.value) : undefined; };
   const facets = (table, id) => JSON.parse(raw(`SELECT facets_json FROM ${table} WHERE id = ?`, id).facets_json);
   const links = () => all('SELECT guardian_id, player_id, role FROM guardian_children ORDER BY rowid').map((l) => ({ guardian_id: l.guardian_id, player_id: l.player_id, role: l.role }));
   // The invariant: players.guardian_id and the primary row agree, and there is at most one primary per player.
@@ -106,8 +103,8 @@ function wire({ store, layer, identity, db, bootResult, warnings }) {
     WHERE (p.guardian_id IS NULL) <> (l.guardian_id IS NULL) OR (p.guardian_id IS NOT NULL AND l.guardian_id <> p.guardian_id)`).n
     + raw("SELECT COUNT(*) AS n FROM (SELECT player_id FROM guardian_children WHERE role = 'primary' GROUP BY player_id HAVING COUNT(*) > 1)").n
     + store.sqlite.prepare('PRAGMA foreign_key_check').all().length;
-  return { store, layer, identity, players: identity.players, guardians: identity.guardians, db, snapshot, raw, all, blob, facets, links, invariantBreaks, bootResult, warnings,
-    unit: (fn) => store.unitOfWork(fn, { snapshot }), close: () => store.sqlite.close() };
+  return { store, layer, identity, players: identity.players, guardians: identity.guardians, db, raw, all, facets, links, invariantBreaks, bootResult, warnings,
+    unit: (fn) => store.unitOfWork(fn), close: () => store.sqlite.close() };
 }
 // An S3-shaped in-memory database (migrations 0001–0004: the identity tables are the S1 shadow), for the authority checks.
 const freshShadowDb = () => { const s = new DatabaseSync(':memory:'); s.exec('PRAGMA foreign_keys = ON;'); runDataMigrations(s, DATA_MIGRATIONS.filter((m) => /^000[1-4]_/.test(m.id))); return s; };
@@ -235,7 +232,7 @@ test('updates: players.update replaces location/stats/prefs whole and merges med
   assert.throws(() => t.guardians.update('gd-signup', { childIds: [] }), /childIds changes only through link/);
   t.guardians.update('gd-signup', { coGuardianOf: 'gd-primary' }); t.guardians.update('gd-signup', { coGuardianOf: null });
   assert.equal(t.raw("SELECT co_guardian_of FROM guardians WHERE id = 'gd-signup'").co_guardian_of, null);
-  t.store.save(t.snapshot()); t.close();
+  t.store.save(); t.close();
   const r = reopen(dir);
   const p2 = r.players.byId('pl-seeded');
   assert.equal(p2.level, 'pro'); assert.equal(p2.medical.conditionStatus, 'injured'); assert.equal(p2.programme.track, 'GK'); assert.equal(p2.programme.completed.length, 1); assert.equal(p2.notificationPrefs, null);
@@ -283,7 +280,7 @@ test('links: a minor is created only with its primary guardian (row and link in 
   assert.throws(() => t.players.link('gd-co', 'pl-child3'), /cannot run inside an open transaction/);
   assert.throws(() => t.guardians.update('gd-co', { name: 'X' }), /cannot run inside an open transaction/);
   t.store.sqlite.exec('ROLLBACK');
-  t.store.save(t.snapshot()); t.close();
+  t.store.save(); t.close();
   const r = reopen(dir);
   assert.deepEqual([...r.guardians.byId('gd-primary').childIds], ['pl-child3']); assert.equal(r.players.byId('pl-child1').guardianId, null); assert.equal(r.players.byId('pl-child2'), null); assert.equal(r.invariantBreaks(), 0);
   r.close(); fs.rmSync(dir, { recursive: true, force: true });
@@ -312,17 +309,17 @@ test('ordinary save: a player or guardian write is in its row when the call retu
   const dir = tempDir('idrepo-s3');
   const t = boot(dir, { ...FIXTURE() });
   t.players.update('pl-adult', { city: 'Pending' }); t.guardians.update('gd-primary', { coGuardians: [...t.guardians.byId('gd-primary').coGuardians, { id: 'gd-p', name: 'P', email: 'p@example.test' }] });
-  t.db.blobNotes[0].big = 1n;
-  assert.throws(() => t.store.save(t.snapshot()), /BigInt/);
+  let explode = true; t.store.setSaveHook({ flush() { if (explode) throw new Error('injected save failure'); } }); // rewritten in S14a: the save failed on a blob
+  assert.throws(() => t.store.save(), /injected save failure/);
   assert.equal(t.raw("SELECT city FROM players WHERE id = 'pl-adult'").city, 'Pending'); assert.equal(t.facets('guardians', 'gd-primary').coGuardians.length, 2);
   assert.equal(t.players.byId('pl-adult').city, 'Pending', 'memory is not undone');
-  delete t.db.blobNotes[0].big;
-  t.store.save(t.snapshot());
+  explode = false;
+  t.store.save();
   assert.equal(t.raw("SELECT city FROM players WHERE id = 'pl-adult'").city, 'Pending'); assert.equal(t.facets('guardians', 'gd-primary').coGuardians.length, 2);
   t.close(); fs.rmSync(dir, { recursive: true, force: true });
 });
 
-/** The multi-collection operation under test: a guardian with a child (row + link), an org facet, a blob edit, a player update, a sub-record and a session, in one real unit of work. */
+/** The multi-collection operation under test: a guardian with a child (row + link), an org facet, a player update, a sub-record and a session, in one real unit of work. */
 function operation(t, { fail = null, afterCommit = null } = {}) {
   const seededPlayer = t.players.byId('pl-seeded');
   let token = null;
@@ -333,24 +330,23 @@ function operation(t, { fail = null, afterCommit = null } = {}) {
     t.players.update('pl-adult', { availability: 'available_now', medical: { shared: true } });
     t.players.addItem('pl-seeded', 'medical.records', { id: 'md-op', type: 'x', title: 'y' });
     t.db.orgs[0].memos.push(squadMember('sq-op'));
-    t.db.blobNotes[0].status = 'accepted'; t.db.blobNotes[0].history.push('accepted');
     token = t.layer.sessions.create('guardian', 'gd-new').token;
     if (afterCommit) t.store.afterCommit(afterCommit);
-    if (fail === 'blob') t.db.blobNotes[0].big = 1n;
+    if (fail === 'flush') t.db.orgs[0].memos.push({ ...squadMember('sq-bad'), addedAt: 1n }); // fails when the staged facet is written at COMMIT (S14a: it was a blob)
     if (fail === 'throw') throw new Error('operation failed late');
     return 'done';
   });
   return { result, token };
 }
-function assertOperationAbsent(t, { unrelatedSaved }) {
+function assertOperationAbsent(t) {
   assert.equal(t.raw("SELECT COUNT(*) AS n FROM guardians WHERE id = 'gd-new'").n, 0); assert.equal(t.raw("SELECT COUNT(*) AS n FROM players WHERE id = 'pl-new'").n, 0);
   assert.equal(t.raw("SELECT COUNT(*) AS n FROM guardian_children WHERE player_id = 'pl-new'").n, 0);
   assert.equal(t.raw("SELECT availability, medical_shared FROM players WHERE id = 'pl-adult'").availability, 'not_seeking'); assert.equal(t.raw("SELECT medical_shared FROM players WHERE id = 'pl-adult'").medical_shared, 0);
   assert.equal(t.raw("SELECT COUNT(*) AS n FROM player_medical_records WHERE player_id = 'pl-seeded'").n, 1);
   assert.equal(JSON.parse(t.raw("SELECT facets_json FROM orgs WHERE id = 'org-pro'").facets_json).memos.length, 0);
-  assert.equal(t.blob('blobNotes')[0].status, 'pending'); assert.equal(t.raw("SELECT COUNT(*) AS n FROM sessions WHERE kind = 'guardian'").n, 0);
-  // Unrelated edits made BEFORE the unit: the player write committed at once (S4a-E); the blob edit only after an ordinary save.
-  assert.equal(t.raw("SELECT city FROM players WHERE id = 'pl-adult'").city, 'PreUnit'); assert.equal(t.blob('blobNotes').length, unrelatedSaved ? 2 : 1);
+  assert.equal(t.raw("SELECT COUNT(*) AS n FROM sessions WHERE kind = 'guardian'").n, 0);
+  // The unrelated edit made BEFORE the unit: the player write committed at once (S4a-E).
+  assert.equal(t.raw("SELECT city FROM players WHERE id = 'pl-adult'").city, 'PreUnit');
   assert.equal(t.invariantBreaks(), 0);
 }
 function assertMemoryRestored(t, refs) {
@@ -359,9 +355,9 @@ function assertMemoryRestored(t, refs) {
   assert.equal(t.players.byId('pl-adult'), adultView, 'same view'); assert.equal(adultView.availability, 'not_seeking'); assert.equal(adultView.medical.shared, false);
   assert.equal(t.players.byId('pl-seeded').medical.records, seededRecords, 'same nested array'); assert.equal(seededRecords.length, 1);
   assert.equal(t.guardians.byId('gd-co').childIds, coKids, 'same childIds view'); assert.deepEqual([...coKids], coKidsBefore);
-  assert.equal(t.db.orgs[0].memos.length, 0); assert.equal(t.db.blobNotes[0].status, 'pending'); assert.equal(t.db.blobNotes[0].history.length, 0); assert.equal(t.db.blobNotes[0].big, undefined);
-  // Pre-unit edits survive.
-  assert.equal(adultView.city, 'PreUnit'); assert.equal(t.db.blobNotes.length, 2);
+  assert.equal(t.db.orgs[0].memos.length, 0);
+  // The pre-unit edit survives.
+  assert.equal(adultView.city, 'PreUnit');
 }
 function assertOperationPersisted(t, token) {
   assert.equal(t.raw("SELECT COUNT(*) AS n FROM guardians WHERE id = 'gd-new'").n, 1); assert.equal(t.raw("SELECT COUNT(*) AS n FROM players WHERE id = 'pl-new'").n, 1);
@@ -369,22 +365,22 @@ function assertOperationPersisted(t, token) {
   assert.equal(t.raw("SELECT availability FROM players WHERE id = 'pl-adult'").availability, 'available_now'); assert.equal(t.raw("SELECT medical_shared FROM players WHERE id = 'pl-adult'").medical_shared, 1);
   assert.equal(t.raw("SELECT COUNT(*) AS n FROM player_medical_records WHERE player_id = 'pl-seeded'").n, 2); assert.equal(t.players.byId('pl-seeded').medical.records.length, 2); assert.equal(t.facets('guardians', 'gd-new').emailCode, 'ABC123');
   assert.equal(JSON.parse(t.raw("SELECT facets_json FROM orgs WHERE id = 'org-pro'").facets_json).memos.length, 1);
-  assert.equal(t.blob('blobNotes')[0].status, 'accepted'); assert.ok(t.layer.sessions.byToken(token), 'the session minted inside the unit is live');
+  assert.ok(t.layer.sessions.byToken(token), 'the session minted inside the unit is live');
   assert.equal(t.raw("SELECT city FROM players WHERE id = 'pl-adult'").city, 'PreUnit', 'the pre-unit write is kept');
   assert.equal(t.invariantBreaks(), 0);
 }
 const prepare = (t) => {
-  const adultView = t.players.update('pl-adult', { city: 'PreUnit' }); t.db.blobNotes.push({ id: 'vch-2', status: 'pending', history: [] }); // unrelated edits before the unit: a committed player write, a pending blob edit
+  const adultView = t.players.update('pl-adult', { city: 'PreUnit' }); // an unrelated edit before the unit: a committed player write
   return { adultView, seededRecords: t.players.byId('pl-seeded').medical.records, coKids: t.guardians.byId('gd-co').childIds, coKidsBefore: [...t.guardians.byId('gd-co').childIds] };
 };
 
-test('unit of work (real store, both repositories, an organisation facet, a blob and a session): everything commits together in one save revision, after-commit work runs once after COMMIT', () => {
+test('unit of work (real store, both repositories, an organisation facet and a session): everything commits together, after-commit work runs once after COMMIT', () => {
   const dir = tempDir('idrepo-uow-ok');
   const t = boot(dir, { ...FIXTURE() });
   prepare(t);
-  const calls = []; const rev = t.store.revision();
+  const calls = [];
   const { result, token } = operation(t, { afterCommit: () => calls.push(t.store.sqlite.isTransaction) });
-  assert.equal(result, 'done'); assert.deepEqual(calls, [false]); assert.equal(t.store.revision(), rev + 1);
+  assert.equal(result, 'done'); assert.deepEqual(calls, [false]); // S14a: there is no save revision to count; the rows below are the proof
   assertOperationPersisted(t, token);
   assert.deepEqual([...t.guardians.byId('gd-co').childIds], ['pl-child1', 'pl-child2', 'pl-new']); assert.equal(t.players.byId('pl-new').guardianId, 'gd-new');
   t.close();
@@ -393,16 +389,16 @@ test('unit of work (real store, both repositories, an organisation facet, a blob
   r.close(); fs.rmSync(dir, { recursive: true, force: true });
 });
 
-test('unit of work: a failure after the row and link writes (blob write) rolls the database back AND restores memory — no half-linked child or guardian, held views, nested arrays and childIds arrays keep identity and content, indexes and link views agree with the tables, unrelated pending edits survive, after-commit work never runs, an ordinary save persists no fragment, an explicit retry lands everything', () => {
+test('unit of work: a failure after the row and link writes (the staged facet write at COMMIT) rolls the database back AND restores memory — no half-linked child or guardian, held views, nested arrays and childIds arrays keep identity and content, indexes and link views agree with the tables, unrelated pending edits survive, after-commit work never runs, an ordinary save persists no fragment, an explicit retry lands everything', () => {
   const dir = tempDir('idrepo-uow-fail');
   const t = boot(dir, { ...FIXTURE() });
   const refs = prepare(t);
   let ran = false; let err = null;
-  try { operation(t, { fail: 'blob', afterCommit: () => { ran = true; } }); } catch (e) { err = e; }
+  try { operation(t, { fail: 'flush', afterCommit: () => { ran = true; } }); } catch (e) { err = e; }
   assert.match(err.message, /BigInt/); assert.equal(err.unitOfWork, 'rolled_back'); assert.equal(ran, false); assert.equal(t.store.sqlite.isTransaction, false);
-  assertOperationAbsent(t, { unrelatedSaved: false }); assertMemoryRestored(t, refs);
-  t.store.save(t.snapshot());
-  assertOperationAbsent(t, { unrelatedSaved: true });
+  assertOperationAbsent(t); assertMemoryRestored(t, refs);
+  t.store.save();
+  assertOperationAbsent(t);
   const { token } = operation(t);
   assertOperationPersisted(t, token);
   t.close(); fs.rmSync(dir, { recursive: true, force: true });
@@ -412,14 +408,14 @@ test('unit of work: a failure thrown by the work after every write, a failure du
   // thrown late by the work
   let dir = tempDir('idrepo-uow-throw'); let t = boot(dir, { ...FIXTURE() }); let refs = prepare(t);
   assert.throws(() => operation(t, { fail: 'throw' }), /operation failed late/);
-  assertOperationAbsent(t, { unrelatedSaved: false }); assertMemoryRestored(t, refs);
+  assertOperationAbsent(t); assertMemoryRestored(t, refs);
   assertOperationPersisted(t, operation(t).token); t.close(); fs.rmSync(dir, { recursive: true, force: true });
   // during the facet flush: a later participant throws after the identity flush wrote its rows
   dir = tempDir('idrepo-uow-flush'); t = boot(dir, { ...FIXTURE() }); refs = prepare(t);
   let explode = true; t.store.setSaveHook({ flush() { if (explode) { explode = false; throw new Error('flush exploded'); } } });
   let err = null; try { operation(t); } catch (e) { err = e; }
   assert.match(err.message, /flush exploded/); assert.equal(err.unitOfWork, 'rolled_back');
-  assertOperationAbsent(t, { unrelatedSaved: false }); assertMemoryRestored(t, refs);
+  assertOperationAbsent(t); assertMemoryRestored(t, refs);
   assertOperationPersisted(t, operation(t).token); t.close(); fs.rmSync(dir, { recursive: true, force: true });
   // at COMMIT
   dir = tempDir('idrepo-uow-commit'); t = boot(dir, { ...FIXTURE() }); refs = prepare(t);
@@ -427,7 +423,7 @@ test('unit of work: a failure thrown by the work after every write, a failure du
   t.store.sqlite.exec = (sql) => { if (boom && sql === 'COMMIT') { boom = false; throw new Error('disk full at commit'); } return exec(sql); };
   err = null; try { operation(t); } catch (e) { err = e; }
   assert.match(err.message, /disk full at commit/); assert.equal(err.unitOfWork, 'rolled_back'); assert.equal(t.store.sqlite.isTransaction, false);
-  assertOperationAbsent(t, { unrelatedSaved: false }); assertMemoryRestored(t, refs);
+  assertOperationAbsent(t); assertMemoryRestored(t, refs);
   assertOperationPersisted(t, operation(t).token); t.store.sqlite.exec = exec; t.close(); fs.rmSync(dir, { recursive: true, force: true });
 });
 
@@ -453,14 +449,14 @@ test('unit of work: a record written twice inside a unit (a value, then back) en
   t.close(); fs.rmSync(dir, { recursive: true, force: true });
 });
 
-test('unit of work: a process killed before COMMIT leaves the pre-operation database — a restart sees no new guardian, child, link, facet or blob change', () => {
+test('unit of work: a process killed before COMMIT leaves the pre-operation database — a restart sees no new guardian, child, link, sub-record or facet change', () => {
   const dir = tempDir('idrepo-crash');
   const t = boot(dir, { ...FIXTURE() }); t.close();
   const r = spawnSync(process.execPath, [path.join(HERE, 'identityCrashChild.mjs'), dir], { encoding: 'utf8', timeout: 30_000 });
   assert.equal(r.signal, 'SIGKILL', `the child must die by SIGKILL: status ${r.status} signal ${r.signal} ${r.stderr.slice(-400)}`); assert.match(r.stdout, /ABOUT_TO_CRASH/);
   const again = reopen(dir);
   assert.equal(again.guardians.byId('gd-crash'), null); assert.equal(again.players.byId('pl-crash'), null); assert.equal(again.raw("SELECT COUNT(*) AS n FROM guardian_children WHERE guardian_id = 'gd-crash'").n, 0);
-  assert.equal(again.players.byId('pl-adult').medical.records.length, 0); assert.equal(again.db.blobNotes[0].status, 'pending');
+  assert.equal(again.players.byId('pl-adult').medical.records.length, 0); assert.equal(JSON.parse(again.raw("SELECT facets_json FROM orgs WHERE id = 'org-pro'").facets_json).memos.length, 0);
   assert.equal(again.raw('PRAGMA integrity_check').integrity_check, 'ok'); assert.equal(again.invariantBreaks(), 0);
   again.close(); fs.rmSync(dir, { recursive: true, force: true });
 });
@@ -534,7 +530,7 @@ test('a standalone operation whose COMMIT fails restores repository memory as we
   assert.deepEqual(snapshotCounts(), before, 'counts and rows are exactly as before every failed operation');
   assert.equal(t.invariantBreaks(), 0);
   // A later ordinary save persists no fragment; the earlier write stays.
-  t.store.save(t.snapshot());
+  t.store.save();
   assert.equal(t.raw("SELECT city FROM players WHERE id = 'pl-adult'").city, 'Before'); assert.equal(t.raw("SELECT name FROM players WHERE id = 'pl-seeded'").name, 'Seeded Adult');
   // Explicit retries succeed.
   t.players.update('pl-seeded', { name: 'Retry' }); t.players.insert(child('pl-new', 'gd-primary', '2015-05-05')); t.guardians.update('gd-primary', { name: 'Renamed' });
@@ -555,17 +551,16 @@ test('inside a real unit, a repository operation that fails after its first SQL 
   let inner = null; let outer = null; let published = 0;
   try {
     t.unit(() => {
-      t.db.blobNotes[0].status = 'in-unit';
       try { t.players.insert(child('pl-half', 'gd-primary', '2015-01-01')); } catch (e) { inner = e; }
       t.store.afterCommit(() => { published += 1; });
     });
   } catch (e) { outer = e; }
   assert.match(String(inner?.message), /injected link failure/, 'the mid-operation failure must actually have occurred');
   assert.ok(outer, 'the outer unit must fail'); assert.match(outer.message, /cannot commit/); assert.equal(outer.unitOfWork, 'rolled_back'); assert.equal(published, 0);
-  assert.equal(t.raw("SELECT COUNT(*) AS n FROM players WHERE id = 'pl-half'").n, 0); assert.equal(t.raw("SELECT COUNT(*) AS n FROM guardian_children WHERE player_id = 'pl-half'").n, 0); assert.equal(t.blob('blobNotes')[0].status, 'pending');
-  assert.equal(t.players.byId('pl-half'), null); assert.equal(primary.childIds, kids); assert.deepEqual([...kids], ['pl-child1', 'pl-child2']); assert.equal(t.db.blobNotes[0].status, 'pending');
+  assert.equal(t.raw("SELECT COUNT(*) AS n FROM players WHERE id = 'pl-half'").n, 0); assert.equal(t.raw("SELECT COUNT(*) AS n FROM guardian_children WHERE player_id = 'pl-half'").n, 0);
+  assert.equal(t.players.byId('pl-half'), null); assert.equal(primary.childIds, kids); assert.deepEqual([...kids], ['pl-child1', 'pl-child2']);
   assertMemoryRestored(t, refs);
-  t.store.save(t.snapshot());
+  t.store.save();
   assert.equal(t.raw("SELECT COUNT(*) AS n FROM players WHERE id = 'pl-half'").n, 0); assert.equal(t.raw("SELECT city FROM players WHERE id = 'pl-adult'").city, 'PreUnit');
   t.store.sqlite.exec('DROP TRIGGER review_fail_link');
   t.unit(() => t.players.insert(child('pl-half', 'gd-primary', '2015-01-01')));

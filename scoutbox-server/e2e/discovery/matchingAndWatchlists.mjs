@@ -38,7 +38,8 @@ import { playerMatchesBrief, POSITIONS, TRUST_BANDS, EVIDENCE_REQUIREMENTS, PROH
 import { EVENT_REGISTRY, isRegistered, minimizePayload } from '../../domains/platform/eventRegistry.mjs';
 import { audienceFor } from '../../domains/platform/eventAudience.mjs';
 import { CATEGORIES, TYPE_CATEGORY, categoryOf } from '../../domains/platform/notificationPrefs.mjs';
-import { MIGRATIONS, SCHEMA_VERSION } from '../../domains/platform/migrations.mjs';
+import { DATA_MIGRATIONS } from '../../repositories/index.mjs';
+import { DISCOVERY_MIGRATION, DISCOVERY_COLLECTIONS } from '../../repositories/discovery.mjs';
 import { RATE_LIMIT_POLICY } from '../../domains/platform/rateLimit.mjs';
 import { SOURCE_CONTEXTS } from '../../domains/recruitment/rooms/shared.mjs';
 import { ageOn } from '../../domain.mjs';
@@ -47,6 +48,7 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SERVER_DIR = path.join(HERE, '..', '..');
 const ROOT = path.join(SERVER_DIR, '..');
 const SERVER = path.join(SERVER_DIR, 'server.mjs');
+const SCHEMA_VERSION = Number(DATA_MIGRATIONS.map((m) => m.id).sort().at(-1).slice(0, 4));
 const PORT = 5940 + Math.floor(Math.random() * 8);
 const BASE = `http://localhost:${PORT}`;
 const DATA_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-m19-'));
@@ -413,11 +415,9 @@ section('§9 — the M19 events, notifications, limits and schema are all declar
   ok(!!RATE_LIMIT_POLICY.matching_query && !!RATE_LIMIT_POLICY.watchlist_write, 'matching and watchlist writes are both rate-limited');
   neg(RATE_LIMIT_POLICY.matching_query.scope === 'org' && RATE_LIMIT_POLICY.watchlist_write.scope === 'org',
     'both limits are per ORGANISATION, so one member cannot spend a colleague’s budget or evade their own');
-  // The schema version moves with every milestone, so pinning it here would
-  // make M19's suite fail on M20's arrival for no M19 reason. What M19 must
-  // keep proving is that its own stores arrive through a numbered, recorded
-  // step — and that the schema has not been rolled back behind M19.
-  ok(SCHEMA_VERSION >= 1900 && MIGRATIONS.some((m) => m.id === 'm190_001_dynamic_watchlists'), 'the watchlist stores arrive through a numbered migration');
+  // What M19 must keep proving is that its own stores arrive through a numbered, recorded migration. Rewritten in
+  // S14a: the blob step m190_001 is retired; the watchlists are tables of migration 0032.
+  ok(DATA_MIGRATIONS.filter((m) => m.id === DISCOVERY_MIGRATION).length === 1 && ['dynamicWatchlists', 'watchlistHistory'].every((c) => DISCOVERY_COLLECTIONS.includes(c)), `the watchlist stores arrive through a numbered migration (${DISCOVERY_MIGRATION})`);
   ok(SOURCE_CONTEXTS.includes('dynamic_watchlist') && SOURCE_CONTEXTS.includes('matching'), 'a Room can record that it came from matching or a watchlist');
   ok(LIMITS.watchlistsPerOrg > 0 && LIMITS.maxCriteria > 0, 'the pathological-input bounds exist');
   ok(TYPE_CATEGORY.watchlist === 'watchlist_changes' && TRUST_BANDS.length === 5 && EVIDENCE_REQUIREMENTS.length > 0, 'the shared vocabularies M19 borrows are intact');
@@ -890,58 +890,8 @@ section('§23 — a restart changes nothing about what a watchlist means');
   ok(caps.body.schema?.upToDate === true, 'the second boot runs no migration twice');
 }
 
-// ============================================= §24 the M18.2 → M19 upgrade
-section('§24 — an M18.2 database upgrades to M19 without losing anything');
-{
-  const OLD = mkdtempSync(path.join(tmpdir(), 'sbx-m19-old-'));
-  const OLD_PORT = PORT + 50;
-  const OLD_BASE = `http://localhost:${OLD_PORT}`;
-  // Boot once to seed and migrate, then remove the M19 collections and the
-  // schema record to simulate a database written before this milestone.
-  const p1 = await boot({ ...ENV, PORT: String(OLD_PORT), DATA_DIR: OLD }, OLD_BASE);
-  // A write, so the snapshot is actually persisted before we age it backwards.
-  const oldTok = (await (await fetch(`${OLD_BASE}/auth/org/login`, {
-    method: 'POST', headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ orgId: 'org-eastport', scoutName: 'Maria Keane', role: 'Head of Recruitment' }),
-  })).json()).token;
-  const legacyBrief = await (await fetch(`${OLD_BASE}/org/recruitment-briefs`, {
-    method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${oldTok}` },
-    body: JSON.stringify({ title: 'Written before M19', positions: ['CDM'] }),
-  })).json();
-  ok(!!legacyBrief.brief?.id, 'fixture: an M18-era Recruitment Brief exists in the old database');
-  p1.kill('SIGKILL');
-  await sleep(600);
-  const { openStore } = await import('../../store.mjs');
-  const store = openStore(OLD);
-  const snap = store.load();
-  if (!snap?.db) throw new Error('fixture: the seeded database did not load back');
-  delete snap.db.dynamicWatchlists;
-  delete snap.db.watchlistHistory;
-  snap.db.schema = {
-    ...(snap.db.schema ?? {}),
-    version: 1820,
-    migrations: (snap.db.schema?.migrations ?? []).filter((x) => !String(x.id ?? x).startsWith('m190')),
-  };
-  store.save(snap);
-  store.close?.();
-  const p2 = await boot({ ...ENV, PORT: String(OLD_PORT), DATA_DIR: OLD }, OLD_BASE);
-  const r = await fetch(`${OLD_BASE}/healthz`);
-  const h = await r.json();
-  ok(h.schemaVersion === SCHEMA_VERSION, `an M18.2-shaped database migrates forward to ${SCHEMA_VERSION}`);
-  const tok = (await (await fetch(`${OLD_BASE}/auth/org/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ orgId: 'org-eastport', scoutName: 'Maria Keane', role: 'Head of Recruitment' }) })).json()).token;
-  const list = await (await fetch(`${OLD_BASE}/org/watchlists`, { headers: { authorization: `Bearer ${tok}` } })).json();
-  ok(Array.isArray(list.items) && list.total === 0, 'the upgraded database has the watchlist stores, empty and usable');
-  const briefsAfter = await (await fetch(`${OLD_BASE}/org/recruitment-briefs`, { headers: { authorization: `Bearer ${tok}` } })).json();
-  neg(briefsAfter.items.some((b) => b.title === 'Written before M19'),
-    'and the M18-era Recruitment Brief is still there — the upgrade adds, it does not rewrite');
-  const made = await (await fetch(`${OLD_BASE}/org/watchlists`, {
-    method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${tok}` },
-    body: JSON.stringify({ name: 'After upgrade', mode: 'snapshot', criteria: CDM }),
-  })).json();
-  ok(!!made.watchlist?.id, 'and a watchlist can be created immediately after the upgrade');
-  p2.kill('SIGKILL');
-  fs.rmSync(OLD, { recursive: true, force: true });
-}
+// §24 (an M18.2 database upgrading to M19 on boot) was removed in S14a: it rewound the retired blob store's schema
+// record, and there is no compatibility with files written by earlier dev builds. Restart survival is §23.
 
 // ================================================================= summary
 const missingAbuse = Array.from({ length: 60 }, (_, i) => i + 1).filter((n) => !seenAbuse.has(n));

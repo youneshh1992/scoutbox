@@ -72,9 +72,7 @@ import {
   PLAYER_SUBRECORD_KEYS, PLAYER_COMPOSITE_SUBRECORDS, PLAYER_DERIVED_KEYS,
 } from './identityMapping.mjs';
 import { validateCoreIdentity, writeCandidate, publicReport, playerRowFor, CORE_IDENTITY_LIVE_MIGRATION } from './identityPreflight.mjs';
-import { readTrials, recruitmentLive } from './recruitment.mjs';
-/** The trials the file holds (the S8a tables; none before migration 0015 is recorded). */
-const readTrialsCollection = (sqlite) => (recruitmentLive(sqlite) ? readTrials(sqlite) : []);
+import { readTrials } from './recruitment.mjs';
 import {
   PLAYER_SUBRECORDS_MIGRATION, subrecordsLive, SUBRECORD_KEYS, SUBRECORD_SPECS, SUBRECORD_TABLES, getSubrecords, validateSubrecordArray,
   validatePlayerRecordWithItems as validatePlayerRecord, prepareSubrecordStatements, writeChildRows, writeArrayRows, deleteChildRows,
@@ -275,7 +273,7 @@ export const IDENTITY_SNAPSHOT = {
     // S5 (migration 0007 recorded): the arrays come from the child tables and
     // `trialReports` from the trials of the same file (the S8a tables).
     const players = subrecordsLive(sqlite)
-      ? readPlayersWithChildren(sqlite, prepareSubrecordStatements(sqlite), { trials: readTrialsCollection(sqlite) ?? [] }).map((x) => x.record)
+      ? readPlayersWithChildren(sqlite, prepareSubrecordStatements(sqlite), { trials: readTrials(sqlite) }).map((x) => x.record)
       : sqlite.prepare(`SELECT ${PLAYER_COLUMNS.join(', ')} FROM players WHERE deleted_at IS NULL ORDER BY rowid`).all().map((r) => playerFromRow(r)); // S4b-R: a retained row is not a player record
     return {
       guardians: sqlite.prepare(`SELECT ${GUARDIAN_COLUMNS.join(', ')} FROM guardians ORDER BY rowid`).all().map((r) => guardianFromRow(r, childIds.get(r.id) ?? [])),
@@ -296,7 +294,7 @@ export const IDENTITY_SNAPSHOT = {
     const { candidate } = report;
     // The trialReports claims, judged against the FINAL trials (see above) before any statement runs.
     if (subrecordsLive(sqlite)) {
-      const finalTrials = trials === undefined ? readTrialsCollection(sqlite) : trials; // the S8a tables when the snapshot omits the trials
+      const finalTrials = trials === undefined ? readTrials(sqlite) : trials; // the S8a tables when the snapshot omits the trials
       const list = Array.isArray(finalTrials) ? finalTrials : null;
       const problems = [];
       for (const row of candidate.players) {

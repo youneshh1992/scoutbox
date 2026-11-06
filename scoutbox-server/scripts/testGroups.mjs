@@ -45,7 +45,7 @@ const grant = (over = {}) => ({
 const FIX = () => ({ users: [...USERS()], orgs: [...ORGS(), club(B, 'Hackney Marsh'), club(C, 'Northside')], notifications: [], dispatches: [] });
 function serverOpen(dir) {
   const store = openStore(dir, { tableBacked: TABLE_BACKED });
-  const db = { ...store.load().db, players: [], guardians: [] };
+  const db = {}; // S14a: a fixture-saved file is not a first installation, so there is nothing to hand in
   const layer = attachDataLayer({ db, store, nextId, persist: () => {}, sessionTtlMs: TTL, now: () => NOW, warn: () => {} });
   const snapshot = () => ({ savedAt: NOW, idCounter: 1000, db });
   return { store, db, repo: layer.groups, unit: (w) => store.unitOfWork(w, { snapshot }), close: () => store.sqlite.close() };

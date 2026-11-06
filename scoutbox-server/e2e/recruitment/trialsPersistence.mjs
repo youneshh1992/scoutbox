@@ -2,11 +2,10 @@
 //
 // THE INVARIANTS
 //
-//   1. Schema 2304 adds the operational containers to every trial row with
-//      NEUTRAL values (`legacy_accepted`, no schedule, no attendance, no
-//      completion) and never renames `awaiting_report` / `reported`, never
-//      invents a date, an attendance or a completion. Running it twice
-//      changes nothing.
+//   1. A trial row reads back with the operational containers at NEUTRAL
+//      values (`legacy_accepted`, no schedule, no attendance, no completion)
+//      and never renames `awaiting_report` / `reported`, never invents a
+//      date, an attendance or a completion.
 //   2. A snapshot that carries P4B trial rows restores them byte-faithfully
 //      through a real boot: sessions keep their ids and order, the append-only
 //      revisions and attendance history keep every entry, the idempotency
@@ -25,13 +24,13 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { MIGRATIONS, SCHEMA_VERSION, runMigrations, PRODUCTION_REQUIRED_STORES } from '../../domains/platform/migrations.mjs';
 import { openStore } from '../../store.mjs';
 import { JOURNEY_REQUIRED_STORES } from '../../domains/recruitment/lifecycle/journey.mjs';
 import { trialIntegrity, deriveWorkflowState, TRIAL_WORKFLOW_STATES } from '../../domains/recruitment/lifecycle/trial.mjs';
 import { typeTrial } from '../../repositories/recruitment.mjs';
-import { guaranteeFor } from '../../storeContract.mjs';
+import { DATA_MIGRATIONS, TABLE_BACKED } from '../../repositories/index.mjs';
 import { createEvidenceProvider } from '../../scripts/recruitmentReadsFixture.mjs'; // §4.3 step 2: the contacts/offers queries over the plain arrays
+const LATEST_SCHEMA = Number(DATA_MIGRATIONS.map((m) => m.id).sort().at(-1).slice(0, 4)); // S14a: the latest table migration's number
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SERVER = path.join(HERE, '..', '..', 'server.mjs');
@@ -96,8 +95,7 @@ function baseDb() {
       createdAt: 1000, history: [{ id: 'aud-1', at: 1000, byKind: 'org', byId: 'usr-owner', byName: 'Owner', action: 'room_created', detail: { status: 'watching' } }, { id: 'aud-2', at: 1001, byKind: 'org', byId: 'usr-owner', byName: 'Owner', action: 'room_status_changed', detail: { from: 'watching', to: 'under_review', reasonCodes: [] } }],
     }],
   };
-  runMigrations(db);
-  db.trials ??= []; db.requests ??= []; // the snapshot's collections: the migrations no longer create them (§4.3 step 2)
+  db.trials ??= []; db.requests ??= [];
   return db;
 }
 
@@ -146,43 +144,28 @@ const legacyTrial = () => ({
 });
 
 const stableJson = (v) => JSON.stringify(v);
+// What a fresh file holds (the migrations' reference rows, by id: their timestamps are the time of creation): the
+// yardstick for "nothing was written".
+const rowIds = (d) => JSON.stringify(Object.fromEntries(Object.entries(d).map(([k, rows]) => [k, rows.map((r) => r?.id ?? JSON.stringify(r))])));
+const FRESH = rowIds(openStore(mkdtempSync(path.join(tmpdir(), 'sbx-m23t-fresh-'))).load().db);
 /** S8a: what a typed trial row reads back as — the record as written, with every absent field null and every absent list empty. */
 const typedJson = (t) => { const r = typeTrial(t); if (!r.ok) throw new Error(r.reason); return stableJson(r.record); };
 
 // ======================================================= 1 — the migration
-section('1 — schema 2304: neutral containers, nothing renamed, nothing invented, idempotent');
+section('1 — a trial row: neutral containers, nothing renamed, nothing invented');
 {
-  // §4.3 step 2 (rewritten throughout §1: it described the blob migration). The trials are typed rows read through SQL;
-  // the P4B step is a recorded no-op, and every trial reads back from its row with the containers (typeTrial).
-  ok(guaranteeFor('trials') === null && !PRODUCTION_REQUIRED_STORES.includes('trials') && !JOURNEY_REQUIRED_STORES.includes('trials'), 'trials is a typed table read through SQL, no db collection a migration guarantees');
-  const step = MIGRATIONS.find((m) => m.id === 'm230_005_trial_workflow');
-  // The claim is that the TRIAL step is frozen at 2304 and that the schema has
-  // only ever moved forward past it — not that the schema is any particular
-  // number. Pinning the literal made a later milestone's honest step (2305 Agent,
-  // 2306 Compliance, 2307 Transactions, …) read as a Trial regression.
-  ok(step?.version === 2304 && SCHEMA_VERSION >= 2306, `m230_005_trial_workflow is frozen at 2304 and the schema has only moved forward (now ${SCHEMA_VERSION})`);
-  const db = { players: [], orgs: [], guardians: [], users: [], sessions: [], ledger: [], notifications: [], trials: [legacyTrial(), soundTrial()] };
-  runMigrations(db);
-  db.schema.version = 2303; db.schema.migrations = db.schema.migrations.filter((m) => m.id !== 'm230_005_trial_workflow');
-  // Simulate a 2303 snapshot: strip the containers from the legacy row only (it never had them).
-  const before = stableJson(db.trials[1]);
-  const up = runMigrations(db);
-  ok(up.ran[0] === 'm230_005_trial_workflow' && up.ran.every((id) => id === 'm230_005_trial_workflow' || id === 'm240_001_agent_core_stores') && up.to === SCHEMA_VERSION, 'a 2303 snapshot runs the Trial step first, then only the P5.6B Agent step');
-  const l = JSON.parse(typedJson(db.trials[0])); // the legacy row as its typed table row reads back
-  ok(stableJson(db.trials[0]) === stableJson(legacyTrial()) && l.workflowState === 'legacy_accepted' && l.caseId === null && l.schedule === null && Array.isArray(l.attendance) && l.attendance.length === 0 && l.completion === null && l.rev === 1 && Array.isArray(l.history) && l.history.length === 0 && Object.values(l.keys).every((k) => k === null || (Array.isArray(k) && k.length === 0)) && stableJson(l.reminders) === '{}', 'the legacy row, typed, reads back with legacy_accepted and empty containers');
+  // Rewritten in S14a: the 2303 → 2304 upgrade, the store contract and runMigrations described the blob (an in-memory
+  // upgrade path, ground rule 1). The trials are typed rows read through SQL; every trial reads back from its row with
+  // the containers (typeTrial).
+  ok(TABLE_BACKED.includes('trials') && !JOURNEY_REQUIRED_STORES.includes('trials') && DATA_MIGRATIONS.length === LATEST_SCHEMA, 'trials is a typed table read through SQL (schema 39)');
+  const input = legacyTrial();
+  const l = JSON.parse(typedJson(input)); // the legacy row as its typed table row reads back
+  ok(stableJson(input) === stableJson(legacyTrial()) && l.workflowState === 'legacy_accepted' && l.caseId === null && l.schedule === null && Array.isArray(l.attendance) && l.attendance.length === 0 && l.completion === null && l.rev === 1 && Array.isArray(l.history) && l.history.length === 0 && Object.values(l.keys).every((k) => k === null || (Array.isArray(k) && k.length === 0)) && stableJson(l.reminders) === '{}', 'the legacy row, typed, reads back with legacy_accepted and empty containers (the record it came from untouched)');
   neg(l.status === 'reported' && l.report.id === 'rep-1' && l.proposedDate === '2026-12-01' && l.notes === 'Bring boots' && l.day.checkins.length === 1 && l.day.emergency.name === 'Mum', 'and keeps status, report, date, notes and the P2 day record exactly — no attendance derived from the check-in, no completion invented');
   neg(deriveWorkflowState(l) === 'legacy_accepted' && trialIntegrity(l, { orgId: 'org-x' }).length === 0, 'the legacy row is sound and derives legacy_accepted');
-  ok(stableJson(db.trials[1]) === before, 'a row that already carries P4B fields is byte-identical after the step');
-  const again = runMigrations(db);
-  ok(again.ran.length === 0 && stableJson(db.trials[0]) === stableJson(legacyTrial()), 'running it twice changes nothing');
-  neg(!TRIAL_WORKFLOW_STATES.includes('awaiting_report') && !TRIAL_WORKFLOW_STATES.includes('reported'), 'the report statuses are not workflow states — the migration cannot have renamed them');
-  const missing = { players: [], orgs: [], guardians: [], users: [], sessions: [], ledger: [], notifications: [] };
-  runMigrations(missing);
-  ok(!Object.hasOwn(missing, 'trials'), 'a database with no trials collection gets none (the trials are a table), and the Trial step tolerates it');
-  const bad = { players: [], orgs: [], guardians: [], users: [], sessions: [], ledger: [], notifications: [], trials: [null, 'x', 7, { id: 'only-id' }] };
-  let threw = null;
-  try { runMigrations(bad); } catch (e) { threw = e; }
-  neg(threw === null && bad.trials.length === 4 && JSON.stringify(bad.trials) === JSON.stringify([null, 'x', 7, { id: 'only-id' }]), 'garbage entries do not throw the (no-op) step and nothing is changed; the typed tables refuse them on a save (S8a)');
+  const sound = soundTrial(); const soundBefore = stableJson(sound);
+  ok(typeTrial(sound).ok && stableJson(sound) === soundBefore, 'a row that already carries P4B fields types cleanly and is left byte-identical');
+  neg(!TRIAL_WORKFLOW_STATES.includes('awaiting_report') && !TRIAL_WORKFLOW_STATES.includes('reported'), 'the report statuses are not workflow states — nothing can have renamed them');
 }
 
 // ======================================================= 2 — byte-faithful restore
@@ -284,7 +267,7 @@ section('3c — a state, a completion or an attendance row outside the vocabular
     let refused = null;
     try { openStore(dir).save({ db }); } catch (err) { refused = err; }
     neg(refused?.code === 'RECRUITMENT_INPUT_INVALID' && named.test(String(refused.message)), `${id}: the save is refused and names the trial and the field (${String(refused?.message ?? 'not refused').slice(0, 160)})`);
-    neg(openStore(dir).load() === null, `${id}: nothing was written`);
+    neg(rowIds(openStore(dir).load().db) === FRESH, `${id}: nothing was written`); // rewritten in S14a: load() was null with no blob
   }
 }
 
@@ -303,7 +286,7 @@ section('3b — alien entries in the trials store are refused with their positio
   neg(!!refused, 'the save of a trials store holding a null, a string and a number is refused');
   const msg = String(refused?.message ?? '');
   neg(/RECRUITMENT_INPUT_INVALID/.test(msg) && /trials entry #1 is not an object \(null\)/.test(msg) && /trials entry #2 is not an object \(a string\)/.test(msg) && /trials entry #3 is not an object \(a number\)/.test(msg), 'the refusal names each alien entry by its position and kind, nothing else');
-  neg(openStore(ALIEN_DIR).load() === null, 'nothing was written: the directory is still a first installation');
+  neg(rowIds(openStore(ALIEN_DIR).load().db) === FRESH, 'nothing was written: the directory holds only what a fresh one does'); // rewritten in S14a: load() was null with no blob
   const s = await bootOn(ALIEN_DIR, PORT + 2);
   ok(s.up, 'a server started on the directory boots from its seed (the refused snapshot left nothing behind)');
   if (s.up) await s.stop();

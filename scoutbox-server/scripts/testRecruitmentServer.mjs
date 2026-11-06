@@ -58,7 +58,8 @@ const q1 = (dir, sql, ...p) => snap(dir, (c) => c.get(sql, ...p));
 const qAll = (dir, sql, ...p) => snap(dir, (c) => c.all(sql, ...p));
 const live = (dir) => !!q1(dir, 'SELECT 1 AS one FROM data_migrations WHERE id = ?', MIGRATION);
 const applied = (dir) => qAll(dir, 'SELECT id FROM data_migrations ORDER BY id').map((r) => r.id);
-const blobOf = (dir, name) => snap(dir, (c) => { const r = c.get('SELECT value FROM collections WHERE name = ?', name); return r ? JSON.parse(r.value) : undefined; });
+const noBlobTable = (dir) => !q1(dir, "SELECT 1 AS one FROM sqlite_master WHERE type = 'table' AND name = 'collections'");
+const fullDump = (s) => JSON.stringify(s.prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").all().map((r) => [r.name, s.prepare(`SELECT * FROM "${r.name}"`).all().map((x) => ({ ...x }))]));
 const tableExists = (dir, t) => !!q1(dir, "SELECT 1 AS one FROM sqlite_master WHERE type = 'table' AND name = ?", t);
 const recDump = (dir) => JSON.stringify(Object.fromEntries([...TABLES, 'channels', 'messages'].filter((t) => tableExists(dir, t)).map((t) => [t, qAll(dir, `SELECT * FROM ${t} ORDER BY rowid`)])));
 const orgLogin = async (S, orgId = 'org-eastport', scoutName = 'Maria Keane', role = 'Head of Recruitment') => { const r = await S.j('POST', '/auth/org/login', { orgId, scoutName, role }); assert.equal(r.status, 200, r.text); return r.body.token; };
@@ -79,7 +80,7 @@ await test('[routes] a fresh boot records 0015_recruitment (followed by S8b\'s 0
   const pending = await S.j('POST', `/org/players/${pid}/request`, { type: 'trial', message: 'Second.', proposedDate: '2026-11-01', venue: 'G', notes: '' }, maria); assert.equal(pending.status, 409); assert.equal(pending.body.error, 'REQUEST_PENDING');
   const acc = await S.j('POST', `/player/requests/${dup.body.requestId}/respond`, { accept: true, chosenSlot: '2026-11-01' }, token); assert.equal(acc.status, 200, acc.text);
   const requestId = dup.body.requestId; const trialId = acc.body.trialId;
-  assert.equal(blobOf(dir, 'requests'), undefined); assert.equal(blobOf(dir, 'trials'), undefined);
+  assert.ok(noBlobTable(dir), 'no blob table'); // rewritten in S14a: it described the blob
   const row = q1(dir, 'SELECT status, trial_id, contact_channel_id, player_id FROM recruitment_requests WHERE id = ?', requestId); assert.equal(row.status, 'accepted'); assert.equal(row.trial_id, trialId); assert.equal(row.player_id, pid);
   assert.equal(q1(dir, 'SELECT request_id FROM channels WHERE id = ?', row.contact_channel_id).request_id, requestId);
   const t = q1(dir, 'SELECT request_id, workflow_state, player_id FROM trials WHERE id = ?', trialId); assert.equal(t.request_id, requestId); assert.equal(t.workflow_state, 'accepted');
@@ -106,7 +107,7 @@ await test('[routes] two stored open-day invitations for one player (the shape t
   const dir = tempDir('s8a-openday'); let S = await boot(dir);
   const maria = await orgLogin(S); const { pid, token } = await signupAdult(S, 'Open Day Adult'); const flow = await inviteAndAccept(S, maria, pid, token);
   await S.stop();
-  assert.equal(blobOf(dir, 'requests'), undefined, 'no blob');
+  assert.ok(noBlobTable(dir), 'no blob table'); // rewritten in S14a: it described the blob
   // two pending open-day invitations for the same org/player/type and one request of a missing player, written by a
   // snapshot-mode save (as a tool would); then the backup of that database restored into a NEW directory
   { const store = openStore(dir); const loaded = store.load(); const base = loaded.db.requests.find((r) => r.id === flow.requestId);
@@ -178,11 +179,11 @@ await test('[routes] through the real routes: an invitation with a clientKey rep
   // S8a (§4.3): an act the routes never write (an unknown act, a prototype-named own act) is refused by a snapshot save
   // with the trial's id — nothing written — and the real keys survive a backup and a restore, where they still replay.
   { const store = openStore(dir); const loaded = store.load(); const t = loaded.db.trials.find((x) => x.id === TID); assert.ok(t && Array.isArray(t.keys.schedule) && t.keys.schedule[0].key === 'sched-key-1');
-    const rev0 = store.revision();
+    const before = fullDump(store.sqlite);
     for (const [label, edit] of [['an unknown act', (k) => { k.extraEmpty = {}; }], ['a prototype-named own act', (k) => { Object.defineProperty(k, '__proto__', { value: { key: 'proto-key', fp: 'proto-fp' }, enumerable: true, writable: true, configurable: true }); }]]) {
       const copy = JSON.parse(JSON.stringify(loaded)); const ct = copy.db.trials.find((x) => x.id === TID); edit(ct.keys);
       assert.throws(() => store.save(copy), (e) => e.code === 'RECRUITMENT_INPUT_INVALID' && e.message.includes(TID) && /keys\.(extraEmpty|__proto__)/.test(e.message), `${label} is refused with the trial's id`);
-      assert.equal(store.revision(), rev0, `${label}: nothing written`);
+      assert.equal(fullDump(store.sqlite), before, `${label}: nothing written`);
     }
     store.sqlite.close(); }
   const expectKeys = (keys, label) => { assert.ok(Array.isArray(keys.cancel) && keys.cancel.length === 0, `${label}: an act with no key reads back as an empty list`); assert.equal(keys.schedule[0].key, 'sched-key-1', `${label}: the real key`); assert.deepEqual(Object.keys(keys).sort(), ['attendance', 'cancel', 'complete', 'link', 'schedule'], `${label}: the five acts and nothing else`); };

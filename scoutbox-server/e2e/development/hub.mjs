@@ -47,11 +47,13 @@ import { M21_STORES } from '../../domains/development/hub/index.mjs';
 import { PAGE_LIMITS } from '../../domains/platform/paging.mjs';
 import { DEVELOPMENT_COLLECTIONS, DEVELOPMENT_MIGRATION } from '../../repositories/development.mjs';
 import { DATA_MIGRATIONS } from '../../repositories/index.mjs';
+
+const SCHEMA_VERSION = Number(DATA_MIGRATIONS.map((m) => m.id).sort().at(-1).slice(0, 4));
 import { liveCombineState, isProductionValidCombine } from '../../domains/development/boxcam/combineShared.mjs';
 import { PROVIDERS } from '../../domains/development/boxcam/drills.mjs';
 import { EVENT_NAMES, EVENT_REGISTRY, assertEventRegistry } from '../../domains/platform/eventRegistry.mjs';
 import { CATEGORIES, TYPE_CATEGORY, categoryOf } from '../../domains/platform/notificationPrefs.mjs';
-import { MIGRATIONS, SCHEMA_VERSION, runMigrations } from '../../domains/platform/migrations.mjs';
+import { openStore } from '../../store.mjs';
 import { RATE_LIMIT_POLICY } from '../../domains/platform/rateLimit.mjs';
 import { resolveEvidenceLink, recordBelongsToPlayer } from '../../scripts/recruitmentReadsFixture.mjs'; // §4.3 step 2: the recruitment queries over the plain arrays
 
@@ -452,17 +454,16 @@ section('§6 — the timeline is meaningful events, and the stores are workflow'
 // =========================================================================
 section('§7 — migration, stores and the clean-boot proof');
 {
-  const step = MIGRATIONS.find((m) => m.id === 'm210_001_development_stores');
-  ok(!!step, 'the M21 migration is registered with a stable id');
-  ok(SCHEMA_VERSION >= 2100, `SCHEMA_VERSION is at or beyond 2100 (${SCHEMA_VERSION})`);
-
-  // S12a (storage, rewritten): the stores are tables created by data migration 0030; the blob step creates nothing.
-  const fresh = {};
-  runMigrations(fresh, { now: NOW });
-  for (const s of M21_STORES) neg(!(s in fresh), `the blob migrations no longer create db.${s} (a table since S12a)`);
-  const again = runMigrations(fresh, { now: NOW });
-  ok(again.ran.length === 0, 'a second boot applies no migration again');
-  ok(DATA_MIGRATIONS.some((m) => m.id === DEVELOPMENT_MIGRATION), `the development tables come from data migration ${DEVELOPMENT_MIGRATION}`);
+  // S12a: the stores are tables created by data migration 0030. Rewritten in S14a: the blob step (m210_001) and its
+  // registry are retired; the checks read the table migrations recorded in a fresh file.
+  ok(DATA_MIGRATIONS.filter((m) => m.id === DEVELOPMENT_MIGRATION).length === 1, `the development tables come from data migration ${DEVELOPMENT_MIGRATION}, registered once`);
+  ok(SCHEMA_VERSION >= 30, `the schema is at or beyond 30 (${SCHEMA_VERSION})`);
+  const freshDir = mkdtempSync(path.join(tmpdir(), 'sbx-m21-fresh-'));
+  const recorded = (dir) => { const st = openStore(dir); try { return st.sqlite.prepare('SELECT id, applied_at FROM data_migrations WHERE id = ?').all(DEVELOPMENT_MIGRATION).map((r) => `${r.id}@${r.applied_at}`); } finally { st.sqlite.close(); } };
+  const first = recorded(freshDir);
+  const fresh = openStore(freshDir).load().db;
+  for (const s of M21_STORES) neg(Array.isArray(fresh[s]) && fresh[s].length === 0, `a clean database holds db.${s} as an empty table`);
+  ok(first.length === 1 && recorded(freshDir).join() === first.join(), 'a second open applies no migration again');
   ok(M21_STORES.every((s) => DEVELOPMENT_COLLECTIONS.includes(s)), 'every M21 store is a collection of the development repository');
 
   // §156/§157: the whole point. `db.trials` existed only because the seed made

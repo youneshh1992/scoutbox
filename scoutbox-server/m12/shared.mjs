@@ -1,35 +1,7 @@
-// M12 shared: additive migrations + helpers used by every feature module.
+// M12 shared: helpers used by every feature module.
 import { isAdult, visibleToOrg, haversineKm } from '../domain.mjs';
 import { ageOrNull, parseDateOrInstant, isAbsent } from '../temporal.mjs';
 import { isLeadUser } from '../roles.mjs';
-
-// ------------------------------------------------------------- migrations
-// Same non-destructive convention as server.mjs: every new collection is
-// created empty if absent; nothing existing is renamed, retyped or deleted.
-// Versioned by the commit that introduces each line.
-/** `players` (S5): the identity repository, for the media caption default (a row write). */
-export function migrateM12(db, players) {
-  // F1 evidence, F10 coach affiliations and squad invitations: tables of the scouting evidence repository (S9a), read
-  // through SQL (scoutingReads); no db.* here.
-  // F2 templates and assessments, F7 video segments and playlists: tables of the scouting assessments repository (S9b),
-  // read through SQL (scoutingReads); no db.* here.
-  // F3 recruitment cases: tables of the recruitment-cases repository, read through SQL (§4.3 step 2); no db.* here.
-  // F4 the tactical setup, squad, shadow list and vacancies: tables of the club setup repository (S9c), read through
-  // SQL (scoutingReads); no db.* and no organisation facet here.
-  // F5 opportunities and applications, F6 campaigns and their submissions: tables of the opportunities and campaigns
-  // repository (S9d), read through SQL (scoutingReads); no db.* here.
-  // F8 development objectives: a table since S12a (repositories/development.mjs, developmentReads.objectives).
-  // F11 follow-ups and outcome reports: tables of the signings repository, read through SQL (§4.3 step 2); no db.* here.
-  // F12 resumable upload sessions: tables of repositories/operations.mjs (S13e), domains/media/uploads.mjs.
-  // F12E — caption track (vtt text) or null. Since S5 a media item is a row of
-  // player_media: the default is written through the repository only where the
-  // stored item lacks the field (an existing null stays as it is).
-  for (const p of [...db.players]) {
-    for (const m of [...(p.media ?? [])]) if (m.captions === undefined) players.patchItem(p.id, 'media', { id: m.id }, { captions: null });
-  }
-  // F10 honesty audit: coach references (S10c: rows of vouches) state on every read that an email code confirms
-  // mailbox control, not coach identity; conflictOfInterest and withdrawn are columns.
-}
 
 // ---------------------------------------------------------------- helpers
 export function buildShared(ctx) {

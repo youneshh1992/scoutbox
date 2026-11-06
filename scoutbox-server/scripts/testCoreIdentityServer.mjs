@@ -16,7 +16,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { openStore } from '../store.mjs';
 import { buildSeed } from '../seed.mjs';
 import { freePort } from './testPort.mjs';
-import { NOW, tempDir, adult, child, gSignup, FIXTURE, ORGS, USERS, EXTRA, freshFile, migrate, openRaw } from './coreIdentityTestFixtures.mjs';
+import { NOW, tempDir, adult, child, gSignup, FIXTURE, ORGS, USERS, EXTRA, freshFile, migrate, openRaw, hasBlobTable, dump } from './coreIdentityTestFixtures.mjs';
 import { SUBRECORD_TABLES } from '../repositories/playerSubrecords.mjs';
 
 let passed = 0;
@@ -47,7 +47,8 @@ function boot(dir, port, env = {}) {
 const raw = (dir) => { const s = new DatabaseSync(path.join(dir, 'scoutbox.db'), { readOnly: true }); return s; };
 const q1 = (dir, sql, ...p) => { const s = raw(dir); try { return s.prepare(sql).get(...p); } finally { s.close(); } };
 const qAll = (dir, sql, ...p) => { const s = raw(dir); try { return s.prepare(sql).all(...p).map((r) => ({ ...r })); } finally { s.close(); } };
-const blobNames = (dir) => qAll(dir, 'SELECT name FROM collections ORDER BY name').map((r) => r.name);
+/** Whether the data directory's file still has the retired blob table (rewritten in S14a: the blob-name checks described the blob). */
+const blobTable = (dir) => { const s = raw(dir); try { return hasBlobTable(s); } finally { s.close(); } };
 const identityCounts = (dir) => ({ players: q1(dir, 'SELECT COUNT(*) AS n FROM players').n, guardians: q1(dir, 'SELECT COUNT(*) AS n FROM guardians').n, links: q1(dir, 'SELECT COUNT(*) AS n FROM guardian_children').n });
 /** A saved database, as a tool or fixture writes one: a snapshot-mode save (openStore(dir) without options), which writes the table-backed collections into their tables. */
 function savedFile(dir, { players = FIXTURE().players, guardians = FIXTURE().guardians } = {}) { const t = openStore(dir); t.save({ savedAt: NOW, idCounter: 1000, db: { orgs: ORGS(), users: USERS(), players, guardians, ...EXTRA() } }); t.sqlite.close(); }
@@ -65,7 +66,7 @@ await test('new installation: the seed is initialised once (never again), served
   let S = await boot(dir, await freePort());
   assert.match(S.log(), /initialised from the first installation's records/);
   let cap = (await S.j('GET', '/capabilities')).body;
-  assert.deepEqual(cap.dataLayer.migrations, ['0001_org_users', '0002_core_identity_shadow', '0003_sessions_live', '0004_orgs_live', '0005_core_identity_live', '0006_media_deletions', '0007_player_subrecords', '0008_one_time_codes', '0009_notifications', '0010_dispatches', '0011_outbox_push', '0012_channels', '0013_safety_audit', '0014_player_erasure', '0015_recruitment', '0016_recruitment_cases', '0017_recruitment_contacts_offers', '0018_signings_follow_ups', '0019_scouting_evidence', '0020_scouting_assessments', '0021_club_setup', '0022_opportunities_campaigns', '0023_verification', '0024_passport', '0025_transitions_vouches', '0026_agent_core', '0027_compliance_policies', '0028_compliance_records', '0029_agent_transactions', '0030_development', '0031_box_cam', '0032_discovery', '0033_insight_coverage', '0034_integrations', '0035_enterprise', '0036_groups', '0037_grassroots', '0038_operations']);
+  assert.deepEqual(cap.dataLayer.migrations, ['0001_org_users', '0002_core_identity_shadow', '0003_sessions_live', '0004_orgs_live', '0005_core_identity_live', '0006_media_deletions', '0007_player_subrecords', '0008_one_time_codes', '0009_notifications', '0010_dispatches', '0011_outbox_push', '0012_channels', '0013_safety_audit', '0014_player_erasure', '0015_recruitment', '0016_recruitment_cases', '0017_recruitment_contacts_offers', '0018_signings_follow_ups', '0019_scouting_evidence', '0020_scouting_assessments', '0021_club_setup', '0022_opportunities_campaigns', '0023_verification', '0024_passport', '0025_transitions_vouches', '0026_agent_core', '0027_compliance_policies', '0028_compliance_records', '0029_agent_transactions', '0030_development', '0031_box_cam', '0032_discovery', '0033_insight_coverage', '0034_integrations', '0035_enterprise', '0036_groups', '0037_grassroots', '0038_operations', '0039_retire_blob']);
   assert.equal(cap.dataLayer.identity.initState, 'done'); assert.equal(cap.dataLayer.domains.players.mode, 'live');
   assert.equal(cap.dataLayer.domains.players.rows, seedCounts.players); assert.equal(cap.dataLayer.domains.guardians.rows, seedCounts.guardians);
   assert.equal(cap.core_identity_storage?.state ?? cap.dataLayer.domains.players.mode, 'live');
@@ -75,7 +76,7 @@ await test('new installation: the seed is initialised once (never again), served
   assert.equal(signup.body.player.password, undefined);
   await S.stop();
   assert.deepEqual(identityCounts(dir), { players: seedCounts.players + 1, guardians: seedCounts.guardians, links: seedCounts.links });
-  assert.ok(!blobNames(dir).includes('players') && !blobNames(dir).includes('guardians'), 'no identity blob');
+  assert.equal(blobTable(dir), false, 'no blob table: the records are rows');
   S = await boot(dir, await freePort());
   assert.doesNotMatch(S.log(), /initialised from the first installation's records/, 'a restart never initialises again');
   cap = (await S.j('GET', '/capabilities')).body;
@@ -91,18 +92,18 @@ await test('new installation: the seed is initialised once (never again), served
 await test('previously saved file: a database a snapshot save wrote (the seed in its tables) boots without initialising — rows and links served, no identity blob — and a restart attaches to the tables; a file a tool wrote from other records boots the same way (no seed fallback)', async () => {
   const dir = tempDir('s4srv-saved');
   openStore(dir).save({ savedAt: NOW, idCounter: 2000, db: SEED });
-  assert.ok(!blobNames(dir).includes('players'), 'the snapshot save wrote the tables');
+  assert.equal(blobTable(dir), false, 'the snapshot save wrote the tables');
   let S = await boot(dir, await freePort());
-  assert.match(S.log(), /players table-backed/); assert.doesNotMatch(S.log(), /initialised from the first installation/);
+  assert.doesNotMatch(S.log(), /initialised from the first installation/); // S14a: the 'snapshot loaded … table-backed' boot line went with the blob
   let cap = (await S.j('GET', '/capabilities')).body;
   assert.equal(cap.dataLayer.identity.initState, 'done'); assert.equal(cap.dataLayer.domains.players.rows, seedCounts.players);
-  assert.deepEqual(identityCounts(dir), seedCounts); assert.ok(!blobNames(dir).includes('players'));
+  assert.deepEqual(identityCounts(dir), seedCounts); assert.equal(blobTable(dir), false);
   const token = await orgLogin(S, 'org-eastport');
   const p = await S.j('GET', '/org/players/pl-adeyemi', undefined, token);
   assert.equal(p.status, 200); assert.equal(p.body.name, 'Kola Adeyemi');
   await S.stop();
   S = await boot(dir, await freePort());
-  assert.match(S.log(), /players table-backed/, 'the restart attaches to the tables');
+  assert.doesNotMatch(S.log(), /initialised from the first installation/, 'the restart attaches to the tables');
   cap = (await S.j('GET', '/capabilities')).body;
   assert.equal(cap.dataLayer.domains.players.rows, seedCounts.players);
   assert.equal((await S.j('GET', '/org/players/pl-adeyemi', undefined, token)).status, 200, 'the staff session minted before the restart is still valid');
@@ -110,7 +111,7 @@ await test('previously saved file: a database a snapshot save wrote (the seed in
   // A file a tool wrote from the fixture: the server attaches and serves its records, never the seed.
   const mig = tempDir('s4srv-tool'); savedFile(mig);
   S = await boot(mig, await freePort());
-  assert.match(S.log(), /players table-backed/);
+  assert.doesNotMatch(S.log(), /initialised from the first installation/);
   cap = (await S.j('GET', '/capabilities')).body;
   assert.equal(cap.dataLayer.domains.players.rows, 5); assert.equal(cap.dataLayer.domains.guardians.rows, 3);
   const t2 = await orgLogin(S, 'org-pro', 'Maria');
@@ -150,16 +151,16 @@ await test('interrupted first installation: a database where migration 0005 reco
 });
 
 // ------------------------------------------------------------- stale blobs after the cutover
-await test('stale blobs: a players/guardians blob row inserted by hand into a saved file is ignored at boot, never imported, and removed again by the next save', async () => {
+// Rewritten in S14a: there is no blob table, so the stale rows sit in a hand-made legacy `collections` table.
+await test('stale blobs: a players/guardians blob row put by hand into a saved file (in a legacy collections table) is ignored at boot and never imported', async () => {
   const dir = tempDir('s4srv-stale'); savedFile(dir);
-  { const s = new DatabaseSync(path.join(dir, 'scoutbox.db')); s.prepare('INSERT INTO collections (name, value) VALUES (?, ?)').run('players', JSON.stringify([{ ...adult(), id: 'pl-stale', name: 'Stale Blob Player' }])); s.prepare('INSERT INTO collections (name, value) VALUES (?, ?)').run('guardians', JSON.stringify([{ ...gSignup(), id: 'gd-stale', email: 'stale@example.test' }])); s.close(); }
+  { const s = new DatabaseSync(path.join(dir, 'scoutbox.db')); s.exec('CREATE TABLE collections (name TEXT PRIMARY KEY, value TEXT NOT NULL)'); s.prepare('INSERT INTO collections (name, value) VALUES (?, ?)').run('players', JSON.stringify([{ ...adult(), id: 'pl-stale', name: 'Stale Blob Player' }])); s.prepare('INSERT INTO collections (name, value) VALUES (?, ?)').run('guardians', JSON.stringify([{ ...gSignup(), id: 'gd-stale', email: 'stale@example.test' }])); s.close(); }
   const S = await boot(dir, await freePort());
   const cap = (await S.j('GET', '/capabilities')).body;
   assert.equal(cap.dataLayer.domains.players.rows, 5); assert.equal(cap.dataLayer.domains.guardians.rows, 3);
   const token = await orgLogin(S, 'org-pro', 'Maria');
   assert.equal((await S.j('GET', '/org/players/pl-stale', undefined, token)).status, 404, 'the stale record was not resurrected');
   await S.stop();
-  assert.ok(!blobNames(dir).includes('players') && !blobNames(dir).includes('guardians'), 'the save on shutdown removed the stale blobs');
   assert.equal(q1(dir, "SELECT COUNT(*) AS n FROM players WHERE id = 'pl-stale'").n, 0);
   rm(dir);
 });
@@ -167,10 +168,10 @@ await test('stale blobs: a players/guardians blob row inserted by hand into a sa
 // ------------------------------------------------------------- the Founder's rule
 await test('the legacy-minor rule: a snapshot save holding a minor who has no guardian link is refused with the reason (ids, never records) and writes nothing; the database still boots as a first installation', async () => {
   const orphan = tempDir('s4srv-orphan'); const fx = FIXTURE(); fx.players.push(child('pl-orphan', null, '2013-04-04'));
-  const t = openStore(orphan);
+  const t = openStore(orphan); const before = dump(t.sqlite);
   let err = null; try { t.save({ savedAt: NOW, idCounter: 1000, db: { orgs: ORGS(), users: USERS(), ...fx } }); } catch (e) { err = e; }
   assert.ok(err, 'the save is refused'); assert.match(err.message, /pl-orphan/); assert.equal(err.message.includes('2013-04-04'), false, 'ids, not records');
-  assert.equal(t.sqlite.prepare('SELECT COUNT(*) AS n FROM players').get().n, 0, 'nothing written'); assert.equal(t.revision(), 0);
+  assert.equal(t.sqlite.prepare('SELECT COUNT(*) AS n FROM players').get().n, 0, 'nothing written'); assert.equal(dump(t.sqlite), before, 'nothing written anywhere (rewritten in S14a: it compared the save sequence)');
   t.sqlite.close();
   const S = await boot(orphan, await freePort());
   assert.match(S.log(), /initialised from the first installation's records/, 'never mistaken for a saved file');
@@ -368,7 +369,7 @@ await test('backup/restore through the real admin routes: a backup taken after c
   assert.equal((await S.j('POST', '/auth/guardian/verify-email', { guardianId: gs.body.guardianId, code: gs.body.devEmailCode })).status, 200, 'the outstanding code travelled with the record');
   assert.equal((await S.j('POST', '/auth/player/login', { playerId: ps.body.playerId, password: 'backup-pass-1' })).status, 200);
   await S.stop();
-  assert.ok(!blobNames(restored).includes('players'));
+  assert.equal(blobTable(restored), false);
   rm(dir, restored);
 });
 
@@ -399,7 +400,7 @@ await test('backup/restore keeps the intent of a pending media removal: a commit
   S = await boot(restored, await freePort());
   assert.equal(fs.existsSync(path.join(restored, 'media', `${gone.mediaId}.webm`)), false);
   assert.equal(q1(restored, 'SELECT COUNT(*) AS n FROM media_deletions').n, 0, 'the entry was cleared at boot because the file is absent');
-  assert.ok(!blobNames(restored).includes('mediaDeletions'), 'the queue is a table, never left as a blob');
+  assert.equal(blobTable(restored), false, 'the queue is a table, there is no blob');
   assert.ok([401, 404].includes((await S.j('GET', `/media/${gone.mediaId}`, undefined, pro)).status), 'the removed owner\'s id is not served on the restored server');
   assert.equal((await S.j('GET', `/media/${live.mediaId}`, undefined, live.token)).status, 200, 'the live clip is served to its owner (session restored by hash)');
   assert.equal((await S.j('GET', '/capabilities')).body.dataLayer.mediaDeletions.queued, 0);
