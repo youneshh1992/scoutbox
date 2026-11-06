@@ -7,7 +7,7 @@
 import { GRASSROOTS_RADIUS_KM, parseTrialDate, trialReportDueAt } from '../../domain.mjs';
 import { parseStrictDateOnly, parseDateOrInstant, isExpiredAt, isAbsent } from '../../temporal.mjs';
 import { trialFamilyView, trialOutcomeLine } from '../recruitment/lifecycle/trial.mjs';
-import { readPage, sendPageError, pageOf, offsetPage } from '../platform/paging.mjs';
+import { readPage, sendPageError, pageOf, offsetPage, pageSorted } from '../platform/paging.mjs';
 import { OPPORTUNITY_TYPES, OPPORTUNITY_CATEGORIES, OPPORTUNITIES_CAMPAIGNS_LIMITS as OL, FILE_CHECK_ISSUES, typeEligibility } from '../../repositories/opportunitiesCampaigns.mjs';
 import { storedName } from './passport.mjs';
 
@@ -132,17 +132,27 @@ export function registerJourneys(ctx) {
   // M23 P5.6B: the board is a pure module-level function so the Agent
   // workspace can project a confirmed client's board through exactly the
   // same eligibility and mutual-visibility rules — one engine, not two.
-  const boardFor = (player) => opportunityBoardFor(db, player, { orgCanSee, checkEligibility, distanceBand, scoutingReads, orgOf: byId.org });
+  const boardFor = (player) => opportunityBoardFor(ctx.grassrootsReads, player, { orgCanSee, checkEligibility, distanceBand, scoutingReads, orgOf: byId.org });
+
+  // S13d: the board pages by (deadline, id), a page cut after the per-player visibility and eligibility filters. It is
+  // bounded by the open opportunities and upcoming open days, not by the player base. `cursor` is `[deadline, id]`.
+  const boardKey = (o) => [String(o.deadline), String(o.id)];
+  const cmpBoard = (a, b) => a[0].localeCompare(b[0]) || a[1].localeCompare(b[1]);
+  const boardPage = (player, page) => pageSorted(boardFor(player).sort((x, y) => cmpBoard(boardKey(x), boardKey(y))), page, boardKey, cmpBoard);
 
   playerRouter.get('/opportunity-board', (req, res) => {
-    res.json({ items: boardFor(req.player), minor: req.playerIsMinor, note: req.playerIsMinor ? 'Applications for under-18s are made by your parent/guardian.' : null });
+    let page;
+    try { page = readPage(req.query, ['string', 'string']); } catch (e) { return sendPageError(res, e); }
+    res.json({ ...boardPage(req.player, page), minor: req.playerIsMinor, note: req.playerIsMinor ? 'Applications for under-18s are made by your parent/guardian.' : null });
   });
 
   guardianRouter.get('/children/:id/opportunity-board', (req, res) => {
     if (!guardianOwnsChild(req.guardian, req.params.id)) return res.status(403).json({ error: 'NOT_YOUR_CHILD' });
     const child = findPlayer(req.params.id);
     if (!child) return res.status(404).json({ error: 'PLAYER_NOT_FOUND' });
-    res.json({ items: boardFor(child) });
+    let page;
+    try { page = readPage(req.query, ['string', 'string']); } catch (e) { return sendPageError(res, e); }
+    res.json(boardPage(child, page));
   });
 
   function applyTo(req, res, player, submitter) {
@@ -786,10 +796,10 @@ export function registerJourneys(ctx) {
  * Pure over the reads and the injected rules; shared by the player, guardian and
  * (M23 P5.6B) Agent client-workspace readers. S9d: the open opportunities come
  * from SQL (published, deadline today or later) and the player's own live
- * applications in one query; the open days are still db.openTrials (S13).
+ * applications in one query; S13d: the upcoming open days are one query too.
  */
-export function opportunityBoardFor(db, player, { orgCanSee, checkEligibility, distanceBand, scoutingReads, orgOf }) {
-  if (!scoutingReads?.opportunities || typeof orgOf !== 'function') throw new TypeError('opportunityBoardFor needs scoutingReads and orgOf');
+export function opportunityBoardFor(grassrootsReads, player, { orgCanSee, checkEligibility, distanceBand, scoutingReads, orgOf }) {
+  if (!scoutingReads?.opportunities || !grassrootsReads?.openTrials || typeof orgOf !== 'function') throw new TypeError('opportunityBoardFor needs grassrootsReads, scoutingReads and orgOf');
   const today = new Date().toISOString().slice(0, 10);
   const mine = new Map(scoutingReads.applications.forPlayers([player.id]).filter((a) => a.status !== 'withdrawn').map((a) => [a.opportunityId, a]));
   const rows = [];
@@ -808,14 +818,14 @@ export function opportunityBoardFor(db, player, { orgCanSee, checkEligibility, d
   }
   // Existing grassroots open days ride the same board — integrated, not
   // duplicated: they keep their own registration flow and records.
-  for (const t of (db.openTrials ?? []).filter((t) => t.date >= today)) {
+  for (const t of grassrootsReads.openTrials.upcoming(today)) {
     const org = orgOf(t.orgId);
     if (!org || org.suspended || !orgCanSee(org, player)) continue;
     rows.push({
       id: t.id, via: 'open_trial', type: 'open_day', orgId: t.orgId, orgName: org.name,
       title: t.title, deadline: t.date, schedule: t.date, category: 'mixed',
       distance: distanceBand(org.location, player.location),
-      applied: (t.registrations ?? []).some((r) => r.playerId === player.id) ? { status: 'registered' } : null,
+      applied: t.registrations.some((r) => r.playerId === player.id) ? { status: 'registered' } : null,
       note: 'Registered through the open-day flow.',
     });
   }

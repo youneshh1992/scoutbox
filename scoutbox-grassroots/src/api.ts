@@ -718,7 +718,8 @@ export const httpApi: ScoutboxApi = {
 
   getFunnel: (s) => request<Funnel>('/org/funnel', { headers: headers(s) }),
 
-  getOpenTrials: (s) => request<OpenTrial[]>('/org/open-trials', { headers: headers(s) }),
+  // These three lists page by cursor (S13d): the first page is read; "load more" (nextCursor) is still needed.
+  getOpenTrials: async (s) => (await request<{ items: OpenTrial[]; nextCursor: string | null }>('/org/open-trials', { headers: headers(s) })).items,
 
   postOpenTrial: (s, input) =>
     request<void>('/org/open-trials', { method: 'POST', headers: headers(s), body: JSON.stringify(input) }),
@@ -745,14 +746,14 @@ export const httpApi: ScoutboxApi = {
   logMatchday: (s, input) =>
     request<{ credited: number }>('/org/matchday', { method: 'POST', headers: headers(s), body: JSON.stringify(input) }),
 
-  getMatchdays: (s) => request<Matchday[]>('/org/matchdays', { headers: headers(s) }),
+  getMatchdays: async (s) => (await request<{ items: Matchday[]; nextCursor: string | null }>('/org/matchdays', { headers: headers(s) })).items,
 
   getPathwayRecord: (s) => request<PathwayRecord>('/org/pathway-record', { headers: headers(s) }),
 
   submitFederationVerification: (s, input) =>
     request<{ note: string }>('/org/verification/federation', { method: 'POST', headers: headers(s), body: JSON.stringify(input) }),
 
-  getFriendlies: (s) => request<Friendly[]>('/org/friendlies', { headers: headers(s) }),
+  getFriendlies: async (s) => (await request<{ items: Friendly[]; nextCursor: string | null }>('/org/friendlies', { headers: headers(s) })).items,
 
   postFriendly: (s, input) =>
     request<void>('/org/friendlies', { method: 'POST', headers: headers(s), body: JSON.stringify(input) }),

@@ -452,7 +452,7 @@ export function registerIntegration(ctx) {
     // budget, so the share/withdraw loop cannot outlive it either.
     if (limitedOr429(res, 'opportunity_share', req.orgUser.id)) return;
     const player = findPlayer(a.clientId);
-    const board = opportunityBoardFor(db, player, { orgCanSee, checkEligibility, distanceBand, scoutingReads: ctx.scoutingReads, orgOf: ctx.byId.org });
+    const board = opportunityBoardFor(ctx.grassrootsReads, player, { orgCanSee, checkEligibility, distanceBand, scoutingReads: ctx.scoutingReads, orgOf: ctx.byId.org });
     const opp = board.find((o) => o && o.id === req.params.oppId) ?? null;
     // A uniform 404: whether the opportunity does not exist, is closed, or is
     // simply not one this client is eligible for, the agent learns the same

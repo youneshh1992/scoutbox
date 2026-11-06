@@ -713,7 +713,7 @@ export function registerAgent(rawCtx) {
     if (!agreementGrantsAccess(a, req.orgUser.id, now()) || !player || !orgCanSee(req.org, player)) {
       return sendAgentError(res, { error: 'REPRESENTATION_NOT_ACTIVE', status: effectiveAgreementStatus(a, now()) }, 'opps');
     }
-    const items = opportunityBoardFor(db, player, { orgCanSee, checkEligibility, distanceBand, scoutingReads: ctx.scoutingReads, orgOf: byId.org })
+    const items = opportunityBoardFor(ctx.grassrootsReads, player, { orgCanSee, checkEligibility, distanceBand, scoutingReads: ctx.scoutingReads, orgOf: byId.org })
       .map((o) => ({ id: o.id, via: o.via, type: o.type, orgId: o.orgId, orgName: o.orgName, title: o.title, deadline: o.deadline, schedule: o.schedule ?? null, category: o.category ?? null, distance: o.distance ?? null, applied: o.applied ?? null }));
     res.json({ items, clientId: player.id, note: 'The client\'s own board, read through the same mutual-visibility and eligibility rules the player sees. Applying is the player\'s act.' });
   });
@@ -726,7 +726,7 @@ export function registerAgent(rawCtx) {
       if (!agreementGrantsAccess(a, req.orgUser.id, now())) continue;
       const player = findPlayer(a.clientId);
       if (!player || !orgCanSee(req.org, player)) continue;
-      for (const o of opportunityBoardFor(db, player, { orgCanSee, checkEligibility, distanceBand, scoutingReads: ctx.scoutingReads, orgOf: byId.org })) {
+      for (const o of opportunityBoardFor(ctx.grassrootsReads, player, { orgCanSee, checkEligibility, distanceBand, scoutingReads: ctx.scoutingReads, orgOf: byId.org })) {
         items.push({ id: o.id, via: o.via, type: o.type, orgId: o.orgId, orgName: o.orgName, title: o.title, deadline: o.deadline, category: o.category ?? null, distance: o.distance ?? null, applied: o.applied ?? null, clientId: player.id, clientName: player.name, agreementId: a.id });
       }
     }

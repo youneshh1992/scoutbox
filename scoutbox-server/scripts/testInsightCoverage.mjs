@@ -64,7 +64,7 @@ function serverOpen(dir) {
   const db = { ...store.load().db, players: [], guardians: [] };
   const layer = attachDataLayer({ db, store, nextId, persist: () => {}, sessionTtlMs: TTL, now: () => NOW, warn: () => {} });
   const snapshot = () => ({ savedAt: NOW, idCounter: 1000, db });
-  return { store, db, repo: layer.insightCoverage, unit: (w) => store.unitOfWork(w, { snapshot }), close: () => store.sqlite.close() };
+  return { store, db, repo: layer.insightCoverage, grassroots: layer.grassroots, unit: (w) => store.unitOfWork(w, { snapshot }), close: () => store.sqlite.close() };
 }
 const seeded = (label) => { const dir = tempDir(label); saveFixture(dir, FIX()); return { dir, s: serverOpen(dir) }; };
 
@@ -209,6 +209,10 @@ test('[coverage] an assignment keys its own fixture, keeps targets and warnings,
   const p = pl.create(plan());
   refused(() => as.create(assignment({ fixture: { kind: 'own', id: 'fix-none' } })), /no fixture fix-none/);
   as.create(assignment());
+  // S13d: an assignment to a friendly or an open day is a key to it.
+  refused(() => as.create(assignment({ id: 'cva-2', fixture: { kind: 'friendly_board', id: 'frd-7' } })), /no friendly frd-7/);
+  refused(() => as.create(assignment({ id: 'cva-2', fixture: { kind: 'open_trial', id: 'open-7' } })), /no open day open-7/);
+  s.grassroots.friendlies.create({ id: 'frd-7', orgId: ORG.id, postedByUserId: SCOUT2.id, ageGroup: 'u15', date: '2026-10-01', venue: '', notes: '', responses: [], createdAt: NOW });
   as.create(assignment({ id: 'cva-2', fixture: { kind: 'friendly_board', id: 'frd-7' }, travelBudget: null, targetPlayerIds: [], warnings: [{ code: 'scout_clash', scoutName: 'Tom' }], createdAt: NOW + 1 }));
   assert.ok(as.liveForFixture(ORG.id, { kind: 'own', id: 'fix-1' }));
   assert.equal(as.liveForFixture(ORG.id, { kind: 'open_trial', id: 'fix-1' }), null, 'the kind is part of the reference');

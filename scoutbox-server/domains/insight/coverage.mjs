@@ -23,7 +23,7 @@ const optText = (v, max) => (absent(v) ? null : typeof v !== 'string' ? undefine
 
 export function registerCoverage(ctx) {
   const {
-    db, byId, orgRouter, nextId, notify, findPlayer, orgCanSee, paginate, isLead, requireLead, haversineKm,
+    db, byId, orgRouter, nextId, notify, findPlayer, orgCanSee, isLead, requireLead, haversineKm,
     validAmountMinor, CURRENCIES, insightCoverage, unit,
   } = ctx;
   if (!insightCoverage || typeof unit !== 'function') throw new TypeError('registerCoverage needs the insight and coverage repository and the unit of work');
@@ -66,30 +66,21 @@ export function registerCoverage(ctx) {
     res.status(201).json({ fixture: fixtureView(f) });
   });
 
-  // Read-time union: own fixture records + existing platform events the org
-  // can already see (friendlies board, open trials). Nothing scraped, nothing
-  // duplicated into new rows. Each carries its `ref` (kind and id) for an assignment.
-  function observableFixtures(org) {
-    const own = fixtures.forOrg(org.id).map((f) => ({ ...fixtureView(f), ref: { kind: 'own', id: f.id } }));
-    const orgLoc = (orgId) => byId.org(orgId)?.location ?? null;
-    const friendlies = (db.friendlies ?? []).map((fr) => ({
-      id: `fr-${fr.id}`, source: 'friendly_board', competition: 'Friendly',
-      home: fr.orgName ?? 'Host club', away: fr.status === 'open' ? 'open invitation' : 'confirmed opponent',
-      date: fr.date ?? null, location: orgLoc(fr.orgId), ref: { kind: 'friendly_board', id: fr.id },
-    })).filter((f) => f.date);
-    const trials = (db.openTrials ?? []).map((t) => ({
-      id: `tr-${t.id}`, source: 'open_trial', competition: 'Open trial',
-      home: t.orgName ?? byId.org(t.orgId)?.name ?? 'Club', away: '—',
-      date: t.date ?? null, location: orgLoc(t.orgId), ref: { kind: 'open_trial', id: t.id },
-    })).filter((f) => f.date);
-    return [...own, ...friendlies, ...trials];
-  }
+  // Read-time union (S13d: one SQL query): own fixture records + platform events the org can already see (every
+  // friendly on the board, every open day). Nothing scraped, nothing duplicated into new rows. Each carries its `ref`
+  // (kind and id) for an assignment.
+  const observableView = (o) => (o.fixture
+    ? { ...fixtureView(o.fixture), ref: o.ref }
+    : { id: o.publicId, source: o.ref.kind, competition: o.competition, home: o.home, away: o.away, date: o.date, location: o.location ? { ...o.location } : null, ref: o.ref });
   const withoutRef = ({ ref, ...f }) => f;
 
-  // Offset paging stays here: the list merges in the friendlies and open days, which are blob records until S13.
+  /** A page of the observable fixtures by date (then id); `cursor` is `[date, id]`. */
   orgRouter.get('/coverage/fixtures', (req, res) => {
-    const all = observableFixtures(req.org).sort((a, b) => String(a.date).localeCompare(String(b.date))).map(withoutRef);
-    res.json(paginate(req, all));
+    let page;
+    try { page = readPage(req.query, ['string', 'string']); } catch (e) { return sendPageError(res, e); }
+    const { items, more } = insightCoverage.observable.page(req.org.id, page);
+    const views = items.map(observableView).map(withoutRef);
+    res.json(pageOf(more ? [...views, null] : views, page.limit, (f) => [f.date, f.id]));
   });
 
   orgRouter.post('/coverage-plans', (req, res) => {
@@ -125,7 +116,8 @@ export function registerCoverage(ctx) {
   orgRouter.post('/coverage/assignments', (req, res) => {
     if (!requireLead(req, res)) return;
     const b = req.body ?? {};
-    const fixture = typeof b.fixtureId === 'string' ? observableFixtures(req.org).find((f) => f.id === b.fixtureId) : null;
+    const found = typeof b.fixtureId === 'string' ? insightCoverage.observable.byPublicId(req.org.id, b.fixtureId) : null;
+    const fixture = found ? observableView(found) : null;
     if (!fixture) return res.status(404).json({ error: 'FIXTURE_NOT_FOUND' });
     const scout = byId.user(b.scoutUserId, (u) => u.orgId === req.org.id && !u.removedAt);
     if (!scout) return res.status(404).json({ error: 'SCOUT_NOT_FOUND' });
@@ -197,7 +189,7 @@ export function registerCoverage(ctx) {
     ]);
     const candidates = [...interest].map(findPlayer).filter((p) => p && orgCanSee(req.org, p) && p.location);
     const today = new Date().toISOString().slice(0, 10);
-    const upcoming = observableFixtures(req.org).filter((f) => f.date >= today && f.location);
+    const upcoming = insightCoverage.observable.upcomingLocated(req.org.id, today).map(observableView);
     const covered = assignments.coveredKeys(req.org.id);
     const items = upcoming.map((f) => {
       const near = candidates.filter((p) => haversineKm(f.location, p.location) <= 30);

@@ -1076,8 +1076,9 @@ CREATE INDEX development_history_review ON development_history (review_id) WHERE
 -- ratings (1–5 or not observed) and notes are rows. The reference media id has no key (tolerant).
 -- Fixtures (fixtures): an organisation's own matches on a real day; a location is lat, lng and city together.
 -- Coverage plans (coverage_plans): a goal of 1–200 observations over 7–365 days; progress is counted on read.
--- Coverage assignments (coverage_assignments): the fixture is the organisation's own (fixture_id, a RESTRICT key) or a
--- friendly or an open day (event_id, no key: blob records until S13). Targets and the warnings raised at creation
+-- Coverage assignments (coverage_assignments): the fixture is the organisation's own (fixture_id), a friendly
+-- (friendly_id) or an open day (open_trial_id), each a RESTRICT key, exactly one set by fixture_kind (S13d: the two event
+-- keys name tables of 08_operations_integrations.sql, created by 0037_grassroots; the 0033 DDL was amended in place). Targets and the warnings raised at creation
 -- (a code and the scout named; the sentence is rendered on read) are rows; the travel note is constant copy; the
 -- assessment the observation produced is one column.
 -- Player, media and assessment ids carry no key (tolerant). Organisations and the staff named are RESTRICT keys.
@@ -1232,7 +1233,8 @@ CREATE TABLE coverage_assignments (
   org_id                                   TEXT NOT NULL CHECK (length(org_id) <= 80 AND length(org_id) > 0),
   fixture_kind                             TEXT NOT NULL CHECK (fixture_kind IN ('own','friendly_board','open_trial')),
   fixture_id                               TEXT CHECK (fixture_id IS NULL OR length(fixture_id) <= 80 AND length(fixture_id) > 0),
-  event_id                                 TEXT CHECK (event_id IS NULL OR length(event_id) <= 80 AND length(event_id) > 0),
+  friendly_id                              TEXT CHECK (friendly_id IS NULL OR length(friendly_id) <= 80 AND length(friendly_id) > 0),
+  open_trial_id                            TEXT CHECK (open_trial_id IS NULL OR length(open_trial_id) <= 80 AND length(open_trial_id) > 0),
   fixture_date                             TEXT NOT NULL CHECK (length(fixture_date) <= 10),
   fixture_label                            TEXT NOT NULL CHECK (length(fixture_label) <= 200 AND length(fixture_label) > 0),
   fixture_competition                      TEXT CHECK (fixture_competition IS NULL OR length(fixture_competition) <= 80 AND length(fixture_competition) > 0),
@@ -1250,15 +1252,20 @@ CREATE TABLE coverage_assignments (
   FOREIGN KEY (fixture_id) REFERENCES fixtures(id) ON DELETE RESTRICT,
   FOREIGN KEY (scout_user_id) REFERENCES org_users(id) ON DELETE RESTRICT,
   CHECK (fixture_date GLOB '[0-9][0-9][0-9][0-9]-[0-1][0-9]-[0-3][0-9]'),
+  FOREIGN KEY (friendly_id) REFERENCES friendlies(id) ON DELETE RESTRICT,
+  FOREIGN KEY (open_trial_id) REFERENCES open_trials(id) ON DELETE RESTRICT,
   CHECK ((fixture_kind = 'own') = (fixture_id IS NOT NULL)),
-  CHECK ((fixture_kind = 'own') = (event_id IS NULL)),
+  CHECK ((fixture_kind = 'friendly_board') = (friendly_id IS NOT NULL)),
+  CHECK ((fixture_kind = 'open_trial') = (open_trial_id IS NOT NULL)),
   CHECK ((travel_budget_minor IS NULL) = (travel_currency IS NULL)),
   CHECK (travel_budget_minor IS NULL OR travel_budget_minor >= 0),
   CHECK (travel_budget_minor IS NOT NULL OR travel_entered_by_name IS NULL),
   CHECK (assessment_id IS NULL OR observed_at IS NOT NULL)
 ) STRICT;
 CREATE INDEX coverage_assignments_org_created ON coverage_assignments (org_id, created_at, id);
-CREATE INDEX coverage_assignments_org_fixture ON coverage_assignments (org_id, fixture_kind, fixture_id, event_id);
+CREATE INDEX coverage_assignments_org_fixture ON coverage_assignments (org_id, fixture_kind, fixture_id, friendly_id, open_trial_id);
+CREATE INDEX coverage_assignments_friendly ON coverage_assignments (friendly_id) WHERE friendly_id IS NOT NULL;
+CREATE INDEX coverage_assignments_open_trial ON coverage_assignments (open_trial_id) WHERE open_trial_id IS NOT NULL;
 CREATE INDEX coverage_assignments_org_scout_date ON coverage_assignments (org_id, scout_user_id, fixture_date);
 CREATE INDEX coverage_assignments_org_observed ON coverage_assignments (org_id, observed_at);
 CREATE INDEX coverage_assignments_fixture ON coverage_assignments (fixture_id);

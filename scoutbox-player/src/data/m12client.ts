@@ -227,6 +227,7 @@ const live: PlayerM12 = {
   addObjectiveProgress: (pid, oid, note) => post(`/player/objectives/${oid}/progress`, pid, { note }),
   shareObjective: (pid, oid, orgId, enabled) => post(`/player/objectives/${oid}/share`, pid, { orgId, enabled }),
   requestReassessment: (pid, oid) => post(`/player/objectives/${oid}/reassessment`, pid),
+  // The board pages by cursor (S13d): this reads the first page; "load more" (nextCursor) is still needed.
   getBoard: (pid) => req('/player/opportunity-board', pid),
   applyToOpportunity: (pid, oid, note) => post(`/player/opportunities/${oid}/apply`, pid, { note }),
   withdrawApplication: (pid, aid) => post(`/player/applications/${aid}/withdraw`, pid),
@@ -264,6 +265,7 @@ const live: PlayerM12 = {
   gCreateObjective: (gid, cid, feedbackId, texts) => post(`/guardian/children/${cid}/objectives`, gid, { feedbackId, objectives: texts.map((t) => ({ text: t })) }),
   gShareObjective: (gid, oid, orgId, enabled) => post(`/guardian/objectives/${oid}/share`, gid, { orgId, enabled }),
   gRequestReassessment: (gid, oid) => post(`/guardian/objectives/${oid}/reassessment`, gid),
+  // First page only (S13d): "load more" (nextCursor) is still needed.
   gBoard: (gid, cid) => req(`/guardian/children/${cid}/opportunity-board`, gid),
   gApply: (gid, cid, oid, note) => post(`/guardian/children/${cid}/opportunities/${oid}/apply`, gid, { note }),
   gApplications: (gid) => req('/guardian/applications', gid),

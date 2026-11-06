@@ -563,145 +563,126 @@ CREATE TABLE saved_searches (
 CREATE INDEX saved_searches_org_id ON saved_searches(org_id);
 
 
--- ---------------------------------------------------------------------
--- open_trials
--- source: db.openTrials  created at server.mjs:224; rows minted at server.mjs:2664-2669 (grassroots orgs only)
--- owner/writer: server.mjs   lifecycle: HARD delete by owner org (server.mjs:2691-2699) — registrations go with it
--- mapping: id -> id (open-N); orgId -> org_id; orgName -> org_name; title -> title (<=160); date -> trial_date;
---          venue -> venue (<=160); ageGroup -> age_group (default 'open', <=40); positions[] -> open_trial_positions child table;
---          notes -> notes (<=2000, '' when absent); createdByUserId -> created_by_user_id; createdAt -> created_at;
---          registrations[] -> open_trial_registrations child table
--- notes: trial_date gates the no-ghosting rule (date < today with unresolved registrations blocks posting,
---        server.mjs:2645-2653) and the upcoming lists (date >= today: 3645, 3800, journeys.mjs:844) by string
---        comparison — validated as a real day since M23 P5.7. Read patterns: by org (2681, 2900); by org+date;
---        by id (3656, 3817); full scan by date>=today joined to orgs.location for radius (3636-3647, 3800-3810,
---        journeys.mjs:844); full scan for the coverage fixture union (planning.mjs:89, synthetic id 'tr-'||id).
--- ---------------------------------------------------------------------
+-- =====================================================================
+-- M10 grassroots operations — open days, match days, the friendlies board
+-- S13d: IMPLEMENTED, migration 0037_grassroots REGISTERED (repositories/grassroots.mjs, 6 Nov 2026).
+-- The DDL below is the migration's, generated from the repository's field specs (scripts/testSchemaDdl.mjs compares
+-- them column for column).
+-- =====================================================================
+--
+-- An open day (open-*) is a grassroots club's open trial session on a calendar day. Its positions are ordered rows
+-- (free text, at most 20, no repeats). Deleting an open day stamps deleted_at: it leaves every list and count, and the
+-- row stays so a coverage assignment that names it (07, open_trial_id) keeps its key. The host club's name is read
+-- live from orgs, not copied. A registration (otr-*) is one per (open day, player): by the player (an adult) or by a
+-- guardian for a child (guardian_id set exactly then). It is answered once (outcome invite_trial | declined, with an
+-- optional note, at outcome_at); the no-ghosting rule counts the unanswered registrations of past open days. The
+-- player's name is a copy taken at registration and goes when the player is deleted; the player id stays (no key).
+--
+-- A match day (md-*) is the squad-wide log of one game: fixture, venue ('' when none), the day, an optional result
+-- (at most 20 characters) and the rostered players it credited, as ordered rows (no key: a credit outlives the
+-- account). Each credited player's attendance row lives with the player (01_identity).
+--
+-- A friendly (fr-*) is a club's post on the local board; its status was only ever 'open' and is not stored (the API
+-- still answers status 'open'). Responses are one per other club (primary key (friendly_id, org_id)); the message is
+-- shown only to the poster. The board is read by match date, with a latitude/longitude box on the host club's
+-- location as the prefilter for the 50 km radius.
+--
+-- Keys: organisations and staff RESTRICT; child rows cascade with their owner (owners are never hard-deleted).
+-- Player and guardian ids carry no key.
+
 CREATE TABLE open_trials (
-  id                 TEXT PRIMARY KEY,
-  org_id             TEXT NOT NULL REFERENCES orgs(id) ON DELETE CASCADE,
-  org_name           TEXT NOT NULL,                    -- snapshot
-  title              TEXT NOT NULL,
-  trial_date         TEXT NOT NULL CHECK (length(trial_date) = 10),
-  venue              TEXT NOT NULL,
-  age_group          TEXT NOT NULL DEFAULT 'open',
-  notes              TEXT NOT NULL DEFAULT '',
-  created_by_user_id TEXT REFERENCES org_users(id) ON DELETE SET NULL,   -- code tolerates null (server.mjs:3665)
-  created_at         INTEGER NOT NULL
+  id                                       TEXT PRIMARY KEY CHECK (length(id) > 0 AND length(id) <= 80),
+  org_id                                   TEXT NOT NULL CHECK (length(org_id) <= 80 AND length(org_id) > 0),
+  title                                    TEXT NOT NULL CHECK (length(title) <= 160 AND length(title) > 0),
+  trial_date                               TEXT NOT NULL CHECK (length(trial_date) <= 10),
+  venue                                    TEXT NOT NULL CHECK (length(venue) <= 160 AND length(venue) > 0),
+  age_group                                TEXT NOT NULL CHECK (length(age_group) <= 40 AND length(age_group) > 0),
+  notes                                    TEXT NOT NULL CHECK (length(notes) <= 2000),
+  created_by_user_id                       TEXT NOT NULL CHECK (length(created_by_user_id) <= 80 AND length(created_by_user_id) > 0),
+  created_at                               INTEGER NOT NULL,
+  deleted_at                               INTEGER,
+  FOREIGN KEY (org_id) REFERENCES orgs(id) ON DELETE RESTRICT,
+  FOREIGN KEY (created_by_user_id) REFERENCES org_users(id) ON DELETE RESTRICT,
+  CHECK (trial_date GLOB '[0-9][0-9][0-9][0-9]-[0-1][0-9]-[0-3][0-9]')
 ) STRICT;
-CREATE INDEX open_trials_org_id_trial_date ON open_trials(org_id, trial_date);
-CREATE INDEX open_trials_trial_date ON open_trials(trial_date);
-
--- source: db.openTrials[].positions[]  (string list, max 20, server.mjs:2667; not validated against POSITIONS)
--- mapping: each string -> (open_trial_id, position); natural PK dedupes (source array could repeat)
+CREATE INDEX open_trials_org ON open_trials (org_id, trial_date) WHERE deleted_at IS NULL;
+CREATE INDEX open_trials_date ON open_trials (trial_date) WHERE deleted_at IS NULL;
 CREATE TABLE open_trial_positions (
-  open_trial_id TEXT NOT NULL REFERENCES open_trials(id) ON DELETE CASCADE,
-  position      TEXT NOT NULL,
-  PRIMARY KEY (open_trial_id, position)
+  open_trial_id                            TEXT NOT NULL CHECK (length(open_trial_id) > 0 AND length(open_trial_id) <= 80),
+  ord                                      INTEGER NOT NULL CHECK (ord >= 0),
+  position                                 TEXT NOT NULL CHECK (length(position) > 0 AND length(position) <= 40),
+  FOREIGN KEY (open_trial_id) REFERENCES open_trials(id) ON DELETE CASCADE,
+  PRIMARY KEY (open_trial_id, ord),
+  UNIQUE (open_trial_id, position)
 ) STRICT;
-
--- source: db.openTrials[].registrations[]  (server.mjs:3664 player self-register; 3825 guardian register; outcome 2723-2725)
--- owner/writer: server.mjs   lifecycle: outcome NULL -> invite_trial | declined; player_name nulled on player deletion (server.mjs:4000-4002)
--- mapping: id -> id (otr-N); playerId -> player_id; playerName -> player_name; byGuardian -> by_guardian;
---          guardianId (only on guardian path) -> guardian_id; ts -> registered_at (source field is literally `ts`);
---          outcome -> outcome; outcomeNote -> outcome_note (<=200); outcomeAt -> outcome_at
--- notes: player_id has NO FK: the deletion route hard-deletes the player row and keeps this id as a tombstone
---        (only the name is redacted). One registration per (open_trial_id, player_id) enforced by code
---        ('ALREADY_REGISTERED', 3663/3824) — unique index. Minors register only via the guardian path to
---        clubs that may see them (visibleToOrg, 3820). Read patterns: by trial; by player across trials
---        (registered flag 3646/3808/journeys.mjs:851; pathway record 2883-2888); unresolved = outcome IS NULL.
 CREATE TABLE open_trial_registrations (
-  id            TEXT PRIMARY KEY,
-  open_trial_id TEXT NOT NULL REFERENCES open_trials(id) ON DELETE CASCADE,
-  player_id     TEXT NOT NULL,                         -- no FK: tombstone survives player deletion
-  player_name   TEXT,                                  -- snapshot; personal data; NULL after player deletion
-  by_guardian   INTEGER NOT NULL DEFAULT 0 CHECK (by_guardian IN (0, 1)),
-  guardian_id   TEXT REFERENCES guardians(id) ON DELETE SET NULL,
-  registered_at INTEGER NOT NULL,
-  outcome       TEXT CHECK (outcome IS NULL OR outcome IN ('invite_trial', 'declined')),
-  outcome_note  TEXT,
-  outcome_at    INTEGER
+  id                                       TEXT PRIMARY KEY CHECK (length(id) > 0 AND length(id) <= 80),
+  open_trial_id                            TEXT NOT NULL CHECK (length(open_trial_id) <= 80 AND length(open_trial_id) > 0),
+  player_id                                TEXT NOT NULL CHECK (length(player_id) <= 80 AND length(player_id) > 0),
+  player_name                              TEXT CHECK (player_name IS NULL OR length(player_name) <= 200),
+  by_guardian                              INTEGER NOT NULL CHECK (by_guardian IN (0,1)),
+  guardian_id                              TEXT CHECK (guardian_id IS NULL OR length(guardian_id) <= 80 AND length(guardian_id) > 0),
+  registered_at                            INTEGER NOT NULL,
+  outcome                                  TEXT CHECK (outcome IS NULL OR outcome IN ('invite_trial','declined')),
+  outcome_note                             TEXT CHECK (outcome_note IS NULL OR length(outcome_note) <= 200),
+  outcome_at                               INTEGER,
+  FOREIGN KEY (open_trial_id) REFERENCES open_trials(id) ON DELETE CASCADE,
+  UNIQUE (open_trial_id, player_id),
+  CHECK ((guardian_id IS NOT NULL) = (by_guardian = 1)),
+  CHECK ((outcome IS NULL) = (outcome_at IS NULL)),
+  CHECK (outcome IS NOT NULL OR outcome_note IS NULL)
 ) STRICT;
-CREATE UNIQUE INDEX open_trial_registrations_open_trial_id_player_id ON open_trial_registrations(open_trial_id, player_id);
-CREATE INDEX open_trial_registrations_player_id ON open_trial_registrations(player_id);
-
-
--- ---------------------------------------------------------------------
--- matchdays
--- source: db.matchdays  created at server.mjs:226; rows minted at server.mjs:2862-2866 (grassroots orgs only)
--- owner/writer: server.mjs   lifecycle: append-only; never deleted or edited
--- mapping: id -> id (md-N — prefix SHARED with players.medical.records md-*; the global counter keeps values distinct);
---          orgId -> org_id; fixture -> fixture; venue -> venue ('' when absent); date -> match_date; result -> result (<=20, nullable);
---          playerIds[] -> matchday_players child table; loggedByUserId -> logged_by_user_id; ts -> created_at (source field is literally `ts`)
--- notes: the same request also appends an att-* row to each credited player's attendance (01_identity) and a
---        'matchday_logged' ledger row — those live in their own tables; this row is the squad-wide log.
---        Read patterns: by org newest first (server.mjs:2874); count by org (2869, 2901).
--- ---------------------------------------------------------------------
+CREATE INDEX open_trial_registrations_player ON open_trial_registrations (player_id);
+CREATE INDEX open_trial_registrations_unresolved ON open_trial_registrations (open_trial_id) WHERE outcome IS NULL;
 CREATE TABLE matchdays (
-  id                TEXT PRIMARY KEY,
-  org_id            TEXT NOT NULL REFERENCES orgs(id) ON DELETE RESTRICT,
-  fixture           TEXT NOT NULL,
-  venue             TEXT NOT NULL DEFAULT '',
-  match_date        TEXT NOT NULL CHECK (length(match_date) = 10),
-  result            TEXT,
-  logged_by_user_id TEXT NOT NULL REFERENCES org_users(id) ON DELETE RESTRICT,
-  created_at        INTEGER NOT NULL
+  id                                       TEXT PRIMARY KEY CHECK (length(id) > 0 AND length(id) <= 80),
+  org_id                                   TEXT NOT NULL CHECK (length(org_id) <= 80 AND length(org_id) > 0),
+  fixture                                  TEXT NOT NULL CHECK (length(fixture) <= 160 AND length(fixture) > 0),
+  venue                                    TEXT NOT NULL CHECK (length(venue) <= 160),
+  match_date                               TEXT NOT NULL CHECK (length(match_date) <= 10),
+  result                                   TEXT CHECK (result IS NULL OR length(result) <= 20 AND length(result) > 0),
+  logged_by_user_id                        TEXT NOT NULL CHECK (length(logged_by_user_id) <= 80 AND length(logged_by_user_id) > 0),
+  created_at                               INTEGER NOT NULL,
+  FOREIGN KEY (org_id) REFERENCES orgs(id) ON DELETE RESTRICT,
+  FOREIGN KEY (logged_by_user_id) REFERENCES org_users(id) ON DELETE RESTRICT,
+  CHECK (match_date GLOB '[0-9][0-9][0-9][0-9]-[0-1][0-9]-[0-3][0-9]')
 ) STRICT;
-CREATE INDEX matchdays_org_id_created_at ON matchdays(org_id, created_at);
-
--- source: db.matchdays[].playerIds[]  (credited rostered players, server.mjs:2859)
--- mapping: each id -> (matchday_id, player_id)
--- notes: no FK on player_id — survives player deletion as a tombstone (deletePlayerData leaves matchdays untouched).
+CREATE INDEX matchdays_org ON matchdays (org_id);
 CREATE TABLE matchday_players (
-  matchday_id TEXT NOT NULL REFERENCES matchdays(id) ON DELETE CASCADE,
-  player_id   TEXT NOT NULL,                           -- no FK: tombstone survives player deletion
-  PRIMARY KEY (matchday_id, player_id)
+  matchday_id                              TEXT NOT NULL CHECK (length(matchday_id) > 0 AND length(matchday_id) <= 80),
+  ord                                      INTEGER NOT NULL CHECK (ord >= 0),
+  player_id                                TEXT NOT NULL CHECK (length(player_id) > 0 AND length(player_id) <= 80),
+  FOREIGN KEY (matchday_id) REFERENCES matchdays(id) ON DELETE CASCADE,
+  PRIMARY KEY (matchday_id, ord),
+  UNIQUE (matchday_id, player_id)
 ) STRICT;
-
-
--- ---------------------------------------------------------------------
--- friendlies
--- source: db.friendlies  created at server.mjs:227; rows minted at server.mjs:2936-2940 (grassroots orgs only)
--- owner/writer: server.mjs   lifecycle: status is only ever 'open' (no close/accept route exists); never deleted
--- mapping: id -> id (fr-N); orgId -> org_id; orgName -> org_name; postedByUserId -> posted_by_user_id;
---          ageGroup -> age_group (default 'open'); date -> match_date; venue -> venue (falls back to org city, '' if none);
---          notes -> notes; status -> status; responses[] -> friendly_responses child table; createdAt -> created_at
--- notes: planning.mjs:85 reads status === 'open' ? 'open invitation' : 'confirmed opponent' but nothing writes
---        another value — CHECK lists only what is written. planning.mjs:85 also builds synthetic ids 'fr-'||id
---        (i.e. 'fr-fr-N') for the coverage union — read-time only. Read patterns: FULL SCAN filtered by
---        haversine distance between orgs.location of poster and reader (server.mjs:2949-2952) — needs a join
---        to orgs; by id (2969).
--- ---------------------------------------------------------------------
 CREATE TABLE friendlies (
-  id                TEXT PRIMARY KEY,
-  org_id            TEXT NOT NULL REFERENCES orgs(id) ON DELETE CASCADE,
-  org_name          TEXT NOT NULL,                     -- snapshot
-  posted_by_user_id TEXT REFERENCES org_users(id) ON DELETE SET NULL,   -- code tolerates null (server.mjs:2976)
-  age_group         TEXT NOT NULL DEFAULT 'open',
-  match_date        TEXT NOT NULL CHECK (length(match_date) = 10),
-  venue             TEXT NOT NULL DEFAULT '',
-  notes             TEXT NOT NULL DEFAULT '',
-  status            TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open')),
-  created_at        INTEGER NOT NULL
+  id                                       TEXT PRIMARY KEY CHECK (length(id) > 0 AND length(id) <= 80),
+  org_id                                   TEXT NOT NULL CHECK (length(org_id) <= 80 AND length(org_id) > 0),
+  posted_by_user_id                        TEXT NOT NULL CHECK (length(posted_by_user_id) <= 80 AND length(posted_by_user_id) > 0),
+  age_group                                TEXT NOT NULL CHECK (length(age_group) <= 40 AND length(age_group) > 0),
+  match_date                               TEXT NOT NULL CHECK (length(match_date) <= 10),
+  venue                                    TEXT NOT NULL CHECK (length(venue) <= 160),
+  notes                                    TEXT NOT NULL CHECK (length(notes) <= 2000),
+  created_at                               INTEGER NOT NULL,
+  FOREIGN KEY (org_id) REFERENCES orgs(id) ON DELETE RESTRICT,
+  FOREIGN KEY (posted_by_user_id) REFERENCES org_users(id) ON DELETE RESTRICT,
+  CHECK (match_date GLOB '[0-9][0-9][0-9][0-9]-[0-1][0-9]-[0-3][0-9]')
 ) STRICT;
-CREATE INDEX friendlies_org_id ON friendlies(org_id);
-CREATE INDEX friendlies_match_date ON friendlies(match_date);
-
--- source: db.friendlies[].responses[]  ({orgId, orgName, message<=200, respondedByUserId, ts}, server.mjs:2975)
--- owner/writer: server.mjs   lifecycle: append-only; one per responding org ('ALREADY_RESPONDED', 2974)
--- mapping: orgId -> org_id; orgName -> org_name; message -> message ('' when absent); respondedByUserId -> responded_by_user_id;
---          ts -> responded_at (source field is literally `ts`)
--- notes: no id in source; natural PK (friendly_id, org_id) is exactly the uniqueness the code enforces.
---        message is shown only to the poster (2961) — a read-side rule, not a column.
+CREATE INDEX friendlies_date ON friendlies (match_date, id);
+CREATE INDEX friendlies_org ON friendlies (org_id);
 CREATE TABLE friendly_responses (
-  friendly_id          TEXT NOT NULL REFERENCES friendlies(id) ON DELETE CASCADE,
-  org_id               TEXT NOT NULL REFERENCES orgs(id) ON DELETE CASCADE,
-  org_name             TEXT NOT NULL,                  -- snapshot
-  message              TEXT NOT NULL DEFAULT '',
-  responded_by_user_id TEXT REFERENCES org_users(id) ON DELETE SET NULL,
-  responded_at         INTEGER NOT NULL,
+  friendly_id                              TEXT NOT NULL CHECK (length(friendly_id) <= 80 AND length(friendly_id) > 0),
+  org_id                                   TEXT NOT NULL CHECK (length(org_id) <= 80 AND length(org_id) > 0),
+  message                                  TEXT NOT NULL CHECK (length(message) <= 200),
+  responded_by_user_id                     TEXT NOT NULL CHECK (length(responded_by_user_id) <= 80 AND length(responded_by_user_id) > 0),
+  responded_at                             INTEGER NOT NULL,
+  FOREIGN KEY (friendly_id) REFERENCES friendlies(id) ON DELETE CASCADE,
+  FOREIGN KEY (org_id) REFERENCES orgs(id) ON DELETE RESTRICT,
+  FOREIGN KEY (responded_by_user_id) REFERENCES org_users(id) ON DELETE RESTRICT,
   PRIMARY KEY (friendly_id, org_id)
 ) STRICT;
+CREATE INDEX friendly_responses_org ON friendly_responses (org_id);
 
 
 -- ---------------------------------------------------------------------

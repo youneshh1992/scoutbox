@@ -104,14 +104,14 @@ export const PRODUCTION_STORE_CONTRACT = Object.freeze({
   // 0020), read through repositories/scoutingAssessments.mjs (scoutingReads). db.<name> throws.
   // evidence, coachAffiliations, squadInvites: never a db.* read since S9a — typed tables (migration 0019), read through
   // repositories/scoutingEvidence.mjs (scoutingReads). db.<name> throws.
-  friendlies: { guarantee: 'module', owner: 'core', reason: 'owned by server.mjs, which has no register() of its own; created during synchronous composition before the socket opens' },
+  // friendlies: never a db.* read since S13d — a typed table (migration 0037), read through repositories/grassroots.mjs (grassrootsReads).
   // groups, groupGrants: never a db.* read since S13c — typed tables (migration 0036), read through
   // repositories/groups.mjs (groupReads). Each db.* name throws; migrateM13 no longer creates them.
   guardians: { guarantee: 'migration', owner: 'core', reason: 'core platform collection, guaranteed by the migration registry so it survives an arbitrary restore' },
   idvQueue: { guarantee: 'migration', owner: 'core', reason: 'guardian identity-verification queue; was created by ??= inside a request handler, so it existed only after the first write; since S6b a read-only view over the idv_queue table, written only through the safetyAudit repository (Q4b: every entry names an existing guardian, checked in code)' },
   invoices: { guarantee: 'module', owner: 'core', reason: 'owned by server.mjs, which has no register() of its own; created during synchronous composition before the socket opens' },
   ledger: { guarantee: 'migration', owner: 'core', reason: 'core platform collection, guaranteed by the migration registry so it survives an arbitrary restore; since S6b a read-only view over the ledger table (insertion order), written only through ledgerAppend → the safetyAudit repository (userId / scoutName verbatim)' },
-  matchdays: { guarantee: 'module', owner: 'core', reason: 'owned by server.mjs, which has no register() of its own; created during synchronous composition before the socket opens' },
+  // matchdays: never a db.* read since S13d — a typed table (migration 0037), read through repositories/grassroots.mjs (grassrootsReads).
   mediaBlobs: { guarantee: 'module', owner: 'core', reason: 'owned by server.mjs, which has no register() of its own; created during synchronous composition before the socket opens' },
   moderationLog: { guarantee: 'migration', owner: 'core', reason: 'moderation hits, counted on the T&S dashboard (D2); since S6b a read-only view over the moderation_log table, written only through moderateOrRefuse → the safetyAudit repository' },
   // notificationPrefs / notifications: since S7a the rows live in notification_prefs / notification_pref_categories and
@@ -121,7 +121,7 @@ export const PRODUCTION_STORE_CONTRACT = Object.freeze({
   // container with its read-only view, so the guarantee the registry gives is "the name exists", and the record is the table.
   notificationPrefs: { guarantee: 'migration', owner: 'core', reason: 'container guaranteed by the migration registry (m182_004); since S7a a read-only view over notification_prefs, written only through the notifications repository' },
   notifications: { guarantee: 'migration', owner: 'core', reason: 'container guaranteed by the migration registry (m182_002); since S7a a read-only view over the notifications table, written only through the notifications repository' },
-  openTrials: { guarantee: 'module', owner: 'core', reason: 'owned by server.mjs, which has no register() of its own; created during synchronous composition before the socket opens' },
+  // openTrials: never a db.* read since S13d — a typed table (migration 0037), read through repositories/grassroots.mjs (grassrootsReads).
   // opportunities: never a db.* read since S9d — a typed table (migration 0022), read through repositories/opportunitiesCampaigns.mjs
   // (scoutingReads). db.opportunities throws.
   opsEvents: { guarantee: 'module', owner: 'm13', reason: 'M13 feature collection, created by migrateM13 at registration; since S6b a read-only view over the ops_events table, written only through the safetyAudit repository (every kind an ordinary row)' },

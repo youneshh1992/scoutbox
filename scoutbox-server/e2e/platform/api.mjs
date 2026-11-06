@@ -372,7 +372,7 @@ ok(r.status === 403, 'minor registration to a club that may not see them is refu
 r = await j(`/guardian/open-trials/${hackneyTrialId}/register`, { method: 'POST', body: JSON.stringify({ childId: 'pl-guni' }) }, bearer(AMARA));
 ok(r.status === 201, 'guardian registers the child for a verified local open day');
 r = await j('/org/open-trials', {}, bearer(HACKNEY));
-ok(r.body.find((t) => t.id === hackneyTrialId)?.registrations.some((x) => x.playerName === 'Guni Adebayo' && x.byGuardian), 'club sees the guardian-made registration');
+ok(r.body.items.find((t) => t.id === hackneyTrialId)?.registrations.some((x) => x.playerName === 'Guni Adebayo' && x.byGuardian), 'club sees the guardian-made registration');
 
 // Season wrap.
 r = await j('/player/season-wrap', {}, bearer(KOLA));
@@ -404,7 +404,7 @@ me = await j('/player/me', {}, bearer(KOLA));
 const lastAtt = me.body.attendance[me.body.attendance.length - 1];
 ok(me.body.attendance.length === attBefore + 1 && lastAtt.verified === true && lastAtt.corroboratedBy === 'Moss Side Athletic', 'player receives verified, coach-corroborated attendance');
 r = await j('/org/matchdays', {}, bearer(MOSS));
-ok(r.body.some((m) => m.fixture === 'Moss Side vs Ancoats Rovers' && m.result === '3-1'), 'match-day log kept for the club');
+ok(r.body.items.some((m) => m.fixture === 'Moss Side vs Ancoats Rovers' && m.result === '3-1'), 'match-day log kept for the club');
 
 // The no-ghosting rule: unresolved past open-day registrants block the next
 // posting — every kid who turns up gets an answer.
@@ -414,7 +414,7 @@ await j(`/player/open-trials/${pastTrialId}/register`, { method: 'POST' }, beare
 r = await j('/org/open-trials', { method: 'POST', body: JSON.stringify({ title: 'Next open session', date: '2099-07-01', venue: 'Moss Side Rec' }) }, bearer(MOSS));
 ok(r.status === 409 && r.body.error === 'OUTCOMES_OUTSTANDING', 'posting a new open day is blocked while past registrants wait for an answer');
 trials = await j('/org/open-trials', {}, bearer(MOSS));
-const pastReg = trials.body.find((t) => t.id === pastTrialId).registrations[0];
+const pastReg = trials.body.items.find((t) => t.id === pastTrialId).registrations[0];
 r = await j(`/org/open-trials/${pastTrialId}/registrations/${pastReg.id}/outcome`, { method: 'POST', body: JSON.stringify({ outcome: 'invite_trial', note: 'Great movement up front — come train with the first team.' }) }, bearer(MOSS));
 ok(r.status === 200 && r.body.registration.outcome === 'invite_trial', 'open-day outcome recorded: trial invitation');
 r = await j('/player/inbox', {}, bearer(KOLA));
@@ -434,7 +434,7 @@ ok(r.status === 201, 'with every registrant answered, the next open day posts');
 
 // The kind no: guardian-managed registrants get the answer via the guardian.
 trials = await j('/org/open-trials', {}, bearer(HACKNEY));
-const guniReg = trials.body.find((t) => t.id === hackneyTrialId).registrations.find((x) => x.playerName === 'Guni Adebayo');
+const guniReg = trials.body.items.find((t) => t.id === hackneyTrialId).registrations.find((x) => x.playerName === 'Guni Adebayo');
 r = await j(`/org/open-trials/${hackneyTrialId}/registrations/${guniReg.id}/outcome`, { method: 'POST', body: JSON.stringify({ outcome: 'declined', note: 'Call me on 07911 123456 to discuss' }) }, bearer(HACKNEY));
 ok(r.status === 400 && r.body.error === 'MODERATION_BLOCKED', 'outcome notes pass the same moderation screen');
 r = await j(`/org/open-trials/${hackneyTrialId}/registrations/${guniReg.id}/outcome`, { method: 'POST', body: JSON.stringify({ outcome: 'declined', note: 'Not this time — keep playing, and come back next season.' }) }, bearer(HACKNEY));
@@ -479,9 +479,9 @@ r = await j('/org/friendlies', { method: 'POST', body: JSON.stringify({ ageGroup
 ok(r.status === 201, 'grassroots club posts a friendly');
 const friendlyId = r.body.friendly.id;
 r = await j('/org/friendlies', {}, bearer(MOSS));
-ok(!r.body.some((f) => f.id === friendlyId), 'Manchester never sees a London friendly — the 50km rule holds club-to-club');
+ok(!r.body.items.some((f) => f.id === friendlyId), 'Manchester never sees a London friendly — the 50km rule holds club-to-club');
 r = await j('/org/friendlies', {}, bearer(LEYTON));
-ok(r.body.some((f) => f.id === friendlyId && typeof f.distanceKm === 'number' && f.distanceKm <= 50), 'a neighbouring club sees the friendly with its distance');
+ok(r.body.items.some((f) => f.id === friendlyId && typeof f.distanceKm === 'number' && f.distanceKm <= 50), 'a neighbouring club sees the friendly with its distance');
 r = await j(`/org/friendlies/${friendlyId}/respond`, { method: 'POST', body: JSON.stringify({ message: 'WhatsApp me on 07911 123456' }) }, bearer(LEYTON));
 ok(r.status === 400 && r.body.error === 'MODERATION_BLOCKED', 'friendly responses are moderated like everything else');
 r = await j(`/org/friendlies/${friendlyId}/respond`, { method: 'POST', body: JSON.stringify({ message: 'Our u15s are free that Saturday — happy to travel.' }) }, bearer(LEYTON));
@@ -489,7 +489,66 @@ ok(r.status === 201, 'a local club responds to the friendly');
 r = await j(`/org/friendlies/${friendlyId}/respond`, { method: 'POST', body: JSON.stringify({ message: 'again' }) }, bearer(LEYTON));
 ok(r.status === 409 && r.body.error === 'ALREADY_RESPONDED', 'double responses refused');
 r = await j('/org/friendlies', {}, bearer(HACKNEY));
-ok(r.body.find((f) => f.id === friendlyId)?.responses.some((x) => /happy to travel/.test(x.message)), 'the poster sees who is up for it');
+ok(r.body.items.find((f) => f.id === friendlyId)?.responses.some((x) => /happy to travel/.test(x.message)), 'the poster sees who is up for it');
+
+// ---- 13c. S13d: open days, match days and friendlies are typed tables. Junk is refused naming the field (it was
+// filtered, stringified or cut off); the clubs' lists page by cursor; deleting an open day takes it off every list.
+r = await j('/org/open-trials', { method: 'POST', body: JSON.stringify({ title: 'Keepers only', date: '2099-06-08', venue: 'Hackney Marshes', positions: 'GK' }) }, bearer(HACKNEY));
+ok(r.status === 400 && r.body.error === 'FIELD_INVALID' && r.body.field === 'positions', 'S13d positions that are not a list are refused (were read as none)');
+r = await j('/org/open-trials', { method: 'POST', body: JSON.stringify({ title: 'Keepers only', date: '2099-06-08', venue: 'Hackney Marshes', positions: ['GK', 7] }) }, bearer(HACKNEY));
+ok(r.status === 400 && r.body.field === 'positions', 'S13d a position that is not text is refused (was dropped)');
+r = await j('/org/open-trials', { method: 'POST', body: JSON.stringify({ title: 'Keepers only', date: '2099-06-08', venue: 'Hackney Marshes', positions: ['GK', ' GK '] }) }, bearer(HACKNEY));
+ok(r.status === 201 && r.body.openTrial.positions.join() === 'GK' && typeof r.body.openTrial.orgName === 'string', 'S13d a repeated position is kept once; the club\'s name is read live');
+const keepersId = r.body.openTrial?.id;
+r = await j('/org/open-trials?limit=1', {}, bearer(HACKNEY));
+ok(r.status === 200 && r.body.items.length === 1 && r.body.items[0].id === keepersId && typeof r.body.nextCursor === 'string', 'S13d a club\'s open days page newest first');
+r = await j(`/org/open-trials?limit=1&cursor=${r.body.nextCursor}`, {}, bearer(HACKNEY));
+ok(r.status === 200 && r.body.items[0]?.id === hackneyTrialId, 'S13d the cursor continues where the page stopped');
+r = await j('/org/open-trials?cursor=junk', {}, bearer(HACKNEY));
+ok(r.status === 400 && r.body.error === 'PAGE_CURSOR_INVALID', 'S13d a junk cursor is refused');
+r = await j('/org/coverage/fixtures?limit=100', {}, bearer(LEYTON));
+ok(r.status === 200 && r.body.items.some((f) => f.id === `tr-${keepersId}` && f.source === 'open_trial' && f.home) && r.body.items.some((f) => f.id === `fr-${friendlyId}` && f.source === 'friendly_board'), 'S13d the observable fixtures union lists open days and friendlies');
+r = await j('/org/coverage/fixtures?limit=1', {}, bearer(LEYTON));
+ok(r.status === 200 && r.body.items.length === 1 && typeof r.body.nextCursor === 'string', 'S13d the fixture list pages by cursor');
+r = await j(`/org/open-trials/${keepersId}`, { method: 'DELETE' }, bearer(LEYTON));
+ok(r.status === 404, 'S13d only the host deletes its open day');
+r = await j(`/org/open-trials/${keepersId}`, { method: 'DELETE' }, bearer(HACKNEY));
+ok(r.status === 200 && r.body.deleted === true, 'S13d the host deletes its open day');
+r = await j('/org/open-trials', {}, bearer(HACKNEY));
+ok(!r.body.items.some((t) => t.id === keepersId), 'S13d a deleted open day leaves the club\'s list');
+r = await j('/org/coverage/fixtures?limit=100', {}, bearer(LEYTON));
+ok(!r.body.items.some((f) => f.id === `tr-${keepersId}`), 'S13d … and the observable fixtures');
+r = await j(`/guardian/open-trials/${keepersId}/register`, { method: 'POST', body: JSON.stringify({ childId: 'pl-guni' }) }, bearer(AMARA));
+ok(r.status === 404 && r.body.error === 'OPEN_TRIAL_NOT_FOUND', 'S13d … and cannot be registered for');
+r = await j(`/org/open-trials/${keepersId}`, { method: 'DELETE' }, bearer(HACKNEY));
+ok(r.status === 404, 'S13d deleting twice answers 404');
+
+r = await j('/org/matchday', { method: 'POST', body: JSON.stringify({ fixture: 7, date: '2026-09-06' }) }, bearer(MOSS));
+ok(r.status === 400 && r.body.field === 'fixture', 'S13d a fixture that is not text is refused (was stringified)');
+r = await j('/org/matchday', { method: 'POST', body: JSON.stringify({ fixture: 'Moss Side vs Hulme', date: '2026-09-06', result: '3-1 after extra time and penalties' }) }, bearer(MOSS));
+ok(r.status === 400 && r.body.field === 'result', 'S13d a result over 20 characters is refused (was cut off)');
+r = await j('/org/matchday', { method: 'POST', body: JSON.stringify({ fixture: 'Moss Side vs Hulme', date: '2026-09-06', playerIds: 'pl-adeyemi' }) }, bearer(MOSS));
+ok(r.status === 400 && r.body.field === 'playerIds', 'S13d playerIds that is not a list is refused (was read as none)');
+r = await j('/org/squad', { method: 'POST', body: JSON.stringify({ name: 'Guni', playerId: 'pl-guni' }) }, bearer(HACKNEY));
+ok(r.status === 201, 'S13d Hackney rosters a local player it can see');
+r = await j('/org/matchday', { method: 'POST', body: JSON.stringify({ fixture: 'Hackney Marsh vs Clapton', date: '2026-09-06', playerIds: ['pl-guni', 'pl-guni'] }) }, bearer(HACKNEY));
+ok(r.status === 201 && r.body.credited === 1, 'S13d a player listed twice is credited once');
+r = await j('/org/matchdays?limit=1', {}, bearer(HACKNEY));
+ok(r.status === 200 && r.body.items.length === 1 && r.body.items[0].playerIds.join() === 'pl-guni', 'S13d … and the match day names them once');
+r = await j('/org/matchdays?limit=1', {}, bearer(MOSS));
+ok(r.status === 200 && r.body.items.length === 1 && r.body.items[0].fixture === 'Moss Side vs Ancoats Rovers' && r.body.nextCursor === null, 'S13d match days page; the last page has no cursor');
+
+r = await j(`/org/friendlies/${friendlyId}/respond`, { method: 'POST', body: JSON.stringify({ message: { text: 'hi' } }) }, bearer(MOSS));
+ok(r.status === 400 && r.body.error === 'FIELD_INVALID' && r.body.field === 'message', 'S13d a response message that is not text is refused (was stringified)');
+r = await j('/org/friendlies?limit=0', {}, bearer(HACKNEY));
+ok(r.status === 400 && r.body.error === 'PAGE_LIMIT_INVALID', 'S13d the board refuses a junk limit');
+r = await j('/org/friendlies?limit=1', {}, bearer(LEYTON));
+ok(r.status === 200 && r.body.items.length === 1 && r.body.items[0].status === 'open' && r.body.items[0].responses.every((x) => x.message === ''), 'S13d the board pages; another club never sees responders\' messages');
+
+r = await j('/player/opportunity-board?limit=1', {}, bearer(KOLA));
+ok(r.status === 200 && Array.isArray(r.body.items) && r.body.items.length <= 1 && 'nextCursor' in r.body, 'S13d the opportunity board pages by cursor');
+r = await j('/player/opportunity-board?cursor=junk', {}, bearer(KOLA));
+ok(r.status === 400 && r.body.error === 'PAGE_CURSOR_INVALID', 'S13d … and refuses a junk cursor');
 
 // ---- 14. storage + SQLite persistence on disk
 // DATA_DIR is the server's own directory (see serverUnderTest), never a guess.

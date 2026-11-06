@@ -130,6 +130,12 @@ Cross-cutting server contracts: errors, boot, dates and time zones, capabilities
   default). When a club leaves, a grant ends once its owner shares no group with any of
   its recipients; a grant whose other recipients remain stays live for them, and the
   shared read re-checks membership for every reader. (S13c, 6 Nov 2026)
+- Grassroots operations: a club's open days, match days and the local friendlies board
+  page by cursor (newest first; the board by match date). Deleting an open day takes it
+  off every list (its registrants are not told; a scout another club assigned to it keeps
+  the assignment). A player listed twice on a match day is credited once. An open day's
+  positions are free text (at most 20, each up to 40 characters, repeats dropped). Club
+  names on open days and friendlies are the club's current name. (S13d, 6 Nov 2026)
 - Signed media URLs last 15 minutes. Each one is bound to the minting session, and the
   viewer's current entitlement is checked again on every fetch.
 

@@ -256,9 +256,9 @@ them.
 | `groupGrants` | persistent | 08 | `group_grants`, `group_grant_recipients` | S13c (0036) |
 | `uploadSessions` | temporary | 08 | `upload_sessions`, `upload_session_chunks` (chunk bytes stay on disk) | S13 |
 | `savedSearches` | persistent | 08 | `saved_searches` | S13 |
-| `openTrials` | persistent | 08 | `open_trials`, `open_trial_positions`, `open_trial_registrations` | S13 |
-| `matchdays` | persistent | 08 | `matchdays`, `matchday_players` | S13 |
-| `friendlies` | persistent | 08 | `friendlies`, `friendly_responses` | S13 |
+| `openTrials` | persistent (deleting stamps `deleted_at`) | 08 | `open_trials`, `open_trial_positions`, `open_trial_registrations` | S13d (0037) |
+| `matchdays` | persistent | 08 | `matchdays`, `matchday_players` | S13d (0037) |
+| `friendlies` | persistent | 08 | `friendlies`, `friendly_responses` | S13d (0037) |
 | `invoices` | persistent (money) | 08 | `invoices` (`amount_minor`, `currency`) | S13 |
 | `plans` | catalogue | 08 | `plans` (`price_per_month_minor`, `currency 'GBP'`) | S13 |
 | `archetypes` | catalogue | 08 | `archetypes` | S13 |

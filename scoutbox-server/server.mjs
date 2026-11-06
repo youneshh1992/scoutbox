@@ -26,6 +26,7 @@ import { fileURLToPath } from 'node:url';
 import { buildSeed } from './seed.mjs';
 import { openStore } from './store.mjs';
 import { attachDataLayer, TABLE_BACKED } from './repositories/index.mjs';
+import { GRASSROOTS_LIMITS, boxAround } from './repositories/grassroots.mjs';
 import { CLUB_SETUP_LIMITS, LOOKING_FOR_POSITIONS } from './repositories/clubSetup.mjs';
 import { TRANSITION_LIMITS, vouchCodeHash } from './repositories/transitionsVouches.mjs';
 import { registerM12 } from './m12/index.mjs';
@@ -201,7 +202,7 @@ const dataLayer = attachDataLayer({
   sessionTtlMs: (Number(process.env.SESSION_TTL_DAYS) > 0 ? Number(process.env.SESSION_TTL_DAYS) : 30) * 24 * 3600 * 1000,
   log: (m) => { if (process.env.M13_QUIET_LOGS !== '1') console.log(m); },
 });
-const { users, sessions, orgs, players, guardians, identity, mediaDeletions, codes, notifications, dispatches, outbox, pushLog, pushTokens, channels, safetyAudit, recruitment, recruitmentCases, recruitmentContactsOffers, signingsFollowUps, scoutingEvidence, scoutingAssessments, clubSetup, opportunitiesCampaigns, verification, passport, transitionsVouches, agentCore, compliancePolicies, complianceRecords, agentTransactions, development, boxCam, discovery, insightCoverage, integrations, enterprise, groups } = dataLayer;
+const { users, sessions, orgs, players, guardians, identity, mediaDeletions, codes, notifications, dispatches, outbox, pushLog, pushTokens, channels, safetyAudit, recruitment, recruitmentCases, recruitmentContactsOffers, signingsFollowUps, scoutingEvidence, scoutingAssessments, clubSetup, opportunitiesCampaigns, verification, passport, transitionsVouches, agentCore, compliancePolicies, complianceRecords, agentTransactions, development, boxCam, discovery, insightCoverage, integrations, enterprise, groups, grassroots } = dataLayer;
 // The recruitment domains read through SQL rather than db.* (§4.3 step 2): read-only query objects, handed to every
 // module context as `recruitmentReads` (contacts, offers, signingPackages, signings, followUps, outcomeReports, requests, trials,
 // cases, comments, snapshots, decisions, evidenceStates).
@@ -226,6 +227,7 @@ const discoveryReads = discovery.reads; // S12c: briefs, Nobody Missed reviews, 
 const insightReads = insightCoverage.reads; // S12d: exposure, review-later, evidence suggestions, calibration and coverage (queries only)
 const enterpriseReads = enterprise.reads; // S13b: staff invites, SSO, support tickets and access grants (queries only)
 const groupReads = groups.reads; // S13c: group workspaces and group grants (queries only)
+const grassrootsReads = grassroots.reads; // S13d: open days, match days and friendlies (queries only)
 const integrationReads = integrations.reads; // S13a: import batches, prospects, identity reviews, API keys, webhook endpoints and deliveries (queries only)
 const complianceReads = complianceRecords.reads; // S11b-2: contexts, evaluations, reviews and consents (queries only)
 // Lookups by id through the repositories' indexes, never a scan of the collection (migration.md §4.3.1): handed to
@@ -305,10 +307,8 @@ db.pushTokens ??= [];      // device push tokens, registered per user
 // IDV, resolve and lift routes, the m13 ops events and m181's source changes).
 db.invoices ??= [];        // billing records (success fees)
 // db.emailChallenges: the data layer's hash-free read-only view since S6a (rows of email_challenges) — never assigned here.
-db.openTrials ??= [];      // grassroots open trial days + registrations
+// Open days, match days and friendlies are tables of repositories/grassroots.mjs since S13d (grassrootsReads).
 // Coach references (vouches) are a table of repositories/transitionsVouches.mjs since S10c (verificationReads.vouches).
-db.matchdays ??= [];       // grassroots match-day logs (squad-wide attendance)
-db.friendlies ??= [];      // club-to-club friendly-match board (local)
 db.mediaBlobs ??= {};
 // S9c: a club's squad is rows of org_squad_members (repositories/clubSetup.mjs), not an organisation facet.
 
@@ -2844,64 +2844,89 @@ function grassrootsOrgOnly(req, res) {
   return false;
 }
 
+// S13d: open days, match days and friendlies are rows of repositories/grassroots.mjs, written by explicit operations;
+// responses are built from these allowlists. A club's name is read live (not a copy taken when it posted).
+const GL = GRASSROOTS_LIMITS;
+const orgNameOf = (orgId) => byId.org(orgId)?.name ?? null;
+const registrationView = (r) => ({
+  id: r.id, playerId: r.playerId, playerName: r.playerName, byGuardian: r.byGuardian, ...(r.guardianId ? { guardianId: r.guardianId } : {}),
+  ts: r.ts, outcome: r.outcome, outcomeNote: r.outcomeNote, outcomeAt: r.outcomeAt,
+});
+const openTrialView = (t) => ({
+  id: t.id, orgId: t.orgId, orgName: orgNameOf(t.orgId), title: t.title, date: t.date, venue: t.venue, ageGroup: t.ageGroup,
+  positions: [...t.positions], notes: t.notes, createdByUserId: t.createdByUserId, createdAt: t.createdAt,
+});
+const fieldInvalid = (res, field, message) => res.status(400).json({ error: 'FIELD_INVALID', field, message });
+/** The positions an open day asks for: absent is none; otherwise a list of at most 20 short texts (repeats dropped). */
+function openDayPositions(v) {
+  if (v === undefined || v === null) return [];
+  if (!Array.isArray(v) || v.length > GL.positions || !v.every((x) => typeof x === 'string' && x.trim() && x.trim().length <= GL.position)) return null;
+  return [...new Set(v.map((x) => x.trim()))];
+}
+
 orgRouter.post('/open-trials', (req, res) => {
   if (grassrootsOrgOnly(req, res)) return;
   // The no-ghosting rule: nobody — least of all a kid at their first session —
   // leaves an open day without an answer. Unresolved past registrants block
   // the next posting, the same way unfiled trial reports block new trials.
   const today = new Date().toISOString().slice(0, 10);
-  const unresolved = db.openTrials
-    .filter((t) => t.orgId === req.org.id && t.date < today)
-    .flatMap((t) => (t.registrations ?? []).filter((r) => !r.outcome));
-  if (unresolved.length > 0) {
+  const unresolved = grassroots.openTrials.unresolvedBefore(req.org.id, today);
+  if (unresolved > 0) {
     return res.status(409).json({
       error: 'OUTCOMES_OUTSTANDING',
-      message: `${unresolved.length} player(s) from your past open day(s) are still waiting for an answer. Resolve them (invite or a kind no) before posting the next one.`,
+      message: `${unresolved} player(s) from your past open day(s) are still waiting for an answer. Resolve them (invite or a kind no) before posting the next one.`,
     });
   }
   const { title, date, venue, ageGroup, positions, notes } = req.body || {};
-  if (!reqText(title, 160) || !date || !reqText(venue, 160)) return res.status(400).json({ error: 'TITLE_DATE_VENUE_REQUIRED' });
-  if (!optText(ageGroup, 40)) return badField(res, 'ageGroup'); // PRE-M24 (PM-10)
-  if (!optText(notes, 2000)) return badField(res, 'notes');
+  if (!reqText(title, GL.title) || !date || !reqText(venue, GL.venue)) return res.status(400).json({ error: 'TITLE_DATE_VENUE_REQUIRED' });
+  if (!optText(ageGroup, GL.ageGroup)) return badField(res, 'ageGroup'); // PRE-M24 (PM-10)
+  if (!optText(notes, GL.notes)) return badField(res, 'notes');
   // M23 P5.7 (T-10): the open-day date gates the no-ghosting rule above
-  // (`t.date < today`) and the upcoming list (`t.date >= today`) by string
+  // (`date < today`) and the upcoming lists (`date >= today`) by string
   // comparison. Text that is not a day compared as "upcoming for ever" and
   // never became a past day whose registrants are owed an answer.
   if (!dateOnlyOrRefuse(res, date, 'date')) return;
+  const wanted = openDayPositions(positions); // S13d: refused, no longer filtered or cut off
+  if (!wanted) return fieldInvalid(res, 'positions', `positions is a list of at most ${GL.positions} positions, each text of at most ${GL.position} characters.`);
   if (notes && !moderateOrRefuse(res, notes, { kind: 'open_trial_notes', orgId: req.org.id })) return;
-  const trial = {
-    id: nextId('open'), orgId: req.org.id, orgName: req.org.name,
-    title: String(title).trim(), date: String(date), venue: String(venue).trim(),
-    ageGroup: ageGroup || 'open', positions: Array.isArray(positions) ? positions.filter((x) => typeof x === 'string').slice(0, 20) : [],
-    notes: notes || '', createdByUserId: req.orgUser.id, createdAt: Date.now(), registrations: [],
-  };
-  db.openTrials.push(trial);
-  ledgerAppend({ type: 'open_trial_posted', playerId: null, orgId: req.org.id, orgName: req.org.name, userId: req.orgUser.id, scoutName: req.orgUser.name });
-  persist();
+  const trial = unit(() => {
+    const t = grassroots.openTrials.create({
+      id: nextId('open'), orgId: req.org.id, title: title.trim(), date, venue: venue.trim(),
+      ageGroup: ageGroup?.trim() || 'open', positions: wanted, notes: notes || '', createdByUserId: req.orgUser.id, createdAt: Date.now(),
+      deletedAt: null, registrations: [],
+    });
+    ledgerAppend({ type: 'open_trial_posted', playerId: null, orgId: req.org.id, orgName: req.org.name, userId: req.orgUser.id, scoutName: req.orgUser.name });
+    return t;
+  });
   broadcast('openTrials');
-  res.status(201).json({ openTrial: trial });
+  res.status(201).json({ openTrial: { ...openTrialView(trial), registrations: [] } });
 });
 
+/** The club's open days, newest first, a page at a time (the apps read the first page). */
 orgRouter.get('/open-trials', (req, res) => {
   if (grassrootsOrgOnly(req, res)) return;
+  let page;
+  try { page = readPage(req.query, ['number']); } catch (e) { return sendPageError(res, e); }
+  const { items, nextCursor } = grassroots.openTrials.pageForOrg(req.org.id, page);
   // Registration lists respect visibility: a club that cannot see a minor
   // never received their registration in the first place.
-  res.json(db.openTrials.filter((t) => t.orgId === req.org.id).map((t) => ({
-    ...t,
-    registrations: (t.registrations ?? []).map((r) => {
-      const p = findPlayer(r.playerId);
-      const view = p ? playerViewForOrg(p, req.org) : null;
-      return { ...r, age: view?.age ?? null, position: view?.position ?? null, trustScore: view?.trustScore ?? null, guardianManaged: !!view?.guardianManaged };
-    }),
-  })).reverse());
+  res.json({
+    items: items.map((t) => ({
+      ...openTrialView(t),
+      registrations: t.registrations.map((r) => {
+        const p = findPlayer(r.playerId);
+        const view = p ? playerViewForOrg(p, req.org) : null;
+        return { ...registrationView(r), age: view?.age ?? null, position: view?.position ?? null, trustScore: view?.trustScore ?? null, guardianManaged: !!view?.guardianManaged };
+      }),
+    })),
+    nextCursor,
+  });
 });
 
+// S13d: deleting stamps the open day; it leaves every list (a coverage assignment naming it keeps its key).
 orgRouter.delete('/open-trials/:id', (req, res) => {
   if (grassrootsOrgOnly(req, res)) return;
-  const before = db.openTrials.length;
-  db.openTrials = db.openTrials.filter((t) => !(t.id === req.params.id && t.orgId === req.org.id));
-  if (db.openTrials.length === before) return res.status(404).json({ error: 'OPEN_TRIAL_NOT_FOUND' });
-  persist();
+  if (!grassroots.openTrials.remove(req.org.id, req.params.id, Date.now())) return res.status(404).json({ error: 'OPEN_TRIAL_NOT_FOUND' });
   broadcast('openTrials');
   res.json({ deleted: true });
 });
@@ -2923,46 +2948,50 @@ orgRouter.post('/looking-for', (req, res) => {
 // real, properly-routed trial request) or a kind no.
 orgRouter.post('/open-trials/:id/registrations/:regId/outcome', (req, res) => {
   if (grassrootsOrgOnly(req, res)) return;
-  const trial = db.openTrials.find((t) => t.id === req.params.id && t.orgId === req.org.id);
-  const reg = trial?.registrations?.find((r) => r.id === req.params.regId);
+  const trial = grassroots.openTrials.forOrgById(req.org.id, req.params.id);
+  const reg = trial?.registrations.find((r) => r.id === req.params.regId);
   if (!trial || !reg) return res.status(404).json({ error: 'REGISTRATION_NOT_FOUND' });
   if (reg.outcome) return res.status(409).json({ error: 'ALREADY_RESOLVED' });
   const { outcome, note } = req.body || {};
   if (!['invite_trial', 'declined'].includes(outcome)) return res.status(400).json({ error: 'OUTCOME_INVALID' });
+  if (!optText(note, 10_000)) return badField(res, 'note'); // S13d: refused when not text (was stringified)
   if (note && !moderateOrRefuse(res, note, { kind: 'open_day_outcome', orgId: req.org.id })) return;
+  const outcomeNote = note?.trim() ? note.trim().slice(0, GL.outcomeNote) : null;
   const p = findPlayer(reg.playerId);
-  reg.outcome = outcome;
-  reg.outcomeNote = note ? String(note).trim().slice(0, 200) : null;
-  reg.outcomeAt = Date.now();
-  if (p && visibleToOrg(p, req.org)) {
-    if (outcome === 'invite_trial') {
-      // Through THE request writer: the same row, routing (guardian-first for a
-      // minor), ledger entry and inbox ping as every other trial invitation;
-      // only the notifications are worded for the open day. Several pending
-      // invitations per player stay allowed (D2).
-      issueRecruitmentRequest({
-        org: req.org, orgUser: req.orgUser, player: p, type: 'trial',
-        message: reg.outcomeNote || `We liked what we saw at "${trial.title}" — come for a proper trial.`,
-        trialDetails: { proposedDate: null, altSlots: [], venue: trial.venue, notes: `Follow-up from open day "${trial.title}".` },
-        notice: {
-          kind: 'open_trial',
-          toGuardian: `Good news: ${req.org.name} would like to invite ${p.name} for a trial after the open day.`,
-          toPlayer: isAdult(p)
-            ? `${req.org.name} liked what they saw at "${trial.title}" — trial invitation in your inbox.`
-            : `${req.org.name} liked what they saw at the open day — they've contacted your parent/guardian about a trial.`,
-        },
-      });
-    } else {
-      const kindNo = reg.outcomeNote || 'Thanks for coming — not this time, but keep playing and keep logging your football.';
-      if (!isAdult(p) && p.guardianId) {
-        notify({ kind: 'guardian', id: p.guardianId }, 'open_trial', `${req.org.name} on ${p.name}'s open day: ${kindNo}`, trial.id);
+  // ONE unit of work (S13d): the answer, the trial request it may raise and the notifications commit together.
+  const answered = unit(() => {
+    const r = grassroots.openTrials.resolve(trial.id, reg.id, { outcome, note: outcomeNote, at: Date.now() });
+    if (p && visibleToOrg(p, req.org)) {
+      if (outcome === 'invite_trial') {
+        // Through THE request writer: the same row, routing (guardian-first for a
+        // minor), ledger entry and inbox ping as every other trial invitation;
+        // only the notifications are worded for the open day. Several pending
+        // invitations per player stay allowed (D2).
+        issueRecruitmentRequest({
+          org: req.org, orgUser: req.orgUser, player: p, type: 'trial',
+          message: outcomeNote || `We liked what we saw at "${trial.title}" — come for a proper trial.`,
+          trialDetails: { proposedDate: null, altSlots: [], venue: trial.venue, notes: `Follow-up from open day "${trial.title}".` },
+          notice: {
+            kind: 'open_trial',
+            toGuardian: `Good news: ${req.org.name} would like to invite ${p.name} for a trial after the open day.`,
+            toPlayer: isAdult(p)
+              ? `${req.org.name} liked what they saw at "${trial.title}" — trial invitation in your inbox.`
+              : `${req.org.name} liked what they saw at the open day — they've contacted your parent/guardian about a trial.`,
+          },
+        });
+      } else {
+        const kindNo = outcomeNote || 'Thanks for coming — not this time, but keep playing and keep logging your football.';
+        if (!isAdult(p) && p.guardianId) {
+          notify({ kind: 'guardian', id: p.guardianId }, 'open_trial', `${req.org.name} on ${p.name}'s open day: ${kindNo}`, trial.id);
+        }
+        notify({ kind: 'player', id: p.id }, 'open_trial', `${req.org.name}: ${kindNo}`, trial.id);
       }
-      notify({ kind: 'player', id: p.id }, 'open_trial', `${req.org.name}: ${kindNo}`, trial.id);
     }
-  }
+    return r;
+  });
   persist();
   broadcast('openTrials');
-  res.json({ registration: reg });
+  res.json({ registration: registrationView(answered) });
 });
 
 // ----------------------------------------------- squad + match-day logging
@@ -3052,55 +3081,70 @@ orgRouter.post('/matchday', (req, res) => {
   if (grassrootsOrgOnly(req, res)) return;
   const { fixture, venue, date, result, playerIds } = req.body || {};
   if (!fixture || !date) return res.status(400).json({ error: 'FIXTURE_AND_DATE_REQUIRED' });
+  // S13d: refused, no longer stringified or cut off.
+  if (!reqText(fixture, GL.fixture)) return fieldInvalid(res, 'fixture', `fixture is text of at most ${GL.fixture} characters.`);
+  if (!optText(venue, GL.venue)) return fieldInvalid(res, 'venue', `venue is text of at most ${GL.venue} characters.`);
+  if (!optText(result, GL.result)) return fieldInvalid(res, 'result', `result is text of at most ${GL.result} characters (e.g. 3-1).`);
   if (!dateOnlyOrRefuse(res, date, 'date')) return; // M23 P5.7: a match day is a day that exists
-  const ids = Array.isArray(playerIds) ? playerIds : [];
+  const ids = playerIds === undefined || playerIds === null ? [] : playerIds;
+  if (!Array.isArray(ids) || ids.length > GL.matchdayPlayers || !ids.every((x) => typeof x === 'string' && x.length > 0 && x.length <= GL.id)) {
+    return fieldInvalid(res, 'playerIds', `playerIds is a list of at most ${GL.matchdayPlayers} player ids.`);
+  }
   const onSquad = new Set(clubSetup.squad.playerIds(req.org.id)); // S9c: the squad only, never the shadow list
   const credited = [];
+  const fixtureText = fixture.trim();
   // ONE unit of work (S5): every credited player's attendance row and activity,
-  // the match-day record (a blob) and the ledger row commit together.
+  // the match-day row (S13d) and the ledger row commit together.
   unit(() => {
-    for (const pid of ids) {
+    for (const pid of new Set(ids)) { // a player listed twice is credited once
       if (!onSquad.has(pid)) continue; // only your own rostered players
       const p = findPlayer(pid);
       if (!p || !visibleToOrg(p, req.org)) continue;
       players.addItem(p.id, 'attendance', {
-        id: nextId('att'), fixture: String(fixture), venue: String(venue || req.org.location?.city || ''),
-        date: String(date), gps: req.org.location ? { lat: req.org.location.lat, lng: req.org.location.lng } : null,
+        id: nextId('att'), fixture: fixtureText, venue: venue?.trim() || req.org.location?.city || '',
+        date, gps: req.org.location ? { lat: req.org.location.lat, lng: req.org.location.lng } : null,
         verified: true, corroboratedBy: req.org.name, // coach counter-signature
       });
       recordActivity(p);
-      notify({ kind: 'player', id: p.id }, 'matchday', `📍 ${req.org.name} logged your appearance in "${fixture}" — verified, coach-signed attendance on your profile.`, p.id);
+      notify({ kind: 'player', id: p.id }, 'matchday', `📍 ${req.org.name} logged your appearance in "${fixtureText}" — verified, coach-signed attendance on your profile.`, p.id);
       credited.push(p.id);
       broadcast('players', { playerId: p.id });
     }
-    db.matchdays.push({
-      id: nextId('md'), orgId: req.org.id, fixture: String(fixture), venue: String(venue || ''),
-      date: String(date), result: result ? String(result).slice(0, 20) : null,
-      playerIds: credited, loggedByUserId: req.orgUser.id, ts: Date.now(),
+    grassroots.matchdays.create({
+      id: nextId('md'), orgId: req.org.id, fixture: fixtureText, venue: venue?.trim() ?? '',
+      date, result: result?.trim() || null, playerIds: credited, loggedByUserId: req.orgUser.id, ts: Date.now(),
     });
     ledgerAppend({ type: 'matchday_logged', playerId: null, orgId: req.org.id, orgName: req.org.name, userId: req.orgUser.id, scoutName: req.orgUser.name });
   });
   persist();
-  res.status(201).json({ credited: credited.length, matchdays: db.matchdays.filter((m) => m.orgId === req.org.id).length });
+  res.status(201).json({ credited: credited.length, matchdays: grassroots.matchdays.countForOrg(req.org.id) });
 });
 
+/** The club's match days, newest first, a page at a time (the apps read the first page). */
 orgRouter.get('/matchdays', (req, res) => {
   if (grassrootsOrgOnly(req, res)) return;
-  res.json(db.matchdays.filter((m) => m.orgId === req.org.id).slice().reverse());
+  let page;
+  try { page = readPage(req.query, ['number']); } catch (e) { return sendPageError(res, e); }
+  const { items, nextCursor } = grassroots.matchdays.pageForOrg(req.org.id, page);
+  res.json({
+    items: items.map((m) => ({ id: m.id, orgId: m.orgId, fixture: m.fixture, venue: m.venue, date: m.date, result: m.result, playerIds: [...m.playerIds], loggedByUserId: m.loggedByUserId, ts: m.ts })),
+    nextCursor,
+  });
 });
 
 // --------------------------------------------------- pathway club record
 // Grassroots reputation currency: not resale multiples — players developed.
 function pathwayRecord(org) {
   const orgSignings = signingsFollowUps.signings.forOrg(org.id);
+  const registrants = grassroots.openTrials.registrantsOf(org.id);
   const involvedIds = new Set([
     ...orgSignings.map((sg) => sg.playerId),
     ...clubSetup.squad.playerIds(org.id),
-    ...db.openTrials.filter((t) => t.orgId === org.id).flatMap((t) => (t.registrations ?? []).map((r) => r.playerId)),
+    ...registrants.map((r) => r.playerId),
   ]);
   const firstInvolvement = (pid) => Math.min(
     ...orgSignings.filter((sg) => sg.playerId === pid).map((sg) => sg.ts),
-    ...db.openTrials.filter((t) => t.orgId === org.id).flatMap((t) => (t.registrations ?? []).filter((r) => r.playerId === pid).map((r) => r.ts)),
+    ...registrants.filter((r) => r.playerId === pid).map((r) => r.ts),
   );
   const progressed = [...involvedIds].filter((pid) => {
     const upward = signingsFollowUps.signings.forPlayer(pid).find((sg) => sg.orgId !== org.id && (byId.org(sg.orgId)?.level ?? '') !== 'grassroots');
@@ -3113,8 +3157,8 @@ orgRouter.get('/pathway-record', (req, res) => {
   if (grassrootsOrgOnly(req, res)) return;
   res.json({
     ...pathwayRecord(req.org),
-    openDaysRun: db.openTrials.filter((t) => t.orgId === req.org.id).length,
-    matchdaysLogged: db.matchdays.filter((m) => m.orgId === req.org.id).length,
+    openDaysRun: grassroots.openTrials.countForOrg(req.org.id),
+    matchdaysLogged: grassroots.matchdays.countForOrg(req.org.id),
     note: 'Progressed = players your club signed or hosted who later signed for an academy or pro club. Development is the reputation that matters here.',
   });
 });
@@ -3142,54 +3186,60 @@ orgRouter.post('/verification/federation', (req, res) => {
 // ---------------------------------------------------- friendlies board
 // Club-to-club, same 50km radius: trial matches are how grassroots scouting
 // actually happens — and a reason to open the app between transfer windows.
+const friendlyView = (f, viewer) => {
+  const other = byId.org(f.orgId);
+  const mine = f.orgId === viewer.id;
+  return {
+    id: f.id, orgId: f.orgId, orgName: other?.name ?? null, postedByUserId: f.postedByUserId, ageGroup: f.ageGroup, date: f.date,
+    venue: f.venue, notes: f.notes, status: 'open', createdAt: f.createdAt, mine,
+    distanceKm: mine || !other?.location || !viewer.location ? 0 : Math.round(haversineKm(other.location, viewer.location) * 10) / 10,
+    // responder details only for the poster
+    responses: f.responses.map((r) => ({ orgId: r.orgId, orgName: orgNameOf(r.orgId), message: mine ? r.message : '', respondedByUserId: r.respondedByUserId, ts: r.ts })),
+  };
+};
+
 orgRouter.post('/friendlies', (req, res) => {
   if (grassrootsOrgOnly(req, res)) return;
   const { ageGroup, date, venue, notes } = req.body || {};
   if (!date) return res.status(400).json({ error: 'DATE_REQUIRED' });
-  for (const [f, v, max] of [['ageGroup', ageGroup, 40], ['venue', venue, 160], ['notes', notes, 2000]]) if (!optText(v, max)) return badField(res, f); // PRE-M24 (PM-10)
+  for (const [f, v, max] of [['ageGroup', ageGroup, GL.ageGroup], ['venue', venue, GL.venue], ['notes', notes, GL.notes]]) if (!optText(v, max)) return badField(res, f); // PRE-M24 (PM-10)
   if (!dateOnlyOrRefuse(res, date, 'date')) return; // M23 P5.7
   if (notes && !moderateOrRefuse(res, notes, { kind: 'friendly_notes', orgId: req.org.id })) return;
-  const friendly = {
-    id: nextId('fr'), orgId: req.org.id, orgName: req.org.name, postedByUserId: req.orgUser.id,
-    ageGroup: ageGroup || 'open', date: String(date), venue: venue ? String(venue).trim() : (req.org.location?.city ?? ''),
-    notes: notes || '', status: 'open', responses: [], createdAt: Date.now(),
-  };
-  db.friendlies.push(friendly);
-  persist();
+  const friendly = grassroots.friendlies.create({
+    id: nextId('fr'), orgId: req.org.id, postedByUserId: req.orgUser.id,
+    ageGroup: ageGroup?.trim() || 'open', date, venue: venue?.trim() || (req.org.location?.city ?? '').slice(0, GL.venue),
+    notes: notes || '', responses: [], createdAt: Date.now(),
+  });
   broadcast('friendlies');
-  res.status(201).json({ friendly });
+  res.status(201).json({ friendly: friendlyView(friendly, req.org) });
 });
 
+/** The local board: the club's own friendlies and those posted within the radius, by match date, a page at a time. */
 orgRouter.get('/friendlies', (req, res) => {
   if (grassrootsOrgOnly(req, res)) return;
-  const nearby = db.friendlies.filter((f) => {
-    if (f.orgId === req.org.id) return true;
-    const other = byId.org(f.orgId);
-    return other?.location && req.org.location && haversineKm(other.location, req.org.location) <= GRASSROOTS_RADIUS_KM;
-  }).map((f) => {
-    const other = byId.org(f.orgId);
-    return {
-      ...f,
-      mine: f.orgId === req.org.id,
-      distanceKm: f.orgId === req.org.id || !other?.location || !req.org.location
-        ? 0 : Math.round(haversineKm(other.location, req.org.location) * 10) / 10,
-      // responder details only for the poster
-      responses: f.orgId === req.org.id ? f.responses : f.responses.map(({ message, ...r }) => ({ ...r, message: '' })),
-    };
-  }).sort((a, b) => a.date.localeCompare(b.date));
-  res.json(nearby);
+  let page;
+  try { page = readPage(req.query, ['string', 'string']); } catch (e) { return sendPageError(res, e); }
+  const here = req.org.location;
+  const box = here ? boxAround(here, GRASSROOTS_RADIUS_KM) : null;
+  const near = (f) => { const loc = byId.org(f.orgId)?.location; return !!loc && haversineKm(loc, here) <= GRASSROOTS_RADIUS_KM; };
+  const { items, nextCursor } = grassroots.friendlies.boardPage(req.org.id, box, page, near);
+  res.json({ items: items.map((f) => friendlyView(f, req.org)), nextCursor });
 });
 
 orgRouter.post('/friendlies/:id/respond', (req, res) => {
   if (grassrootsOrgOnly(req, res)) return;
-  const friendly = db.friendlies.find((f) => f.id === req.params.id);
+  const friendly = grassroots.friendlies.byId(req.params.id);
   if (!friendly) return res.status(404).json({ error: 'FRIENDLY_NOT_FOUND' });
   if (friendly.orgId === req.org.id) return res.status(400).json({ error: 'OWN_POST' });
   const { message } = req.body || {};
+  if (!optText(message, 10_000)) return badField(res, 'message'); // S13d: refused when not text (was stringified)
   if (message && !moderateOrRefuse(res, message, { kind: 'friendly_response', orgId: req.org.id })) return;
   if (friendly.responses.some((r) => r.orgId === req.org.id)) return res.status(409).json({ error: 'ALREADY_RESPONDED' });
-  friendly.responses.push({ orgId: req.org.id, orgName: req.org.name, message: message ? String(message).trim().slice(0, 200) : '', respondedByUserId: req.orgUser.id, ts: Date.now() });
-  if (friendly.postedByUserId) notify({ kind: 'org_user', id: friendly.postedByUserId }, 'friendly', `${req.org.name} is up for your friendly on ${friendly.date}.`, friendly.id);
+  // ONE unit of work (S13d): the response and the poster's notification commit together.
+  unit(() => {
+    grassroots.friendlies.respond(friendly.id, { orgId: req.org.id, message: message ? message.trim().slice(0, GL.message) : '', respondedByUserId: req.orgUser.id, ts: Date.now() });
+    notify({ kind: 'org_user', id: friendly.postedByUserId }, 'friendly', `${req.org.name} is up for your friendly on ${friendly.date}.`, friendly.id);
+  });
   persist();
   broadcast('friendlies');
   res.status(201).json({ responded: true });
@@ -3943,18 +3993,20 @@ playerRouter.get('/benchmarks', (req, res) => {
 playerRouter.get('/opportunities', (req, res) => {
   if (grassrootsOnly(req, res)) return;
   if (!req.player.location) return res.json({ clubs: [], note: 'Set your location to see clubs within reach.' });
-  const clubs = db.orgs
+  const near = db.orgs
     .filter((o) => o.level === 'grassroots' && o.location)
     .map((o) => ({ org: o, distanceKm: Math.round(haversineKm(o.location, req.player.location) * 10) / 10 }))
     .filter((x) => x.distanceKm <= GRASSROOTS_RADIUS_KM)
-    .sort((a, b) => a.distanceKm - b.distanceKm)
+    .sort((a, b) => a.distanceKm - b.distanceKm);
+  // S13d: the clubs' upcoming open days in one query.
+  const upcoming = Map.groupBy(grassroots.openTrials.upcomingForOrgs(near.map((x) => x.org.id), new Date().toISOString().slice(0, 10)), (t) => t.orgId);
+  const clubs = near
     .map(({ org, distanceKm }) => ({
       id: org.id, name: org.name, city: org.location.city ?? '', distanceKm,
       verified: org.verified, safeguardingCertified: safeguardingCertified(org),
       ...pathwayRecord(org),
       lookingFor: [...clubSetup.lookingFor.forOrg(org.id)],
-      openTrials: db.openTrials.filter((t) => t.orgId === org.id && t.date >= new Date().toISOString().slice(0, 10))
-        .map(({ registrations, ...t }) => ({ ...t, registered: (registrations ?? []).some((r) => r.playerId === req.player.id) })),
+      openTrials: (upcoming.get(org.id) ?? []).map((t) => ({ ...openTrialView(t), registered: t.registrations.some((r) => r.playerId === req.player.id) })),
     }));
   res.json({ radiusKm: GRASSROOTS_RADIUS_KM, clubs, lookingForYou: clubs.filter((c) => c.lookingFor.includes(req.player.position)).length });
 });
@@ -3964,17 +4016,19 @@ playerRouter.get('/opportunities', (req, res) => {
 playerRouter.post('/open-trials/:id/register', (req, res) => {
   if (grassrootsOnly(req, res)) return;
   if (guardianManagedOnly(req, res)) return;
-  const trial = db.openTrials.find((t) => t.id === req.params.id);
+  const trial = grassroots.openTrials.byId(req.params.id);
   if (!trial) return res.status(404).json({ error: 'OPEN_TRIAL_NOT_FOUND' });
   const org = byId.org(trial.orgId);
   if (!org || !req.player.location || !org.location || haversineKm(org.location, req.player.location) > GRASSROOTS_RADIUS_KM) {
     return res.status(403).json({ error: 'OUT_OF_RADIUS', message: 'Open days are local — this one is beyond 50km of you.' });
   }
-  trial.registrations ??= [];
   if (trial.registrations.some((r) => r.playerId === req.player.id)) return res.status(409).json({ error: 'ALREADY_REGISTERED' });
-  trial.registrations.push({ id: nextId('otr'), playerId: req.player.id, playerName: req.player.name, byGuardian: false, ts: Date.now() });
-  ledgerAppend({ type: 'open_trial_registration', playerId: req.player.id, orgId: org.id, orgName: org.name, userId: trial.createdByUserId ?? null, scoutName: 'open day' });
-  notify({ kind: 'org_user', id: trial.createdByUserId }, 'open_trial', `${req.player.name} registered for "${trial.title}".`, trial.id);
+  // ONE unit of work (S13d): the registration, the ledger row and the notification commit together.
+  unit(() => {
+    grassroots.openTrials.register(trial.id, { id: nextId('otr'), playerId: req.player.id, playerName: req.player.name?.slice(0, GL.playerName) ?? null, byGuardian: false, guardianId: null, ts: Date.now() });
+    ledgerAppend({ type: 'open_trial_registration', playerId: req.player.id, orgId: org.id, orgName: org.name, userId: trial.createdByUserId, scoutName: 'open day' });
+    notify({ kind: 'org_user', id: trial.createdByUserId }, 'open_trial', `${req.player.name} registered for "${trial.title}".`, trial.id);
+  });
   persist();
   res.status(201).json({ registered: true });
 });
@@ -4143,15 +4197,17 @@ guardianRouter.get('/children/:id/open-trials', (req, res) => {
   const child = findPlayer(req.params.id);
   if (!child || !req.guardian.childIds.includes(child.id)) return res.status(404).json({ error: 'CHILD_NOT_FOUND' });
   if (!child.location) return res.json({ openTrials: [], note: 'Set a location on the profile to see local open days.' });
-  const list = db.openTrials
+  // S13d: the open days hosted inside the radius's box (one query; past ones too, as before, so a parent still sees the
+  // day their child registered for); the exact distance and visibility here.
+  const list = grassroots.openTrials.inBox(boxAround(child.location, GRASSROOTS_RADIUS_KM))
     .map((t) => ({ t, org: byId.org(t.orgId) }))
     .filter(({ org }) => org?.level === 'grassroots' && org.location && haversineKm(org.location, child.location) <= GRASSROOTS_RADIUS_KM)
     .filter(({ org }) => visibleToOrg(child, org)) // only clubs that may see the child at all
     .map(({ t, org }) => ({
-      id: t.id, title: t.title, date: t.date, venue: t.venue, ageGroup: t.ageGroup, positions: t.positions,
-      orgName: t.orgName, verified: org.verified, safeguardingCertified: safeguardingCertified(org),
+      id: t.id, title: t.title, date: t.date, venue: t.venue, ageGroup: t.ageGroup, positions: [...t.positions],
+      orgName: org.name, verified: org.verified, safeguardingCertified: safeguardingCertified(org),
       distanceKm: Math.round(haversineKm(org.location, child.location) * 10) / 10,
-      registered: (t.registrations ?? []).some((r) => r.playerId === child.id),
+      registered: t.registrations.some((r) => r.playerId === child.id),
     }))
     .sort((a, b) => a.date.localeCompare(b.date));
   res.json({ openTrials: list });
@@ -4160,18 +4216,20 @@ guardianRouter.get('/children/:id/open-trials', (req, res) => {
 guardianRouter.post('/open-trials/:id/register', (req, res) => {
   const child = findPlayer(req.body?.childId);
   if (!child || !req.guardian.childIds.includes(child.id)) return res.status(404).json({ error: 'CHILD_NOT_FOUND' });
-  const trial = db.openTrials.find((t) => t.id === req.params.id);
+  const trial = grassroots.openTrials.byId(req.params.id);
   if (!trial) return res.status(404).json({ error: 'OPEN_TRIAL_NOT_FOUND' });
   const org = byId.org(trial.orgId);
   if (!org || !visibleToOrg(child, org)) {
     return res.status(403).json({ error: 'VERIFIED_CLUBS_ONLY', message: 'Only verified, local clubs can receive an under-18 registration.' });
   }
-  trial.registrations ??= [];
   if (trial.registrations.some((r) => r.playerId === child.id)) return res.status(409).json({ error: 'ALREADY_REGISTERED' });
-  trial.registrations.push({ id: nextId('otr'), playerId: child.id, playerName: child.name, byGuardian: true, guardianId: req.guardian.id, ts: Date.now() });
-  ledgerAppend({ type: 'open_trial_registration_by_guardian', playerId: child.id, orgId: org.id, orgName: org.name, userId: trial.createdByUserId ?? null, scoutName: 'open day' });
-  notify({ kind: 'org_user', id: trial.createdByUserId }, 'open_trial', `${child.name} (via guardian) registered for "${trial.title}".`, trial.id);
-  notify({ kind: 'player', id: child.id }, 'open_trial', `Your parent/guardian registered you for ${org.name}'s open day "${trial.title}" — good luck!`, trial.id);
+  // ONE unit of work (S13d): the registration, the ledger row and the notifications commit together.
+  unit(() => {
+    grassroots.openTrials.register(trial.id, { id: nextId('otr'), playerId: child.id, playerName: child.name?.slice(0, GL.playerName) ?? null, byGuardian: true, guardianId: req.guardian.id, ts: Date.now() });
+    ledgerAppend({ type: 'open_trial_registration_by_guardian', playerId: child.id, orgId: org.id, orgName: org.name, userId: trial.createdByUserId, scoutName: 'open day' });
+    notify({ kind: 'org_user', id: trial.createdByUserId }, 'open_trial', `${child.name} (via guardian) registered for "${trial.title}".`, trial.id);
+    notify({ kind: 'player', id: child.id }, 'open_trial', `Your parent/guardian registered you for ${org.name}'s open day "${trial.title}" — good luck!`, trial.id);
+  });
   persist();
   res.status(201).json({ registered: true });
 });
@@ -4356,9 +4414,7 @@ function deletePlayerData(playerId) {
   recruitmentCases.redactPlayer(playerId, at); // S8b: the case's copy of the name goes, in this unit
   scoutingAssessments.assessments.redactPlayer(playerId); // S9b: the club keeps its assessments; the player's name goes, in this unit
   recruitmentContactsOffers.contacts.redactPlayer(playerId); // S8c: the reply's words go; the contact stays
-  for (const ot of db.openTrials ?? []) {
-    for (const reg of ot.registrations ?? []) if (reg.playerId === playerId) reg.playerName = null;
-  }
+  grassroots.openTrials.redactPlayer(playerId); // S13d: the registration keeps the id; the name goes, in this unit
   // M23 P5.6B: agent relationships become id-only tombstones (no name is
   // stored on them; the dispute text and any player-authored history names go).
   m24Ctx?.onPlayerDeleted?.(playerId, at);
@@ -4703,7 +4759,7 @@ function revokeOrgUserAccess(userId) {
 }
 
 registerM12({
-  db, byId, scoutingReads, verificationReads, agentReads, complianceReads, developmentReads, development, boxCamReads, discoveryReads, insightReads, recruitmentReads, users, players, guardians, unit, app, orgRouter, playerRouter, guardianRouter, adminRouter,
+  db, byId, scoutingReads, verificationReads, agentReads, complianceReads, developmentReads, development, boxCamReads, discoveryReads, insightReads, grassrootsReads, recruitmentReads, users, players, guardians, unit, app, orgRouter, playerRouter, guardianRouter, adminRouter,
   nextId, persist, persistNow, notify, ledgerAppend, broadcast, safetyAudit, recruitment, recruitmentCases, // S8a: requests and trials are explicit repository writes
   signingsFollowUps, // S8d: follow-ups and outcome reports are explicit repository writes
   scoutingEvidence, // S9a: evidence, coach affiliations and squad invitations are explicit repository writes
@@ -4721,7 +4777,7 @@ registerM12({
 // Same module pattern under m13/. registerM13 returns the enriched context so
 // the login path above can reach the MFA rate-limit guards.
 const m13Ctx = registerM13({
-  db, byId, scoutingReads, verificationReads, agentReads, complianceReads, developmentReads, development, boxCamReads, discoveryReads, insightReads, recruitmentReads, users, sessions, orgs, players, guardians, mediaDeletions, codes, notifications, dispatches, outbox, pushLog, pushTokens, channels, unit, app, orgRouter, playerRouter, guardianRouter, adminRouter,
+  db, byId, scoutingReads, verificationReads, agentReads, complianceReads, developmentReads, development, boxCamReads, discoveryReads, insightReads, grassrootsReads, recruitmentReads, users, sessions, orgs, players, guardians, mediaDeletions, codes, notifications, dispatches, outbox, pushLog, pushTokens, channels, unit, app, orgRouter, playerRouter, guardianRouter, adminRouter,
   nextId, persist, persistNow, notify, ledgerAppend, broadcast, safetyAudit, recruitment, recruitmentCases,
   opportunitiesCampaigns, // S9d: player suitability preferences and approved summaries are explicit repository writes
   transitionsVouches, // S10c: transition cases, their grants and history are explicit repository writes
@@ -4742,7 +4798,7 @@ const m13Ctx = registerM13({
 // keep claim provenance in sync.
 const m14Ctx = registerM14({
   verification, unit, // S10a: every verification record is an explicit repository write
-  db, byId, scoutingReads, verificationReads, agentReads, complianceReads, developmentReads, development, boxCamReads, discoveryReads, insightReads, users, orgs, app, orgRouter, playerRouter, guardianRouter, adminRouter,
+  db, byId, scoutingReads, verificationReads, agentReads, complianceReads, developmentReads, development, boxCamReads, discoveryReads, insightReads, grassrootsReads, users, orgs, app, orgRouter, playerRouter, guardianRouter, adminRouter,
   nextId, persist, persistNow, notify, ledgerAppend, broadcast, safetyAudit,
   findPlayer, isBlocked, moderateOrRefuse, playerViewForOrg, sessionFor,
   storage, mailer, orgSafe, recordActivity, revokeOrgUserAccess,
@@ -4761,7 +4817,7 @@ registerSourceChanges(srcCtx);
 // routers exist and before the milestone modules that emit notifications, so
 // the preference gate is in place for every notify() call that follows.
 m182Ctx = {
-  db, byId, scoutingReads, verificationReads, agentReads, complianceReads, developmentReads, development, boxCamReads, discoveryReads, insightReads, recruitmentReads, notifications, orgRouter, playerRouter, guardianRouter, persist, findPlayer,
+  db, byId, scoutingReads, verificationReads, agentReads, complianceReads, developmentReads, development, boxCamReads, discoveryReads, insightReads, grassrootsReads, recruitmentReads, notifications, orgRouter, playerRouter, guardianRouter, persist, findPlayer,
   // The same standing-gate composition M12's shared helpers use.
   orgCanSee: (org, p) => !!p && visibleToOrg(p, org) && !isBlocked(p.id, org.id),
   requireLead: (req, res) => {
@@ -4783,7 +4839,7 @@ const rateLimit = createRateLimiter();
 // records. Registered after M14 so it can read verification stores; it
 // receives the same context and adds no new authorization surface.
 const m15Ctx = registerM15({
-  db, byId, scoutingReads, verificationReads, agentReads, complianceReads, developmentReads, development, boxCamReads, discoveryReads, insightReads, recruitmentReads, app, orgRouter, playerRouter, guardianRouter, adminRouter,
+  db, byId, scoutingReads, verificationReads, agentReads, complianceReads, developmentReads, development, boxCamReads, discoveryReads, insightReads, grassrootsReads, recruitmentReads, app, orgRouter, playerRouter, guardianRouter, adminRouter,
   nextId, persist, persistNow, notify, ledgerAppend, broadcast, safetyAudit,
   findPlayer, isBlocked, moderateOrRefuse, playerViewForOrg,
   storage, m14: m14Ctx,
@@ -4792,7 +4848,7 @@ const m15Ctx = registerM15({
 });
 const m16Ctx = registerM16({
   rateLimit,
-  db, byId, scoutingReads, verificationReads, agentReads, complianceReads, developmentReads, development, boxCamReads, discoveryReads, insightReads, app, orgRouter, playerRouter, guardianRouter, adminRouter,
+  db, byId, scoutingReads, verificationReads, agentReads, complianceReads, developmentReads, development, boxCamReads, discoveryReads, insightReads, grassrootsReads, app, orgRouter, playerRouter, guardianRouter, adminRouter,
   nextId, persist, persistNow, notify, ledgerAppend, broadcast, safetyAudit,
   findPlayer, isBlocked, moderateOrRefuse,
   players, unit, // S5: a Box Clip marks a media row through the repository, inside a unit with the session and the ledger
@@ -4804,7 +4860,7 @@ const m16Ctx = registerM16({
 // Registered last because it consumes all of them; it adds no storage and no
 // authorization surface (a Trust Score grants nothing).
 const m162Ctx = registerM162({
-  db, byId, scoutingReads, verificationReads, agentReads, complianceReads, developmentReads, development, boxCamReads, discoveryReads, insightReads, app, orgRouter, playerRouter, guardianRouter, adminRouter,
+  db, byId, scoutingReads, verificationReads, agentReads, complianceReads, developmentReads, development, boxCamReads, discoveryReads, insightReads, grassrootsReads, app, orgRouter, playerRouter, guardianRouter, adminRouter,
   nextId, persist, persistNow, notify, ledgerAppend, broadcast, safetyAudit,
   findPlayer, isBlocked, moderateOrRefuse,
   assemblePassport: m15Ctx.assemblePassport,
@@ -4819,7 +4875,7 @@ const m162Ctx = registerM162({
 const m17Ctx = registerM17({
   rateLimit,
   faults: faultLayer, // M23 P8.1 — the development fault seam inside the ONE lifecycle writer
-  db, byId, scoutingReads, verificationReads, agentReads, complianceReads, developmentReads, development, boxCamReads, discoveryReads, insightReads, recruitmentReads, app, orgRouter, playerRouter, guardianRouter, adminRouter,
+  db, byId, scoutingReads, verificationReads, agentReads, complianceReads, developmentReads, development, boxCamReads, discoveryReads, insightReads, grassrootsReads, recruitmentReads, app, orgRouter, playerRouter, guardianRouter, adminRouter,
   nextId, persist, persistNow, notify, ledgerAppend, broadcast, safetyAudit, recruitmentCases, unit,
   findPlayer, isBlocked, moderateOrRefuse, playerViewForOrg,
   storage, publishedVouchesFor, pathwayRecord, DRILLS, DATA_DIR,
@@ -4852,7 +4908,7 @@ const m17Ctx = registerM17({
 // M18 registers no player, guardian or public route at all.
 const m18Ctx = registerM18({
   rateLimit,
-  db, byId, scoutingReads, verificationReads, agentReads, complianceReads, developmentReads, development, boxCamReads, discoveryReads, insightReads, recruitmentReads, app, orgRouter, playerRouter, guardianRouter, adminRouter,
+  db, byId, scoutingReads, verificationReads, agentReads, complianceReads, developmentReads, development, boxCamReads, discoveryReads, insightReads, grassrootsReads, recruitmentReads, app, orgRouter, playerRouter, guardianRouter, adminRouter,
   discovery, unit, // S12c: every brief, review, Second Look item and watchlist is an explicit repository write
   combineProtocolIds: () => COMBINE_PROTOCOLS.map((p) => p.id), // a brief's Combine protocols are refused unless known (S12c)
   nextId, persist, persistNow, notify, ledgerAppend, broadcast, safetyAudit,
@@ -4881,7 +4937,7 @@ const m18Ctx = registerM18({
 const m19Ctx = {
   ...m18Ctx,
   recruitmentReads, // §4.3 step 2: contacts and offers are read through SQL
-  scoutingReads, verificationReads, agentReads, developmentReads, development, boxCamReads, discoveryReads, insightReads, // S12a: the development domain; S10a: verification reads; S9: the evidence and the assessments are read through SQL
+  scoutingReads, verificationReads, agentReads, developmentReads, development, boxCamReads, discoveryReads, insightReads, grassrootsReads, // S12a: the development domain; S10a: verification reads; S9: the evidence and the assessments are read through SQL
   users,
   notifications, // S7a: the Agent module's inbox and unread count read the repository
   combineProtocolIds: () => COMBINE_PROTOCOLS.map((p) => p.id),

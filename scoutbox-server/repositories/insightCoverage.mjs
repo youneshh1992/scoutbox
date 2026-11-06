@@ -16,7 +16,9 @@
  *   - A fixture (F7): an organisation's own record of a match on a real day, with an optional location.
  *   - A coverage plan (F7): a goal of observations over a window.
  *   - A coverage assignment (F7): a scout sent to a fixture. The fixture is the organisation's own (`fixture_id`, a key)
- *     or a friendly or an open day (`event_id`, no key: those are still blob records until S13). Target players and the
+ *     (`fixture_id`), a friendly (`friendly_id`) or an open day (`open_trial_id`), each a key: exactly one is set, by
+ *     kind. The two event keys name tables created by 0037 (S13d), so no assignment to an event can be written before
+ *     that migration is recorded. Target players and the
  *     warnings raised at creation are rows; the observation, the assessment it produced and a cancellation are columns.
  *
  * WRITES are explicit operations; every write joins the open unit of work, the caller's transaction or its own.
@@ -91,7 +93,8 @@ const ASSIGNMENT_SPEC = [
   group('travelBudget', [int('amountMinor', 'travel_budget_minor', req), oneOf('currency', 'travel_currency', CURRENCIES, req), text('enteredBy', 'travel_entered_by_name', L.name)], { nullable: true }),
   text('assignedBy', 'assigned_by_name', L.name), int('createdAt', 'created_at', req), int('observedAt', 'observed_at'), idf('assessmentId', 'assessment_id'), int('cancelledAt', 'cancelled_at'),
 ];
-// The stored assignment splits the fixture reference: `fixture_id` (an own fixture, a key) or `event_id` (no key).
+// The stored assignment splits the fixture reference by kind: `fixture_id` (own), `friendly_id` or `open_trial_id`.
+const REF_COLUMN = Object.freeze({ own: 'fixture_id', friendly_board: 'friendly_id', open_trial: 'open_trial_id' });
 const ASSIGNMENT_COLUMNS = ASSIGNMENT_SPEC.filter((f) => f.k !== 'fixture');
 
 // ------------------------------------------------------------------ DDL
@@ -167,16 +170,21 @@ export const INSIGHT_COVERAGE_DDL = [
   'CREATE INDEX coverage_plans_org ON coverage_plans (org_id, created_at);',
 
   tableDdl('coverage_assignments', [
-    ...ASSIGNMENT_COLUMNS.slice(0, 2), oneOf('kind', 'fixture_kind', FIXTURE_KINDS, req), idf('fixtureId', 'fixture_id'), idf('eventId', 'event_id'), ...ASSIGNMENT_COLUMNS.slice(2),
+    ...ASSIGNMENT_COLUMNS.slice(0, 2), oneOf('kind', 'fixture_kind', FIXTURE_KINDS, req), idf('fixtureId', 'fixture_id'), idf('friendlyId', 'friendly_id'), idf('openTrialId', 'open_trial_id'), ...ASSIGNMENT_COLUMNS.slice(2),
   ], [
     rowOf('orgs', 'org_id'), rowOf('fixtures', 'fixture_id'), rowOf('org_users', 'scout_user_id'), DAY_GLOB('fixture_date'),
-    "CHECK ((fixture_kind = 'own') = (fixture_id IS NOT NULL))", "CHECK ((fixture_kind = 'own') = (event_id IS NULL))",
+    // S13d: friendlies and open days are never hard-deleted by a route (deleting an open day stamps it).
+    rowOf('friendlies', 'friendly_id'), rowOf('open_trials', 'open_trial_id'),
+    "CHECK ((fixture_kind = 'own') = (fixture_id IS NOT NULL))", "CHECK ((fixture_kind = 'friendly_board') = (friendly_id IS NOT NULL))",
+    "CHECK ((fixture_kind = 'open_trial') = (open_trial_id IS NOT NULL))",
     'CHECK ((travel_budget_minor IS NULL) = (travel_currency IS NULL))', 'CHECK (travel_budget_minor IS NULL OR travel_budget_minor >= 0)',
     'CHECK (travel_budget_minor IS NOT NULL OR travel_entered_by_name IS NULL)',
     'CHECK (assessment_id IS NULL OR observed_at IS NOT NULL)',
   ]),
   'CREATE INDEX coverage_assignments_org_created ON coverage_assignments (org_id, created_at, id);',
-  'CREATE INDEX coverage_assignments_org_fixture ON coverage_assignments (org_id, fixture_kind, fixture_id, event_id);',
+  'CREATE INDEX coverage_assignments_org_fixture ON coverage_assignments (org_id, fixture_kind, fixture_id, friendly_id, open_trial_id);',
+  'CREATE INDEX coverage_assignments_friendly ON coverage_assignments (friendly_id) WHERE friendly_id IS NOT NULL;',
+  'CREATE INDEX coverage_assignments_open_trial ON coverage_assignments (open_trial_id) WHERE open_trial_id IS NOT NULL;',
   'CREATE INDEX coverage_assignments_org_scout_date ON coverage_assignments (org_id, scout_user_id, fixture_date);',
   'CREATE INDEX coverage_assignments_org_observed ON coverage_assignments (org_id, observed_at);',
   'CREATE INDEX coverage_assignments_fixture ON coverage_assignments (fixture_id);',
@@ -327,7 +335,10 @@ export function typeAssignment(raw, at = 'coverageAssignments') {
 }
 
 // ------------------------------------------------------------------ rows
-const assignmentRow = (a) => ({ ...encode(ASSIGNMENT_COLUMNS, a), fixture_kind: a.fixture.kind, fixture_id: a.fixture.kind === 'own' ? a.fixture.id : null, event_id: a.fixture.kind === 'own' ? null : a.fixture.id });
+const assignmentRow = (a) => ({
+  ...encode(ASSIGNMENT_COLUMNS, a), fixture_kind: a.fixture.kind,
+  ...Object.fromEntries(Object.entries(REF_COLUMN).map(([kind, c]) => [c, a.fixture.kind === kind ? a.fixture.id : null])),
+});
 const ASSIGNMENT_ROW_COLUMNS = Object.keys(assignmentRow({ fixture: { kind: 'own', id: 'x' } }));
 function statements(sqlite) {
   const p = (sql) => sqlite.prepare(sql);
@@ -401,7 +412,7 @@ function decodeAssignments(sqlite, rows) {
   return rows.map((row) => {
     const a = decode(ASSIGNMENT_COLUMNS, row);
     return {
-      id: a.id, orgId: a.orgId, fixture: { kind: row.fixture_kind, id: row.fixture_id ?? row.event_id },
+      id: a.id, orgId: a.orgId, fixture: { kind: row.fixture_kind, id: row[REF_COLUMN[row.fixture_kind]] },
       ...Object.fromEntries(Object.entries(a).filter(([k]) => !['id', 'orgId'].includes(k))),
       targetPlayerIds: targets.all(row.id).map((x) => x.player_id),
       warnings: warnings.all(row.id).map((w) => ({ code: w.code, scoutName: w.scout_name })),
@@ -718,6 +729,36 @@ export function createInsightCoverageRepository({ sqlite, unit = null, now = Dat
     forOrg: (orgId) => q('SELECT * FROM fixtures WHERE org_id = ? ORDER BY fixture_date, rowid').all(orgId).map((r) => deepFreeze(decodeFixture(r))),
   };
 
+  // ---- the fixtures an organisation can observe (S13d): its own, every friendly on the board and every open day that
+  // is not deleted, one SQL union ordered by (date, public id). An event's location is its host club's.
+  const OBSERVABLE = `SELECT 'own' AS kind, f.id AS ref, f.id AS public_id, f.fixture_date AS date, f.competition, f.home, f.away, f.lat, f.lng, f.city
+      FROM fixtures f WHERE f.org_id = @org
+    UNION ALL SELECT 'friendly_board', fr.id, 'fr-' || fr.id, fr.match_date, 'Friendly', o.name, 'open invitation', o.lat, o.lng, o.city
+      FROM friendlies fr JOIN orgs o ON o.id = fr.org_id
+    UNION ALL SELECT 'open_trial', t.id, 'tr-' || t.id, t.trial_date, 'Open trial', o.name, '—', o.lat, o.lng, o.city
+      FROM open_trials t JOIN orgs o ON o.id = t.org_id WHERE t.deleted_at IS NULL`;
+  const decodeObservable = (rows) => {
+    const own = new Map(rows.filter((r) => r.kind === 'own').map((r) => [r.ref, fixtureById(r.ref)]));
+    return rows.map((r) => deepFreeze({
+      ref: { kind: r.kind, id: r.ref }, publicId: r.public_id, date: r.date, competition: r.competition, home: r.home, away: r.away,
+      location: r.lat === null || r.lat === undefined ? null : { lat: r.lat, lng: r.lng, city: r.city ?? '' },
+      fixture: r.kind === 'own' ? own.get(r.ref) : null,
+    }));
+  };
+  const observable = {
+    /** A page of the organisation's observable fixtures by date then public id; `after` is `[date, publicId]`. */
+    page: (orgId, { after = null, limit }) => {
+      const rows = q(`SELECT * FROM (${OBSERVABLE}) WHERE (@d IS NULL OR date > @d OR (date = @d AND public_id > @p)) ORDER BY date, public_id LIMIT @n`)
+        .all({ org: orgId, d: after?.[0] ?? null, p: after?.[1] ?? null, n: limit + 1 });
+      const items = decodeObservable(rows);
+      return { items: items.slice(0, limit), more: items.length > limit };
+    },
+    /** One observable fixture by its public id (an own fixture's id, `fr-<id>` or `tr-<id>`), or null. */
+    byPublicId: (orgId, publicId) => (str(publicId) ? decodeObservable(q(`SELECT * FROM (${OBSERVABLE}) WHERE public_id = @p LIMIT 1`).all({ org: orgId, p: publicId }))[0] ?? null : null),
+    /** The observable fixtures on or after `today` that have a location. */
+    upcomingLocated: (orgId, today) => decodeObservable(q(`SELECT * FROM (${OBSERVABLE}) WHERE date >= @t AND lat IS NOT NULL ORDER BY date, public_id`).all({ org: orgId, t: today })),
+  };
+
   // ---- plans
   const planById = (id) => (str(id) ? frozen(((r) => (r ? decode(PLAN_SPEC, r) : null))(q('SELECT * FROM coverage_plans WHERE id = ?').get(id))) : null);
   const plans = {
@@ -740,7 +781,7 @@ export function createInsightCoverageRepository({ sqlite, unit = null, now = Dat
   // ---- assignments
   const decA = (rows) => decodeAssignments(sqlite, rows).map(deepFreeze);
   const assignmentById = (id) => (str(id) ? decA(q('SELECT * FROM coverage_assignments WHERE id = ?').all(id))[0] ?? null : null);
-  const fixtureCond = "fixture_kind = ? AND ((fixture_kind = 'own' AND fixture_id = ?) OR (fixture_kind <> 'own' AND event_id = ?))";
+  const fixtureCond = "fixture_kind = ? AND COALESCE(fixture_id, friendly_id, open_trial_id) = ?";
   const assignments = {
     create: (raw) => operation(() => {
       const a = typedOr(typeAssignment, raw, 'coverageAssignments');
@@ -751,6 +792,9 @@ export function createInsightCoverageRepository({ sqlite, unit = null, now = Dat
         const f = fixtureById(a.fixture.id);
         if (!f) throw refusal('INSIGHT_REFERENCE_MISSING', `coverage_assignments ${a.id}: no fixture ${a.fixture.id}`);
         if (f.orgId !== a.orgId) throw refusal('INSIGHT_INPUT_INVALID', `coverage_assignments ${a.id}: the fixture is another organisation's`);
+      } else {
+        const sql = a.fixture.kind === 'friendly_board' ? 'SELECT 1 FROM friendlies WHERE id = ?' : 'SELECT 1 FROM open_trials WHERE id = ? AND deleted_at IS NULL';
+        if (!q(sql).get(a.fixture.id)) throw refusal('INSIGHT_REFERENCE_MISSING', `coverage_assignments ${a.id}: no ${a.fixture.kind === 'friendly_board' ? 'friendly' : 'open day'} ${a.fixture.id}`);
       }
       writeAssignment(st, a);
       return assignmentById(a.id);
@@ -772,11 +816,11 @@ export function createInsightCoverageRepository({ sqlite, unit = null, now = Dat
     byId: assignmentById,
     forOrgById: (orgId, id) => { const a = assignmentById(id); return a && a.orgId === orgId ? a : null; },
     /** An assignment of the organisation to this fixture that is not cancelled, or null (the duplicate-visit warning). */
-    liveForFixture: (orgId, fixture) => decA(q(`SELECT * FROM coverage_assignments WHERE org_id = ? AND ${fixtureCond} AND cancelled_at IS NULL ORDER BY rowid LIMIT 1`).all(orgId, fixture.kind, fixture.id, fixture.id))[0] ?? null,
+    liveForFixture: (orgId, fixture) => decA(q(`SELECT * FROM coverage_assignments WHERE org_id = ? AND ${fixtureCond} AND cancelled_at IS NULL ORDER BY rowid LIMIT 1`).all(orgId, fixture.kind, fixture.id))[0] ?? null,
     /** Whether the scout has an assignment that is not cancelled on `date` (the clash warning). */
     scoutBusyOn: (orgId, scoutUserId, date) => !!q('SELECT 1 FROM coverage_assignments WHERE org_id = ? AND scout_user_id = ? AND fixture_date = ? AND cancelled_at IS NULL').get(orgId, scoutUserId, date),
     /** The fixtures the organisation has a live assignment to, as `<kind>:<id>` keys. */
-    coveredKeys: (orgId) => new Set(q("SELECT DISTINCT fixture_kind, COALESCE(fixture_id, event_id) AS ref FROM coverage_assignments WHERE org_id = ? AND cancelled_at IS NULL").all(orgId).map((r) => `${r.fixture_kind}:${r.ref}`)),
+    coveredKeys: (orgId) => new Set(q("SELECT DISTINCT fixture_kind, COALESCE(fixture_id, friendly_id, open_trial_id) AS ref FROM coverage_assignments WHERE org_id = ? AND cancelled_at IS NULL").all(orgId).map((r) => `${r.fixture_kind}:${r.ref}`)),
     /** A page of the organisation's live assignments (one scout's when `scoutUserId` is given), newest first; `after` is `[createdAt, id]`. */
     page: (orgId, { scoutUserId = null, after = null, limit = 50 } = {}) => decA(q(`SELECT * FROM coverage_assignments WHERE org_id = ? AND cancelled_at IS NULL AND (? IS NULL OR scout_user_id = ?)
         AND (? IS NULL OR created_at < ? OR (created_at = ? AND id < ?)) ORDER BY created_at DESC, id DESC LIMIT ?`)
@@ -784,7 +828,7 @@ export function createInsightCoverageRepository({ sqlite, unit = null, now = Dat
   };
 
   const readOnly = (o) => Object.freeze(Object.fromEntries(Object.entries(o).filter(([k]) => !WRITES.has(k))));
-  const repo = { exposure, reviewLater, suggestions, calibration, fixtures, plans, assignments };
+  const repo = { exposure, reviewLater, suggestions, calibration, fixtures, observable, plans, assignments };
   const counters = Object.fromEntries([
     ['exposureEvents', 'exposure_events'], ['reviewLater', 'review_later'], ['evidenceSuggestions', 'evidence_suggestions'], ['calibrationSessions', 'calibration_sessions'],
     ['fixtures', 'fixtures'], ['coveragePlans', 'coverage_plans'], ['coverageAssignments', 'coverage_assignments'],
