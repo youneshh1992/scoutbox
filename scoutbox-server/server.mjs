@@ -106,6 +106,7 @@ import {
 } from './domain.mjs';
 import { parseDobStrict, parseStrictDateOnly, readInstant, utcDayOf, validateIanaZone, localParts } from './temporal.mjs';
 import { readPage, sendPageError, pageOf } from './domains/platform/paging.mjs';
+import { AUDIT_LIMITS } from './repositories/safetyAudit.mjs';
 import { PLANS, ARCHETYPES } from './catalogue.mjs';
 import { invoiceView } from './adapters.mjs';
 import { createLookups } from './domains/platform/lookups.mjs';
@@ -176,6 +177,7 @@ const { users, sessions, orgs, players, guardians, identity, mediaDeletions, cod
 // cases, comments, snapshots, decisions, evidenceStates).
 // A record the caller may use, or null: `onlyIf(repo.byId(id), (r) => r.orgId === orgId)`.
 const onlyIf = (record, ok) => (record && ok(record) ? record : null);
+const safetyReads = safetyAudit.reads; // S14b: blocks, reports, the ledger… as queries (repositories/safetyAudit.mjs)
 const recruitmentReads = Object.freeze({ ...recruitmentContactsOffers.reads, ...signingsFollowUps.reads, ...recruitment.reads, ...recruitmentCases.reads });
 // The scouting domain reads through SQL too (S9): `scoutingReads` (evidence, coachAffiliations, squadInvites; since S9b
 // templates, assessments, segments, playlists; since S9c tacticalSetups, squad, shadow, lookingFor, federationChecks,
@@ -631,16 +633,25 @@ function findPlayer(id) {
 
 function ledgerAppend(entry) {
   // Discovery Ledger is append-only; nothing in this file ever mutates or
-  // deletes an entry after this append. S6b: a row of the ledger table, written
-  // through the repository in the caller's unit or staged into its next save;
-  // userId / scoutName are stored verbatim, exactly as the caller passes them.
+  // deletes an entry after this append. A row of the ledger table, written at
+  // once (in the caller's unit of work when one is open); userId / scoutName
+  // are stored exactly as the caller passes them.
   const row = safetyAudit.ledger.append({ id: nextId('led'), ts: Date.now(), ...entry });
   broadcast('ledger', { type: row.type, playerId: row.playerId });
   return row;
 }
 
+// Response allowlists for the audit records (repositories/safetyAudit.mjs).
+const ledgerView = (l) => ({ id: l.id, ts: l.ts, type: l.type, playerId: l.playerId, orgId: l.orgId, orgName: l.orgName, userId: l.userId, scoutName: l.scoutName, detail: l.detail });
+const reportView = (r) => ({ id: r.id, ts: r.ts, by: r.by, byId: r.byId, byOrgId: r.byOrgId, targetKind: r.targetKind, targetOrgId: r.targetOrgId, targetScoutName: r.targetScoutName, targetPlayerId: r.targetPlayerId, reason: r.reason, urgent: r.urgent, status: r.status, outcome: r.outcome, resolvedAt: r.resolvedAt });
+const filedReportView = reportView; // the reporter's own reports: the same fields
+const blockView = (b) => ({ id: b.id, playerId: b.playerId, orgId: b.orgId, by: b.by, reason: b.reason, ts: b.ts });
+const moderationView = (m) => ({ id: m.id, ts: m.ts, context: m.context, flags: m.flags, severity: m.severity, excerpt: m.excerpt });
+const noteView = (n) => ({ id: n.id, orgId: n.orgId, playerId: n.playerId, userId: n.userId, scoutName: n.scoutName, text: n.text, ts: n.ts });
+const idvView = (q) => ({ id: q.id, guardianId: q.guardianId, guardianName: q.guardianName, documentType: q.documentType, documentRef: q.documentRef, provider: q.provider, reference: q.reference, ts: q.ts, status: q.status });
+
 function isBlocked(playerId, orgId) {
-  return db.blocks.some((b) => b.playerId === playerId && b.orgId === orgId);
+  return safetyAudit.blocks.has(playerId, orgId);
 }
 
 /**
@@ -1040,7 +1051,7 @@ function publishedVouchesFor(playerId) {
 // contract + no unresolved urgent report against the org.
 function safeguardingCertified(org) {
   if (!org.verified || !org.safeguardingContractSigned) return false;
-  return !db.reports.some((r) => r.targetOrgId === org.id && r.urgent && r.status === 'pending_review');
+  return !safetyAudit.reports.openUrgentAgainst(org.id);
 }
 
 // Scout tag vocabulary — structured, professional, no free text.
@@ -1054,7 +1065,7 @@ const SCOUT_TAGS = [
 const INSIGHT_TYPES = ['view', 'save', 'shortlist', 'contact_request', 'trial_request', 'contact_request_to_guardian', 'trial_request_to_guardian'];
 
 function insightsFor(playerId) {
-  const events = db.ledger.filter((l) => l.playerId === playerId && INSIGHT_TYPES.includes(l.type));
+  const events = safetyAudit.ledger.forPlayer(playerId, INSIGHT_TYPES);
   const week = Date.now() - 7 * 24 * 3600 * 1000;
   const month = Date.now() - 30 * 24 * 3600 * 1000;
   const count = (list, type) => list.filter((l) => l.type.startsWith(type)).length;
@@ -1090,18 +1101,20 @@ function insightsFor(playerId) {
 function moderateOrRefuse(res, text, context) {
   const check = moderateText(text);
   if (!check.ok) {
-    safetyAudit.moderationLog.append({ id: nextId('mod'), ts: Date.now(), context, flags: check.flags, severity: check.severity, excerpt: String(text).slice(0, 140) });
-    // Grooming-pattern hits don't just block — they escalate to a human
-    // immediately as an urgent auto-report against the sender.
-    if (check.severity === 'grooming') {
-      safetyAudit.reports.append({
-        id: nextId('rep'), ts: Date.now(), by: 'system', byId: 'moderation',
-        targetKind: context.orgId ? 'club' : 'player', targetOrgId: context.orgId ?? null,
-        reason: `Automatic escalation: grooming-pattern language blocked (${check.flags.join(', ')}) in ${context.kind}.`,
-        urgent: true, status: 'pending_review', outcome: null, resolvedAt: null,
-      });
-    }
-    persist();
+    // The hit and, for grooming-pattern language, its escalation commit together.
+    unit(() => {
+      safetyAudit.moderationLog.record({ id: nextId('mod'), ts: Date.now(), context, flags: check.flags, severity: check.severity, excerpt: String(text).slice(0, 140) });
+      // Grooming-pattern hits don't just block — they escalate to a human
+      // immediately as an urgent auto-report against the sender.
+      if (check.severity === 'grooming') {
+        safetyAudit.reports.file({
+          id: nextId('rep'), ts: Date.now(), by: 'system', byId: 'moderation', byOrgId: null,
+          targetKind: context.orgId ? 'club' : 'player', targetOrgId: context.orgId ?? null,
+          reason: `Automatic escalation: grooming-pattern language blocked (${check.flags.join(', ')}) in ${context.kind}.`,
+          urgent: true, status: 'pending_review', outcome: null, resolvedAt: null,
+        });
+      }
+    });
     res.status(400).json({
       error: 'MODERATION_BLOCKED',
       message: 'This text was blocked by moderation: personal contact details and off-platform contact are not allowed.',
@@ -1381,7 +1394,7 @@ guardianRouter.post('/verify-id', async (req, res, next) => {
       // Every check lands in the admin IDV queue for audit — and can be revoked there.
       // S6b: a row of idv_queue in the same unit as the guardian's column (Domain G:
       // the repository refuses an entry naming a guardian that does not exist).
-      safetyAudit.idvQueue.append({
+      safetyAudit.idvQueue.add({
         id: nextId('idv'), guardianId: req.guardian.id, guardianName: req.guardian.name,
         documentType, documentRef: result.document.refLast4, provider: result.provider,
         reference: result.reference, ts: Date.now(), status: 'approved',
@@ -1670,7 +1683,7 @@ guardianRouter.post('/notifications/read', (req, res) => {
 });
 
 guardianRouter.get('/reports', (req, res) => {
-  res.json(db.reports.filter((r) => r.by === 'guardian' && r.byId === req.guardian.id).slice().reverse());
+  res.json(safetyAudit.reports.forReporter('guardian', req.guardian.id).map(filedReportView));
 });
 
 guardianRouter.get('/children/:id/insights', (req, res) => {
@@ -1680,8 +1693,12 @@ guardianRouter.get('/children/:id/insights', (req, res) => {
 });
 
 // All communications are logged, and the parent can read the full log.
+// Newest first, paged by cursor (domains/platform/paging.mjs): { items, nextCursor }.
 guardianRouter.get('/log', (req, res) => {
-  res.json(db.ledger.filter((l) => req.guardian.childIds.includes(l.playerId)).slice().reverse());
+  let page;
+  try { page = readPage(req.query, ['number']); } catch (e) { return sendPageError(res, e); }
+  const out = safetyAudit.ledger.pageForPlayers(req.guardian.childIds, page);
+  res.json({ items: out.items.map(ledgerView), nextCursor: out.nextCursor });
 });
 
 // Guardian controls the child's medical sharing and availability.
@@ -1704,8 +1721,10 @@ guardianRouter.post('/block', (req, res) => {
   if (!orgId || !childId) return res.status(400).json({ error: 'ORG_AND_CHILD_REQUIRED', message: playerId ? undefined : 'Name which child the block is for (playerId).' });
   if (!optText(reason)) return badField(res, 'reason');
   if (!db.orgs.some((o) => o.id === orgId)) return res.status(404).json({ error: 'ORG_NOT_FOUND' });
-  safetyAudit.blocks.append({ id: nextId('blk'), playerId: childId, orgId, by: 'guardian', reason: reason || '', ts: Date.now() });
-  ledgerAppend({ type: 'org_blocked_by_guardian', playerId: childId, orgId, orgName: byId.org(orgId)?.name ?? orgId, userId: null, scoutName: 'guardian' });
+  unit(() => {
+    safetyAudit.blocks.add({ id: nextId('blk'), playerId: childId, orgId, by: 'guardian', reason: reason || '', ts: Date.now() });
+    ledgerAppend({ type: 'org_blocked_by_guardian', playerId: childId, orgId, orgName: byId.org(orgId).name, userId: null, scoutName: 'guardian' });
+  });
   broadcast('players');
   res.status(201).json({ blocked: true });
 });
@@ -1718,11 +1737,14 @@ function handleReport(req, res, actor) {
     return res.status(400).json({ error: 'TARGET_KIND_REQUIRED', allowed: ['club', 'scout', 'player'] });
   }
   if (!reason || !String(reason).trim()) return res.status(400).json({ error: 'REASON_REQUIRED' });
+  if (typeof reason !== 'string' || reason.trim().length > AUDIT_LIMITS.reason) return badField(res, 'reason');
   // The report's references are text columns: an id of another type is refused, never stored.
   for (const [field, v] of [['targetOrgId', targetOrgId], ['targetScoutName', targetScoutName], ['targetPlayerId', targetPlayerId]]) if (!optText(v, 200)) return badField(res, field);
+  if (targetOrgId && !byId.org(targetOrgId)) return res.status(404).json({ error: 'ORG_NOT_FOUND' });
   const report = {
     id: nextId('rep'),
     ts: Date.now(),
+    byOrgId: null,
     ...actor,
     targetKind,
     targetOrgId: targetOrgId || null,
@@ -1734,28 +1756,26 @@ function handleReport(req, res, actor) {
     outcome: null,
     resolvedAt: null,
   };
-  // S6b: a row of the reports table, stored as built here (Domain P: the
-  // targetPlayerId is not checked against the players).
-  safetyAudit.reports.append(report);
-  // Reports now land in the REAL review queue: the trust-and-safety admin
+  // Reports land in the REAL review queue: the trust-and-safety admin
   // console resolves them (POST /admin/reports/:id/resolve) and the reporter
-  // is notified with the outcome. No more auto-resolve timer.
-  if (report.urgent && targetOrgId) {
-    // Immediate suspension pending review: the org loses access to the
-    // reporter's players and its pending requests to them freeze.
-    const playerIds = actor.by === 'guardian'
-      ? byId.guardian(actor.byId)?.childIds ?? []
-      : actor.by === 'player' ? [actor.byId] : [];
-    unit(() => {
-      for (const pid of playerIds) {
-        safetyAudit.blocks.append({ id: nextId('blk'), playerId: pid, orgId: targetOrgId, by: actor.by, reason: 'suspended_pending_review', ts: Date.now() });
-        for (const r of recruitment.requests.forOrgPlayer(targetOrgId, pid).filter((x) => x.status === 'pending')) {
-          recruitment.requests.update(r.id, (d) => { d.status = 'suspended'; }); // S8a: the frozen request, with its block
-        }
+  // is notified with the outcome. The targetPlayerId is not checked against
+  // the players (Q4). An urgent report against an organisation suspends it
+  // at once, in the same unit: the org loses access to the reporter's players
+  // and its pending requests to them freeze.
+  const suspend = !!(report.urgent && targetOrgId);
+  const playerIds = !suspend ? [] : actor.by === 'guardian'
+    ? byId.guardian(actor.byId)?.childIds ?? []
+    : actor.by === 'player' ? [actor.byId] : [];
+  unit(() => {
+    safetyAudit.reports.file(report);
+    for (const pid of playerIds) {
+      safetyAudit.blocks.add({ id: nextId('blk'), playerId: pid, orgId: targetOrgId, by: actor.by, reason: 'suspended_pending_review', ts: Date.now() });
+      for (const r of recruitment.requests.forOrgPlayer(targetOrgId, pid).filter((x) => x.status === 'pending')) {
+        recruitment.requests.update(r.id, (d) => { d.status = 'suspended'; }); // S8a: the frozen request, with its block
       }
-    });
-    broadcast('players');
-  }
+    }
+  });
+  if (suspend) broadcast('players');
   res.status(201).json({ reportId: report.id, status: report.status, suspended: !!(report.urgent && targetOrgId) });
 }
 
@@ -1922,8 +1942,7 @@ app.post('/auth/org/login', (req, res) => {
         role: isLeadRole(requested) ? requested : 'Manager',
         provenance: 'org_password_bootstrap',
       });
-      safetyAudit.opsEvents.append({ id: nextId('ops'), at: Date.now(), kind: 'staff_bootstrapped', detail: { orgId: org.id, userId: user.id, by: user.name } });
-      persist();
+      safetyAudit.opsEvents.record({ id: nextId('ops'), at: Date.now(), kind: 'staff_bootstrapped', detail: { orgId: org.id, userId: user.id, by: user.name } });
     } else {
       user = users.insert({ orgId, name: scoutName.trim(), role: (role || 'Scout').trim() });
     }
@@ -2047,7 +2066,7 @@ orgRouter.get('/players/:id', (req, res) => {
     .map((a) => ({ archetypeId: a.id, label: a.label, score: similarityScore(p, a) }))
     .sort((a, b) => b.score - a.score)
     .slice(0, 2);
-  const orgNotes = (db.orgNotes ?? []).filter((n) => n.orgId === req.org.id && n.playerId === p.id).slice().reverse();
+  const orgNotes = safetyAudit.orgNotes.forOrgPlayer(req.org.id, p.id).map(noteView);
   res.json({ ...view, orgNotes, similarPlayers: { note: 'Statistical similarity — a lead, not a verdict.', players: similar, archetypes } });
 });
 
@@ -2060,10 +2079,11 @@ orgRouter.post('/players/:id/notes', (req, res) => {
   if (!p || !visibleToOrg(p, req.org) || isBlocked(p.id, req.org.id)) return res.status(404).json({ error: 'PLAYER_NOT_FOUND' });
   const { text } = req.body || {};
   if (typeof text !== 'string' || !text.trim()) return res.status(400).json({ error: 'TEXT_REQUIRED' });
+  if (text.trim().length > AUDIT_LIMITS.note) return badField(res, 'text');
   const note = { id: nextId('note'), orgId: req.org.id, playerId: p.id, userId: req.orgUser.id, scoutName: req.orgUser.name, text: text.trim(), ts: Date.now() };
-  safetyAudit.orgNotes.append(note);
+  const stored = safetyAudit.orgNotes.add(note);
   broadcast('players', { playerId: p.id });
-  res.status(201).json(note);
+  res.status(201).json(noteView(stored));
 });
 
 // "More like this" — the similarity engine as a search entry point.
@@ -2089,9 +2109,9 @@ for (const action of ['save', 'shortlist']) {
 }
 
 orgRouter.get('/shortlist', (req, res) => {
-  const ids = new Set(db.ledger.filter((l) => l.orgId === req.org.id && l.type === 'shortlist').map((l) => l.playerId));
+  const ids = safetyAudit.ledger.playersListedBy(req.org.id);
   // A shortlisted player who has since deleted their account is simply absent (the ledger row stays, id only).
-  res.json([...ids].map((id) => findPlayer(id)).filter(Boolean).map((p) => playerViewForOrg(p, req.org)).filter(Boolean));
+  res.json(ids.map((id) => findPlayer(id)).filter(Boolean).map((p) => playerViewForOrg(p, req.org)).filter(Boolean));
 });
 
 // ------------------------------------------------------- contact & trials
@@ -2328,7 +2348,7 @@ function contactReplyFrom(req, res, request) {
 orgRouter.post('/report', (req, res) => handleReport(req, res, { by: 'org_user', byId: req.orgUser.id, byOrgId: req.org.id }));
 
 orgRouter.get('/reports', (req, res) => {
-  res.json(db.reports.filter((r) => r.by === 'org_user' && r.byId === req.orgUser.id).slice().reverse());
+  res.json(safetyAudit.reports.forReporter('org_user', req.orgUser.id).map(filedReportView));
 });
 
 // Message threads for this org — only exist where a request was accepted.
@@ -2442,7 +2462,7 @@ orgRouter.get('/tags', (_req, res) => res.json(SCOUT_TAGS));
 orgRouter.get('/feed', (req, res) => {
   const FOURTEEN_DAYS = Date.now() - 14 * 24 * 3600 * 1000;
   const items = [];
-  const shortlisted = new Set(db.ledger.filter((l) => l.orgId === req.org.id && (l.type === 'shortlist' || l.type === 'save')).map((l) => l.playerId));
+  const shortlisted = new Set(safetyAudit.ledger.playersListedBy(req.org.id, ['shortlist', 'save']));
   for (const p of db.players) {
     const view = playerViewForOrg(p, req.org);
     if (!view) continue;
@@ -3121,8 +3141,8 @@ orgRouter.post('/friendlies/:id/respond', (req, res) => {
 // The club's whole pipeline computed from the ledger — every stage is a real
 // recorded event, so the numbers are the numbers.
 orgRouter.get('/funnel', (req, res) => {
-  const mine = db.ledger.filter((l) => l.orgId === req.org.id);
-  const count = (type) => mine.filter((l) => l.type.startsWith(type)).length;
+  const byType = safetyAudit.ledger.countsForOrg(req.org.id);
+  const count = (type) => Object.entries(byType).reduce((n, [t, c]) => n + (t.startsWith(type) ? c : 0), 0);
   res.json({
     stages: [
       { key: 'views', label: 'Profile views', count: count('view') },
@@ -3134,12 +3154,7 @@ orgRouter.get('/funnel', (req, res) => {
       { key: 'reports', label: 'Reports filed', count: recruitment.trials.countForOrgStatus(req.org.id, 'reported') },
       { key: 'signings', label: 'Signings', count: signingsFollowUps.signings.countForOrg(req.org.id) },
     ],
-    byScout: Object.values(mine.reduce((acc, l) => {
-      if (!l.scoutName) return acc;
-      acc[l.scoutName] ??= { scoutName: l.scoutName, events: 0 };
-      acc[l.scoutName].events += 1;
-      return acc;
-    }, {})).sort((a, b) => b.events - a.events).slice(0, 8),
+    byScout: safetyAudit.ledger.topActorsForOrg(req.org.id, 8),
   });
 });
 
@@ -3214,8 +3229,12 @@ orgRouter.post('/verification/email/confirm', (req, res) => {
 });
 
 // ------------------------------------------------- ledger, proof, plan etc
+// Newest first, paged by cursor (domains/platform/paging.mjs): { items, nextCursor }.
 orgRouter.get('/ledger', (req, res) => {
-  res.json(db.ledger.filter((l) => l.orgId === req.org.id).slice().reverse());
+  let page;
+  try { page = readPage(req.query, ['number']); } catch (e) { return sendPageError(res, e); }
+  const out = safetyAudit.ledger.pageForOrg(req.org.id, page);
+  res.json({ items: out.items.map(ledgerView), nextCursor: out.nextCursor });
 });
 
 // Proof Pack: attribution evidence for this org on this player.
@@ -3223,7 +3242,7 @@ orgRouter.get('/players/:id/proofpack', (req, res) => {
   const p = findPlayer(req.params.id);
   if (!p || isBlocked(p.id, req.org.id)) return res.status(404).json({ error: 'PLAYER_NOT_FOUND' });
   if (!visibleToOrg(p, req.org)) return res.status(403).json({ error: 'UNDER_18_WALL' });
-  const events = db.ledger.filter((l) => l.playerId === p.id && l.orgId === req.org.id);
+  const events = safetyAudit.ledger.forPlayerOrg(p.id, req.org.id).map(ledgerView);
   const first = events[0] || null;
   const windowMonths = PLANS[req.org.plan].attributionWindowMonths; // orgs.plan is one of the catalogue's plans (its CHECK)
   res.json({
@@ -3255,13 +3274,13 @@ orgRouter.get('/plan', (req, res) => {
 // Scout & Coach Reputation: seeded track records + live rows from the ledger.
 orgRouter.get('/reputation', (_req, res) => {
   const live = {};
-  for (const l of db.ledger) {
-    const key = `${l.scoutName}|${l.orgName}`;
-    live[key] ??= { scoutName: l.scoutName, orgName: l.orgName, views: 0, contacts: 0, trials: 0, signings: 0, seeded: false };
-    if (l.type === 'view') live[key].views++;
-    if (l.type === 'contact_request') live[key].contacts++;
-    if (l.type === 'trial_request' || l.type === 'trial_report') live[key].trials++;
-    if (l.type === 'signing') live[key].signings++;
+  for (const { scoutName, orgName, type, n } of safetyAudit.ledger.countsByActor()) {
+    const key = `${scoutName}|${orgName}`;
+    live[key] ??= { scoutName, orgName, views: 0, contacts: 0, trials: 0, signings: 0, seeded: false };
+    if (type === 'view') live[key].views += n;
+    if (type === 'contact_request') live[key].contacts += n;
+    if (type === 'trial_request' || type === 'trial_report') live[key].trials += n;
+    if (type === 'signing') live[key].signings += n;
   }
   res.json({ seeded: operations.reputationSeed.all(), live: Object.values(live) });
 });
@@ -3499,7 +3518,7 @@ playerRouter.post('/notifications/read', (req, res) => {
 playerRouter.get('/insights', (req, res) => res.json(insightsFor(req.player.id)));
 
 playerRouter.get('/reports', (req, res) => {
-  res.json(db.reports.filter((r) => r.by === 'player' && r.byId === req.player.id).slice().reverse());
+  res.json(safetyAudit.reports.forReporter('player', req.player.id).map(filedReportView));
 });
 
 // Academy+ is opt-in only and player-controlled (guardian-managed for minors).
@@ -3977,7 +3996,7 @@ playerRouter.get('/season-wrap', (req, res) => {
     combineBests: verifiedBests.slice(-4).map((r) => ({ drillName: r.drillName, metric: r.metric, value: r.value, unit: r.unit })),
     badges: p.badges,
     coachVouches: publishedVouchesFor(p.id).length,
-    scoutViews: db.ledger.filter((l) => l.playerId === p.id && l.type === 'view').length,
+    scoutViews: safetyAudit.ledger.countForPlayer(p.id, 'view'),
     note: 'Your season, verified. Every number above is backed by the ledger — no vanity metrics.',
   });
 });
@@ -3996,8 +4015,11 @@ playerRouter.post('/block', (req, res) => {
   if (!orgId) return res.status(400).json({ error: 'ORG_REQUIRED' });
   if (!reqText(orgId, 200)) return badField(res, 'orgId');
   if (!optText(reason)) return badField(res, 'reason');
-  safetyAudit.blocks.append({ id: nextId('blk'), playerId: req.player.id, orgId, by: 'player', reason: reason || '', ts: Date.now() });
-  ledgerAppend({ type: 'org_blocked_by_player', playerId: req.player.id, orgId, orgName: byId.org(orgId)?.name ?? orgId, userId: null, scoutName: 'player' });
+  if (!byId.org(orgId)) return res.status(404).json({ error: 'ORG_NOT_FOUND' });
+  unit(() => {
+    safetyAudit.blocks.add({ id: nextId('blk'), playerId: req.player.id, orgId, by: 'player', reason: reason || '', ts: Date.now() });
+    ledgerAppend({ type: 'org_blocked_by_player', playerId: req.player.id, orgId, orgName: byId.org(orgId).name, userId: null, scoutName: 'player' });
+  });
   broadcast('players');
   res.status(201).json({ blocked: true });
 });
@@ -4163,7 +4185,7 @@ function exportPlayer(p) {
     threads: db.channels.filter((c) => c.playerId === p.id).map((c) => channelViewFor(c, 'player')),
     notifications: notificationsFor('player', p.id),
     insights: insightsFor(p.id),
-    ledgerEvents: db.ledger.filter((l) => l.playerId === p.id),
+    ledgerEvents: safetyAudit.ledger.forPlayer(p.id).map(ledgerView),
   };
 }
 
@@ -4437,9 +4459,9 @@ adminRouter.get('/overview', (_req, res) => {
     players: db.players.length,
     guardians: db.guardians.length,
     orgs: db.orgs.length,
-    openReports: db.reports.filter((r) => r.status === 'pending_review').length,
-    blocks: db.blocks.length,
-    moderationHits: db.moderationLog.length,
+    openReports: safetyAudit.reports.countOpen(),
+    blocks: safetyAudit.blocks.count(),
+    moderationHits: safetyAudit.moderationLog.count(),
     channels: db.channels.length,
     signings: signingsFollowUps.signings.count(),
     invoices: operations.invoices.count(),
@@ -4447,15 +4469,18 @@ adminRouter.get('/overview', (_req, res) => {
     pushesSent: db.pushLog.length,
     sessions: sessions.count(),
     storageEngine: store.engine,
-    groomingEscalations: db.moderationLog.filter((m) => m.severity === 'grooming').length,
+    groomingEscalations: safetyAudit.moderationLog.count('grooming'),
     persisted: true, // every write is in the database (there is no unsaved snapshot since S14a)
   });
 });
 
-// Triage order: urgent first, then oldest-pending first, then resolved.
-adminRouter.get('/reports', (_req, res) => {
-  const rank = (r) => (r.status === 'pending_review' ? (r.urgent ? 0 : 1) : 2);
-  res.json(db.reports.slice().sort((a, b) => rank(a) - rank(b) || (rank(a) < 2 ? a.ts - b.ts : b.ts - a.ts)));
+// Triage order: urgent first, then oldest-pending first, then resolved (newest
+// first). Paged by cursor (domains/platform/paging.mjs): { items, nextCursor }.
+adminRouter.get('/reports', (req, res) => {
+  let page;
+  try { page = readPage(req.query, ['number', 'number', 'number']); } catch (e) { return sendPageError(res, e); }
+  const out = safetyAudit.reports.triagePage(page);
+  res.json({ items: out.items.map(reportView), nextCursor: out.nextCursor });
 });
 
 // S6a: on the dev transport the outbox is the delivery, so a mail whose one-time code the persisted record withholds is shown
@@ -4485,22 +4510,20 @@ adminRouter.post('/vouches/:id/revoke', (req, res) => {
 });
 
 adminRouter.post('/reports/:id/resolve', (req, res) => {
-  const report = db.reports.find((r) => r.id === req.params.id);
+  const report = safetyAudit.reports.byId(req.params.id);
   if (!report) return res.status(404).json({ error: 'REPORT_NOT_FOUND' });
   if (report.status !== 'pending_review') return res.status(409).json({ error: 'ALREADY_RESOLVED' });
   const { outcome, action } = req.body || {};
   if (!outcome || !String(outcome).trim()) return res.status(400).json({ error: 'OUTCOME_REQUIRED' });
-  // S6b: the three fields the route always changed, updated by row id (the view
-  // `report` reflects the change; the row lands in the persist() below).
-  safetyAudit.reports.patch(report.id, { status: action === 'dismiss' ? 'resolved' : 'resolved', resolvedAt: Date.now(), outcome: String(outcome).trim() });
-  if (action === 'suspend_org' && report.targetOrgId) {
-    const org = byId.org(report.targetOrgId);
-    if (org) orgs.update(org.id, { suspended: true });
-  }
-  const audienceKind = report.by === 'org_user' ? 'org_user' : report.by;
-  notify({ kind: audienceKind, id: report.byId }, 'report_resolved', `Your report was reviewed: ${report.outcome}`, report.id);
-  persist();
-  res.json(report);
+  if (typeof outcome !== 'string' || outcome.trim().length > AUDIT_LIMITS.outcome) return badField(res, 'outcome');
+  // The resolution, the organisation's suspension and the reporter's notice commit together.
+  const resolved = unit(() => {
+    const r = safetyAudit.reports.resolve(report.id, { outcome: outcome.trim(), at: Date.now() });
+    if (action === 'suspend_org' && r.targetOrgId) orgs.update(r.targetOrgId, { suspended: true });
+    notify({ kind: r.by, id: r.byId }, 'report_resolved', `Your report was reviewed: ${r.outcome}`, r.id);
+    return r;
+  });
+  res.json(reportView(resolved));
 });
 
 adminRouter.get('/clubs', (_req, res) => {
@@ -4544,7 +4567,7 @@ adminRouter.post('/clubs/:id/verification', (req, res) => {
 
 // §6.5 — Trust & Safety sees an allowlist of each guardian: never the password hash, never the e-mail code.
 adminRouter.get('/guardians', (_req, res) => {
-  res.json({ guardians: db.guardians.map(adminGuardianView), idvQueue: db.idvQueue ?? [] });
+  res.json({ guardians: db.guardians.map(adminGuardianView), idvQueue: safetyAudit.idvQueue.all().map(idvView) });
 });
 
 adminRouter.post('/guardians/:id/idv', (req, res) => {
@@ -4556,23 +4579,34 @@ adminRouter.post('/guardians/:id/idv', (req, res) => {
   unit(() => {
     guardians.update(g.id, { idVerified: approved });
     const entry = safetyAudit.idvQueue.firstForGuardian(g.id);
-    if (entry) safetyAudit.idvQueue.patch(entry.id, { status: approved ? 'approved' : 'revoked' });
+    if (entry) safetyAudit.idvQueue.setStatus(entry.id, approved ? 'approved' : 'revoked');
   });
   res.json(adminGuardianView(g));
 });
 
-adminRouter.get('/blocks', (_req, res) => res.json(db.blocks.slice().reverse()));
+// Newest first, paged by cursor (domains/platform/paging.mjs): { items, nextCursor }.
+adminRouter.get('/blocks', (req, res) => {
+  let page;
+  try { page = readPage(req.query, ['number']); } catch (e) { return sendPageError(res, e); }
+  const out = safetyAudit.blocks.page(page);
+  res.json({ items: out.items.map(blockView), nextCursor: out.nextCursor });
+});
 
 adminRouter.post('/blocks/:id/lift', (req, res) => {
   // Q5 (19 October 2026): lifting a block deletes its row, as it always did.
-  const lifted = safetyAudit.blocks.remove(req.params.id);
+  const lifted = safetyAudit.blocks.lift(req.params.id);
   if (!lifted) return res.status(404).json({ error: 'BLOCK_NOT_FOUND' });
-  persist();
   broadcast('players');
-  res.json({ lifted });
+  res.json({ lifted: blockView(lifted) });
 });
 
-adminRouter.get('/moderation', (_req, res) => res.json(db.moderationLog.slice().reverse()));
+// Newest first, paged by cursor (domains/platform/paging.mjs): { items, nextCursor }.
+adminRouter.get('/moderation', (req, res) => {
+  let page;
+  try { page = readPage(req.query, ['number']); } catch (e) { return sendPageError(res, e); }
+  const out = safetyAudit.moderationLog.page(page);
+  res.json({ items: out.items.map(moderationView), nextCursor: out.nextCursor });
+});
 
 // Thread audit — the "all communications logged" promise, made inspectable.
 adminRouter.get('/channels', (_req, res) => res.json(db.channels.map((c) => ({ ...c }))));
@@ -4640,7 +4674,7 @@ function revokeOrgUserAccess(userId) {
 }
 
 registerM12({
-  db, byId, scoutingReads, verificationReads, agentReads, complianceReads, developmentReads, development, boxCamReads, discoveryReads, insightReads, grassrootsReads, recruitmentReads, users, players, guardians, unit, app, orgRouter, playerRouter, guardianRouter, adminRouter,
+  db, byId, safetyReads, scoutingReads, verificationReads, agentReads, complianceReads, developmentReads, development, boxCamReads, discoveryReads, insightReads, grassrootsReads, recruitmentReads, users, players, guardians, unit, app, orgRouter, playerRouter, guardianRouter, adminRouter,
   nextId, persist, persistNow, notify, ledgerAppend, broadcast, safetyAudit, recruitment, recruitmentCases, // S8a: requests and trials are explicit repository writes
   signingsFollowUps, // S8d: follow-ups and outcome reports are explicit repository writes
   scoutingEvidence, // S9a: evidence, coach affiliations and squad invitations are explicit repository writes
@@ -4659,7 +4693,7 @@ registerM12({
 // Same module pattern under m13/. registerM13 returns the enriched context so
 // the login path above can reach the MFA rate-limit guards.
 const m13Ctx = registerM13({
-  db, byId, scoutingReads, verificationReads, agentReads, complianceReads, developmentReads, development, boxCamReads, discoveryReads, insightReads, grassrootsReads, recruitmentReads, users, sessions, orgs, players, guardians, mediaDeletions, codes, notifications, dispatches, outbox, pushLog, pushTokens, channels, unit, app, orgRouter, playerRouter, guardianRouter, adminRouter,
+  db, byId, safetyReads, scoutingReads, verificationReads, agentReads, complianceReads, developmentReads, development, boxCamReads, discoveryReads, insightReads, grassrootsReads, recruitmentReads, users, sessions, orgs, players, guardians, mediaDeletions, codes, notifications, dispatches, outbox, pushLog, pushTokens, channels, unit, app, orgRouter, playerRouter, guardianRouter, adminRouter,
   nextId, persist, persistNow, notify, ledgerAppend, broadcast, safetyAudit, recruitment, recruitmentCases,
   opportunitiesCampaigns, // S9d: player suitability preferences and approved summaries are explicit repository writes
   transitionsVouches, // S10c: transition cases, their grants and history are explicit repository writes
@@ -4682,7 +4716,7 @@ const m13Ctx = registerM13({
 // keep claim provenance in sync.
 const m14Ctx = registerM14({
   verification, unit, // S10a: every verification record is an explicit repository write
-  db, byId, scoutingReads, verificationReads, agentReads, complianceReads, developmentReads, development, boxCamReads, discoveryReads, insightReads, grassrootsReads, users, orgs, app, orgRouter, playerRouter, guardianRouter, adminRouter,
+  db, byId, safetyReads, scoutingReads, verificationReads, agentReads, complianceReads, developmentReads, development, boxCamReads, discoveryReads, insightReads, grassrootsReads, users, orgs, app, orgRouter, playerRouter, guardianRouter, adminRouter,
   nextId, persist, persistNow, notify, ledgerAppend, broadcast, safetyAudit,
   findPlayer, isBlocked, moderateOrRefuse, playerViewForOrg, sessionFor,
   storage, mailer, orgSafe, recordActivity, revokeOrgUserAccess,
@@ -4694,14 +4728,14 @@ const m14Ctx = registerM14({
 // write to it (M15 preferences) and the system that reads it (M18 Second Look),
 // so a change carries the clock of the moment it happened rather than one
 // borrowed from a record describing a different event.
-const srcCtx = { db, byId, nextId, persistNow, safetyAudit }; // S6b: source changes are rows of source_changes, written through the repository
+const srcCtx = { nextId, safetyAudit }; // source changes are rows of source_changes, written through the repository
 registerSourceChanges(srcCtx);
 
 // M18.2 — preferences, audit and fault injection. Registered here, after the
 // routers exist and before the milestone modules that emit notifications, so
 // the preference gate is in place for every notify() call that follows.
 m182Ctx = {
-  db, byId, scoutingReads, verificationReads, agentReads, complianceReads, developmentReads, development, boxCamReads, discoveryReads, insightReads, grassrootsReads, recruitmentReads, notifications, orgRouter, playerRouter, guardianRouter, persist, findPlayer,
+  db, byId, safetyReads, scoutingReads, verificationReads, agentReads, complianceReads, developmentReads, development, boxCamReads, discoveryReads, insightReads, grassrootsReads, recruitmentReads, notifications, orgRouter, playerRouter, guardianRouter, persist, findPlayer,
   // The same standing-gate composition M12's shared helpers use.
   orgCanSee: (org, p) => !!p && visibleToOrg(p, org) && !isBlocked(p.id, org.id),
   requireLead: (req, res) => {
@@ -4723,7 +4757,7 @@ const rateLimit = createRateLimiter();
 // records. Registered after M14 so it can read verification stores; it
 // receives the same context and adds no new authorization surface.
 const m15Ctx = registerM15({
-  db, byId, scoutingReads, verificationReads, agentReads, complianceReads, developmentReads, development, boxCamReads, discoveryReads, insightReads, grassrootsReads, recruitmentReads, app, orgRouter, playerRouter, guardianRouter, adminRouter,
+  db, byId, safetyReads, scoutingReads, verificationReads, agentReads, complianceReads, developmentReads, development, boxCamReads, discoveryReads, insightReads, grassrootsReads, recruitmentReads, app, orgRouter, playerRouter, guardianRouter, adminRouter,
   nextId, persist, persistNow, notify, ledgerAppend, broadcast, safetyAudit,
   findPlayer, isBlocked, moderateOrRefuse, playerViewForOrg,
   storage, m14: m14Ctx,
@@ -4732,7 +4766,7 @@ const m15Ctx = registerM15({
 });
 const m16Ctx = registerM16({
   rateLimit,
-  db, byId, scoutingReads, verificationReads, agentReads, complianceReads, developmentReads, development, boxCamReads, discoveryReads, insightReads, grassrootsReads, app, orgRouter, playerRouter, guardianRouter, adminRouter,
+  db, byId, safetyReads, scoutingReads, verificationReads, agentReads, complianceReads, developmentReads, development, boxCamReads, discoveryReads, insightReads, grassrootsReads, app, orgRouter, playerRouter, guardianRouter, adminRouter,
   nextId, persist, persistNow, notify, ledgerAppend, broadcast, safetyAudit,
   findPlayer, isBlocked, moderateOrRefuse,
   players, unit, // S5: a Box Clip marks a media row through the repository, inside a unit with the session and the ledger
@@ -4744,7 +4778,7 @@ const m16Ctx = registerM16({
 // Registered last because it consumes all of them; it adds no storage and no
 // authorization surface (a Trust Score grants nothing).
 const m162Ctx = registerM162({
-  db, byId, scoutingReads, verificationReads, agentReads, complianceReads, developmentReads, development, boxCamReads, discoveryReads, insightReads, grassrootsReads, app, orgRouter, playerRouter, guardianRouter, adminRouter,
+  db, byId, safetyReads, scoutingReads, verificationReads, agentReads, complianceReads, developmentReads, development, boxCamReads, discoveryReads, insightReads, grassrootsReads, app, orgRouter, playerRouter, guardianRouter, adminRouter,
   nextId, persist, persistNow, notify, ledgerAppend, broadcast, safetyAudit,
   findPlayer, isBlocked, moderateOrRefuse,
   assemblePassport: m15Ctx.assemblePassport,
@@ -4759,7 +4793,7 @@ const m162Ctx = registerM162({
 const m17Ctx = registerM17({
   rateLimit,
   faults: faultLayer, // M23 P8.1 — the development fault seam inside the ONE lifecycle writer
-  db, byId, scoutingReads, verificationReads, agentReads, complianceReads, developmentReads, development, boxCamReads, discoveryReads, insightReads, grassrootsReads, recruitmentReads, app, orgRouter, playerRouter, guardianRouter, adminRouter,
+  db, byId, safetyReads, scoutingReads, verificationReads, agentReads, complianceReads, developmentReads, development, boxCamReads, discoveryReads, insightReads, grassrootsReads, recruitmentReads, app, orgRouter, playerRouter, guardianRouter, adminRouter,
   nextId, persist, persistNow, notify, ledgerAppend, broadcast, safetyAudit, recruitmentCases, unit,
   findPlayer, isBlocked, moderateOrRefuse, playerViewForOrg,
   storage, publishedVouchesFor, pathwayRecord, DRILLS, DATA_DIR,
@@ -4792,7 +4826,7 @@ const m17Ctx = registerM17({
 // M18 registers no player, guardian or public route at all.
 const m18Ctx = registerM18({
   rateLimit,
-  db, byId, scoutingReads, verificationReads, agentReads, complianceReads, developmentReads, development, boxCamReads, discoveryReads, insightReads, grassrootsReads, recruitmentReads, app, orgRouter, playerRouter, guardianRouter, adminRouter,
+  db, byId, safetyReads, scoutingReads, verificationReads, agentReads, complianceReads, developmentReads, development, boxCamReads, discoveryReads, insightReads, grassrootsReads, recruitmentReads, app, orgRouter, playerRouter, guardianRouter, adminRouter,
   discovery, unit, // S12c: every brief, review, Second Look item and watchlist is an explicit repository write
   combineProtocolIds: () => COMBINE_PROTOCOLS.map((p) => p.id), // a brief's Combine protocols are refused unless known (S12c)
   nextId, persist, persistNow, notify, ledgerAppend, broadcast, safetyAudit,

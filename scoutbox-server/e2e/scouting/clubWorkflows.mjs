@@ -631,7 +631,7 @@ ok(r.status === 201, 'the player blocks the club after the trial was accepted');
 r = await j(`/org/trials/${trial.id}/day`, {}, bearer(MARIA));
 ok(r.status === 200 && r.body.trial.emergency === null && r.body.trial.emergencyWithheld === 'BLOCKED' && !JSON.stringify(r.body).includes('70 000 11 22'),
   'after the block the emergency contact is withheld from the org day view (and the number appears nowhere in it)');
-const blk = (await j('/admin/blocks', {}, admin)).body.find((b) => b.playerId === 'pl-svensson' && b.orgId === 'org-eastport');
+const blk = (await j('/admin/blocks?limit=100', {}, admin)).body.items.find((b) => b.playerId === 'pl-svensson' && b.orgId === 'org-eastport');
 r = await post(`/admin/blocks/${blk.id}/lift`, {}, admin);
 ok(r.status === 200, 'Trust & Safety lifts the block');
 r = await j(`/org/trials/${trial.id}/day`, {}, bearer(MARIA));

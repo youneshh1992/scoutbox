@@ -326,7 +326,7 @@ section('RF/§9 — authority is re-derived at mutation time, not read from the 
   const blk = await j('POST', '/player/block', { orgId: 'org-northstar' }, kola.token);
   ok(blk.status === 201, 'RF7 the client blocks the agency');
   neg(collect('RF blocked read', await j('GET', `/org/agent/clients/${REL}/trials`, undefined, ana.token)).status >= 400, 'RF8 and the client surface closes — a block ends the question before the licence or the disclosure is consulted');
-  const blocks = (await j('GET', '/admin/blocks', undefined, undefined, ADMIN)).body ?? [];
+  const blocks = (await j('GET', '/admin/blocks?limit=100', undefined, undefined, ADMIN)).body.items ?? [];
   for (const b of (Array.isArray(blocks) ? blocks : []).filter((x) => x.playerId === 'pl-adeyemi' && x.orgId === 'org-northstar')) await j('POST', `/admin/blocks/${b.id}/lift`, {}, undefined, ADMIN);
   // 4. The agent leaves the agency while the session lives.
   const team = await j('GET', '/org/agent/agency/team', undefined, alex.token);

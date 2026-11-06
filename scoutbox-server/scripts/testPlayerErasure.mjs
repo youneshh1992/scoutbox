@@ -221,7 +221,7 @@ test('unit of work: an erase inside a unit that fails after every write — and 
   t.sessions.create('player', 'pl-child1');
   const code = t.codes.issuePairingCode('pl-child1');
   assert.ok(code?.code, 'a pairing code was issued');
-  t.layer.safetyAudit.ledger.append({ id: 'led-erase', ts: NOW, type: 'view', playerId: 'pl-child1', orgId: 'org-pro', orgName: 'Eastport FC', userId: 'usr-1', scoutName: 'Maria' });
+  t.layer.safetyAudit.ledger.append({ id: 'led-erase', ts: NOW, type: 'view', playerId: 'pl-child1', orgId: 'org-pro', orgName: 'Eastport FC', userId: null, scoutName: 'Maria' }); // no staff row in this fixture: the staff key is RESTRICT (S14b)
   t.save();
   const ledgerBefore = JSON.stringify(t.all('SELECT * FROM ledger ORDER BY seq'));
   const view = t.players.byId('pl-child1'); const kids = t.guardians.byId('gd-primary').childIds;

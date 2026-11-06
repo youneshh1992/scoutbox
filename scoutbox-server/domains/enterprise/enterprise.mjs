@@ -71,8 +71,9 @@ export function registerEnterprise(ctx) {
   } = ctx;
   if (!enterprise || !enterpriseReads) throw new TypeError('registerEnterprise needs the enterprise repository (ctx.enterprise, ctx.enterpriseReads)');
   if (!ctx.groupReads) throw new TypeError('registerEnterprise needs groupReads (the audit export lists the group grants)');
-  // S6b: an ops event is a row of ops_events (repositories/safetyAudit.mjs), staged into the persist() that follows each one; a bare context without the repository keeps the array push.
-  const opsEvent = (row) => (safetyAudit ? safetyAudit.opsEvents.append(row) : db.opsEvents.push(row));
+  // An ops event is a row of ops_events (repositories/safetyAudit.mjs), written at once.
+  const opsEvent = (row) => safetyAudit.opsEvents.record(row);
+  const ledgerExport = (l) => ({ id: l.id, ts: l.ts, type: l.type, playerId: l.playerId, orgId: l.orgId, orgName: l.orgName, userId: l.userId, scoutName: l.scoutName, detail: l.detail });
 
   const DEV = devLoginsEnabled();
 
@@ -350,7 +351,7 @@ export function registerEnterprise(ctx) {
     const orgId = req.org.id;
     const scoped = {
       contract: 'audit-export.2026-09.v1', orgId, exportedAt: Date.now(), exportedBy: req.orgUser.name,
-      ledger: db.ledger.filter((l) => l.orgId === orgId),
+      ledger: safetyAudit.ledger.forOrg(orgId).map(ledgerExport),
       caseHistories: ctx.recruitmentReads.cases.forOrg(orgId).map((c) => ({ id: c.id, playerId: c.playerId, history: c.history })),
       importHistories: ctx.integrationReads.batches.historiesForOrg(orgId),
       grantsGiven: ctx.groupReads.grants.allGivenBy(orgId).map(grantExport),
@@ -358,7 +359,6 @@ export function registerEnterprise(ctx) {
       supportAccess: enterpriseReads.grants.forOrg(orgId),
     };
     opsEvent({ id: nextId('ops'), at: Date.now(), kind: 'audit_export', detail: { orgId, by: req.orgUser.name } });
-    persist();
     res.json(scoped);
   });
 
@@ -477,8 +477,7 @@ export function registerEnterprise(ctx) {
     // directory exists; ids only, never a record.
     const conflicts = mediaDeletions.conflicts();
     if (conflicts.length) {
-      opsEvent({ id: nextId('ops'), at: Date.now(), kind: 'backup_refused', detail: { dir: stamp, error: 'MEDIA_QUEUE_OWNERSHIP_CONFLICT', conflicts: conflicts.map((c) => ({ mediaId: c.media_id, owners: c.owners })) } });
-      persistNow();
+      opsEvent({ id: nextId('ops'), at: Date.now(), kind: 'backup_refused', detail: { dir: stamp, error: 'MEDIA_QUEUE_OWNERSHIP_CONFLICT', conflictCount: conflicts.length } });
       return res.status(409).json({
         error: 'MEDIA_QUEUE_OWNERSHIP_CONFLICT',
         message: `${conflicts.length} queued media removal(s) name a clip a live player still references; the backup was refused because it could neither copy the file as the player's nor leave it out as removed. Resolve the queue entry or the player's reference first.`,
@@ -531,11 +530,9 @@ export function registerEnterprise(ctx) {
       try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* best effort */ }
       console.error(`backup failed (${stamp}): ${err?.message ?? err}`);
       opsEvent({ id: nextId('ops'), at: Date.now(), kind: 'backup_failed', detail: { dir: stamp, error: String(err?.message ?? err).slice(0, 200) } });
-      persistNow();
       return res.status(500).json({ error: 'BACKUP_FAILED', message: 'The backup could not be completed; the partial directory was removed.' });
     }
     opsEvent({ id: nextId('ops'), at: Date.now(), kind: 'backup_created', detail: { dir: stamp, files: manifest.files.length, queuedForRemoval: manifest.media.queuedForRemoval } });
-    persistNow();
     res.status(201).json({ dir, manifest });
   });
 
@@ -584,11 +581,11 @@ export function registerEnterprise(ctx) {
   adminRouter.get('/metrics', (_req, res) => {
     res.json({
       ...metrics,
-      deliveryFailures: db.opsEvents.filter((e) => e.kind === 'delivery_failed').length,
-      webhookFailures: db.opsEvents.filter((e) => e.kind === 'webhook_failed').length,
+      deliveryFailures: safetyAudit.opsEvents.count('delivery_failed'),
+      webhookFailures: safetyAudit.opsEvents.count('webhook_failed'),
       dispatchBacklog: dispatches.backlogCount(), // S7b: queued or retrying, the same definition as before, counted on the repository's mirror
       webhookBacklog: ctx.integrationReads.deliveries.backlogCount(), // S13a: queued or retrying, counted in SQL
-      opsEvents: db.opsEvents.slice(-50).reverse(),
+      opsEvents: safetyAudit.opsEvents.newest(50).map((e) => ({ id: e.id, at: e.at, kind: e.kind, detail: e.detail })),
       note: 'Counters cover this process since boot. Local development metrics — not a production SLA measurement.',
     });
   });

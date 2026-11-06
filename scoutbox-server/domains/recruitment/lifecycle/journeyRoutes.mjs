@@ -23,7 +23,7 @@ import { currentSigningForOffer } from './journeyModel.mjs';
 import { playerJourneyReads } from './journeyReads.mjs';
 
 export function registerJourneyRoutes(ctx) {
-  const { db, recruitmentReads, scoutingReads, playerRouter, guardianRouter, orgRouter, agent = null, integration = null, findPlayer, guardianOwnsChild } = ctx;
+  const { db, recruitmentReads, scoutingReads, safetyReads, playerRouter, guardianRouter, orgRouter, agent = null, integration = null, findPlayer, guardianOwnsChild } = ctx;
   if (!recruitmentReads?.contacts || !recruitmentReads?.offers || !recruitmentReads?.signings || !recruitmentReads?.signingPackages) throw new TypeError('registerJourneyRoutes needs recruitmentReads (contacts, offers, signings, signingPackages) from the data layer');
   const evidence = () => ctx.recruitmentEvidenceProvider ?? undefined;
   const orgOf = (orgId) => (ctx.byId ? ctx.byId.org(orgId) : (db.orgs ?? []).find((o) => o && o.id === orgId) ?? null);
@@ -36,7 +36,7 @@ export function registerJourneyRoutes(ctx) {
     const items = [];
     // Every case's records read once for the whole list (journeyReads.mjs), not a dozen queries a case.
     const cases = recruitmentReads.cases.forPlayer(playerId);
-    const reads = { ...playerJourneyReads(recruitmentReads, playerId, cases.filter((k) => k.room)), assessments: scoutingReads.assessments };
+    const reads = { ...playerJourneyReads(recruitmentReads, playerId, cases.filter((k) => k.room)), assessments: scoutingReads.assessments, blocks: safetyReads.blocks };
     for (const k of cases) {
       if (!k.room) continue;
       const out = buildRecruitmentJourney(db, k.id, viewer, { now: at, evidence: evidence(), reads });
@@ -89,7 +89,7 @@ export function registerJourneyRoutes(ctx) {
     if (!g.ok) return res.status(403).json({ error: g.decision.code, rule: g.decision.rule ?? null, message: 'This client\'s record is not open to you right now.' });
     const items = [];
     const cases = recruitmentReads.cases.forPlayer(a.clientId);
-    const reads = { ...playerJourneyReads(recruitmentReads, a.clientId, cases.filter((k) => k.room)), assessments: scoutingReads.assessments };
+    const reads = { ...playerJourneyReads(recruitmentReads, a.clientId, cases.filter((k) => k.room)), assessments: scoutingReads.assessments, blocks: safetyReads.blocks };
     for (const k of cases) {
       if (!k.room) continue;
       const out = buildRecruitmentJourney(db, k.id, { kind: 'agent', authorized: true, playerId: a.clientId, userId: req.orgUser.id, grants: g.grants }, { now: at, evidence: evidence(), reads });
@@ -108,7 +108,7 @@ export function registerJourneyRoutes(ctx) {
   const orgUserOrg = (userId) => { const u = (db.users ?? []).find((x) => x && x.id === userId); return u ? u.orgId : null; };
   const caseFor = (caseId, orgId) => { const k = recruitmentReads.cases.byId(caseId); return k && k.room && (orgId === null || k.orgId === orgId) ? k : null; };
   const room = (k, tab) => (k ? { kind: 'room', roomId: k.id, tab } : null);
-  const blocked = (playerId, orgId) => (db.blocks ?? []).some((b) => b && b.playerId === playerId && b.orgId === orgId);
+  const blocked = (playerId, orgId) => safetyReads.blocks.has(playerId, orgId);
   /**
    * M23 P8.1 (D-P81-14): an agent's target is re-derived through the SAME
    * authority the client routes prove on every read — a live representation

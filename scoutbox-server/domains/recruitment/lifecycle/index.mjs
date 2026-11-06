@@ -33,7 +33,8 @@ export function registerM23(rawCtx) {
   const ctx = { ...rawCtx, ...buildShared(rawCtx) };
   const { db, recruitmentReads, scoutingReads, orgRouter, persistNow, isLead } = ctx;
   // The journey reads the club's assessments too (S9b: scoutingReads).
-  const journeyReads = { ...recruitmentReads, ...scoutingReads };
+  if (!ctx.safetyReads?.blocks) throw new TypeError('the lifecycle routes need safetyReads (the safety repository\'s queries)');
+  const journeyReads = { ...recruitmentReads, ...scoutingReads, blocks: ctx.safetyReads.blocks };
   if (!recruitmentReads?.contacts || !recruitmentReads?.offers) throw new TypeError('registerM23 needs recruitmentReads (contacts, offers) from the data layer');
 
   /**

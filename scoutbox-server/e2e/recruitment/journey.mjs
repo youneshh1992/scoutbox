@@ -412,7 +412,7 @@ section('C — the boundaries the journey never crosses (§62)');
   const d = await j('POST', `/org/rooms/${RID}/contacts`, { subject: 'Hi', body: 'Hello there.', clientKey: key() }, maria.token);
   const send = d.status === 201 ? await j('POST', `/org/rooms/${RID}/contacts/${d.body.contact.id}/send`, { expectedRev: d.body.contact.rev, clientKey: key() }, maria.token) : d;
   neg(blk.status === 201 && send.status !== 200 && (await stage(RID)) === 'contact_planned' && !(await jb(RID)).completedStages.some((c) => c.stage === 'contact') && (await jb(RID)).blocked === true, '#4 C1 a contact that cannot be delivered (blocked) moves nothing; the journey names the block');
-  const blocks = (await j('GET', '/admin/blocks', undefined, undefined, { 'x-admin-key': process.env.ADMIN_KEY ?? 'scoutbox-admin' })).body;
+  const blocks = (await j('GET', '/admin/blocks?limit=100', undefined, undefined, { 'x-admin-key': process.env.ADMIN_KEY ?? 'scoutbox-admin' })).body.items;
   for (const b of (Array.isArray(blocks) ? blocks : []).filter((x) => x.playerId === 'pl-nowak')) await j('POST', `/admin/blocks/${b.id}/lift`, {}, undefined, { 'x-admin-key': process.env.ADMIN_KEY ?? 'scoutbox-admin' });
   // #14 signed requires canonical evidence (legacy route)
   const M = await reviewed(maria.token, 'pl-martin');

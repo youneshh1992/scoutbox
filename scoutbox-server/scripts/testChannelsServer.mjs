@@ -30,7 +30,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import { tempDir } from './coreIdentityTestFixtures.mjs';
-import { AUDIT_SNAPSHOT_TABLES } from '../repositories/safetyAudit.mjs';
+import { SAFETY_AUDIT_SNAPSHOT } from '../repositories/safetyAudit.mjs';
 
 let passed = 0;
 const only = process.env.TEST_ONLY || '';
@@ -72,7 +72,7 @@ const live = (dir) => !!q1(dir, 'SELECT 1 AS one FROM data_migrations WHERE id =
 /** Whether the file still has the retired blob table (dropped by migration 0039, S14a). */
 const hasBlobTable = (dir) => !!q1(dir, "SELECT 1 AS one FROM sqlite_master WHERE type = 'table' AND name = 'collections'");
 // S6b: the ledger is a table since 0013 — read in the writer's literal through the repository's own reader.
-const ledgerRows = (dir) => { const t = AUDIT_SNAPSHOT_TABLES.find((x) => x.name === 'ledger'); const s = new DatabaseSync(path.join(dir, 'scoutbox.db'), { readOnly: true }); try { return s.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'ledger'").get() ? t.read(s) : []; } finally { s.close(); } };
+const ledgerRows = (dir) => { const s = new DatabaseSync(path.join(dir, 'scoutbox.db'), { readOnly: true }); try { return SAFETY_AUDIT_SNAPSHOT.read(s)?.ledger ?? []; } finally { s.close(); } };
 // S8a: the requests are rows of recruitment_requests since 0015 — read the columns the assertions need.
 const requestRows = (c) => c.all('SELECT id, status, contact_channel_id AS contactChannel FROM recruitment_requests ORDER BY rowid');
 const requestsOf = (dir) => snap(dir, (c) => requestRows(c) ?? []);

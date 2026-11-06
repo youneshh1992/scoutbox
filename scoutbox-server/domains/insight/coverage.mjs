@@ -185,7 +185,7 @@ export function registerCoverage(ctx) {
   orgRouter.get('/coverage/suggestions', (req, res) => {
     const interest = new Set([
       ...ctx.recruitmentReads.cases.forOrg(req.org.id).filter((c) => !['closed'].includes(c.stage)).map((c) => c.playerId),
-      ...db.ledger.filter((l) => l.type === 'shortlist' && l.orgId === req.org.id).map((l) => l.playerId),
+      ...ctx.safetyReads.ledger.playersListedBy(req.org.id),
     ]);
     const candidates = [...interest].map(findPlayer).filter((p) => p && orgCanSee(req.org, p) && p.location);
     const today = new Date().toISOString().slice(0, 10);

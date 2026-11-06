@@ -37,10 +37,9 @@ export function registerDelivery(ctx) {
   // S13e: the callback ids applied, the instant the delivery centre started and the injected failures are rows of
   // repositories/operations.mjs (delivery_callbacks_seen, delivery_centre, delivery_fail_injections), written explicitly.
   const bookkeeping = operations.delivery;
-  // S6b: an exhausted retry's ops event is a row of ops_events (repositories/safetyAudit.mjs),
-  // staged into the sweep pass's persistNow() with the dispatch rows and the outbox row; a bare
-  // context without the repository keeps the array push (the same fallback as the outbox below).
-  const opsEvent = (row) => (safetyAudit ? safetyAudit.opsEvents.append(row) : db.opsEvents.push(row));
+  // An exhausted retry's ops event is a row of ops_events (repositories/safetyAudit.mjs), written at once
+  // (in the sweep's unit of work when one is open).
+  const opsEvent = (row) => safetyAudit.opsEvents.record(row);
   // S7c: the local fake provider's record is an outbox row (repositories/outboxPush.mjs).
   // The server always passes the repository. Without one, the record is pushed onto
   // db.outbox exactly as before the cutover — the same fallback adapters.mjs keeps —

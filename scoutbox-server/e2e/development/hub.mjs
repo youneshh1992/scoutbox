@@ -1178,7 +1178,7 @@ section('§17 — G1–G15, the mandate’s positive journeys');
   // Lift the block through the only route that lifts one, so the remaining
   // journeys run against a club that can see the player again.
   if (blockRes.status < 400) {
-    const blocks = (await j('GET', '/admin/blocks', undefined, undefined, ADMIN)).body ?? [];
+    const blocks = (await j('GET', '/admin/blocks?limit=100', undefined, undefined, ADMIN)).body.items ?? [];
     const mine = blocks.find((b) => b.playerId === 'pl-adeyemi' && b.orgId === 'org-eastport');
     if (mine) await j('POST', `/admin/blocks/${mine.id}/lift`, {}, undefined, ADMIN);
   }

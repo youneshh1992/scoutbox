@@ -545,7 +545,7 @@ section('H/I/J/§20–§24 — contact routing, its reauthorization, and Inbox i
   ok(blocked.status === 200 || blocked.status === 201, 'Y1 the client blocks the club between the draft and the send');
   neg(expect(collect('#26', await j('POST', `/org/rooms/${RID}/contacts/${d3.body.contact.id}/send`, { expectedRev: d3.body.contact.rev }, maria.token)), 403, 'CONTACT_BLOCKED'), '#26 and the send is refused — the block is re-derived at mutation time, not read from the draft');
   // Lift it through the canonical door so the rest of the suite can proceed.
-  const blocks = (await j('GET', '/admin/blocks', undefined, undefined, ADMIN)).body ?? [];
+  const blocks = (await j('GET', '/admin/blocks?limit=100', undefined, undefined, ADMIN)).body.items ?? [];
   for (const b of (Array.isArray(blocks) ? blocks : []).filter((x) => x.playerId === 'pl-adeyemi' && x.orgId === 'org-eastport')) {
     await j('POST', `/admin/blocks/${b.id}/lift`, {}, undefined, ADMIN);
   }

@@ -162,7 +162,7 @@ export function registerGroups(ctx) {
   function resourceViewFor(grant, receivingOrg) {
     const eligible = (pid) => { const p = findPlayer(pid); return p && orgCanSee(receivingOrg, p); };
     if (grant.resourceKind === 'shortlist') {
-      const ids = [...new Set(db.ledger.filter((l) => l.type === 'shortlist' && l.orgId === grant.fromOrgId).map((l) => l.playerId))];
+      const ids = ctx.safetyReads.ledger.playersListedBy(grant.fromOrgId);
       const visible = ids.filter(eligible);
       return {
         kind: 'shortlist',

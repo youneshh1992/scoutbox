@@ -141,6 +141,9 @@ const MODERATION_PATTERNS = [
   { flag: 'secrecy', severity: 'grooming', re: /\b(don'?t tell (your|ur|any)|keep (this|it) (between us|a? ?secret|quiet)|(our|a) little secret|come alone)\b/i },
   { flag: 'personal_probing', severity: 'grooming', re: /\b(what school (do|does)|home alone|are you alone|where do you live|send (me )?(more )?(photos|pictures|pics) of (you|yourself))\b/i },
 ];
+/** Every flag a moderation hit can carry, and the two severities (one definition: the moderation log's CHECKs). */
+export const MODERATION_FLAGS = Object.freeze(MODERATION_PATTERNS.map((p) => p.flag));
+export const MODERATION_SEVERITIES = Object.freeze(['contact', 'grooming']);
 
 export function moderateText(text) {
   const hits = MODERATION_PATTERNS.filter((p) => p.re.test(String(text ?? '')));

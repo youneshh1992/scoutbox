@@ -244,7 +244,7 @@ let tomAffId, tomRoleId, tomEvidenceId;
   const notif = await j('GET', '/org/notifications', undefined, tom.token);
   ok(notif.body.some((n) => n.type === 'verification' && n.text.includes('confirmed')), 'delivery-centre notification reached the subject');
   const led = await j('GET', '/org/ledger', undefined, maria.token);
-  ok(led.body.some((l) => l.type === 'verification_decision'), 'decision landed in the tenant audit ledger');
+  ok(led.body.items.some((l) => l.type === 'verification_decision'), 'decision landed in the tenant audit ledger');
 }
 
 // Identity claim: document evidence + T&S review (never auto).

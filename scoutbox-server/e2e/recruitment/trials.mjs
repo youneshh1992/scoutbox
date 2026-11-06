@@ -314,7 +314,7 @@ const trial = async (RID, tid, token = maria.token) => (await j('GET', `/org/roo
 const notifs = async (path, token) => (await j('GET', path, undefined, token)).body;
 /** Blocks are lifted by Trust & Safety only (existing rule) — the suite does it through that door. */
 async function unblock(playerId, orgId) {
-  const blocks = (await j('GET', '/admin/blocks', undefined, undefined, ADMIN)).body;
+  const blocks = (await j('GET', '/admin/blocks?limit=100', undefined, undefined, ADMIN)).body.items;
   for (const b of blocks.filter((x) => x.playerId === playerId && x.orgId === orgId)) await j('POST', `/admin/blocks/${b.id}/lift`, {}, undefined, ADMIN);
 }
 

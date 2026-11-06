@@ -85,11 +85,21 @@ These are the product's first principles for under-18s. Everything below refines
 - The report, block, note and ID-check routes take text where they store text: a
   report's target ids and scout name, a block's organisation and reason, an ID check's
   document type. Anything else (a number, an object, a list) gets `400 FIELD_INVALID`
-  naming the field; a note that is not text gets `400 TEXT_REQUIRED`. Nothing is stored.
+  naming the field; a note that is not text gets `400 TEXT_REQUIRED`. A report reason,
+  a resolution outcome or a note longer than 2,000 characters gets `400 FIELD_INVALID`.
+  Nothing is stored.
+- A block or a report naming an organisation that does not exist gets `404 ORG_NOT_FOUND`
+  (since S14b; before, the block was stored against the unknown id).
 - An IDV-queue entry must name an existing guardian (strict). An operation that would
   orphan one is refused whole.
-- A block and its ledger row land together. An IDV submission commits together with the
-  guardian's status before the response is sent.
+- Each of these commits as one unit before the response is sent: a block and its ledger
+  row; a moderation hit and its automatic grooming escalation; an urgent report with its
+  suspension blocks and frozen requests; a report's resolution with the organisation's
+  suspension and the reporter's notice; an IDV submission with the guardian's status.
+- The Trust & Safety reports, blocks and moderation lists, the club's ledger and a
+  guardian's activity log page by cursor (`{ items, nextCursor }`, 50 a page). Reports
+  stay in triage order (urgent pending first, then pending, oldest first; then resolved,
+  newest first). The apps read the first page; "load more" is still to build.
 
 ## Open questions and deferred work
 

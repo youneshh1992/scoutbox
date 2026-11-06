@@ -1,474 +1,564 @@
 /**
- * The eight audit collections as tables — migration plan step S6b (Candidate A of
- * docs/architecture/sqlite-migration-plan.md §D.4 as accepted at 1792fc7; the Founder's
- * decisions Q4, Q4b and Q5 of 19 October 2026, recorded in §D.5).
+ * Safety and audit as typed tables with explicit writes (S6b, migration `0013_safety_audit`; explicit since S14b,
+ * docs/architecture/migration.md §4.6; sql/03_messaging_safety_audit.sql).
  *
- * Owns eight tables, one read-only view each, one participant:
+ * Records (the keys every reader sees):
+ *   blocks          { id, playerId, orgId, by, reason, ts }: a player or guardian blocking an organisation, or an
+ *                   urgent report's suspension. Lifting a block deletes it (Q5).
+ *   reports         { id, ts, by, byId, byOrgId, targetKind, targetOrgId, targetScoutName, targetPlayerId, reason,
+ *                     urgent, status, outcome, resolvedAt }: one-click reports and moderation's automatic escalations.
+ *   moderationLog   { id, ts, context, flags, severity, excerpt }: every text moderation blocked. `context` is
+ *                   `{ kind, playerId?, orgId?, userId?, channelId?, requestId?, trialId? }`; the flags are ordered rows.
+ *   orgNotes        { id, orgId, playerId, userId, scoutName, text, ts }: a club's private notes on a player.
+ *   ledger          { id, ts, type, playerId, orgId, orgName, userId, scoutName, detail }: the Discovery Ledger, append
+ *                   only. `detail` is typed columns by type (LEDGER_DETAIL), null when the type has none.
+ *   opsEvents       { id, at, kind, detail }: operational events; `detail` is typed columns by kind (OPS_DETAIL).
+ *   sourceChanges   { id, playerId, type, sourceSystem, sourceId, occurredAt, detail }: the canonical change log
+ *                   (M18.1), capped at the newest SOURCE_CHANGE_CAP rows.
+ *   idvQueue        { id, guardianId, guardianName, documentType, documentRef, provider, reference, ts, status }.
  *
- *   blocks          { id, playerId, orgId, by, reason, ts }                                   → db.blocks
- *   reports         { id, ts, by, byId, byOrgId?, targetKind, targetOrgId, targetScoutName?,
- *                     targetPlayerId?, reason, urgent, status, outcome, resolvedAt }          → db.reports
- *   moderation_log  { id, ts, context, flags, severity, excerpt }                            → db.moderationLog
- *   org_notes       { id, orgId, playerId, userId, scoutName, text, ts }                     → db.orgNotes
- *   ledger          { id, ts, ...entry }  (type, playerId, orgId, orgName, userId, scoutName,
- *                     detail — and whatever else a caller passed)                            → db.ledger
- *   ops_events      { id, at, kind, detail }                                                 → db.opsEvents
- *   source_changes  { id, playerId, type, sourceSystem, sourceId, occurredAt, detail }       → db.sourceChanges
- *   idv_queue       { id, guardianId, guardianName, documentType, documentRef, provider,
- *                     reference, ts, status }                                                → db.idvQueue
+ * WRITES are explicit operations: each joins the open unit of work, the caller's transaction or its own. READS are
+ * SQL: no mirror, no db.* view. Fresh, deep-frozen records; lists that grow without limit page by `seq`, newest first.
  *
- * WHAT THE ROWS ARE. Each collection was a JSON blob every build wrote through the
- * literals above (server.mjs ledgerAppend, handleReport, moderateOrRefuse, the block
- * and note routes, the IDV route; m13 delivery/enterprise/imports for the ops events;
- * m181 recordSourceChange). One column per key, in the writer's order.
+ * References. Organisations and staff are RESTRICT keys. Player ids carry no key and no existence rule (Q4: a row
+ * outlives the account; an unresolved id is counted, never refused). The ID-check queue's guardian is checked on
+ * every write (Q4b), without a key while the guardians are still the staged identity repository's.
  *
- * TYPED COLUMNS, VALID INPUT ONLY (docs/architecture/migration.md §1 rule 3; the S8d
- * fidelity rule, 3 November 2026). A record is exactly its typed columns:
- *   - text columns hold a string or NULL, the time columns a safe integer or NULL,
- *     `urgent` a boolean, `context` / `flags` / `detail` a whole JSON value (stored the
- *     way JSON.stringify stores it: a nested undefined omitted, a non-finite number null);
- *   - a record read back carries every key of its literal; a NULL column is `null`;
- *   - a write (append, patch, a snapshot replace) DROPS an unknown key and REFUSES a
- *     known key of the wrong type by name (collection, field, id — never the value);
- *   - the import (migration 0013) drops an unknown key, normalises a value whose meaning
- *     is obvious (a number in a text column → its decimal text, a fractional time →
- *     rounded, 0/1 → a boolean) and drops any other off-type value; every change is a
- *     note with the row id in the cutover record (ids and field names, never a value);
- *   - vocabularies are OPEN (no CHECK on `by`, `severity`, `provider`, `status`, `kind`,
- *     `type`, `sourceSystem`, `targetKind`): the writers' sets are not narrowed.
- * The routes validate what they store (server.mjs handleReport, the block, note and IDV
- * routes answer 400 FIELD_INVALID for a non-text field). The import refuses only what is
- * unusable: an entry that is not an object, an `id` that is not a non-empty string, a
- * duplicate id within a collection, and — for the IDV queue — a `guardianId` that is not
- * a non-empty string or names no guardian.
- *
- * REFERENCES — THE APPROVED CONTRACT (plan §D.4, Q4/Q4b/Q5):
- *   Domain P (TOLERANT, historical): blocks.player_id, reports.target_player_id,
- *     org_notes.player_id, ledger.player_id, source_changes.player_id carry NO foreign key
- *     and NO parent-existence rule. An unresolved id — a player deleted today (the hard
- *     delete keeps these rows, server.mjs deletePlayerData), a pre-S4a import, a report
- *     naming a player that never existed — is COUNTED (the cutover record, the data-layer
- *     report, `unresolvedPlayerReferences`) and never refused, never given a fabricated
- *     parent, never deleted. An absent id proves nothing about why it is absent. The
- *     organisation and staff references (org_id, by_org_id, target_org_id, user_id) are
- *     historical pointers the routes never checked (a player's block names any truthy
- *     orgId) and carry no foreign key either.
- *   Domain G (STRICT, live): idv_queue.guardian_id carries NO foreign key yet (the
- *     identity snapshot deletes and reinserts every guardian row — plan §D.2a) but every
- *     write refuses a guardian that does not exist (IDV_GUARDIAN_MISSING), the import
- *     refuses an entry naming a missing guardian, and `assertIdvQueueGuardiansConsistent`
- *     checks every retained or incoming entry against the FINAL guardians table whenever
- *     a snapshot writes the queue OR rewrites the identity pair (the queue omitted
- *     included). A miss refuses the whole write with ids only.
- *   Q5: lifting a block DELETES its row (blocks.remove), as the route always did; no
- *     lifted_at/lifted_by, no retained block history.
- * The source-change cap (20 000, m181) stays a DELETE of the oldest rows by insertion
- * order (sourceChanges.trimTo). A report's resolution and an IDV status change are
- * UPDATEs by row id of exactly the fields the routes change (reports.patch: status,
- * outcome, resolvedAt; idvQueue.patch: status). Everything else is append-only.
- *
- * THE ORDERING KEY. Each table has `seq INTEGER PRIMARY KEY`: array position at import,
- * the next value at append, preserved by backup/restore. Every reader
- * (newest-first lists are `slice().reverse()` of the view) sees insertion order.
- *
- * WHERE A ROW BECOMES DURABLE (nothing new). STAGED mode in the server: a mutation
- * changes the mirror at once and its SQL waits for the next snapshot save, so each row
- * lands in exactly the save that carried its blob before S6b — a block with its ledger
- * row in the next save, a moderation hit in moderateOrRefuse's persist(), a report in
- * the next save (its suspension blocks and frozen requests alongside), a note in the
- * next save, a source change in m181's persistNow(), an ops event in its caller's save;
- * the IDV entry and the admin toggle join their units of work (the guardian column
- * commits with them). A failed ordinary save keeps the mirror and the queue (the next
- * save lands them once); an aborted unit restores the pre-unit state IN PLACE through
- * the graph memento (repositories/memento.mjs), held views and nested values included.
- *
- * Whether the tables are authoritative is decided by the cutover record
- * `0013_safety_audit` in `data_migrations`, never by the tables existing. Refusals
- * (SAFETY_AUDIT_IMPORT_BLOCKED, IDV_GUARDIAN_MISSING) name collections, positions, ids
- * and reasons — never a reason text, a note, an excerpt, a name or a document value.
+ * Refusals name tables, ids and fields, never a reason, note, excerpt, name or document value.
  */
-import { readonlyView } from './readonly.mjs';
-import { captureGraph, restoreGraph } from './memento.mjs';
-import { migrationApplied, transaction } from './database.mjs';
+import { isPlainObject, describe, ids } from './recruitment.mjs';
+import { transaction, migrationApplied, childRowsOf } from './database.mjs';
+import { deepFreeze } from './scoutingEvidence.mjs';
+import { text, int, bool, oneOf, columnDdl, bad, typeSpec, typeScalar, encode, decode, flat, quote } from './fieldSpecs.mjs';
+import { pageOf } from '../domains/platform/paging.mjs';
+import { MODERATION_FLAGS, MODERATION_SEVERITIES } from '../domain.mjs';
 
 export const SAFETY_AUDIT_MIGRATION = '0013_safety_audit';
+export const AUDIT_COLLECTIONS = Object.freeze(['blocks', 'reports', 'moderationLog', 'orgNotes', 'ledger', 'opsEvents', 'sourceChanges', 'idvQueue']);
 
-const JSON_CHECK = (col) => `CHECK (${col} IS NULL OR json_valid(${col}))`;
+// ------------------------------------------------------------------ vocabularies and limits (one definition)
+export const BLOCK_BY = Object.freeze(['player', 'guardian']);
+export const REPORT_BY = Object.freeze(['player', 'guardian', 'org_user', 'system']);
+export const REPORT_TARGETS = Object.freeze(['club', 'scout', 'player']);
+export const REPORT_STATUSES = Object.freeze(['pending_review', 'resolved']);
+export const IDV_STATUSES = Object.freeze(['approved', 'revoked']);
+export const SOURCE_SYSTEMS = Object.freeze(['passport_prefs', 'position_history']);
+export const SOURCE_CHANGE_CAP = 20_000;
+const REQUEST_LEDGER = ['contact', 'trial'].flatMap((t) => [`${t}_request`, `${t}_request_to_guardian`, `${t}_accepted`, `${t}_accepted_by_guardian`, `${t}_declined`, `${t}_declined_by_guardian`]);
+export const LEDGER_TYPES = Object.freeze([
+  'view', 'save', 'shortlist', ...REQUEST_LEDGER, 'message', 'signing', 'released_by_club', 'staff_removed',
+  'org_blocked_by_player', 'org_blocked_by_guardian', 'account_transitioned', 'assessment_submitted', 'attendance_verified',
+  'clip_tagged', 'coach_affiliation_confirmed', 'level_review', 'matchday_logged', 'open_trial_posted', 'open_trial_registration',
+  'open_trial_registration_by_guardian', 'opportunity_application', 'passport_view', 'passport_recruitment_view',
+  'passport_share_created', 'passport_share_revoked', 'recruitment_room_created', 'transition_pack_view', 'trial_checkin',
+  'trial_report', 'box_assignment_created', 'box_assignment_cancelled', 'box_challenge_published', 'box_clip_saved',
+  'box_prefs_changed', 'box_result_invalidated', 'box_result_restored', 'combine_attempt_completed', 'combine_request_created',
+  'combine_request_completed', 'verification_decision', 'verification_root_approved',
+]);
+export const OPS_KINDS = Object.freeze(['staff_bootstrapped', 'audit_export', 'backup_created', 'backup_refused', 'backup_failed', 'delivery_failed', 'webhook_failed']);
+export const AUDIT_LIMITS = Object.freeze({ id: 80, name: 200, reason: 2000, note: 2000, outcome: 2000, excerpt: 140, contextKind: 60, detailText: 300, documentType: 60, documentRef: 20, provider: 60, reference: 200, position: 40, protocols: 50 });
+const L = AUDIT_LIMITS;
+
+// ------------------------------------------------------------------ field specs
+const req = { req: true };
+const idf = (k, c, o = {}) => text(k, c, L.id, { nonEmpty: true, ...o });
+const name = (k, c, o = {}) => text(k, c, L.name, o);
+
+const BLOCK_SPEC = [idf('id', 'id', req), idf('playerId', 'player_id', req), idf('orgId', 'org_id', req), oneOf('by', 'by_kind', BLOCK_BY, req), text('reason', 'reason', L.reason, req), int('ts', 'created_at', req)];
+const REPORT_SPEC = [
+  idf('id', 'id', req), int('ts', 'created_at', req), oneOf('by', 'by_kind', REPORT_BY, req), idf('byId', 'by_id', req), idf('byOrgId', 'by_org_id'),
+  oneOf('targetKind', 'target_kind', REPORT_TARGETS, req), idf('targetOrgId', 'target_org_id'), name('targetScoutName', 'target_scout_name', { nonEmpty: true }),
+  name('targetPlayerId', 'target_player_id', { nonEmpty: true }), text('reason', 'reason', L.reason, { req: true, nonEmpty: true }), bool('urgent', 'urgent', req),
+  oneOf('status', 'status', REPORT_STATUSES, req), text('outcome', 'outcome', L.outcome, { nonEmpty: true }), int('resolvedAt', 'resolved_at'),
+];
+const CONTEXT_SPEC = [
+  text('kind', 'context_kind', L.contextKind, { req: true, nonEmpty: true }), idf('playerId', 'context_player_id'), idf('orgId', 'context_org_id'),
+  idf('userId', 'context_user_id'), idf('channelId', 'context_channel_id'), idf('requestId', 'context_request_id'), idf('trialId', 'context_trial_id'),
+];
+const MODERATION_SPEC = [idf('id', 'id', req), int('ts', 'created_at', req), { k: 'context', group: CONTEXT_SPEC, sparse: true }, oneOf('severity', 'severity', MODERATION_SEVERITIES, req), text('excerpt', 'excerpt', L.excerpt, req)];
+const NOTE_SPEC = [idf('id', 'id', req), idf('orgId', 'org_id', req), idf('playerId', 'player_id', req), idf('userId', 'user_id', req), name('scoutName', 'scout_name', req), text('text', 'text', L.note, { req: true, nonEmpty: true }), int('ts', 'created_at', req)];
+const LEDGER_BASE = [idf('id', 'id', req), int('ts', 'occurred_at', req), oneOf('type', 'type', LEDGER_TYPES, req), idf('playerId', 'player_id'), idf('orgId', 'org_id'), name('orgName', 'org_name'), idf('userId', 'user_id'), name('scoutName', 'actor_name')];
+const OPS_BASE = [idf('id', 'id', req), int('at', 'occurred_at', req), oneOf('kind', 'kind', OPS_KINDS, req)];
+const SOURCE_BASE = [idf('id', 'id', req), idf('playerId', 'player_id', req), oneOf('type', 'type', ['position_changed'], req), oneOf('sourceSystem', 'source_system', SOURCE_SYSTEMS, req), name('sourceId', 'source_id', { nonEmpty: true }), int('occurredAt', 'occurred_at', req)];
+const IDV_SPEC = [
+  idf('id', 'id', req), idf('guardianId', 'guardian_id', req), name('guardianName', 'guardian_name'), text('documentType', 'document_type', L.documentType, { req: true, nonEmpty: true }),
+  text('documentRef', 'document_ref_last4', L.documentRef, req), text('provider', 'provider', L.provider, { req: true, nonEmpty: true }),
+  text('reference', 'reference', L.reference, { req: true, nonEmpty: true }), int('ts', 'created_at', req), oneOf('status', 'status', IDV_STATUSES, req),
+];
 
 /**
- * The eight domains: the table, the writer's literal as [column, key, kind] in the
- * writer's order (`id` first), the player reference key (Domain P) or the guardian
- * reference key (Domain G), the indexes. Kinds: id / guardian (a non-empty string),
- * text (a string), int (a safe integer), bool (a boolean, stored 0/1), json (any JSON
- * value). Every column but id / guardian may be NULL.
+ * A polymorphic detail as typed columns: `fields` are the possible keys (a field spec each; `target` is the pair
+ * targetType/targetValue, and `protocols` the one list, stored as child rows); `byType` names the keys each type may
+ * carry. A detail key the type does not carry is refused; a column holds a value only for the types that carry its
+ * key (a CHECK each). Decoded, a detail keeps its non-null keys, and is null when it has none.
  */
-const DOMAINS = Object.freeze({
-  blocks: { table: 'blocks', playerKey: 'playerId', cols: [['id', 'id', 'id'], ['player_id', 'playerId', 'text'], ['org_id', 'orgId', 'text'], ['by_kind', 'by', 'text'], ['reason', 'reason', 'text'], ['created_at', 'ts', 'int']], indexes: [['blocks_player_id_org_id', 'player_id, org_id']] },
-  reports: { table: 'reports', playerKey: 'targetPlayerId', cols: [['id', 'id', 'id'], ['created_at', 'ts', 'int'], ['by_kind', 'by', 'text'], ['by_id', 'byId', 'text'], ['by_org_id', 'byOrgId', 'text'], ['target_kind', 'targetKind', 'text'], ['target_org_id', 'targetOrgId', 'text'], ['target_scout_name', 'targetScoutName', 'text'], ['target_player_id', 'targetPlayerId', 'text'], ['reason', 'reason', 'text'], ['urgent', 'urgent', 'bool'], ['status', 'status', 'text'], ['outcome', 'outcome', 'text'], ['resolved_at', 'resolvedAt', 'int']], indexes: [['reports_by_kind_by_id', 'by_kind, by_id'], ['reports_target_org_id_urgent_status', 'target_org_id, urgent, status'], ['reports_status_created_at', 'status, created_at'], ['reports_target_player_id', 'target_player_id']] },
-  moderationLog: { table: 'moderation_log', cols: [['id', 'id', 'id'], ['created_at', 'ts', 'int'], ['context_json', 'context', 'json'], ['flags_json', 'flags', 'json'], ['severity', 'severity', 'text'], ['excerpt', 'excerpt', 'text']], indexes: [['moderation_log_severity', 'severity'], ['moderation_log_created_at', 'created_at']] },
-  orgNotes: { table: 'org_notes', playerKey: 'playerId', cols: [['id', 'id', 'id'], ['org_id', 'orgId', 'text'], ['player_id', 'playerId', 'text'], ['user_id', 'userId', 'text'], ['scout_name', 'scoutName', 'text'], ['text', 'text', 'text'], ['created_at', 'ts', 'int']], indexes: [['org_notes_org_id_player_id_created_at', 'org_id, player_id, created_at']] },
-  ledger: { table: 'ledger', playerKey: 'playerId', cols: [['id', 'id', 'id'], ['occurred_at', 'ts', 'int'], ['type', 'type', 'text'], ['player_id', 'playerId', 'text'], ['org_id', 'orgId', 'text'], ['org_name', 'orgName', 'text'], ['user_id', 'userId', 'text'], ['actor_name', 'scoutName', 'text'], ['detail_json', 'detail', 'json']], indexes: [['ledger_player_id_type', 'player_id, type'], ['ledger_player_id_org_id_occurred_at', 'player_id, org_id, occurred_at'], ['ledger_org_id_type', 'org_id, type'], ['ledger_occurred_at', 'occurred_at']] },
-  opsEvents: { table: 'ops_events', cols: [['id', 'id', 'id'], ['occurred_at', 'at', 'int'], ['kind', 'kind', 'text'], ['detail_json', 'detail', 'json']], indexes: [['ops_events_kind', 'kind'], ['ops_events_occurred_at', 'occurred_at']] },
-  sourceChanges: { table: 'source_changes', playerKey: 'playerId', cols: [['id', 'id', 'id'], ['player_id', 'playerId', 'text'], ['type', 'type', 'text'], ['source_system', 'sourceSystem', 'text'], ['source_id', 'sourceId', 'text'], ['occurred_at', 'occurredAt', 'int'], ['detail_json', 'detail', 'json']], indexes: [['source_changes_player_id_occurred_at', 'player_id, occurred_at']] },
-  idvQueue: { table: 'idv_queue', guardianKey: 'guardianId', cols: [['id', 'id', 'id'], ['guardian_id', 'guardianId', 'guardian'], ['guardian_name', 'guardianName', 'text'], ['document_type', 'documentType', 'text'], ['document_ref_last4', 'documentRef', 'text'], ['provider', 'provider', 'text'], ['reference', 'reference', 'text'], ['created_at', 'ts', 'int'], ['status', 'status', 'text']], indexes: [['idv_queue_guardian_id_created_at', 'guardian_id, created_at']] },
+const D = (k, c, t, o = {}) => ({ k, c: `detail_${c}`, t, ...o });
+const did = (k, c) => D(k, c, 'text', { max: L.id, nonEmpty: true });
+const dtext = (k, c, max = L.detailText) => D(k, c, 'text', { max });
+const LEDGER_DETAIL_FIELDS = [
+  did('assignmentId', 'assignment_id'), did('drillId', 'drill_id'), dtext('targetType', 'target_type', 40), D('targetValue', 'target_value', 'num'),
+  did('challengeId', 'challenge_id'), did('sessionId', 'session_id'), did('mediaId', 'media_id'), dtext('by', 'by', 40), dtext('share', 'share', 40),
+  D('retainClips', 'retain_clips', 'bool'), did('disputeId', 'dispute_id'), dtext('outcome', 'outcome', 40), dtext('reason', 'reason'),
+  did('attemptId', 'attempt_id'), dtext('protocol', 'protocol', 120), dtext('state', 'state', 40), did('requestId', 'request_id'),
+  dtext('from', 'from_value', 40), dtext('to', 'to_value', 40), did('trialId', 'trial_id'), dtext('via', 'via', 40), dtext('mode', 'mode', 40),
+  did('shareId', 'share_id'), did('claimId', 'claim_id'), dtext('action', 'action', 40), did('request', 'root_request_id'),
+];
+/** Ledger detail keys by type. `target` is `{ type, value }` (the targetType/targetValue columns); `protocols` a list. */
+export const LEDGER_DETAIL = Object.freeze({
+  box_assignment_cancelled: ['assignmentId'],
+  box_assignment_created: ['drillId', 'target'],
+  box_challenge_published: ['challengeId', 'drillId'],
+  box_clip_saved: ['sessionId', 'mediaId'],
+  box_prefs_changed: ['by', 'share', 'retainClips'],
+  box_result_invalidated: ['sessionId', 'disputeId', 'outcome'],
+  box_result_restored: ['sessionId', 'reason'],
+  combine_attempt_completed: ['attemptId', 'protocol', 'state'],
+  combine_request_completed: ['requestId'],
+  combine_request_created: ['requestId', 'protocols'],
+  level_review: ['from', 'to', 'reason'],
+  open_trial_posted: ['trialId'],
+  passport_recruitment_view: ['via'],
+  passport_share_created: ['mode', 'shareId'],
+  passport_share_revoked: ['shareId', 'by'],
+  verification_decision: ['claimId', 'action'],
+  verification_root_approved: ['request'],
 });
-/** The collections, in snapshot-dispatch order. */
-export const AUDIT_COLLECTIONS = Object.freeze(Object.keys(DOMAINS));
-export const AUDIT_TABLE_NAMES = Object.freeze(AUDIT_COLLECTIONS.map((n) => DOMAINS[n].table));
-/** The five tolerant player references (Domain P), by collection → the table and column. */
-export const PLAYER_REFERENCE_TABLES = Object.freeze(AUDIT_COLLECTIONS.filter((n) => DOMAINS[n].playerKey).map((n) => ({ name: n, table: DOMAINS[n].table, column: DOMAINS[n].cols.find((c) => c[1] === DOMAINS[n].playerKey)[0] })));
-/** The keys of each collection's record, in the writer's order. */
-export const AUDIT_KEYS = Object.freeze(Object.fromEntries(AUDIT_COLLECTIONS.map((n) => [n, Object.freeze(DOMAINS[n].cols.map((c) => c[1]))])));
+const OPS_DETAIL_FIELDS = [
+  did('orgId', 'org_id'), did('userId', 'user_id'), dtext('by', 'by', L.name), dtext('dir', 'dir', 200), D('files', 'files', 'int'),
+  D('queuedForRemoval', 'queued_for_removal', 'int'), dtext('error', 'error'), D('conflictCount', 'conflict_count', 'int'),
+  did('dispatchId', 'dispatch_id'), dtext('channel', 'channel', 40), did('deliveryId', 'delivery_id'), did('endpointId', 'endpoint_id'),
+];
+export const OPS_DETAIL = Object.freeze({
+  staff_bootstrapped: ['orgId', 'userId', 'by'],
+  audit_export: ['orgId', 'by'],
+  backup_created: ['dir', 'files', 'queuedForRemoval'],
+  backup_refused: ['dir', 'error', 'conflictCount'],
+  backup_failed: ['dir', 'error'],
+  delivery_failed: ['dispatchId', 'channel'],
+  webhook_failed: ['deliveryId', 'endpointId'],
+});
+const SOURCE_DETAIL_FIELDS = [dtext('from', 'position_from', L.position), dtext('to', 'position_to', L.position), dtext('submittedBy', 'submitted_by', 40)];
+const SOURCE_DETAIL = Object.freeze({ position_changed: ['from', 'to', 'submittedBy'] });
 
-const sqlType = (kind) => (kind === 'int' || kind === 'bool' ? 'INTEGER' : 'TEXT');
-function tableDdl(name) {
-  const d = DOMAINS[name];
-  const cols = d.cols.filter((c) => c[2] !== 'id').map(([col, , kind]) => `  ${col.padEnd(18)} ${sqlType(kind)}${kind === 'guardian' ? ' NOT NULL' : ''}${kind === 'json' ? ` ${JSON_CHECK(col)}` : ''}`);
-  return `CREATE TABLE ${d.table} (\n  seq                INTEGER PRIMARY KEY,\n  id                 TEXT NOT NULL UNIQUE,\n${cols.join(',\n')}\n) STRICT;\n${d.indexes.map(([idx, on]) => `CREATE INDEX ${idx} ON ${d.table} (${on});`).join('\n')}`;
+function detailCodec(fields, byType, typeColumn) {
+  const byKey = new Map(fields.map((f) => [f.k, f]));
+  const keysOf = (type) => byType[type] ?? [];
+  /** Type `detail` for `type` into `{ ok, cols, protocols }`. */
+  const type = (t, detail, at) => {
+    const cols = Object.fromEntries(fields.map((f) => [f.c, null]));
+    let protocols = [];
+    if (detail === undefined || detail === null) return { ok: true, cols, protocols };
+    if (!isPlainObject(detail)) return bad(at, 'detail', `must be an object or null (got ${describe(detail)})`);
+    const allowed = keysOf(t);
+    for (const [k, v] of Object.entries(detail)) {
+      if (v === undefined) continue;
+      if (!allowed.includes(k)) return bad(at, `detail.${k}`, `is not part of a ${t} detail`);
+      if (k === 'target') {
+        if (v === null) continue;
+        if (!isPlainObject(v) || Object.keys(v).some((x) => x !== 'type' && x !== 'value')) return bad(at, 'detail.target', 'must be { type, value }');
+        for (const [kk, f] of [['type', byKey.get('targetType')], ['value', byKey.get('targetValue')]]) { const r = typeScalar({ ...f, req: true }, v[kk], `${at}.detail.target`); if (!r.ok) return r; cols[f.c] = r.value; }
+        continue;
+      }
+      if (k === 'protocols') {
+        if (v === null) continue;
+        if (!Array.isArray(v) || v.length > L.protocols || v.some((p) => typeof p !== 'string' || !p.length || p.length > 120)) return bad(at, 'detail.protocols', 'must be a list of protocol ids');
+        protocols = [...v];
+        continue;
+      }
+      const f = byKey.get(k);
+      const r = typeScalar(f, v, `${at}.detail`); if (!r.ok) return r;
+      cols[f.c] = f.t === 'bool' && r.value !== null ? (r.value ? 1 : 0) : r.value;
+    }
+    return { ok: true, cols, protocols };
+  };
+  const decodeDetail = (t, row, protocols = []) => {
+    const out = {};
+    for (const k of keysOf(t)) {
+      if (k === 'target') { if (row.detail_target_type !== null && row.detail_target_type !== undefined) out.target = { type: row.detail_target_type, value: row.detail_target_value }; continue; }
+      if (k === 'protocols') { if (protocols.length) out.protocols = protocols; continue; }
+      const f = byKey.get(k); const v = row[f.c];
+      if (v !== null && v !== undefined) out[k] = f.t === 'bool' ? v === 1 : v;
+    }
+    return Object.keys(out).length ? out : null;
+  };
+  /** The column definitions, each with its CHECK limiting it to the types that carry its key. */
+  const ddl = () => fields.map((f) => {
+    const key = f.k === 'targetType' || f.k === 'targetValue' ? 'target' : f.k;
+    const types = Object.keys(byType).filter((t) => byType[t].includes(key));
+    return `${f.c.padEnd(32)} ${columnDdl(f)} CHECK (${f.c} IS NULL OR ${typeColumn} IN (${types.map(quote).join(', ')}))`;
+  });
+  return { type, decode: decodeDetail, ddl, columns: fields.map((f) => f.c) };
 }
-export const SAFETY_AUDIT_DDL = AUDIT_COLLECTIONS.map(tableDdl).join('\n');
+const LEDGER_CODEC = detailCodec(LEDGER_DETAIL_FIELDS, LEDGER_DETAIL, 'type');
+const OPS_CODEC = detailCodec(OPS_DETAIL_FIELDS, OPS_DETAIL, 'kind');
+const SOURCE_CODEC = detailCodec(SOURCE_DETAIL_FIELDS, SOURCE_DETAIL, 'type');
 
-export const safetyAuditLive = (sqlite) => migrationApplied(sqlite, SAFETY_AUDIT_MIGRATION);
-const describe = (v) => (v === null ? 'null' : Array.isArray(v) ? 'an array' : typeof v === 'object' ? 'an object' : `a ${typeof v}`);
-const blocked = (detail, extra = {}) => Object.assign(new Error(`SAFETY_AUDIT_IMPORT_BLOCKED: ${detail}; nothing was imported`), { code: 'SAFETY_AUDIT_IMPORT_BLOCKED', ...extra });
-const refusal = (code, message, extra = {}) => Object.assign(new Error(`${code}: ${message}`), { code, ...extra });
-const isPlainObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
-const nonEmpty = (v) => typeof v === 'string' && v.length > 0;
-const tableExists = (sqlite, name) => !!sqlite.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(name);
-const ids = (list) => list.slice(0, 20).join(', ') + (list.length > 20 ? ', …' : '');
+// ------------------------------------------------------------------ DDL
+const rowOf = (tbl, c) => `FOREIGN KEY (${c}) REFERENCES ${tbl}(id) ON DELETE RESTRICT`;
+const ownedBy = (tbl, c) => `FOREIGN KEY (${c}) REFERENCES ${tbl}(id) ON DELETE CASCADE`;
+const specCols = (spec) => flat(spec).filter((f) => f.c !== 'id').map((f) => `${f.c.padEnd(32)} ${columnDdl(f)}`);
+const table = (tbl, cols, extra = []) => `CREATE TABLE ${tbl} (\n  ${['seq                              INTEGER PRIMARY KEY', `id                               TEXT NOT NULL UNIQUE CHECK (length(id) > 0 AND length(id) <= ${L.id})`, ...cols, ...extra].join(',\n  ')}\n) STRICT;`;
+const childTable = (tbl, parent, parentCol, valueCol, check) => `CREATE TABLE ${tbl} (\n  ${parentCol} TEXT NOT NULL,\n  ord INTEGER NOT NULL CHECK (ord >= 0),\n  ${valueCol} TEXT NOT NULL CHECK (${check}),\n  PRIMARY KEY (${parentCol}, ord),\n  ${ownedBy(parent, parentCol)}\n) STRICT;`;
 
-/**
- * Why `v` cannot be stored as a JSON column, or null when it can. JSON.stringify's own
- * rules apply to what it can carry (a nested undefined omitted or null in an array, a
- * non-finite number null — review of c6cf5e1, F2: the Box Cam prefs writer's
- * `detail.share`); a function, a symbol, a BigInt, a non-plain object or a cycle is refused.
- */
-function jsonProblem(v, at, path = new Set()) {
-  if (v === null || v === undefined || typeof v === 'string' || typeof v === 'boolean' || typeof v === 'number') return null;
-  if (typeof v !== 'object') return `${at} (${typeof v}) cannot be stored as JSON`;
-  if (path.has(v)) return `${at} is cyclic and cannot be stored as JSON`;
-  if (!Array.isArray(v)) { const proto = Object.getPrototypeOf(v); if (proto !== Object.prototype && proto !== null) return `${at} is not a plain object and cannot be stored as JSON`; }
-  path.add(v);
-  try {
-    for (const k of Object.keys(v)) { const p = jsonProblem(v[k], Array.isArray(v) ? `${at}[${k}]` : `${at}.${k}`, path); if (p) return p; }
-  } finally { path.delete(v); }
-  return null;
+export const SAFETY_AUDIT_DDL = [
+  table('blocks', specCols(BLOCK_SPEC), [rowOf('orgs', 'org_id')]),
+  'CREATE INDEX blocks_player_id_org_id ON blocks (player_id, org_id);',
+  'CREATE INDEX blocks_org_id ON blocks (org_id);',
+  table('reports', specCols(REPORT_SPEC), [
+    rowOf('orgs', 'by_org_id'), rowOf('orgs', 'target_org_id'),
+    "CHECK ((status = 'resolved') = (resolved_at IS NOT NULL))", "CHECK (status = 'resolved' OR outcome IS NULL)",
+    "CHECK ((by_kind = 'org_user') = (by_org_id IS NOT NULL))",
+  ]),
+  'CREATE INDEX reports_by_kind_by_id ON reports (by_kind, by_id);',
+  'CREATE INDEX reports_target_org_id_urgent_status ON reports (target_org_id, urgent, status);',
+  'CREATE INDEX reports_status_created_at ON reports (status, created_at);',
+  'CREATE INDEX reports_target_player_id ON reports (target_player_id);',
+  table('moderation_log', specCols(MODERATION_SPEC), [rowOf('orgs', 'context_org_id'), rowOf('org_users', 'context_user_id')]),
+  'CREATE INDEX moderation_log_severity ON moderation_log (severity);',
+  childTable('moderation_flags', 'moderation_log', 'moderation_id', 'flag', `flag IN (${MODERATION_FLAGS.map(quote).join(', ')})`),
+  table('org_notes', specCols(NOTE_SPEC), [rowOf('orgs', 'org_id'), rowOf('org_users', 'user_id')]),
+  'CREATE INDEX org_notes_org_id_player_id ON org_notes (org_id, player_id);',
+  table('ledger', [...specCols(LEDGER_BASE), ...LEDGER_CODEC.ddl()], [rowOf('orgs', 'org_id'), rowOf('org_users', 'user_id')]),
+  'CREATE INDEX ledger_player_id_type ON ledger (player_id, type);',
+  'CREATE INDEX ledger_player_id_org_id ON ledger (player_id, org_id);',
+  'CREATE INDEX ledger_org_id_type ON ledger (org_id, type);',
+  'CREATE INDEX ledger_actor ON ledger (actor_name, org_name, type);',
+  childTable('ledger_protocols', 'ledger', 'ledger_id', 'protocol', 'length(protocol) > 0 AND length(protocol) <= 120'),
+  table('ops_events', [...specCols(OPS_BASE), ...OPS_CODEC.ddl()], [rowOf('orgs', 'detail_org_id'), rowOf('org_users', 'detail_user_id')]),
+  'CREATE INDEX ops_events_kind ON ops_events (kind);',
+  table('source_changes', [...specCols(SOURCE_BASE), ...SOURCE_CODEC.ddl()]),
+  'CREATE INDEX source_changes_player_id_occurred_at ON source_changes (player_id, occurred_at);',
+  table('idv_queue', specCols(IDV_SPEC)),
+  'CREATE INDEX idv_queue_guardian_id ON idv_queue (guardian_id);',
+].join('\n');
+export const AUDIT_TABLE_NAMES = Object.freeze(['blocks', 'reports', 'moderation_log', 'moderation_flags', 'org_notes', 'ledger', 'ledger_protocols', 'ops_events', 'source_changes', 'idv_queue']);
+const TABLE_OF = Object.freeze({ blocks: 'blocks', reports: 'reports', moderationLog: 'moderation_log', orgNotes: 'org_notes', ledger: 'ledger', opsEvents: 'ops_events', sourceChanges: 'source_changes', idvQueue: 'idv_queue' });
+/** The five tolerant player references (Q4), by collection → the table and column. */
+export const PLAYER_REFERENCE_TABLES = Object.freeze([
+  { name: 'blocks', table: 'blocks', column: 'player_id' }, { name: 'reports', table: 'reports', column: 'target_player_id' },
+  { name: 'orgNotes', table: 'org_notes', column: 'player_id' }, { name: 'ledger', table: 'ledger', column: 'player_id' },
+  { name: 'sourceChanges', table: 'source_changes', column: 'player_id' },
+]);
+
+// ------------------------------------------------------------------ typing (the one place a value is judged)
+export const refusal = (code, message, extra = {}) => Object.assign(new Error(`${code}: ${message}`), { code, ...extra });
+const labelOf = (at, raw) => `${at} ${isPlainObject(raw) && typeof raw.id === 'string' ? raw.id : ''}`.trim();
+const plainSpec = (spec) => (raw, at) => typeSpec(spec, raw, labelOf(at, raw));
+function typeWithDetail(base, codec, typeKey) {
+  return (raw, at) => {
+    const label = labelOf(at, raw);
+    if (!isPlainObject(raw)) return { ok: false, reason: `${label} is not an object (${describe(raw)})` };
+    const { detail, ...rest } = raw;
+    const t = typeSpec(base, rest, label); if (!t.ok) return t;
+    const d = codec.type(t.record[typeKey], detail, label); if (!d.ok) return d;
+    return { ok: true, record: { ...t.record, detail: codec.decode(t.record[typeKey], d.cols, d.protocols) }, cols: d.cols, protocols: d.protocols };
+  };
 }
-const columnHolds = (kind, v) => (kind === 'text' ? typeof v === 'string' : kind === 'int' ? Number.isSafeInteger(v) : kind === 'bool' ? typeof v === 'boolean' : true);
-const KIND_TEXT = { text: 'a string or null', int: 'an integer or null', bool: 'a boolean or null' };
-/** The import's normalisation of an off-type value whose meaning is obvious; undefined when there is none (the value is dropped). */
-function normalise(kind, v) {
-  if (kind === 'text' && typeof v === 'number' && Number.isFinite(v)) return String(v);
-  if (kind === 'int' && typeof v === 'number' && Number.isFinite(v)) { const n = Math.round(v); return Number.isSafeInteger(n) ? n : undefined; }
-  if (kind === 'bool' && (v === 0 || v === 1)) return v === 1;
-  return undefined;
+function typeModeration(raw, at) {
+  const label = labelOf(at, raw);
+  if (!isPlainObject(raw)) return { ok: false, reason: `${label} is not an object (${describe(raw)})` };
+  const { flags, ...rest } = raw;
+  const t = typeSpec(MODERATION_SPEC, rest, label); if (!t.ok) return t;
+  if (!Array.isArray(flags) || !flags.length || flags.some((f) => !MODERATION_FLAGS.includes(f)) || new Set(flags).size !== flags.length) return bad(label, 'flags', `must be a list of distinct moderation flags (${MODERATION_FLAGS.join('|')})`);
+  return { ok: true, record: { ...t.record, flags: [...flags] } };
 }
+function typeReport(raw, at) {
+  const t = plainSpec(REPORT_SPEC)(raw, at); if (!t.ok) return t;
+  const r = t.record; const label = labelOf(at, raw);
+  if ((r.status === 'resolved') !== (r.resolvedAt !== null)) return bad(label, 'resolvedAt', 'is set exactly when the report is resolved');
+  if (r.status !== 'resolved' && r.outcome !== null) return bad(label, 'outcome', 'is set only on a resolved report');
+  if ((r.by === 'org_user') !== (r.byOrgId !== null)) return bad(label, 'byOrgId', 'is set exactly when a club user filed the report');
+  return t;
+}
+export const AUDIT_TYPERS = Object.freeze({
+  blocks: plainSpec(BLOCK_SPEC),
+  reports: typeReport,
+  moderationLog: typeModeration,
+  orgNotes: plainSpec(NOTE_SPEC),
+  ledger: typeWithDetail(LEDGER_BASE, LEDGER_CODEC, 'type'),
+  opsEvents: typeWithDetail(OPS_BASE, OPS_CODEC, 'kind'),
+  sourceChanges: typeWithDetail(SOURCE_BASE, SOURCE_CODEC, 'type'),
+  idvQueue: plainSpec(IDV_SPEC),
+});
+const BASE_OF = Object.freeze({ blocks: BLOCK_SPEC, reports: REPORT_SPEC, moderationLog: MODERATION_SPEC, orgNotes: NOTE_SPEC, ledger: LEDGER_BASE, opsEvents: OPS_BASE, sourceChanges: SOURCE_BASE, idvQueue: IDV_SPEC });
+const CODEC_OF = Object.freeze({ ledger: [LEDGER_CODEC, 'type'], opsEvents: [OPS_CODEC, 'kind'], sourceChanges: [SOURCE_CODEC, 'type'] });
 
-// ------------------------------------------------------------------ typing (every refusal and note names the field and the id, never a value)
-/**
- * Type one entry of `name` into its columns: `{ ok: true, cols, notes }` or `{ ok: false, reason }`.
- * An unknown key is dropped (a note in `lenient` mode); an absent or undefined key is NULL. A known key of the wrong
- * type is refused — or, in `lenient` mode (the import), normalised when its meaning is obvious and otherwise dropped,
- * with a note.
- */
-export function typeAuditEntry(name, raw, at = name, { lenient = false } = {}) {
-  const d = DOMAINS[name]; if (!d) return { ok: false, reason: `${at}: unknown audit collection` };
-  if (!isPlainObject(raw)) return { ok: false, reason: `${at} is not an object (${describe(raw)})` };
-  if (!nonEmpty(raw.id)) return { ok: false, reason: `${at}.id must be a non-empty string` };
-  if (d.guardianKey && !nonEmpty(raw[d.guardianKey])) return { ok: false, reason: `${at}.${d.guardianKey} must be a non-empty string (the IDV queue names an existing guardian; id ${raw.id})` };
-  const cols = {}; const notes = [];
-  for (const [col, key, kind] of d.cols) {
-    const v = Object.hasOwn(raw, key) ? raw[key] : undefined;
-    if (v === undefined || v === null) { cols[col] = null; continue; }
-    if (kind === 'id' || kind === 'guardian') { cols[col] = v; continue; }
-    if (kind === 'json') { const p = jsonProblem(v, `${at}.${key}`); if (p) return { ok: false, reason: `${p} (id ${raw.id})` }; cols[col] = JSON.stringify(v) ?? null; continue; }
-    if (columnHolds(kind, v)) { cols[col] = kind === 'bool' ? (v ? 1 : 0) : v; continue; }
-    if (!lenient) return { ok: false, reason: `${at}.${key} must be ${KIND_TEXT[kind]} (got ${describe(v)}; id ${raw.id})` };
-    const n = normalise(kind, v);
-    if (n === undefined) { cols[col] = null; notes.push(`${raw.id}: ${key} was ${describe(v)}, dropped`); } else { cols[col] = kind === 'bool' ? (n ? 1 : 0) : n; notes.push(`${raw.id}: ${key} was ${describe(v)}, normalised`); }
+// ------------------------------------------------------------------ rows
+const columnsOf = (n) => [...flat(BASE_OF[n]).map((f) => f.c), ...(CODEC_OF[n] ? CODEC_OF[n][0].columns : [])];
+const INSERT = Object.fromEntries(AUDIT_COLLECTIONS.map((n) => { const cols = columnsOf(n); return [n, `INSERT INTO ${TABLE_OF[n]} (${cols.join(', ')}) VALUES (${cols.map((c) => `@${c}`).join(', ')})`]; }));
+function writeRecord(sqlite, n, t) {
+  sqlite.prepare(INSERT[n]).run({ ...encode(BASE_OF[n], t.record), ...(t.cols ?? {}) });
+  if (n === 'moderationLog') t.record.flags.forEach((f, i) => sqlite.prepare('INSERT INTO moderation_flags (moderation_id, ord, flag) VALUES (?, ?, ?)').run(t.record.id, i, f));
+  if (n === 'ledger') (t.protocols ?? []).forEach((p, i) => sqlite.prepare('INSERT INTO ledger_protocols (ledger_id, ord, protocol) VALUES (?, ?, ?)').run(t.record.id, i, p));
+}
+/** Decode rows of one collection (child rows in one batch per list). */
+function decodeRows(sqlite, n, rows) {
+  if (n === 'moderationLog') {
+    const flags = childRowsOf(sqlite, 'moderation_flags', 'moderation_id', rows.map((r) => r.id), { order: 'ord' });
+    return rows.map((r) => ({ ...decode(MODERATION_SPEC, r), flags: flags.all(r.id).map((f) => f.flag) }));
   }
-  if (lenient) for (const k of Object.keys(raw)) if (raw[k] !== undefined && !d.cols.some((c) => c[1] === k)) notes.push(`${raw.id}: unknown field ${k} dropped`);
-  return { ok: true, cols, notes };
+  if (CODEC_OF[n]) {
+    const [codec, key] = CODEC_OF[n];
+    const protocols = n === 'ledger' ? childRowsOf(sqlite, 'ledger_protocols', 'ledger_id', rows.filter((r) => r.type === 'combine_request_created').map((r) => r.id), { order: 'ord' }) : null;
+    return rows.map((r) => ({ ...decode(BASE_OF[n], r), detail: codec.decode(r[key], r, protocols ? protocols.all(r.id).map((p) => p.protocol) : []) }));
+  }
+  return rows.map((r) => decode(BASE_OF[n], r));
 }
-/** The record a row of columns stands for (the mirror, a read, an export): every key of the literal, in order; NULL is null. */
-function fromDb(name, r) {
-  const out = {};
-  for (const [col, key, kind] of DOMAINS[name].cols) { const v = r[col]; out[key] = v === null || v === undefined ? null : kind === 'bool' ? v === 1 : kind === 'json' ? JSON.parse(v) : v; }
+
+// ------------------------------------------------------------------ references
+const tableExists = (sqlite, t) => !!sqlite.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(t);
+export const safetyAuditLive = (sqlite) => migrationApplied(sqlite, SAFETY_AUDIT_MIGRATION);
+/** The organisation and staff references of a typed record: [[what, table, id]]. */
+function referencesOf(n, r) {
+  const out = [];
+  const ref = (tbl) => (k, v) => { if (v !== null && v !== undefined) out.push([`${TABLE_OF[n]} ${r.id} ${k}`, tbl, v]); };
+  const org = ref('orgs'); const staff = ref('org_users');
+  if (n === 'blocks') org('orgId', r.orgId);
+  if (n === 'reports') { org('byOrgId', r.byOrgId); org('targetOrgId', r.targetOrgId); }
+  if (n === 'moderationLog') { org('context.orgId', r.context.orgId); staff('context.userId', r.context.userId); }
+  if (n === 'orgNotes' || n === 'ledger') { org('orgId', r.orgId); staff('userId', r.userId); }
+  if (n === 'opsEvents') { org('detail.orgId', r.detail?.orgId); staff('detail.userId', r.detail?.userId); }
   return out;
 }
 /**
- * Type a whole collection (unique ids); throws SAFETY_AUDIT_IMPORT_BLOCKED. Returns `{ entries: [{ cols, row }], counts,
- * notes }` — `counts` per collection { imported, normalised } (rows the import changed), `notes` the changes by id.
- */
-export function validateAuditRows(name, rows, { label = name, lenient = false } = {}) {
-  if (!Array.isArray(rows)) throw blocked(`${label} must be an array of entries (got ${describe(rows)})`);
-  const entries = []; const problems = []; const notes = []; const seen = new Set(); let normalised = 0;
-  rows.forEach((raw, i) => {
-    const t = typeAuditEntry(name, raw, `${label} entry #${i}`, { lenient });
-    if (!t.ok) { problems.push(t.reason); return; }
-    if (seen.has(t.cols.id)) { problems.push(`${label} entry #${i}: duplicates the id of an earlier entry (${t.cols.id})`); return; }
-    seen.add(t.cols.id);
-    if (t.notes.length) { normalised += 1; notes.push(...t.notes.map((n) => `${name} ${n}`)); }
-    entries.push({ cols: t.cols, row: fromDb(name, t.cols) });
-  });
-  if (problems.length) throw blocked(`${problems.length} invalid entr${problems.length === 1 ? 'y' : 'ies'} — ${problems.slice(0, 20).join('; ')}${problems.length > 20 ? '; …' : ''}`, { problems });
-  return { entries, counts: { imported: entries.length, normalised }, notes };
-}
-
-// ------------------------------------------------------------------ rows ↔ the tables
-const SELECT = Object.fromEntries(AUDIT_COLLECTIONS.map((n) => [n, `SELECT * FROM ${DOMAINS[n].table}`]));
-const INSERT = Object.fromEntries(AUDIT_COLLECTIONS.map((n) => { const cols = DOMAINS[n].cols.map((c) => c[0]); return [n, `INSERT INTO ${DOMAINS[n].table} (${cols.join(', ')}) VALUES (${cols.map((c) => `@${c}`).join(', ')})`]; }));
-const UPDATE = Object.fromEntries(AUDIT_COLLECTIONS.map((n) => { const cols = DOMAINS[n].cols.map((c) => c[0]).filter((c) => c !== 'id'); return [n, `UPDATE ${DOMAINS[n].table} SET ${cols.map((c) => `${c} = @${c}`).join(', ')} WHERE id = @id`]; }));
-const DELETE_BY_ID = Object.fromEntries(AUDIT_COLLECTIONS.map((n) => [n, `DELETE FROM ${DOMAINS[n].table} WHERE id = ?`]));
-/** Every row of a collection in `seq` order: fresh objects from the file. */
-function readRows(sqlite, name) { return sqlite.prepare(`${SELECT[name]} ORDER BY seq`).all().map((r) => fromDb(name, r)); }
-/** Write the typed entries in array order (the array position is the durable order). */
-function writeRows(sqlite, name, entries) {
-  sqlite.exec(`DELETE FROM ${DOMAINS[name].table};`);
-  const ins = sqlite.prepare(INSERT[name]);
-  for (const { cols } of entries) ins.run(cols);
-  return entries.length;
-}
-const existingIds = (sqlite, table) => (tableExists(sqlite, table) ? new Set(sqlite.prepare(`SELECT id FROM ${table}`).all().map((r) => r.id)) : new Set());
-
-/** The STRICT check an INCOMING idv_queue collection must pass before its rows are written: every guardianId names a guardian in the table as it stands (ids only). */
-function checkIncomingGuardians(sqlite, rows, { label }) {
-  if (!rows.length) return;
-  const guardians = existingIds(sqlite, 'guardians');
-  const missing = rows.filter((r) => !guardians.has(r.guardianId));
-  if (missing.length) throw blocked(`IDV_GUARDIAN_MISSING: ${missing.length} IDV entr${missing.length === 1 ? 'y' : 'ies'} in ${label} name a guardian that does not exist (entries ${ids(missing.map((r) => r.id))}; guardians ${ids([...new Set(missing.map((r) => r.guardianId))])})`, { code: 'IDV_GUARDIAN_MISSING', entries: missing.map((r) => r.id) });
-}
-/**
- * The FINAL-STATE assertion for Domain G (Q4b): every idv_queue row names a guardian
- * present in the FINAL guardians table. Runs inside the caller's transaction whenever
- * a snapshot wrote the queue or rewrote the identity pair (the queue omitted included);
- * a miss THROWS with ids only, so the whole write rolls back. A no-op before the
- * cutover record exists.
+ * The ID-check queue's guardian rule (Q4b), on the final state: every entry names a guardian in the guardians table.
+ * Runs inside the caller's transaction after a snapshot wrote the queue or the identity pair; a miss throws (ids only).
  */
 export function assertIdvQueueGuardiansConsistent(sqlite, { label = 'the snapshot' } = {}) {
   if (!safetyAuditLive(sqlite)) return;
-  const rows = sqlite.prepare('SELECT id, guardian_id FROM idv_queue ORDER BY seq').all();
-  if (!rows.length) return;
-  const guardians = existingIds(sqlite, 'guardians');
-  const missing = rows.filter((r) => !guardians.has(r.guardian_id));
-  if (missing.length) throw refusal('IDV_GUARDIAN_MISSING', `${missing.length} IDV entr${missing.length === 1 ? 'y' : 'ies'} in ${label} name a guardian that does not exist in the final guardians table (entries ${ids(missing.map((r) => r.id))}; guardians ${ids([...new Set(missing.map((r) => r.guardian_id))])}); the write was rolled back and nothing was changed — remove the entries with their guardian, or keep the guardian`, { entries: missing.map((r) => r.id) });
+  const missing = sqlite.prepare('SELECT id, guardian_id FROM idv_queue WHERE guardian_id NOT IN (SELECT id FROM guardians) ORDER BY seq').all();
+  if (missing.length) throw refusal('IDV_GUARDIAN_MISSING', `${missing.length} IDV entr${missing.length === 1 ? 'y' : 'ies'} in ${label} name a guardian that does not exist (entries ${ids(missing.map((r) => r.id))}; guardians ${ids([...new Set(missing.map((r) => r.guardian_id))])}); the write was rolled back and nothing was changed`, { entries: missing.map((r) => r.id) });
 }
-/**
- * Domain P, the diagnostic (never a refusal): per collection, how many rows name a
- * player id (a string in the column) that is not in the players table. A count, not
- * provenance — it says how many rows resolve to nothing, not why.
- */
+/** Q4, the diagnostic (never a refusal): per collection, rows naming a player id that is not in the players table. */
 export function unresolvedPlayerReferences(sqlite) {
-  const out = {};
   const players = tableExists(sqlite, 'players');
-  for (const { name, table, column } of PLAYER_REFERENCE_TABLES) {
-    if (!tableExists(sqlite, table)) { out[name] = 0; continue; }
-    out[name] = players ? sqlite.prepare(`SELECT COUNT(*) AS n FROM ${table} WHERE ${column} IS NOT NULL AND ${column} NOT IN (SELECT id FROM players)`).get().n : sqlite.prepare(`SELECT COUNT(*) AS n FROM ${table} WHERE ${column} IS NOT NULL`).get().n;
-  }
-  return out;
+  return Object.fromEntries(PLAYER_REFERENCE_TABLES.map(({ name: n, table: t, column }) => [n, !tableExists(sqlite, t) ? 0
+    : sqlite.prepare(`SELECT COUNT(*) AS n FROM ${t} WHERE ${column} IS NOT NULL${players ? ` AND ${column} NOT IN (SELECT id FROM players)` : ''}`).get().n]));
 }
-/**
- * S4b-R, the companion diagnostic: per collection, how many rows name a player whose
- * record is RETAINED (an account deleted under the new behaviour). A count beside the
- * unresolved one — the unresolved count keeps counting the ids that resolve to no row
- * at all (players deleted before S4b-R, pre-S4a imports, ids that never existed: Q4),
- * for which nothing is fabricated.
- */
+/** S4b-R, the companion diagnostic: per collection, rows naming a player whose record is retained (an account deleted). */
 export function retainedPlayerReferences(sqlite) {
-  const out = {};
   const players = tableExists(sqlite, 'players');
-  for (const { name, table, column } of PLAYER_REFERENCE_TABLES) {
-    if (!tableExists(sqlite, table) || !players) { out[name] = 0; continue; }
-    out[name] = sqlite.prepare(`SELECT COUNT(*) AS n FROM ${table} WHERE ${column} IS NOT NULL AND ${column} IN (SELECT id FROM players WHERE deleted_at IS NOT NULL)`).get().n;
-  }
-  return out;
+  return Object.fromEntries(PLAYER_REFERENCE_TABLES.map(({ name: n, table: t, column }) => [n, !tableExists(sqlite, t) || !players ? 0
+    : sqlite.prepare(`SELECT COUNT(*) AS n FROM ${t} WHERE ${column} IS NOT NULL AND ${column} IN (SELECT id FROM players WHERE deleted_at IS NOT NULL)`).get().n]));
 }
 
+// ------------------------------------------------------------------ snapshot (fixtures and the persistence batteries)
+function readAll(sqlite) {
+  return Object.fromEntries(AUDIT_COLLECTIONS.map((n) => [n, decodeRows(sqlite, n, sqlite.prepare(`SELECT * FROM ${TABLE_OF[n]} ORDER BY seq`).all())]));
+}
 /**
- * Whole-table access for the tools that treat the file as one snapshot (backups,
- * restores, the persistence suites), one entry per collection in dispatch order. Before
- * the cutover record both methods decline (`null` / `false`): the caller keeps the legacy
- * blob. Afterwards `read` returns the typed records in insertion order; `replace`
- * types every entry (an unknown key dropped, an off-type value refused by name), checks an incoming IDV queue against the guardians
- * table as it stands (the identity pair is dispatched first), rewrites the table inside
- * the caller's transaction and refuses the whole write on the first problem. The caller
- * then runs `assertIdvQueueGuardiansConsistent` on the FINAL state.
+ * Whole-snapshot access (readTableBacked / writeTableBacked): a supplied collection IS the whole final collection, in
+ * order; an omitted one is kept. Every entry is typed (an unknown field or a wrong type refused, naming the field and
+ * the id) and its organisation and staff references checked. `assert` checks the keys and the ID-check queue's
+ * guardians on the final state.
  */
-export const AUDIT_SNAPSHOT_TABLES = Object.freeze(AUDIT_COLLECTIONS.map((name) => Object.freeze({
-  name,
-  table: DOMAINS[name].table,
-  read(sqlite) { if (!safetyAuditLive(sqlite)) return null; return readRows(sqlite, name); },
-  replace(sqlite, rows) {
-    if (!safetyAuditLive(sqlite)) return false;
-    if (!sqlite.isTransaction) throw new Error(`${name}: replace() runs inside the caller's transaction`);
-    const v = validateAuditRows(name, rows, { label: `the ${name} snapshot collection` });
-    if (DOMAINS[name].guardianKey) checkIncomingGuardians(sqlite, v.entries.map((e) => e.row), { label: `the ${name} snapshot collection` });
-    writeRows(sqlite, name, v.entries);
-    return true;
-  },
-})));
-
-// ------------------------------------------------------------------ detached copies (the export)
-const copyRow = (row) => JSON.parse(JSON.stringify(row));
-
-// ------------------------------------------------------------------ the repository
-/**
- * `unit` is the store's participant API ({ active(), join(work) }) or null (a tool, a
- * test, the migration). `staged` selects the server's write mode (see the header); it
- * needs `unit`, and the store must register `saveHook()` — with `unit` given, no
- * operation joins a unit until `saveHook()` was taken.
- */
-export function createSafetyAuditRepository({ sqlite, now = Date.now, log = () => {}, unit = null, staged = false } = {}) {
-  if (!sqlite) throw new TypeError('the safety-audit repository needs a SQLite connection (node:sqlite); the audit tables have no in-memory or JSON fallback');
-  if (unit !== null && (typeof unit?.active !== 'function' || typeof unit?.join !== 'function')) throw new TypeError('the safety-audit repository needs the store\'s participant API `unit` ({ active(), join(work) }) or null; a unit without join() could not report an operation\'s failure to the unit of work');
-  if (staged && !unit) throw new TypeError('the safety-audit repository in staged mode needs the store\'s participant API `unit` and the store must register its saveHook()');
-  void now;
-  const stmt = {
-    cutover: sqlite.prepare('SELECT 1 FROM data_migrations WHERE id = ?'),
-    guardian: sqlite.prepare('SELECT 1 FROM guardians WHERE id = ?'),
-    insert: Object.fromEntries(AUDIT_COLLECTIONS.map((n) => [n, sqlite.prepare(INSERT[n])])),
-    update: Object.fromEntries(AUDIT_COLLECTIONS.map((n) => [n, sqlite.prepare(UPDATE[n])])),
-    remove: Object.fromEntries(AUDIT_COLLECTIONS.map((n) => [n, sqlite.prepare(DELETE_BY_ID[n])])),
-  };
-
-  // The mirrors: every row of every collection, in insertion order.
-  const rows = Object.fromEntries(AUDIT_COLLECTIONS.map((n) => [n, []]));
-  const byId = Object.fromEntries(AUDIT_COLLECTIONS.map((n) => [n, new Map()]));
-  const views = Object.fromEntries(AUDIT_COLLECTIONS.map((n) => [n, readonlyView(rows[n], `an audit record (${n})`)]));
-  const index = (n) => { byId[n].clear(); for (const r of rows[n]) byId[n].set(r.id, r); };
-  const load = () => { for (const n of AUDIT_COLLECTIONS) { rows[n].length = 0; if (safetyAuditLive(sqlite)) for (const r of readRows(sqlite, n)) rows[n].push(r); index(n); } };
-  load();
-
-  // Staged mode: the SQL queue, FIFO, drained whole inside every save transaction.
-  const pending = []; let inFlight = 0;
-  let hookTaken = false;
-  const inUnit = () => !!unit?.active?.();
-  const hookRefusal = (what) => new Error(`safetyAudit: ${what} needs the repository's save hook registered with the store first (store.setSaveHook(repo.saveHook())): the hook is how a save writes the queued statements and how a unit of work's rollback restores this repository's memory`);
-  /** The one boundary of every mutation (repositories/channels.mjs `operation`: identical contract). */
-  const operation = (fn) => {
-    if (inUnit()) {
-      return unit.join(() => {
-        if (!hookTaken) throw hookRefusal(staged ? 'a staged write inside a unit of work' : 'joining a unit of work');
-        return staged ? fn((op) => { pending.push(op); }) : fn((op) => op());
+export const SAFETY_AUDIT_SNAPSHOT = {
+  names: AUDIT_COLLECTIONS,
+  read(sqlite) { return safetyAuditLive(sqlite) ? readAll(sqlite) : null; },
+  replace(sqlite, db, { label = 'the snapshot (safety and audit)' } = {}) {
+    if (!safetyAuditLive(sqlite)) return [];
+    const written = AUDIT_COLLECTIONS.filter((n) => Object.hasOwn(db, n) && db[n] !== undefined);
+    const typed = {};
+    for (const n of written) {
+      const list = db[n];
+      if (!Array.isArray(list)) throw refusal('SAFETY_AUDIT_IMPORT_BLOCKED', `the ${n} collection of ${label} must be an array of entries (got ${describe(list)})`);
+      const seen = new Set();
+      typed[n] = list.map((raw, i) => {
+        const t = AUDIT_TYPERS[n](raw, `${n} entry #${i}`);
+        if (!t.ok) throw refusal('SAFETY_AUDIT_IMPORT_BLOCKED', `${label}: ${t.reason}`);
+        if (seen.has(t.record.id)) throw refusal('SAFETY_AUDIT_IMPORT_BLOCKED', `${label}: ${n} entry #${i} duplicates an earlier entry (${t.record.id})`);
+        seen.add(t.record.id);
+        return t;
       });
     }
-    if (staged) {
-      if (!hookTaken) throw hookRefusal('a staged write');
-      if (sqlite.isTransaction) throw new Error('safetyAudit: the staged repository cannot take part in a transaction it did not open (the server\'s transactions are units of work or snapshot saves)');
-      return fn((op) => { pending.push(op); });
+    const missing = [];
+    for (const n of written) for (const t of typed[n]) for (const [what, tbl, id] of referencesOf(n, t.record)) if (!sqlite.prepare(`SELECT 1 FROM ${tbl} WHERE id = ?`).get(id)) missing.push(`${what} → ${tbl} ${id}`);
+    if (missing.length) throw refusal('SAFETY_AUDIT_REFERENCE_MISSING', `${missing.length} reference(s) in ${label} are not there (${ids(missing)}); the write was rolled back and nothing was changed`, { rows: missing });
+    for (const n of written) {
+      sqlite.prepare(`DELETE FROM ${TABLE_OF[n]}`).run();
+      for (const t of typed[n]) writeRecord(sqlite, n, t);
     }
-    const body = () => fn((op) => op());
-    if (sqlite.isTransaction) return body(); // caller-owned: see reload()
-    const state = repo.snapshotState();
-    try { return transaction(sqlite, body); } catch (err) { repo.restoreState(state); throw err; }
+    return written;
+  },
+  assert(sqlite, { label = 'the snapshot (safety and audit)' } = {}) {
+    if (!safetyAuditLive(sqlite)) return;
+    for (const t of AUDIT_TABLE_NAMES) {
+      const broken = sqlite.prepare(`PRAGMA foreign_key_check(${t})`).all();
+      if (broken.length) throw refusal('SAFETY_AUDIT_KEY_VIOLATION', `${label}: ${t} holds ${broken.length} row(s) whose reference is not there (first: rowid ${broken[0].rowid} → ${broken[0].parent}); the write was rolled back`);
+    }
+    assertIdvQueueGuardiansConsistent(sqlite, { label });
+  },
+};
+
+// ------------------------------------------------------------------ the repository
+const WRITES = new Set(['add', 'lift', 'file', 'resolve', 'record', 'append', 'setStatus']);
+const REPORT_RANK = "CASE WHEN status = 'pending_review' AND urgent = 1 THEN 0 WHEN status = 'pending_review' THEN 1 ELSE 2 END";
+const REPORT_SORT = "CASE WHEN status = 'pending_review' THEN created_at ELSE -created_at END";
+
+/**
+ * `createSafetyAuditRepository({ sqlite, unit, now, log })`: one object per collection with its writes and queries,
+ * plus `reads` (the queries alone, for modules that must not write).
+ */
+export function createSafetyAuditRepository({ sqlite, unit = null, now = Date.now, log = () => {} } = {}) {
+  if (!sqlite) throw new TypeError('the safety-audit repository needs a SQLite connection (node:sqlite)');
+  const operation = (fn) => (unit?.active?.() ? unit.join(fn) : sqlite.isTransaction ? fn() : transaction(sqlite, fn));
+  const cache = new Map();
+  const q = (sql) => { let s = cache.get(sql); if (!s) cache.set(sql, (s = sqlite.prepare(sql))); return s; };
+  const str = (v) => typeof v === 'string';
+  const dec = (n, rows) => decodeRows(sqlite, n, rows).map(deepFreeze);
+  const byIdOf = (n) => (id) => (str(id) ? dec(n, q(`SELECT * FROM ${TABLE_OF[n]} WHERE id = ?`).all(id))[0] ?? null : null);
+  /** Rows after `after` ([seq]), newest first: `{ items, nextCursor }`. */
+  const newestPage = (n, where, args, { after = null, limit }) => {
+    const rows = q(`SELECT * FROM ${TABLE_OF[n]} WHERE ${where} AND (? IS NULL OR seq < ?) ORDER BY seq DESC LIMIT ?`).all(...args, after?.[0] ?? null, after?.[0] ?? null, limit + 1);
+    const page = pageOf(rows, limit, (r) => [r.seq]);
+    return { items: dec(n, page.items), nextCursor: page.nextCursor };
   };
-  const label = (n) => `an audit record (${n})`;
+  /** Type, check the references, insert; returns the stored record. */
+  const insert = (n, raw) => {
+    const t = AUDIT_TYPERS[n](raw, n);
+    if (!t.ok) throw refusal('AUDIT_RECORD_INVALID', t.reason);
+    if (q(`SELECT 1 FROM ${TABLE_OF[n]} WHERE id = ?`).get(t.record.id)) throw refusal('AUDIT_DUPLICATE', `${TABLE_OF[n]} ${t.record.id} already exists`);
+    for (const [what, tbl, id] of referencesOf(n, t.record)) if (!q(`SELECT 1 FROM ${tbl} WHERE id = ?`).get(id)) throw refusal('AUDIT_REFERENCE_MISSING', `${what} names no ${tbl} row (${id})`);
+    if (n === 'idvQueue' && !q('SELECT 1 FROM guardians WHERE id = ?').get(t.record.guardianId)) throw refusal('IDV_GUARDIAN_MISSING', `idv_queue ${t.record.id}: guardian ${t.record.guardianId} does not exist; an IDV entry names an existing guardian`);
+    writeRecord(sqlite, n, t);
+    return byIdOf(n)(t.record.id);
+  };
+  const typesArg = (types) => (types ? JSON.stringify(types) : null);
 
-  const invalid = (n, reason) => Object.assign(new TypeError(`${n}: ${reason}`), { code: 'AUDIT_RECORD_INVALID' });
-  /** The append shared by every collection: typed like a snapshot write (unknown keys dropped, an off-type value refused by name); the IDV queue's guardian checked strictly. */
-  const append = (n, raw) => operation((exec) => {
-    const t = typeAuditEntry(n, raw, n); if (!t.ok) throw invalid(n, t.reason);
-    const row = fromDb(n, t.cols);
-    if (byId[n].has(row.id)) throw new Error(`${n}: a row with id ${row.id} already exists`);
-    if (DOMAINS[n].guardianKey && !stmt.guardian.get(row.guardianId)) throw refusal('IDV_GUARDIAN_MISSING', `${n}: guardian ${row.guardianId} does not exist; an IDV entry names an existing guardian`);
-    rows[n].push(row); byId[n].set(row.id, row);
-    exec(() => { stmt.insert[n].run(t.cols); });
-    return readonlyView(row, label(n));
-  });
-  /**
-   * Change exactly `allowed` keys of a row by id (the routes' status updates).
-   * ATOMIC (review of c6cf5e1, F1): the candidate record is typed, and the UPDATE parameters computed, BEFORE anything
-   * is published — a refusal at any field leaves the row (and so every held or fresh view), the queue and the file
-   * untouched. Only then are the typed values assigned to the live row (its identity, and so every held view, is kept)
-   * and the statement queued.
-   */
-  const patch = (n, id, fields, allowed) => operation((exec) => {
-    const row = byId[n].get(id); if (!row) throw new Error(`${n}: no ${n === 'reports' ? 'report' : 'entry'} ${id}`);
-    if (!isPlainObject(fields)) throw new TypeError(`${n}: patch takes an object of fields`);
-    const keys = Object.keys(fields);
-    if (!keys.length || keys.some((k) => !allowed.includes(k))) throw new TypeError(`${n}: patch changes ${allowed.length === 1 ? allowed[0] : `${allowed.slice(0, -1).join(', ')} and ${allowed.at(-1)}`} only`);
-    for (const k of keys) if (fields[k] === undefined) throw invalid(n, `${n}.${k} needs a value (null clears it; id ${id})`);
-    const t = typeAuditEntry(n, { ...row, ...fields }, n); if (!t.ok) throw invalid(n, t.reason);
-    const next = fromDb(n, t.cols);
-    for (const k of keys) row[k] = next[k];
-    exec(() => { stmt.update[n].run(t.cols); });
-    return readonlyView(row, label(n));
-  });
-  /** Delete one row by id; returns a detached copy of what was removed, or null. */
-  const remove = (n, id) => operation((exec) => {
-    const i = rows[n].findIndex((r) => r.id === id); if (i < 0) return null;
-    const [removed] = rows[n].splice(i, 1); byId[n].delete(id);
-    exec(() => { stmt.remove[n].run(id); });
-    return copyRow(removed);
-  });
-  const byIdView = (n, id) => { const r = byId[n].get(id); return r ? readonlyView(r, label(n)) : null; };
-  const collection = (n) => ({
-    view: views[n],
-    count: () => rows[n].length,
-    byId: (id) => byIdView(n, id),
-    append: (raw) => append(n, raw),
-    exportRows: () => rows[n].map(copyRow),
-  });
+  const blocks = {
+    /** A block (a player's or guardian's, or an urgent report's suspension). */
+    add: (raw) => operation(() => insert('blocks', raw)),
+    /** Q5: lifting a block deletes its row. Returns the lifted record, or null. */
+    lift: (id) => operation(() => { const b = byIdOf('blocks')(id); if (!b) return null; q('DELETE FROM blocks WHERE id = ?').run(id); return b; }),
+    byId: byIdOf('blocks'),
+    /** Has `playerId` (or their guardian, or a suspension) blocked `orgId`? */
+    has: (playerId, orgId) => str(playerId) && str(orgId) && !!q('SELECT 1 FROM blocks WHERE player_id = ? AND org_id = ? LIMIT 1').get(playerId, orgId),
+    /** A page of every block, newest first (Trust & Safety). */
+    page: (page) => newestPage('blocks', '1 = 1', [], page),
+    count: () => q('SELECT COUNT(*) AS n FROM blocks').get().n,
+  };
 
+  const reports = {
+    file: (raw) => operation(() => insert('reports', raw)),
+    /** Resolve a pending report once with its `outcome` at `at`. Refuses a report already resolved. */
+    resolve: (id, { outcome, at }) => operation(() => {
+      const r = byIdOf('reports')(id);
+      if (!r) throw refusal('REPORT_NOT_FOUND', `reports ${id} is not a record of the repository`);
+      if (r.status !== 'pending_review') throw refusal('ALREADY_RESOLVED', `reports ${id} is already resolved`);
+      const t = typeReport({ ...r, status: 'resolved', outcome, resolvedAt: at }, 'reports');
+      if (!t.ok) throw refusal('AUDIT_RECORD_INVALID', t.reason);
+      q("UPDATE reports SET status = 'resolved', outcome = ?, resolved_at = ? WHERE id = ?").run(t.record.outcome, t.record.resolvedAt, id);
+      return byIdOf('reports')(id);
+    }),
+    byId: byIdOf('reports'),
+    /** The reports one reporter filed, newest first. */
+    forReporter: (by, byId) => dec('reports', q('SELECT * FROM reports WHERE by_kind = ? AND by_id = ? ORDER BY seq DESC').all(by, byId)),
+    /** Is an urgent report against `orgId` still waiting for review (safeguarding certification)? */
+    openUrgentAgainst: (orgId) => !!q("SELECT 1 FROM reports WHERE target_org_id = ? AND urgent = 1 AND status = 'pending_review' LIMIT 1").get(orgId),
+    countOpen: () => q("SELECT COUNT(*) AS n FROM reports WHERE status = 'pending_review'").get().n,
+    /** A page in triage order: urgent pending first, then pending, both oldest first; then resolved, newest first. `after` is [rank, sortKey, seq]. */
+    triagePage: ({ after = null, limit }) => {
+      const rows = q(`SELECT *, ${REPORT_RANK} AS rank_, ${REPORT_SORT} AS sort_ FROM reports
+        WHERE (? IS NULL OR (${REPORT_RANK}, ${REPORT_SORT}, seq) > (?, ?, ?)) ORDER BY rank_, sort_, seq LIMIT ?`).all(after ? 1 : null, after?.[0] ?? null, after?.[1] ?? null, after?.[2] ?? null, limit + 1);
+      const page = pageOf(rows, limit, (r) => [r.rank_, r.sort_, r.seq]);
+      return { items: dec('reports', page.items), nextCursor: page.nextCursor };
+    },
+  };
+
+  const moderationLog = {
+    record: (raw) => operation(() => insert('moderationLog', raw)),
+    byId: byIdOf('moderationLog'),
+    page: (page) => newestPage('moderationLog', '1 = 1', [], page),
+    count: (severity = null) => q('SELECT COUNT(*) AS n FROM moderation_log WHERE (? IS NULL OR severity = ?)').get(severity, severity).n,
+  };
+
+  const orgNotes = {
+    add: (raw) => operation(() => insert('orgNotes', raw)),
+    byId: byIdOf('orgNotes'),
+    /** One club's notes on one player, newest first. */
+    forOrgPlayer: (orgId, playerId) => dec('orgNotes', q('SELECT * FROM org_notes WHERE org_id = ? AND player_id = ? ORDER BY seq DESC').all(orgId, playerId)),
+  };
+
+  const ledger = {
+    append: (raw) => operation(() => insert('ledger', raw)),
+    byId: byIdOf('ledger'),
+    /** One player's ledger, oldest first; `types` limits it (null: every type). */
+    forPlayer: (playerId, types = null) => dec('ledger', q('SELECT * FROM ledger WHERE player_id = ? AND (? IS NULL OR type IN (SELECT value FROM json_each(?))) ORDER BY seq').all(playerId, typesArg(types), typesArg(types))),
+    /** One club's events about one player, oldest first (the Proof Pack, the signing's attribution). */
+    forPlayerOrg: (playerId, orgId) => dec('ledger', q('SELECT * FROM ledger WHERE player_id = ? AND org_id = ? ORDER BY seq').all(playerId, orgId)),
+    /** One club's events, oldest first; `types` limits it (null: every type: the enterprise export). */
+    forOrg: (orgId, types = null) => dec('ledger', q('SELECT * FROM ledger WHERE org_id = ? AND (? IS NULL OR type IN (SELECT value FROM json_each(?))) ORDER BY seq').all(orgId, typesArg(types), typesArg(types))),
+    /** A page of one club's ledger, newest first. */
+    pageForOrg: (orgId, page) => newestPage('ledger', 'org_id = ?', [orgId], page),
+    /** A page of these players' ledger, newest first (a guardian's log of their children). */
+    pageForPlayers: (playerIds, page) => newestPage('ledger', 'player_id IN (SELECT value FROM json_each(?))', [JSON.stringify(playerIds)], page),
+    /** The players a club put on these lists (default: its shortlist), in the order it first did. */
+    playersListedBy: (orgId, types = ['shortlist']) => q('SELECT player_id AS id, MIN(seq) AS first FROM ledger WHERE org_id = ? AND type IN (SELECT value FROM json_each(?)) AND player_id IS NOT NULL GROUP BY player_id ORDER BY first').all(orgId, JSON.stringify(types)).map((r) => r.id),
+    /** Has the club put this player on these lists (default: its shortlist)? */
+    isListedBy: (orgId, playerId, types = ['shortlist']) => !!q('SELECT 1 FROM ledger WHERE org_id = ? AND player_id = ? AND type IN (SELECT value FROM json_each(?)) LIMIT 1').get(orgId, playerId, JSON.stringify(types)),
+    countForPlayer: (playerId, type) => q('SELECT COUNT(*) AS n FROM ledger WHERE player_id = ? AND type = ?').get(playerId, type).n,
+    /** One club's event counts by type: `{ [type]: n }`. */
+    countsForOrg: (orgId) => Object.fromEntries(q('SELECT type, COUNT(*) AS n FROM ledger WHERE org_id = ? GROUP BY type').all(orgId).map((r) => [r.type, r.n])),
+    /** One club's busiest actors: `[{ scoutName, events }]`, most events first (ties: who acted first), at most `n`. */
+    topActorsForOrg: (orgId, n) => q("SELECT actor_name AS scoutName, COUNT(*) AS events FROM ledger WHERE org_id = ? AND actor_name IS NOT NULL AND actor_name <> '' GROUP BY actor_name ORDER BY events DESC, MIN(seq) LIMIT ?").all(orgId, n).map((r) => ({ scoutName: r.scoutName, events: r.events })),
+    /** Every (actor, organisation, type) with its count, in first-seen order (the reputation board). */
+    countsByActor: () => q('SELECT actor_name AS scoutName, org_name AS orgName, type, COUNT(*) AS n, MIN(seq) AS first FROM ledger GROUP BY actor_name, org_name, type ORDER BY first').all().map((r) => ({ scoutName: r.scoutName, orgName: r.orgName, type: r.type, n: r.n })),
+  };
+
+  const opsEvents = {
+    record: (raw) => operation(() => insert('opsEvents', raw)),
+    byId: byIdOf('opsEvents'),
+    count: (kind = null) => q('SELECT COUNT(*) AS n FROM ops_events WHERE (? IS NULL OR kind = ?)').get(kind, kind).n,
+    /** The newest `n`, newest first. */
+    newest: (n) => dec('opsEvents', q('SELECT * FROM ops_events ORDER BY seq DESC LIMIT ?').all(n)),
+  };
+
+  const sourceChanges = {
+    /** Append a change; the log keeps the newest `cap` rows (a change log, not the history of record). */
+    record: (raw, { cap = SOURCE_CHANGE_CAP } = {}) => operation(() => {
+      const c = insert('sourceChanges', raw);
+      q('DELETE FROM source_changes WHERE seq <= (SELECT seq FROM source_changes ORDER BY seq DESC LIMIT 1 OFFSET ?)').run(cap);
+      return c;
+    }),
+    byId: byIdOf('sourceChanges'),
+    /** One player's changes, oldest first by when they happened. */
+    forPlayer: (playerId) => dec('sourceChanges', q('SELECT * FROM source_changes WHERE player_id = ? ORDER BY occurred_at, seq').all(playerId)),
+    count: () => q('SELECT COUNT(*) AS n FROM source_changes').get().n,
+  };
+
+  const idvQueue = {
+    add: (raw) => operation(() => insert('idvQueue', raw)),
+    /** The admin toggle: the status of one entry. */
+    setStatus: (id, status) => operation(() => {
+      if (!IDV_STATUSES.includes(status)) throw refusal('AUDIT_RECORD_INVALID', `idv_queue ${id}: status must be one of ${IDV_STATUSES.join('|')}`);
+      if (q('UPDATE idv_queue SET status = ? WHERE id = ?').run(status, id).changes !== 1) throw refusal('IDV_ENTRY_NOT_FOUND', `idv_queue ${id} is not a record of the repository`);
+      return byIdOf('idvQueue')(id);
+    }),
+    byId: byIdOf('idvQueue'),
+    /** The guardian's first entry (the admin toggle's rule), or null. */
+    firstForGuardian: (guardianId) => dec('idvQueue', q('SELECT * FROM idv_queue WHERE guardian_id = ? ORDER BY seq LIMIT 1').all(guardianId))[0] ?? null,
+    /** Every entry, in the order the checks happened (about one per guardian). */
+    all: () => dec('idvQueue', q('SELECT * FROM idv_queue ORDER BY seq').all()),
+  };
+
+  const readOnly = (o) => Object.freeze(Object.fromEntries(Object.entries(o).filter(([k]) => !WRITES.has(k))));
+  const parts = { blocks, reports, moderationLog, orgNotes, ledger, opsEvents, sourceChanges, idvQueue };
   const repo = {
-    /** Boot: refuse to run without the cutover record; (re)load the mirrors; report counts (never a value). */
+    ...parts,
+    /** The queries alone, for modules that must not write. */
+    reads: Object.freeze(Object.fromEntries(Object.entries(parts).map(([k, v]) => [k, readOnly(v)]))),
     attach() {
-      if (!stmt.cutover.get(SAFETY_AUDIT_MIGRATION)) throw new Error(`safetyAudit: the cutover record ${SAFETY_AUDIT_MIGRATION} is missing from data_migrations; the tables cannot be trusted as the source of truth`);
-      load();
+      if (!safetyAuditLive(sqlite)) throw new Error(`the safety-audit repository needs ${SAFETY_AUDIT_MIGRATION} recorded`);
       const c = repo.counts();
-      log(`safety audit: ${AUDIT_COLLECTIONS.map((n) => `${c[n]} ${n}`).join(', ')} loaded from the tables`);
+      log(`safety audit: ${AUDIT_COLLECTIONS.map((n) => `${c[n]} ${n}`).join(', ')} in the tables`);
       return { engine: 'sqlite', ...c };
     },
-    /** Re-read the mirrors from the tables (a tool that rolled back a raw transaction of its own must call this). */
-    reload() { load(); return repo.counts(); },
-    counts: () => Object.fromEntries(AUDIT_COLLECTIONS.map((n) => [n, rows[n].length])),
-    /** Staged writes not yet in a committed save (0 in immediate mode). */
-    pending: () => pending.length,
-    /** Domain P, the diagnostic: per collection, rows whose player id (a string) is not in the players table. Never a refusal. */
+    counts: () => Object.fromEntries(AUDIT_COLLECTIONS.map((n) => [n, q(`SELECT COUNT(*) AS n FROM ${TABLE_OF[n]}`).get().n])),
+    pending: () => 0,
     unresolvedPlayerReferences: () => unresolvedPlayerReferences(sqlite),
-    /** Every collection's typed records (the literal's keys in the writer's order), detached (the admin backup). */
-    exportAll: () => Object.fromEntries(AUDIT_COLLECTIONS.map((n) => [n, rows[n].map(copyRow)])),
-    views,
-
-    blocks: { ...collection('blocks'), /** Q5: lifting a block deletes its row, as the route always did. Returns the lifted row (detached) or null. */ remove: (id) => remove('blocks', id) },
-    reports: { ...collection('reports'), /** The resolve route's three fields, by row id. */ patch: (id, fields) => patch('reports', id, fields, ['status', 'outcome', 'resolvedAt']) },
-    moderationLog: collection('moderationLog'),
-    orgNotes: collection('orgNotes'),
-    ledger: collection('ledger'),
-    opsEvents: collection('opsEvents'),
-    sourceChanges: { ...collection('sourceChanges'), /** m181's cap: delete the OLDEST rows beyond `cap` (insertion order). Returns the number removed. */ trimTo: (cap) => operation((exec) => {
-      if (!Number.isSafeInteger(cap) || cap < 0) throw new TypeError('sourceChanges: trimTo needs a non-negative integer cap');
-      const excess = rows.sourceChanges.length - cap; if (excess <= 0) return 0;
-      const removed = rows.sourceChanges.splice(0, excess); for (const r of removed) byId.sourceChanges.delete(r.id);
-      const removedIds = removed.map((r) => r.id);
-      exec(() => { for (const id of removedIds) stmt.remove.sourceChanges.run(id); });
-      return removed.length;
-    }) },
-    idvQueue: { ...collection('idvQueue'), /** The admin toggle's rule: the FIRST entry of the guardian in insertion order (read-only), or null. */ firstForGuardian: (guardianId) => { const r = rows.idvQueue.find((q) => q.guardianId === guardianId); return r ? readonlyView(r, label('idvQueue')) : null; }, /** The admin toggle: status only, by row id. */ patch: (id, fields) => patch('idvQueue', id, fields, ['status']) },
-
-    // ---------------------------------------------------------- the save hook (staged mode)
-    flush() {
-      if (!sqlite.isTransaction) throw new Error('safetyAudit.flush runs inside a save transaction; the store reports its commit or rollback afterwards');
-      for (const op of pending) op();
-      inFlight = pending.length;
-      return inFlight;
-    },
-    commit() { pending.splice(0, inFlight); inFlight = 0; },
-    rollback() { inFlight = 0; },
-    /**
-     * Unit-of-work participation: the graph memento of every mirror (each row, its
-     * nested context/detail/flags — by identity, restored IN PLACE so
-     * every held view reads the pre-unit state) and the queue length when the unit began.
-     */
-    snapshotState: () => ({ pendingLength: pending.length, graph: captureGraph(AUDIT_COLLECTIONS.map((n) => rows[n])) }),
-    restoreState(state) {
-      if (!state) return;
-      pending.length = state.pendingLength; inFlight = 0;
-      restoreGraph(state.graph);
-      for (const n of AUDIT_COLLECTIONS) index(n);
-    },
-    /** What the store registers (staged mode; and immediate mode with a `unit`, before any operation may join one). Taking it is the registration this repository can see. */
-    saveHook: () => { hookTaken = true; return { flush: () => repo.flush(), commit: () => repo.commit(), rollback: () => repo.rollback(), snapshotState: () => repo.snapshotState(), restoreState: (s) => repo.restoreState(s) }; },
+    /** Every collection's records, detached (the admin backup). */
+    exportAll: () => JSON.parse(JSON.stringify(readAll(sqlite))),
+    now,
   };
   return repo;
 }

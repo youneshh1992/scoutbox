@@ -1,30 +1,22 @@
-// S6b — the eight audit collections as tables (repositories/safetyAudit.mjs, migration
-// 0013_safety_audit): Candidate A of
-// docs/architecture/sqlite-migration-plan.md §D.4 as accepted at 1792fc7, with the
-// Founder's three decisions of 19 October 2026 — Q4 (the five historical player
-// references are TOLERANT: an unresolved id is counted, never refused, never given a
-// fabricated parent, never deleted; no parent-existence rule), Q4b (the idv_queue
-// guardian reference is STRICT: a missing guardian refuses the write, the import and
-// the final state of every snapshot that touches the queue or the identity pair),
-// Q5 (lifting a block deletes its row, as today).
+// S6b, explicit since S14b — the eight audit collections as typed tables (repositories/safetyAudit.mjs, migration
+// 0013_safety_audit amended in place). Q4: the five player references (blocks, reports, org notes, ledger, source
+// changes) carry no key and an unresolved id is counted, never refused. Q4b: the ID-check queue names an existing
+// guardian, checked on every write and every snapshot. Q5: lifting a block deletes its row.
 //
-// Covered: the migration (DDL only, no blob import); junk refused at a snapshot
-// save (positions, ids and reasons, never a text); the actual schema (typed columns only,
-// no foreign key on any of the eight tables, a unique id per table, insertion order);
-// the repository (append — an unknown key dropped, an off-type value refused by name —,
-// the block removal, the report and IDV status patches, the first-matching IDV entry, the
-// source-change cap, the two write modes, joined units, real COMMIT failure, hook
-// registration, held views restored in place); the snapshot dispatcher (round trip,
-// omission, empty, malformed, an unknown key dropped, an off-type value refused, tolerant
-// player references under an identity rewrite, the strict guardian assertion in every
-// direction, identity-only replacement with the queue omitted). Temporary databases
-// only; nothing touches DATA_DIR. Run with: npm test
+// Covered: the schema (typed columns, vocabulary CHECKs, organisation and staff RESTRICT keys, no key on a player or
+// guardian id, the ledger details as typed columns by type); the repository's explicit writes (each record typed — an
+// unknown field or a wrong type refused by name, never by value —, a detail key the type does not carry refused, the
+// organisation, staff and guardian references checked, a duplicate refused; every write committed at once; fresh,
+// deep-frozen reads); the queries the routes use (blocks, the report triage order and its cursor, the reporter's
+// list, the ledger's lists, counts and paging, the source-change cap); units of work (a write joins the open unit and
+// rolls back with it; a read inside the unit sees its writes); no db.<collection> name (each throws, naming the
+// repository); the snapshot path (round trip, refusals by id, the final-state guardian check in both directions).
+// Temporary databases only; nothing touches DATA_DIR. Run with: npm test
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import path from 'node:path';
-import { DatabaseSync } from 'node:sqlite';
 import { runDataMigrations } from '../repositories/database.mjs';
 import { attachDataLayer, DATA_MIGRATIONS, TABLE_BACKED } from '../repositories/index.mjs';
+import { createSafetyAuditRepository, SAFETY_AUDIT_SNAPSHOT, AUDIT_COLLECTIONS, LEDGER_TYPES, LEDGER_DETAIL } from '../repositories/safetyAudit.mjs';
 import { openStore } from '../store.mjs';
 import { NOW, TTL, tempDir, openRaw, applied, dump, FIXTURE, ORGS, USERS, SESSIONS, hasBlobTable } from './coreIdentityTestFixtures.mjs';
 
@@ -32,322 +24,208 @@ let passed = 0;
 const only = process.env.TEST_ONLY || '';
 function test(name, fn) { if (only && !name.includes(only)) return; fn(); passed++; console.log(`  ✓ ${name}`); }
 const rm = (...dirs) => { for (const d of dirs) fs.rmSync(d, { recursive: true, force: true }); };
-const dbFile = (dir) => path.join(dir, 'scoutbox.db');
 let counter = 9000;
 const nextId = (p) => `${p}-${++counter}`;
-const MIN = 60_000;
 const MIGRATION = '0013_safety_audit';
-const COLLECTIONS = ['blocks', 'reports', 'moderationLog', 'orgNotes', 'ledger', 'opsEvents', 'sourceChanges', 'idvQueue'];
-const TABLES = { blocks: 'blocks', reports: 'reports', moderationLog: 'moderation_log', orgNotes: 'org_notes', ledger: 'ledger', opsEvents: 'ops_events', sourceChanges: 'source_changes', idvQueue: 'idv_queue' };
-/** The writers' literals, key for key (server.mjs, m13, m181). */
-const KEYS = {
-  blocks: ['id', 'playerId', 'orgId', 'by', 'reason', 'ts'],
-  reports: ['id', 'ts', 'by', 'byId', 'byOrgId', 'targetKind', 'targetOrgId', 'targetScoutName', 'targetPlayerId', 'reason', 'urgent', 'status', 'outcome', 'resolvedAt'],
-  moderationLog: ['id', 'ts', 'context', 'flags', 'severity', 'excerpt'],
-  orgNotes: ['id', 'orgId', 'playerId', 'userId', 'scoutName', 'text', 'ts'],
-  ledger: ['id', 'ts', 'type', 'playerId', 'orgId', 'orgName', 'userId', 'scoutName', 'detail'],
-  opsEvents: ['id', 'at', 'kind', 'detail'],
-  sourceChanges: ['id', 'playerId', 'type', 'sourceSystem', 'sourceId', 'occurredAt', 'detail'],
-  idvQueue: ['id', 'guardianId', 'guardianName', 'documentType', 'documentRef', 'provider', 'reference', 'ts', 'status'],
-};
-const second = (dir) => new DatabaseSync(dbFile(dir), { readOnly: true });
-const rowsOf = (dir, table, order = 'seq') => { const s = second(dir); try { return s.prepare(`SELECT * FROM ${table} ORDER BY ${order}`).all().map((r) => ({ ...r })); } finally { s.close(); } };
-const tableExistsIn = (dir, t) => { const s = second(dir); try { return !!s.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(t); } finally { s.close(); } };
-const idsIn = (dir, table) => (tableExistsIn(dir, table) ? rowsOf(dir, table).map((r) => r.id) : null);
-/** Every table of the file, as committed (rewritten in S14a: replaces the save revision as the "nothing landed" check). */
-const fileDump = (dir) => { const s = second(dir); try { return dump(s); } finally { s.close(); } };
 const plain = (v) => JSON.parse(JSON.stringify(v));
-/** The typed record of a valid literal: every key of the collection in the writer's order, an absent key null. */
-const canonRow = (name, r) => Object.fromEntries(KEYS[name].map((k) => [k, r[k] === undefined ? null : r[k]]));
-const canon = (name, rows) => rows.map((r) => canonRow(name, r));
+/** The key a cursor carries (what readPage hands the repository). */
+const after = (cursor) => JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8'));
 
-// ------------------------------------------------------------------ the literals (synthetic values only)
-const T = NOW - MIN;
+// ------------------------------------------------------------------ the writers' literals (synthetic values only)
+const T = NOW - 60_000;
 const block = (over = {}) => ({ id: 'blk-1', playerId: 'pl-adult', orgId: 'org-pro', by: 'player', reason: 'synthetic reason', ts: T, ...over });
-const report = (over = {}) => ({ id: 'rep-1', ts: T, by: 'player', byId: 'pl-adult', targetKind: 'club', targetOrgId: 'org-pro', targetScoutName: null, targetPlayerId: null, reason: 'Synthetic report reason.', urgent: false, status: 'pending_review', outcome: null, resolvedAt: null, ...over });
-/** The automatic escalation literal (moderateOrRefuse): no targetPlayerId key, no byOrgId key. */
-const autoReport = (over = {}) => ({ id: 'rep-auto', ts: T, by: 'system', byId: 'moderation', targetKind: 'club', targetOrgId: 'org-pro', reason: 'Automatic escalation: grooming-pattern language blocked (secrecy) in player_message.', urgent: true, status: 'pending_review', outcome: null, resolvedAt: null, ...over });
-const modHit = (over = {}) => ({ id: 'mod-1', ts: T, context: { kind: 'player_message', channelId: 'chan-1' }, flags: ['email'], severity: 'contact', excerpt: 'synthetic excerpt with an address', ...over });
+const report = (over = {}) => ({ id: 'rep-1', ts: T, by: 'player', byId: 'pl-adult', byOrgId: null, targetKind: 'club', targetOrgId: 'org-pro', targetScoutName: null, targetPlayerId: null, reason: 'Synthetic report reason.', urgent: false, status: 'pending_review', outcome: null, resolvedAt: null, ...over });
+const modHit = (over = {}) => ({ id: 'mod-1', ts: T, context: { kind: 'player_message', channelId: 'chan-1' }, flags: ['email'], severity: 'contact', excerpt: 'synthetic excerpt', ...over });
 const note = (over = {}) => ({ id: 'note-1', orgId: 'org-pro', playerId: 'pl-adult', userId: 'usr-1', scoutName: 'Maria', text: 'Synthetic note text.', ts: T, ...over });
-const led = (over = {}) => ({ id: 'led-1', ts: T, type: 'view', playerId: 'pl-adult', orgId: 'org-pro', orgName: 'Eastport FC', userId: 'usr-1', scoutName: 'Maria', ...over });
+const led = (over = {}) => ({ id: 'led-1', ts: T, type: 'view', playerId: 'pl-adult', orgId: 'org-pro', orgName: 'Eastport FC', userId: 'usr-1', scoutName: 'Maria', detail: null, ...over });
 const ops = (over = {}) => ({ id: 'ops-1', at: T, kind: 'backup_created', detail: { dir: '2026-10-19', files: 3, queuedForRemoval: 0 }, ...over });
-const srcc = (over = {}) => ({ id: 'srcc-1', playerId: 'pl-adult', type: 'position_changed', sourceSystem: 'passport_prefs', sourceId: 'pl-adult:ST', occurredAt: T, detail: { from: null, to: 'ST', submittedBy: 'player' }, ...over });
+const srcc = (over = {}) => ({ id: 'srcc-1', playerId: 'pl-adult', type: 'position_changed', sourceSystem: 'passport_prefs', sourceId: 'pl-adult:ST', occurredAt: T, detail: { to: 'ST', submittedBy: 'player' }, ...over });
 const idv = (over = {}) => ({ id: 'idv-1', guardianId: 'gd-primary', guardianName: 'Primary Parent', documentType: 'passport', documentRef: '4567', provider: 'dev-attestation', reference: 'idv_0123456789abcdef', ts: T, status: 'approved', ...over });
 
 /** The fixture's identity, organisation and staff with the given audit collections, as a snapshot-mode save writes them. */
-const fixtureDb = (blobs = {}) => ({ ...FIXTURE(), orgs: ORGS(), users: USERS(), sessions: SESSIONS(), ...blobs });
-/** A fully migrated file holding the fixture and the given audit rows, written by a snapshot-mode save (the writers' validation applies). */
-function s7dFile(dir, { blobs = {} } = {}) {
-  const tool = openStore(dir); tool.save({ idCounter: 1000, db: fixtureDb(blobs) }); tool.sqlite.close();
+const fixtureDb = (audit = {}) => ({ ...FIXTURE(), orgs: ORGS(), users: USERS(), sessions: SESSIONS(), ...audit });
+function fixtureFile(dir, audit = {}) { const tool = openStore(dir); tool.save({ idCounter: 1000, db: fixtureDb(audit) }); tool.sqlite.close(); }
+const migrate = (s) => runDataMigrations(s, DATA_MIGRATIONS, { now: NOW, context: { sessionTtlMs: TTL } });
+/** A repository on a bare migrated connection holding the fixture. */
+function bare(tag, audit = {}) {
+  const dir = tempDir(tag); fixtureFile(dir, audit); const s = openRaw(dir); migrate(s);
+  return { dir, s, repo: createSafetyAuditRepository({ sqlite: s, now: () => NOW }), close: () => { s.close(); rm(dir); } };
 }
-const migrate = (s, { now = NOW } = {}) => runDataMigrations(s, DATA_MIGRATIONS, { now, context: { sessionTtlMs: TTL } });
-let mod = null;
-try { mod = await import('../repositories/safetyAudit.mjs'); } catch { mod = null; }
-const needModule = () => { assert.ok(mod, 'repositories/safetyAudit.mjs exists (the S6b repository module)'); return mod; };
-/** A live server-mode store with the data layer attached: the repository in its STAGED mode, as the server runs it. */
-function live(dir, { now = () => NOW } = {}) {
+/** A live server-mode store with the data layer attached, as the server runs it. */
+function live(dir) {
   const store = openStore(dir, { tableBacked: TABLE_BACKED });
   const db = {};
-  const warnings = [];
-  const layer = attachDataLayer({ db, store, nextId, persist: () => {}, sessionTtlMs: TTL, now, warn: (m) => warnings.push(m) });
-  return { store, db, layer, warnings, repo: layer.safetyAudit, save: () => store.save(), close: () => store.sqlite.close() };
+  const layer = attachDataLayer({ db, store, nextId, persist: () => {}, sessionTtlMs: TTL, now: () => NOW, warn: () => {} });
+  return { store, db, layer, repo: layer.safetyAudit, close: () => store.sqlite.close() };
 }
-/** An immediate-mode repository on a bare connection (a tool, a test): own transaction per mutation. */
-const bare = (s, over = {}) => needModule().createSafetyAuditRepository({ sqlite: s, now: () => NOW, ...over });
-/** Every table's typed records, through the module's own reader. */
-const stored = (s) => { const { AUDIT_SNAPSHOT_TABLES } = needModule(); const out = {}; for (const t of AUDIT_SNAPSHOT_TABLES) out[t.name] = t.read(s); return out; };
+const ids = (s, table) => s.prepare(`SELECT id FROM ${table} ORDER BY seq`).all().map((r) => r.id);
 
-// ============================================================= junk refused at the snapshot save
-test('snapshot-save refusals (SAFETY_AUDIT_IMPORT_BLOCKED: collections, positions, ids and reasons — never a text): a duplicate id within a collection, an entry without an id, an entry that is not an object, a non-array collection, an IDV entry whose guardian does not exist (STRICT — IDV_GUARDIAN_MISSING), an IDV entry whose guardianId is not a string — each refuses the whole save: every table and saveSeq untouched; a player-audit row naming a missing player is NOT a refusal (Domain P: stored as it is)', () => {
-  const SECRET = 'SECRET-NOTE-TEXT-44';
-  const cases = [
-    ['duplicate id', { ledger: [led(), led()] }, /ledger[^;]*duplicates the id/],
-    ['no id', { orgNotes: [{ ...note({ text: SECRET }), id: undefined }] }, /orgNotes[^;]*id must be a non-empty string/],
-    ['not an object', { blocks: [block(), 'blk-2'] }, /blocks[^;]*entry #1[^;]*not an object/],
-    ['not an array', { reports: { id: 'rep-1' } }, /reports[^;]*must be an array/],
-    ['guardian missing', { idvQueue: [idv({ guardianId: 'gd-missing' })] }, /IDV_GUARDIAN_MISSING[^;]*idv-1/],
-    ['guardianId not a string', { idvQueue: [idv({ guardianId: 7 })] }, /idvQueue[^;]*guardianId must be a non-empty string/],
-  ];
-  const dir = tempDir('sa-refuse'); s7dFile(dir);
-  const tool = openStore(dir); const before = dump(tool.sqlite);
-  for (const [label, blobs, re] of cases) {
-    assert.throws(() => tool.save({ idCounter: 1000, db: fixtureDb(blobs) }), (e) => (/SAFETY_AUDIT_IMPORT_BLOCKED/.test(e.message) || /must be an array/.test(e.message)) && re.test(e.message) && !e.message.includes(SECRET), `${label}: ${(() => { try { tool.save({ idCounter: 1000, db: fixtureDb(blobs) }); return 'did not throw'; } catch (e) { return e.message.slice(0, 300); } })()}`);
-    assert.deepEqual(dump(tool.sqlite), before, `${label}: nothing changed`);
+// ============================================================= the schema
+test('the schema: 0013 after 0012, no blob; typed columns with vocabulary CHECKs and no JSON column; organisation and staff RESTRICT keys and no key on a player or guardian id (Q4, Q4b); a ledger detail column holds a value only for the types that carry it; the moderation flags and the Combine protocols are ordered child rows', () => {
+  assert.deepEqual(DATA_MIGRATIONS.map((m) => m.id).filter((id) => id <= MIGRATION).slice(-2), ['0012_channels', MIGRATION]);
+  const { s, close } = bare('sa-schema');
+  assert.ok(applied(s).includes(MIGRATION)); assert.equal(hasBlobTable(s), false);
+  for (const t of ['blocks', 'reports', 'moderation_log', 'org_notes', 'ledger', 'ops_events', 'source_changes', 'idv_queue']) {
+    const cols = s.prepare(`PRAGMA table_info(${t})`).all();
+    assert.deepEqual(cols.filter((c) => /_json$/.test(c.name)).map((c) => c.name), [], `${t}: no JSON column`);
+    const keys = s.prepare(`PRAGMA foreign_key_list(${t})`).all();
+    assert.ok(keys.every((k) => ['orgs', 'org_users'].includes(k.table) && k.on_delete === 'RESTRICT'), `${t}: organisation and staff keys only, RESTRICT`);
+    assert.ok(!keys.some((k) => /player_id|guardian_id/.test(k.from)), `${t}: no key on a player or guardian id`);
   }
-  tool.save({ idCounter: 1000, db: fixtureDb({ ledger: [led({ playerId: 'pl-gone' })], blocks: [block({ playerId: 'pl-gone' })], reports: [report({ targetKind: 'player', targetPlayerId: 'pl-gone' })], orgNotes: [note({ playerId: 'pl-gone' })], sourceChanges: [srcc({ playerId: 'pl-gone' })] }) });
-  for (const t of ['ledger', 'blocks', 'org_notes', 'source_changes']) assert.equal(tool.sqlite.prepare(`SELECT player_id FROM ${t}`).get().player_id, 'pl-gone', `${t}: stored as it is`);
-  assert.equal(tool.sqlite.prepare('SELECT target_player_id AS p FROM reports').get().p, 'pl-gone');
-  tool.sqlite.close(); rm(dir);
+  const ins = (sql) => () => s.exec(sql);
+  assert.throws(ins("INSERT INTO blocks (id, player_id, org_id, by_kind, reason, created_at) VALUES ('b', 'p', 'org-pro', 'admin', '', 1)"), /CHECK/, 'by_kind is a vocabulary');
+  assert.throws(ins("INSERT INTO blocks (id, player_id, org_id, by_kind, reason, created_at) VALUES ('b', 'p', 'org-nobody', 'player', '', 1)"), /FOREIGN KEY/, 'org_id is a key');
+  s.exec("INSERT INTO blocks (id, player_id, org_id, by_kind, reason, created_at) VALUES ('b', 'pl-nobody', 'org-pro', 'player', '', 1)"); // Q4: a player id resolves to nothing, tolerated
+  assert.throws(ins("INSERT INTO ledger (id, occurred_at, type) VALUES ('l', 1, 'invented')"), /CHECK/, 'the ledger type is a vocabulary');
+  assert.throws(ins("INSERT INTO ledger (id, occurred_at, type, detail_drill_id) VALUES ('l', 1, 'view', 'd1')"), /CHECK/, 'a view carries no drill');
+  s.exec("INSERT INTO ledger (id, occurred_at, type, detail_drill_id) VALUES ('l', 1, 'box_challenge_published', 'd1')");
+  assert.throws(ins("INSERT INTO moderation_flags (moderation_id, ord, flag) VALUES ('m', 0, 'email')"), /FOREIGN KEY/, 'a flag belongs to a hit');
+  s.exec("INSERT INTO idv_queue (id, guardian_id, document_type, document_ref_last4, provider, reference, created_at, status) VALUES ('i', 'gd-nobody', 'passport', '1', 'p', 'r', 1, 'approved')"); // Q4b is the code's check, not a key
+  close();
 });
 
-test('[cutover] migration 0013 is registered after 0012; the actual schema: no audit blob, typed columns only (no absent_keys_json, offtype_json or extra_json side column); NO foreign key on any of the eight tables (Q4: the five player references are historical; Q4b: the guardian reference is checked in code; organisation and staff references are historical pointers the routes never checked); every table STRICT with a seq order key and a UNIQUE id; the documented indexes exist; no CHECK narrows a vocabulary the writers leave open', () => {
-  assert.deepEqual(DATA_MIGRATIONS.map((m) => m.id).filter((id) => id <= MIGRATION).slice(-2), ['0012_channels', MIGRATION], '0013 is registered after 0012');
-  const dir = tempDir('sa-schema'); s7dFile(dir); const s = openRaw(dir); migrate(s);
-  assert.ok(applied(s).includes(MIGRATION)); assert.equal(hasBlobTable(s), false, 'no blob table (rewritten in S14a)');
-  for (const t of Object.values(TABLES)) {
-    assert.deepEqual(s.prepare(`PRAGMA foreign_key_list(${t})`).all(), [], `${t}: no foreign key`);
-    const sql = s.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?").get(t).sql; assert.match(sql, /STRICT\s*$/, `${t} STRICT`); assert.match(sql, /seq\s+INTEGER PRIMARY KEY/, `${t} seq`); assert.match(sql, /\bid\s+TEXT NOT NULL UNIQUE/, `${t} unique id`);
-    assert.doesNotMatch(sql, /CHECK \((by_kind|severity|provider|status|kind|type|source_system|target_kind) IN/, `${t}: no vocabulary CHECK`);
-    assert.deepEqual(s.prepare(`PRAGMA table_info(${t})`).all().map((c) => c.name).filter((c) => /absent_keys|offtype|extra_json/.test(c)), [], `${t}: no side column`);
-  }
-  const idx = s.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND name NOT LIKE 'sqlite_%' AND tbl_name IN ('blocks','reports','moderation_log','org_notes','ledger','ops_events','source_changes','idv_queue') ORDER BY name").all().map((r) => r.name);
-  for (const i of ['blocks_player_id_org_id', 'reports_by_kind_by_id', 'reports_target_org_id_urgent_status', 'reports_status_created_at', 'reports_target_player_id', 'moderation_log_severity', 'moderation_log_created_at', 'org_notes_org_id_player_id_created_at', 'ledger_player_id_type', 'ledger_player_id_org_id_occurred_at', 'ledger_org_id_type', 'ledger_occurred_at', 'ops_events_kind', 'ops_events_occurred_at', 'source_changes_player_id_occurred_at', 'idv_queue_guardian_id_created_at']) assert.ok(idx.includes(i), `index ${i}`);
-  s.exec("INSERT INTO blocks (id, player_id, org_id, by_kind, reason, created_at) VALUES ('b1', 'pl-nobody', 'org-nobody', 'player', '', 1)");
-  assert.throws(() => s.exec("INSERT INTO blocks (id, player_id, org_id, by_kind, reason, created_at) VALUES ('b1', 'p', 'o', 'player', '', 1)"), /UNIQUE/, 'one row per id');
-  s.exec("INSERT INTO idv_queue (id, guardian_id, status) VALUES ('i1', 'gd-nobody', 'approved')"); // no FK: the strict check is the code's, not the engine's
-  s.close(); rm(dir);
+// ============================================================= explicit writes
+test('explicit writes: each collection\'s record is typed and committed at once, read back fresh and deep-frozen, in the writer\'s key order; an unknown field, a wrong type, a detail key its type does not carry or an over-long text is refused by name (never by value); a missing organisation or staff member, a duplicate id and a missing guardian are refused; nothing is written by a refusal', () => {
+  const { s, repo, close } = bare('sa-writes');
+  const b = repo.blocks.add(block());
+  assert.deepEqual(Object.keys(b), ['id', 'playerId', 'orgId', 'by', 'reason', 'ts']); assert.ok(Object.isFrozen(b)); assert.throws(() => { b.reason = 'x'; }, TypeError);
+  assert.deepEqual(ids(s, 'blocks'), ['blk-1'], 'committed at once');
+  const r = repo.reports.file(report()); assert.deepEqual(plain(r), report());
+  const m = repo.moderationLog.record(modHit()); assert.deepEqual(m.context, { kind: 'player_message', channelId: 'chan-1' }); assert.deepEqual(m.flags, ['email']);
+  assert.deepEqual(plain(repo.orgNotes.add(note())), note());
+  assert.deepEqual(plain(repo.ledger.append(led())), led());
+  const combine = repo.ledger.append(led({ id: 'led-c', type: 'combine_request_created', detail: { requestId: 'cr-1', protocols: ['sprint@1', 'agility@2'] } }));
+  assert.deepEqual(combine.detail, { requestId: 'cr-1', protocols: ['sprint@1', 'agility@2'] }, 'the protocols are ordered rows');
+  assert.deepEqual(repo.ledger.append(led({ id: 'led-t', type: 'box_assignment_created', detail: { drillId: 'd-1', target: { type: 'reps', value: 20 } } })).detail, { drillId: 'd-1', target: { type: 'reps', value: 20 } });
+  assert.deepEqual(repo.ledger.append(led({ id: 'led-p', type: 'box_prefs_changed', orgId: null, orgName: null, userId: null, scoutName: null, detail: { by: 'player', share: undefined, retainClips: false } })).detail, { by: 'player', retainClips: false }, 'an undefined detail key is absent');
+  assert.deepEqual(repo.opsEvents.record(ops()).detail, ops().detail);
+  assert.deepEqual(plain(repo.sourceChanges.record(srcc())), srcc());
+  assert.deepEqual(plain(repo.idvQueue.add(idv())), idv());
+  const SECRET = 'SECRET-VALUE-77';
+  const refused = (fn, re) => assert.throws(fn, (e) => re.test(e.message) && !e.message.includes(SECRET));
+  const before = dump(s);
+  refused(() => repo.blocks.add(block({ id: 'blk-x', futureField: SECRET })), /AUDIT_RECORD_INVALID[^]*futureField/);
+  refused(() => repo.blocks.add(block({ id: 'blk-x', reason: { why: SECRET } })), /AUDIT_RECORD_INVALID[^]*reason must be text/);
+  refused(() => repo.blocks.add(block({ id: 'blk-x', by: SECRET })), /by must be one of/);
+  refused(() => repo.reports.file(report({ id: 'rep-x', urgent: 'yes' })), /urgent must be true or false/);
+  refused(() => repo.reports.file(report({ id: 'rep-x', reason: `${SECRET}${'x'.repeat(2000)}` })), /reason exceeds 2000 characters/);
+  refused(() => repo.reports.file(report({ id: 'rep-x', outcome: SECRET })), /outcome is set only on a resolved report/);
+  refused(() => repo.reports.file(report({ id: 'rep-x', by: 'org_user' })), /byOrgId is set exactly when a club user filed/);
+  refused(() => repo.moderationLog.record(modHit({ id: 'mod-x', flags: [SECRET] })), /flags must be a list of distinct moderation flags/);
+  refused(() => repo.moderationLog.record(modHit({ id: 'mod-x', context: { kind: 'x', note: SECRET } })), /context carries field\(s\)[^]*note/);
+  refused(() => repo.ledger.append(led({ id: 'led-x', detail: { drillId: SECRET } })), /detail\.drillId is not part of a view detail/);
+  refused(() => repo.ledger.append(led({ id: 'led-x', type: SECRET })), /type must be one of/);
+  refused(() => repo.ledger.append(led({ id: 'led-x', type: 'box_assignment_created', detail: { target: { type: 'reps', value: SECRET } } })), /target[^]*finite number/);
+  refused(() => repo.opsEvents.record(ops({ id: 'ops-x', detail: { dir: 'd', conflicts: [SECRET] } })), /detail\.conflicts is not part of a backup_created detail/);
+  refused(() => repo.blocks.add(block({ id: 'blk-x', orgId: 'org-nobody' })), /AUDIT_REFERENCE_MISSING: blocks blk-x orgId names no orgs row/);
+  refused(() => repo.orgNotes.add(note({ id: 'note-x', userId: 'usr-nobody' })), /AUDIT_REFERENCE_MISSING: org_notes note-x userId names no org_users row/);
+  refused(() => repo.opsEvents.record(ops({ id: 'ops-x', kind: 'staff_bootstrapped', detail: { orgId: 'org-nobody', userId: 'usr-1', by: 'M' } })), /detail\.orgId names no orgs row/);
+  refused(() => repo.blocks.add(block()), /AUDIT_DUPLICATE: blocks blk-1 already exists/);
+  refused(() => repo.idvQueue.add(idv({ id: 'idv-x', guardianId: 'gd-missing', guardianName: SECRET })), /IDV_GUARDIAN_MISSING[^]*gd-missing/);
+  assert.equal(dump(s), before, 'no refusal wrote anything');
+  close();
 });
 
-// ============================================================= [cutover] the repository (immediate mode)
-test('[cutover] repository, immediate mode: append on each of the eight collections keeps insertion order; blocks.remove returns the lifted row and deletes it (Q5); reports.patch changes status/outcome/resolvedAt by row id and refuses any other key; idvQueue.append refuses a missing guardian by name (IDV_GUARDIAN_MISSING) and leaves the mirror as it was, idvQueue.firstForGuardian is the FIRST entry in insertion order and patch flips its status; sourceChanges.trimTo deletes the oldest beyond the cap; a value JSON cannot carry is refused; unresolved player references are counted, never refused; a refused operation inside its own transaction restores the mirror in place (held views included); exportRows is detached; reload reproduces the stored rows', () => {
-  const dir = tempDir('sa-repo'); s7dFile(dir, { blobs: { idvQueue: [idv()], ledger: [led()] } }); const s = openRaw(dir); migrate(s);
-  const repo = bare(s);
-  assert.deepEqual(repo.counts(), { blocks: 0, reports: 0, moderationLog: 0, orgNotes: 0, ledger: 1, opsEvents: 0, sourceChanges: 0, idvQueue: 1 });
-  const b1 = repo.blocks.append(block({ id: 'blk-a' })); const b2 = repo.blocks.append(block({ id: 'blk-b', futureField: 'dropped' })); assert.equal(b1.id, 'blk-a'); assert.throws(() => { b1.reason = 'x'; }, /written through its domain repository/);
-  assert.deepEqual(repo.blocks.view.map((b) => b.id), ['blk-a', 'blk-b']); assert.deepEqual(idsIn(dir, 'blocks'), ['blk-a', 'blk-b']); assert.deepEqual(plain(b2), block({ id: 'blk-b' }), 'an unknown key is dropped at the repository boundary');
-  // A wrong-typed value is refused by name: code, collection, field and id — never the value.
-  for (const [field, bad] of [['orgId', { odd: 'SECRET-VALUE' }], ['reason', 42], ['ts', 1.5], ['playerId', ['SECRET-VALUE']]]) assert.throws(() => repo.blocks.append(block({ id: 'blk-odd', [field]: bad })), (e) => e.code === 'AUDIT_RECORD_INVALID' && e.message.includes(`blocks.${field} must be`) && e.message.includes('blk-odd') && !e.message.includes('SECRET-VALUE') && !e.message.includes('42'), `${field}: refused by name`);
-  assert.throws(() => repo.reports.append(report({ id: 'rep-odd', urgent: 'yes' })), /reports\.urgent must be a boolean or null/);
-  assert.throws(() => repo.blocks.append(block({ id: 'blk-a' })), /blocks: a row with id blk-a already exists/); assert.throws(() => repo.blocks.append({ playerId: 'x' }), /id must be a non-empty string/); assert.throws(() => repo.blocks.append(block({ id: 'blk-fn', reason: () => 1 })), /blocks\.reason must be a string or null \(got a function; id blk-fn\)/);
-  assert.throws(() => repo.opsEvents.append(ops({ id: 'ops-fn', detail: { f: () => 1 } })), /opsEvents\.detail\.f \(function\) cannot be stored as JSON/);
-  assert.deepEqual(repo.blocks.view.map((b) => b.id), ['blk-a', 'blk-b'], 'refusals leave the mirror as it was');
-  const lifted = repo.blocks.remove('blk-a'); assert.deepEqual(plain(lifted), block({ id: 'blk-a' })); assert.deepEqual(repo.blocks.view.map((b) => b.id), ['blk-b']); assert.deepEqual(idsIn(dir, 'blocks'), ['blk-b']); assert.equal(repo.blocks.remove('blk-none'), null);
-  repo.reports.append(report({ id: 'rep-a' })); repo.reports.append(autoReport({ id: 'rep-b' })); repo.reports.append(report({ id: 'rep-c', targetKind: 'player', targetPlayerId: 'pl-nobody' }));
-  const held = repo.reports.byId('rep-a'); assert.equal(held.status, 'pending_review');
-  assert.deepEqual(plain(repo.reports.patch('rep-a', { status: 'resolved', resolvedAt: NOW, outcome: 'Synthetic outcome.' })), canonRow('reports', report({ id: 'rep-a', status: 'resolved', resolvedAt: NOW, outcome: 'Synthetic outcome.' }))); assert.equal(held.status, 'resolved'); assert.equal(held.resolvedAt, NOW);
-  assert.deepEqual(rowsOf(dir, 'reports').map((r) => [r.id, r.status, r.outcome, r.resolved_at]), [['rep-a', 'resolved', 'Synthetic outcome.', NOW], ['rep-b', 'pending_review', null, null], ['rep-c', 'pending_review', null, null]]);
-  assert.throws(() => repo.reports.patch('rep-a', { reason: 'rewritten' }), /reports: patch changes status, outcome and resolvedAt only/); assert.throws(() => repo.reports.patch('rep-a', { resolvedAt: 'yesterday' }), (e) => e.code === 'AUDIT_RECORD_INVALID' && /reports\.resolvedAt must be an integer or null/.test(e.message)); assert.equal(held.resolvedAt, NOW, 'a refused patch changes nothing'); assert.throws(() => repo.reports.patch('rep-none', { status: 'resolved' }), /no report rep-none/);
-  repo.moderationLog.append(modHit({ id: 'mod-a' })); repo.orgNotes.append(note({ id: 'note-a', playerId: 'pl-nobody' })); repo.ledger.append(led({ id: 'led-a', playerId: 'pl-nobody' })); repo.ledger.append({ id: 'led-b', ts: T, type: 'open_trial_posted', orgId: 'org-pro', orgName: 'Eastport FC', userId: 'usr-1', scoutName: 'Maria', detail: { trialId: 't1' }, extraKey: 'dropped' }); repo.opsEvents.append(ops({ id: 'ops-a', kind: 'backup_refused' }));
-  assert.deepEqual(repo.ledger.view.map((l) => l.id), ['led-1', 'led-a', 'led-b']); assert.deepEqual(plain(repo.ledger.view[2]), { id: 'led-b', ts: T, type: 'open_trial_posted', playerId: null, orgId: 'org-pro', orgName: 'Eastport FC', userId: 'usr-1', scoutName: 'Maria', detail: { trialId: 't1' } }, 'every key in the writer\'s order, an absent one null, the unknown one dropped');
-  assert.deepEqual(repo.unresolvedPlayerReferences(), { blocks: 0, reports: 1, orgNotes: 1, ledger: 1, sourceChanges: 0 }, 'Domain P: counted, never refused');
-  // IDV: strict.
-  assert.throws(() => repo.idvQueue.append(idv({ id: 'idv-x', guardianId: 'gd-missing' })), (e) => e.code === 'IDV_GUARDIAN_MISSING' && /gd-missing/.test(e.message) && !/Primary Parent|4567/.test(e.message)); assert.deepEqual(repo.idvQueue.view.map((q) => q.id), ['idv-1']); assert.deepEqual(idsIn(dir, 'idv_queue'), ['idv-1']);
-  repo.idvQueue.append(idv({ id: 'idv-2', ts: T + 1 })); repo.idvQueue.append(idv({ id: 'idv-3', guardianId: 'gd-signup', guardianName: 'Signup Parent' }));
-  assert.equal(repo.idvQueue.firstForGuardian('gd-primary').id, 'idv-1', 'the FIRST entry in insertion order (the admin toggle\'s rule)'); assert.equal(repo.idvQueue.firstForGuardian('gd-nobody'), null);
-  assert.equal(repo.idvQueue.patch('idv-1', { status: 'revoked' }).status, 'revoked'); assert.deepEqual(rowsOf(dir, 'idv_queue').map((r) => [r.id, r.status]), [['idv-1', 'revoked'], ['idv-2', 'approved'], ['idv-3', 'approved']]); assert.throws(() => repo.idvQueue.patch('idv-1', { guardianId: 'x' }), /idvQueue: patch changes status only/);
-  // Source changes: the cap.
-  for (let i = 0; i < 5; i++) repo.sourceChanges.append(srcc({ id: `srcc-${i}`, occurredAt: T + i }));
-  assert.equal(repo.sourceChanges.trimTo(3), 2); assert.deepEqual(repo.sourceChanges.view.map((c) => c.id), ['srcc-2', 'srcc-3', 'srcc-4']); assert.deepEqual(idsIn(dir, 'source_changes'), ['srcc-2', 'srcc-3', 'srcc-4']); assert.equal(repo.sourceChanges.trimTo(3), 0);
-  // A failure inside the repository's own transaction restores the mirror in place.
-  const heldLedger = repo.ledger.view; const heldDetail = repo.ledger.byId('led-b').detail;
-  s.exec("CREATE TEMP TRIGGER sa_fail BEFORE INSERT ON ledger BEGIN SELECT RAISE(ABORT, 'synthetic statement failure'); END");
-  assert.throws(() => repo.ledger.append(led({ id: 'led-fail' })), /synthetic statement failure/);
-  assert.deepEqual(heldLedger.map((l) => l.id), ['led-1', 'led-a', 'led-b'], 'the held view is back'); assert.equal(repo.ledger.byId('led-b').detail, heldDetail, 'nested identity kept'); assert.deepEqual(idsIn(dir, 'ledger'), ['led-1', 'led-a', 'led-b']);
-  s.exec('DROP TRIGGER sa_fail');
-  const exported = repo.exportAll(); assert.deepEqual(Object.keys(exported), COLLECTIONS); exported.ledger[2].detail.trialId = 'edited'; assert.equal(repo.ledger.byId('led-b').detail.trialId, 't1', 'the export is detached'); assert.deepEqual(exported.blocks.map((b) => b.id), ['blk-b']);
-  repo.reload(); assert.deepEqual(repo.ledger.view.map((l) => l.id), ['led-1', 'led-a', 'led-b']); assert.equal(repo.reports.byId('rep-a').status, 'resolved'); assert.deepEqual(plain(repo.blocks.byId('blk-b')), block({ id: 'blk-b' })); assert.equal(repo.idvQueue.byId('idv-1').status, 'revoked');
-  s.close(); rm(dir);
+// ============================================================= the queries the routes use
+test('the queries: blocks.has and the newest-first page; the report triage order (urgent pending, pending, both oldest first; then resolved, newest first) paged by cursor; resolve once (ALREADY_RESOLVED after); the reporter\'s list; the ledger by player, by player and club, by club and type, the listed players in first-listed order, counts by type and by actor, the newest-first pages; the moderation and ops counts; the IDV first entry and status; the source-change cap', () => {
+  const { s, repo, close } = bare('sa-reads');
+  for (let i = 0; i < 5; i++) repo.blocks.add(block({ id: `blk-${i}`, playerId: `pl-${i}`, ts: T + i }));
+  assert.equal(repo.blocks.has('pl-3', 'org-pro'), true); assert.equal(repo.blocks.has('pl-3', 'org-other'), false); assert.equal(repo.blocks.has(undefined, 'org-pro'), false);
+  let page = repo.blocks.page({ limit: 2 }); assert.deepEqual(page.items.map((b) => b.id), ['blk-4', 'blk-3']);
+  page = repo.blocks.page({ limit: 2, after: after(page.nextCursor) }); assert.deepEqual(page.items.map((b) => b.id), ['blk-2', 'blk-1']);
+  page = repo.blocks.page({ limit: 2, after: after(page.nextCursor) }); assert.deepEqual([page.items.map((b) => b.id), page.nextCursor], [['blk-0'], null]);
+  assert.deepEqual(plain(repo.blocks.lift('blk-0')), block({ id: 'blk-0', playerId: 'pl-0', ts: T })); assert.equal(repo.blocks.lift('blk-0'), null, 'Q5: gone');
+  repo.reports.file(report({ id: 'r-old', ts: 1 })); repo.reports.file(report({ id: 'r-urgent-new', ts: 5, urgent: true })); repo.reports.file(report({ id: 'r-urgent-old', ts: 2, urgent: true }));
+  repo.reports.file(report({ id: 'r-res-1', ts: 3 })); repo.reports.file(report({ id: 'r-res-2', ts: 4 })); repo.reports.file(report({ id: 'r-mine', ts: 6, by: 'guardian', byId: 'gd-primary' }));
+  repo.reports.resolve('r-res-1', { outcome: 'Done.', at: 10 }); repo.reports.resolve('r-res-2', { outcome: 'Done.', at: 11 });
+  assert.throws(() => repo.reports.resolve('r-res-1', { outcome: 'Again.', at: 12 }), /ALREADY_RESOLVED/); assert.throws(() => repo.reports.resolve('r-nobody', { outcome: 'x', at: 1 }), /REPORT_NOT_FOUND/);
+  const triage = []; let cursor = null;
+  do { const p = repo.reports.triagePage({ limit: 2, after: cursor ? after(cursor) : null }); triage.push(...p.items.map((r) => r.id)); cursor = p.nextCursor; } while (cursor);
+  assert.deepEqual(triage, ['r-urgent-old', 'r-urgent-new', 'r-old', 'r-mine', 'r-res-2', 'r-res-1']);
+  assert.equal(repo.reports.openUrgentAgainst('org-pro'), true); assert.equal(repo.reports.countOpen(), 4);
+  assert.deepEqual(repo.reports.forReporter('guardian', 'gd-primary').map((r) => r.id), ['r-mine']);
+  repo.ledger.append(led({ id: 'l1', playerId: 'pl-a', type: 'view' })); repo.ledger.append(led({ id: 'l2', playerId: 'pl-b', type: 'shortlist' }));
+  repo.ledger.append(led({ id: 'l3', playerId: 'pl-a', type: 'shortlist' })); repo.ledger.append(led({ id: 'l4', playerId: 'pl-b', type: 'shortlist', scoutName: 'Tom' }));
+  repo.ledger.append(led({ id: 'l5', playerId: 'pl-a', type: 'org_blocked_by_player', orgId: null, orgName: null, userId: null, scoutName: 'player' }));
+  assert.deepEqual(repo.ledger.forPlayer('pl-a').map((l) => l.id), ['l1', 'l3', 'l5']); assert.deepEqual(repo.ledger.forPlayer('pl-a', ['view']).map((l) => l.id), ['l1']);
+  assert.deepEqual(repo.ledger.forPlayerOrg('pl-a', 'org-pro').map((l) => l.id), ['l1', 'l3']);
+  assert.deepEqual(repo.ledger.playersListedBy('org-pro'), ['pl-b', 'pl-a'], 'in the order first listed, once each');
+  assert.equal(repo.ledger.isListedBy('org-pro', 'pl-a'), true); assert.equal(repo.ledger.isListedBy('org-pro', 'pl-c'), false);
+  assert.deepEqual(repo.ledger.countsForOrg('org-pro'), { view: 1, shortlist: 3 }); assert.equal(repo.ledger.countForPlayer('pl-b', 'shortlist'), 2);
+  assert.deepEqual(repo.ledger.topActorsForOrg('org-pro', 8), [{ scoutName: 'Maria', events: 3 }, { scoutName: 'Tom', events: 1 }]);
+  assert.deepEqual(repo.ledger.countsByActor().filter((r) => r.scoutName === 'Maria'), [{ scoutName: 'Maria', orgName: 'Eastport FC', type: 'view', n: 1 }, { scoutName: 'Maria', orgName: 'Eastport FC', type: 'shortlist', n: 2 }]);
+  assert.deepEqual(repo.ledger.forOrg('org-pro', ['view']).map((l) => l.id), ['l1']);
+  const lp = repo.ledger.pageForOrg('org-pro', { limit: 3 }); assert.deepEqual(lp.items.map((l) => l.id), ['l4', 'l3', 'l2']); assert.deepEqual(repo.ledger.pageForOrg('org-pro', { limit: 3, after: after(lp.nextCursor) }).items.map((l) => l.id), ['l1']);
+  assert.deepEqual(repo.ledger.pageForPlayers(['pl-a'], { limit: 50 }).items.map((l) => l.id), ['l5', 'l3', 'l1'], 'a guardian\'s log covers the player whichever club');
+  repo.moderationLog.record(modHit()); repo.moderationLog.record(modHit({ id: 'mod-2', severity: 'grooming', flags: ['secrecy'] }));
+  assert.deepEqual([repo.moderationLog.count(), repo.moderationLog.count('grooming')], [2, 1]); assert.deepEqual(repo.moderationLog.page({ limit: 50 }).items.map((m) => m.id), ['mod-2', 'mod-1']);
+  repo.opsEvents.record(ops()); repo.opsEvents.record(ops({ id: 'ops-2', kind: 'webhook_failed', detail: { deliveryId: 'd', endpointId: 'e' } }));
+  assert.deepEqual([repo.opsEvents.count('webhook_failed'), repo.opsEvents.newest(1)[0].id], [1, 'ops-2']);
+  repo.idvQueue.add(idv()); repo.idvQueue.add(idv({ id: 'idv-2', ts: T + 1 }));
+  assert.equal(repo.idvQueue.firstForGuardian('gd-primary').id, 'idv-1'); assert.equal(repo.idvQueue.setStatus('idv-1', 'revoked').status, 'revoked');
+  assert.throws(() => repo.idvQueue.setStatus('idv-1', 'pending'), /status must be one of/); assert.throws(() => repo.idvQueue.setStatus('idv-nobody', 'approved'), /IDV_ENTRY_NOT_FOUND/);
+  for (let i = 0; i < 5; i++) repo.sourceChanges.record(srcc({ id: `srcc-${i}`, occurredAt: T + i }), { cap: 3 });
+  assert.deepEqual(ids(s, 'source_changes'), ['srcc-2', 'srcc-3', 'srcc-4'], 'the oldest beyond the cap are deleted');
+  assert.deepEqual(repo.unresolvedPlayerReferences(), { blocks: 4, reports: 0, orgNotes: 0, ledger: 5, sourceChanges: 0 }, 'Q4: counted, never refused');
+  assert.deepEqual(Object.keys(repo.reads), AUDIT_COLLECTIONS); assert.equal(repo.reads.blocks.add, undefined, 'reads carry no writes');
+  close();
 });
 
-// ============================================================= [cutover] the staged mode (the server's)
-test('[cutover] staged mode (the server): a block, a ledger row, a report patch, a block removal and an IDV entry are visible in memory at once but NOT durable ahead of the next save, which lands them together; a FAILED ORDINARY SAVE (statement or real COMMIT) keeps the mirror and the queue as they are and the retry lands everything once; an ABORTED UNIT OF WORK restores the mirror and the queue to the pre-unit state (held views, nested detail objects and the sequence state included) whether the unit threw, a queued statement failed at the flush, the real COMMIT failed or a participant refusal was caught; the removal joins the unit; writes pending before the unit stay pending; a repository given the participant API refuses to join or write until its save hook is registered', () => {
-  const dir = tempDir('sa-staged'); s7dFile(dir, { blobs: { blocks: [block()], reports: [report()], ledger: [led()], idvQueue: [idv()] } });
-  const L = live(dir); L.save(); const file0 = fileDump(dir);
-  L.repo.blocks.append(block({ id: 'blk-2', reason: 'suspended_pending_review' }));
-  L.repo.ledger.append(led({ id: 'led-2', type: 'org_blocked_by_player', userId: null, scoutName: 'player' })); L.repo.reports.patch('rep-1', { status: 'resolved', resolvedAt: NOW, outcome: 'Synthetic.' }); L.repo.blocks.remove('blk-1'); L.repo.idvQueue.append(idv({ id: 'idv-2' }));
-  assert.equal(L.repo.pending(), 5); assert.deepEqual(idsIn(dir, 'blocks'), ['blk-1'], 'nothing durable before the save'); assert.deepEqual(L.db.blocks.map((b) => b.id), ['blk-2'], 'memory shows the new block and not the lifted one'); assert.equal(L.db.reports[0].status, 'resolved'); assert.equal(L.db.idvQueue.length, 2);
-  L.store.sqlite.exec("CREATE TEMP TRIGGER sa_fx BEFORE INSERT ON ledger BEGIN SELECT RAISE(ABORT, 'synthetic flush failure'); END");
-  assert.throws(() => L.save(), /synthetic flush failure/); assert.deepEqual(idsIn(dir, 'blocks'), ['blk-1']); assert.equal(fileDump(dir), file0, 'nothing landed'); assert.equal(L.repo.pending(), 5);
-  L.store.sqlite.exec('DROP TRIGGER sa_fx');
-  L.store.sqlite.exec('CREATE TEMP TABLE sa_parent (id TEXT PRIMARY KEY); CREATE TEMP TABLE sa_child (parent_id TEXT NOT NULL REFERENCES sa_parent(id) DEFERRABLE INITIALLY DEFERRED); CREATE TEMP TRIGGER sa_commit AFTER INSERT ON ledger BEGIN INSERT INTO sa_child (parent_id) VALUES (\'missing-on-purpose\'); END');
-  assert.throws(() => L.save(), /FOREIGN KEY constraint failed/); assert.deepEqual(idsIn(dir, 'blocks'), ['blk-1']); assert.equal(fileDump(dir), file0); assert.equal(L.repo.pending(), 5);
-  L.store.sqlite.exec('DROP TRIGGER sa_commit');
-  L.save();
-  assert.deepEqual(idsIn(dir, 'blocks'), ['blk-2']); assert.deepEqual(idsIn(dir, 'ledger'), ['led-1', 'led-2']); assert.deepEqual(rowsOf(dir, 'reports').map((r) => [r.id, r.status]), [['rep-1', 'resolved']]); assert.deepEqual(idsIn(dir, 'idv_queue'), ['idv-1', 'idv-2']); assert.equal(L.repo.pending(), 0);
-  { const landed = fileDump(dir); L.save(); assert.equal(fileDump(dir), landed, 'a later save does not replay'); }
-  // A unit of work: together or not at all.
-  L.repo.ledger.append(led({ id: 'led-pre' })); assert.equal(L.repo.pending(), 1);
-  const heldReport = L.repo.reports.byId('rep-1'); const heldDetailRow = L.repo.ledger.append({ ...led({ id: 'led-d' }), detail: { tag: 'keep' } }); const heldDetail = L.repo.ledger.byId('led-d').detail; assert.equal(L.repo.pending(), 2);
-  const state = () => ({ export: plain(L.repo.exportAll()), heldStatus: heldReport.status, heldDetail: plain(heldDetail), durable: fileDump(dir) });
-  const before = state();
-  const unchanged = (label) => { assert.deepEqual(state(), before, label); assert.equal(L.repo.pending(), 2, `${label}: the pre-unit writes are still pending`); assert.equal(L.store.sqlite.isTransaction, false); assert.equal(L.repo.ledger.byId('led-d').detail, heldDetail, `${label}: nested identity kept`); };
-  const work = () => { L.repo.blocks.append(block({ id: 'blk-u' })); L.repo.blocks.remove('blk-2'); L.repo.reports.patch('rep-1', { status: 'pending_review', resolvedAt: null, outcome: null }); L.repo.ledger.byId('led-d'); L.repo.idvQueue.patch('idv-1', { status: 'revoked' }); L.repo.sourceChanges.append(srcc({ id: 'srcc-u' })); };
-  assert.throws(() => L.store.unitOfWork(() => { work(); throw new Error('synthetic unit failure'); }), /synthetic unit failure/);
-  unchanged('thrown'); assert.equal(heldDetail.tag, 'keep', 'the nested detail object reads its pre-unit value'); assert.throws(() => { heldDetail.tag = 'x'; }, /written through its domain repository/, 'the held nested view is read-only');
-  let caught = null; let outer = null;
-  try { L.store.unitOfWork(() => { L.repo.blocks.append(block({ id: 'blk-ok' })); try { L.repo.idvQueue.append(idv({ id: 'idv-bad', guardianId: 'gd-missing' })); } catch (e) { caught = e; } }); } catch (e) { outer = e; }
-  assert.equal(caught?.code, 'IDV_GUARDIAN_MISSING'); assert.ok(outer, 'the caught participant failure still refuses the unit'); assert.equal(outer.unitOfWork, 'rolled_back'); unchanged('caught');
-  L.store.sqlite.exec("CREATE TEMP TRIGGER sa_j BEFORE DELETE ON blocks BEGIN SELECT RAISE(ABORT, 'synthetic joined failure'); END");
-  assert.throws(() => L.store.unitOfWork(work), /synthetic joined failure/); unchanged('statement failure at the unit\'s flush');
-  L.store.sqlite.exec('DROP TRIGGER sa_j');
-  L.store.sqlite.exec("CREATE TEMP TRIGGER sa_commit2 AFTER INSERT ON source_changes BEGIN INSERT INTO sa_child (parent_id) VALUES ('missing-on-purpose'); END");
-  assert.throws(() => L.store.unitOfWork(work), /FOREIGN KEY constraint failed/); unchanged('real COMMIT failure');
-  L.store.sqlite.exec('DROP TRIGGER sa_commit2');
-  L.store.unitOfWork(work);
-  assert.deepEqual(idsIn(dir, 'blocks'), ['blk-u']); assert.deepEqual(idsIn(dir, 'ledger'), ['led-1', 'led-2', 'led-pre', 'led-d'], 'the pre-unit writes landed with the unit'); assert.deepEqual(rowsOf(dir, 'reports').map((r) => [r.id, r.status]), [['rep-1', 'pending_review']]); assert.deepEqual(rowsOf(dir, 'idv_queue').map((r) => [r.id, r.status]), [['idv-1', 'revoked'], ['idv-2', 'approved']]); assert.deepEqual(idsIn(dir, 'source_changes'), ['srcc-u']); assert.equal(L.repo.pending(), 0);
-  // Hook registration is a precondition inside the joined boundary.
-  const { createSafetyAuditRepository } = needModule();
-  const bareUnit = createSafetyAuditRepository({ sqlite: L.store.sqlite, now: () => NOW, unit: L.store.unit });
-  const stagedUnit = createSafetyAuditRepository({ sqlite: L.store.sqlite, now: () => NOW, unit: L.store.unit, staged: true });
-  for (const [label, w] of [['immediate', () => bareUnit.blocks.append(block({ id: 'blk-h' }))], ['staged', () => stagedUnit.blocks.append(block({ id: 'blk-h' }))]]) {
-    let c = null; let o = null; const f0 = fileDump(dir);
-    try { L.store.unitOfWork(() => { try { w(); } catch (e) { c = e; } }); } catch (e) { o = e; }
-    assert.match(c?.message ?? '', /save hook/, label); assert.ok(o, `${label}: the caught refusal still refuses the unit`); assert.equal(fileDump(dir), f0, `${label}: nothing written`);
-  }
-  assert.throws(() => stagedUnit.blocks.append(block({ id: 'blk-h' })), /save hook/); assert.throws(() => createSafetyAuditRepository({ sqlite: L.store.sqlite, staged: true }), /needs the store's participant API/);
-  void heldDetailRow;
+// ============================================================= every ledger type and detail the writers produce
+test('every ledger type is accepted with the detail its writer passes; LEDGER_DETAIL names only known types', () => {
+  const { repo, close } = bare('sa-types');
+  for (const t of Object.keys(LEDGER_DETAIL)) assert.ok(LEDGER_TYPES.includes(t), t);
+  let i = 0;
+  for (const type of LEDGER_TYPES) repo.ledger.append(led({ id: `l-${i++}`, type }));
+  assert.equal(repo.counts().ledger, LEDGER_TYPES.length);
+  close();
+});
+
+// ============================================================= units of work and the retired names
+test('units of work: a write joins the open unit, a read inside it sees the write, and a failure later in the unit rolls the write back; db.<collection> is gone for all eight, naming the repository', () => {
+  const dir = tempDir('sa-unit'); fixtureFile(dir);
+  const L = live(dir);
+  assert.throws(() => L.store.unitOfWork(() => {
+    L.repo.blocks.add(block());
+    L.repo.ledger.append(led({ type: 'org_blocked_by_player' }));
+    assert.equal(L.repo.blocks.has('pl-adult', 'org-pro'), true, 'the unit sees its own write');
+    throw new Error('synthetic failure after the writes');
+  }), /synthetic failure/);
+  assert.deepEqual([L.repo.blocks.has('pl-adult', 'org-pro'), L.repo.counts().ledger], [false, 0], 'both rolled back');
+  L.store.unitOfWork(() => { L.repo.blocks.add(block()); L.repo.ledger.append(led({ type: 'org_blocked_by_player' })); });
+  assert.deepEqual([L.repo.blocks.has('pl-adult', 'org-pro'), L.repo.counts().ledger], [true, 1], 'committed together');
+  for (const n of AUDIT_COLLECTIONS) assert.throws(() => L.db[n], new RegExp(`db\\.${n} is gone: read it through the safetyAudit repository`));
+  assert.equal(L.layer.report().domains.safetyAudit.pendingWrites, 0);
   L.close(); rm(dir);
 });
 
-// ============================================================= [cutover] the snapshot dispatcher: tolerant and strict references
-test('[cutover] snapshot dispatcher: a tool that loads and saves the whole file round-trips all eight collections byte for byte (typed records); an unknown key in a saved row is dropped silently; a wrong-typed value refuses the WHOLE save by name (collection, field, id — never the value); a collection OMITTED leaves its table alone while others are rewritten; an explicit EMPTY array clears a table; a malformed collection (an object) rolls the WHOLE save back — every other collection unchanged; an invalid entry refuses with a text-free diagnostic; the blobs are never recreated; Domain P: a snapshot whose audit rows name players that are absent is ACCEPTED, and an identity-only replacement that REMOVES a player every audit table names is ACCEPTED with every audit row and reference value exactly as before (unresolved references counted, never refused)', () => {
-  const dir = tempDir('sa-snap');
-  const blobs = { blocks: [block(), block({ id: 'blk-2', orgId: 'org-harbour' })], reports: [report(), autoReport()], moderationLog: [modHit()], orgNotes: [note()], ledger: [led(), led({ id: 'led-2', playerId: 'pl-child1', type: 'shortlist', detail: { x: 1 } })], opsEvents: [ops()], sourceChanges: [srcc()], idvQueue: [idv(), idv({ id: 'idv-2', guardianId: 'gd-signup' })] };
-  s7dFile(dir, { blobs }); { const s = openRaw(dir); migrate(s); s.close(); }
-  const tool = openStore(dir); const snap = tool.load();
-  for (const n of COLLECTIONS) assert.equal(JSON.stringify(snap.db[n]), JSON.stringify(canon(n, blobs[n])), `${n} loaded as typed records`);
-  const texts0 = Object.fromEntries(COLLECTIONS.map((n) => [n, JSON.stringify(snap.db[n])]));
-  tool.save(snap);
-  const again = tool.load(); for (const n of COLLECTIONS) assert.equal(JSON.stringify(again.db[n]), texts0[n], `${n} round-tripped through replace`);
-  assert.equal(again.db.reports[1].targetPlayerId, null, 'the automatic report\'s absent key reads back as null');
-  const { ledger: _omit, blocks: _omit2, ...without } = snap.db; tool.save({ ...snap, db: { ...without, players: without.players.map((p) => (p.id === 'pl-child1' ? { ...p, name: 'Renamed Child' } : p)) } });
-  assert.deepEqual(idsIn(dir, 'ledger'), ['led-1', 'led-2'], 'an omitted collection leaves its table alone'); assert.deepEqual(idsIn(dir, 'blocks'), ['blk-1', 'blk-2']); assert.equal(rowsOf(dir, 'players', 'rowid').find((p) => p.id === 'pl-child1').name, 'Renamed Child', 'the other collections were rewritten');
-  const beforeDump = dump(tool.sqlite);
-  assert.throws(() => tool.save({ ...snap, db: { ...snap.db, players: snap.db.players.map((p) => ({ ...p, name: 'Unrelated Change' })), ledger: { id: 'x' } } }), /ledger: the snapshot collection must be an array/);
-  assert.deepEqual(dump(tool.sqlite), beforeDump, 'nothing of the save landed (the unrelated edit included)');
-  const SECRET = 'SECRET-NOTE-TEXT-77';
-  assert.throws(() => tool.save({ ...snap, db: { ...snap.db, orgNotes: [note({ id: 'note-1', text: SECRET }), note({ id: 'note-1', text: SECRET })] } }), (e) => /SAFETY_AUDIT_IMPORT_BLOCKED/.test(e.message) && /duplicates the id/.test(e.message) && !e.message.includes(SECRET));
-  assert.deepEqual(dump(tool.sqlite), beforeDump);
-  const SECRET_VALUE = 'SECRET-ORG-VALUE-55';
-  assert.throws(() => tool.save({ ...snap, db: { ...snap.db, blocks: [block(), block({ id: 'blk-2', orgId: { name: SECRET_VALUE } })] } }), (e) => /SAFETY_AUDIT_IMPORT_BLOCKED/.test(e.message) && /blocks snapshot collection entry #1\.orgId must be a string or null \(got an object; id blk-2\)/.test(e.message) && !e.message.includes(SECRET_VALUE), 'a wrong-typed value is refused by name');
-  assert.deepEqual(dump(tool.sqlite), beforeDump, 'nothing of the refused save landed');
-  tool.save({ ...snap, db: { ...snap.db, ledger: snap.db.ledger.map((l) => ({ ...l, futureField: 'dropped' })) } });
-  assert.equal(JSON.stringify(tool.load().db.ledger), texts0.ledger, 'an unknown key is dropped silently: the table holds exactly the typed records');
-  tool.save({ ...snap, db: { ...snap.db, moderationLog: [] } }); assert.deepEqual(idsIn(dir, 'moderation_log'), []); assert.deepEqual(idsIn(dir, 'blocks'), ['blk-1', 'blk-2']);
-  // Domain P, tolerant: audit rows naming absent players are accepted; an identity-only replacement removing a named player is accepted with the audit rows untouched.
-  tool.save({ ...snap, db: { ...snap.db, ledger: [...snap.db.ledger, led({ id: 'led-orphan', playerId: 'pl-nobody' })], blocks: [...snap.db.blocks, block({ id: 'blk-orphan', playerId: 'pl-nobody' })] } });
-  assert.deepEqual(idsIn(dir, 'ledger'), ['led-1', 'led-2', 'led-orphan']); assert.deepEqual(idsIn(dir, 'blocks'), ['blk-1', 'blk-2', 'blk-orphan']);
-  const base = tool.load().db; const auditBefore = Object.fromEntries(COLLECTIONS.map((n) => [n, JSON.stringify(base[n])])); const rowsBefore = Object.fromEntries(Object.values(TABLES).map((t) => [t, rowsOf(dir, t)]));
-  const { blocks: _b, reports: _r, moderationLog: _m, orgNotes: _o, ledger: _l, opsEvents: _e, sourceChanges: _s, idvQueue: _q, ...identityOnly } = base;
-  const withoutAdult = base.players.filter((p) => p.id !== 'pl-adult'); assert.equal(withoutAdult.length, base.players.length - 1);
-  tool.save({ ...snap, db: { ...identityOnly, players: withoutAdult, guardians: base.guardians } });
-  assert.equal(rowsOf(dir, 'players', 'rowid').some((p) => p.id === 'pl-adult'), false, 'the player is gone from the identity table');
-  const after = tool.load().db; for (const n of COLLECTIONS) assert.equal(JSON.stringify(after[n]), auditBefore[n], `${n}: every row and reference value exactly as before the identity rewrite`);
-  assert.deepEqual(Object.fromEntries(Object.values(TABLES).map((t) => [t, rowsOf(dir, t)])), rowsBefore, 'the stored rows (seq included) are byte-identical');
-  assert.deepEqual(needModule().unresolvedPlayerReferences(tool.sqlite), { blocks: 3, reports: 0, orgNotes: 1, ledger: 2, sourceChanges: 1 }, 'the unresolved references are counted (blk-1 and blk-2 name the removed adult, blk-orphan a player that never existed) — a count, not a claim about why the ids are absent');
-  tool.sqlite.close(); rm(dir);
-});
-
-test('[cutover] the STRICT guardian reference (Q4b), every direction, judged on the FINAL state after the coordinated replacement: identity pair only with a referenced guardian removed — the queue OMITTED — refuses atomically (IDV_GUARDIAN_MISSING; every table unchanged); identity pair only with every guardian retained succeeds with the queue\'s order and content unchanged; identity pair and queue with a guardian and its entries removed together succeeds; an invalid coordinated replacement (guardian removed, its entry kept) refuses whole with unrelated collections untouched; queue only with an entry naming a missing guardian refuses against the retained identity tables; a queue entry naming a guardian the SAME snapshot adds is accepted', () => {
-  const dir = tempDir('sa-strict');
-  s7dFile(dir, { blobs: { idvQueue: [idv(), idv({ id: 'idv-2', ts: T + 1 }), idv({ id: 'idv-3', guardianId: 'gd-signup', guardianName: 'Signup Parent' })], ledger: [led()] } }); { const s = openRaw(dir); migrate(s); s.close(); }
-  const tool = openStore(dir); const snap = tool.load(); const base = { ...snap.db };
-  const unchangedAfter = (fn, re, code, label) => { const before = dump(tool.sqlite); assert.throws(fn, (e) => re.test(e.message) && (!code || e.code === code) && !/Primary Parent|Signup Parent|4567/.test(e.message), label); assert.deepEqual(dump(tool.sqlite), before, `${label}: nothing changed`); };
-  const save = (db) => tool.save({ ...snap, db });
-  const { idvQueue: _q, ...noQueue } = base;
-  const textBefore = JSON.stringify(tool.load().db.idvQueue);
-  // gd-signup has no child and no co-guardian link: its removal is valid for the identity snapshot itself, so the refusal is the queue's final-state assertion.
-  const withoutSignup = base.guardians.filter((g) => g.id !== 'gd-signup'); assert.equal(withoutSignup.length, base.guardians.length - 1);
-  unchangedAfter(() => save({ ...noQueue, guardians: withoutSignup }), /IDV_GUARDIAN_MISSING[^;]*idv-3/, 'IDV_GUARDIAN_MISSING', '(i) identity pair only, the queue omitted, a referenced guardian removed');
-  save({ ...noQueue, guardians: base.guardians }); assert.equal(JSON.stringify(tool.load().db.idvQueue), textBefore, '(ii) identity pair only, every guardian retained: the queue unchanged in order and content');
-  save({ ...base, guardians: withoutSignup, idvQueue: base.idvQueue.filter((q) => q.id !== 'idv-3') }); assert.deepEqual(idsIn(dir, 'idv_queue'), ['idv-1', 'idv-2'], '(iii) guardian and its entries removed together'); assert.equal(rowsOf(dir, 'guardians', 'rowid').some((g) => g.id === 'gd-signup'), false);
-  save({ ...base }); assert.deepEqual(idsIn(dir, 'idv_queue'), ['idv-1', 'idv-2', 'idv-3']); assert.ok(rowsOf(dir, 'guardians', 'rowid').some((g) => g.id === 'gd-signup'), 'the guardian is back');
-  unchangedAfter(() => save({ ...base, guardians: withoutSignup, idvQueue: base.idvQueue }), /IDV_GUARDIAN_MISSING[^;]*idv-3/, 'IDV_GUARDIAN_MISSING', '(iv) invalid coordinated replacement: guardian removed, its entry kept');
-  const { players: _p, guardians: _g, ...noIdentity } = base;
-  unchangedAfter(() => save({ ...noIdentity, idvQueue: [...base.idvQueue, idv({ id: 'idv-bad', guardianId: 'gd-missing' })] }), /IDV_GUARDIAN_MISSING/, undefined, '(v) queue only with an invalid guardian, against the retained identity tables');
-  const newGuardian = { id: 'gd-new', name: 'New Parent', email: 'new@example.test', idVerified: false, disclaimerAccepted: false, childIds: [] };
-  save({ ...base, guardians: [...base.guardians, newGuardian], idvQueue: [...base.idvQueue, idv({ id: 'idv-new', guardianId: 'gd-new', guardianName: 'New Parent' })] }); assert.deepEqual(idsIn(dir, 'idv_queue'), ['idv-1', 'idv-2', 'idv-3', 'idv-new'], '(vi) an entry naming a guardian the same snapshot adds');
-  tool.sqlite.close(); rm(dir);
-});
-
-// ============================================================= [S6b correction] the two findings of the independent review of c6cf5e1
-test('a REJECTED staged patch changes nothing: reports.patch({ status, outcome }) with a valid status and an invalid LATER field (undefined; a function; a Map) throws and leaves the held view, a fresh view, the export, the pending queue (a valid write queued before it stays queued) and the file exactly as before; a later valid patch of another field persists only that field (the rejected status never lands); an idvQueue.patch with an invalid value changes nothing either; inside a unit of work the caught refusal still refuses the unit and restores the pre-unit state; an ACCEPTED patch whose save COMMIT fails is kept and lands once on the retry; held-view identity kept throughout', () => {
-  const dir = tempDir('sa-f1'); s7dFile(dir, { blobs: { reports: [report()], idvQueue: [idv()] } });
-  const L = live(dir); L.save();
-  const held = L.repo.reports.byId('rep-1'); const heldIdv = L.repo.idvQueue.byId('idv-1');
-  L.repo.ledger.append(led({ id: 'led-queued' })); assert.equal(L.repo.pending(), 1, 'a valid write queued before the rejected patch');
-  const fileReport = () => { const r = rowsOf(dir, 'reports')[0]; return { status: r.status, outcome: r.outcome, resolved_at: r.resolved_at }; };
-  const state = () => ({ export: JSON.stringify(L.repo.exportAll()), held: [held.status, held.outcome, held.resolvedAt], fresh: [L.repo.reports.byId('rep-1').status, L.repo.reports.byId('rep-1').outcome], idv: [heldIdv.status, L.repo.idvQueue.byId('idv-1').status], pending: L.repo.pending(), file: fileReport(), dump: fileDump(dir) });
-  const before = state();
-  assert.deepEqual(before.held, ['pending_review', null, null]);
-  for (const [label, bad] of [['undefined', undefined], ['a function', () => 'x'], ['a Map', new Map([['k', 'v']])]]) {
-    assert.throws(() => L.repo.reports.patch('rep-1', { status: 'resolved', resolvedAt: NOW, outcome: bad }), /reports\.outcome/, `${label}: refused, naming the field`);
-    assert.deepEqual(state(), before, `${label}: nothing changed — held and fresh views, export, queue and file`);
+// ============================================================= the snapshot path
+test('the snapshot path: a whole-file save round-trips all eight collections; an omitted collection is kept; junk is refused by position and id (never by value) and changes nothing; an organisation the audit rows name cannot be dropped; the IDV guardians are judged on the FINAL state (a queue naming a missing guardian refused; an identity rewrite removing a guardian the queue names refused, the queue omitted)', () => {
+  const audit = { blocks: [block()], reports: [report(), report({ id: 'rep-2', status: 'resolved', outcome: 'Done.', resolvedAt: T + 1 })], moderationLog: [modHit()], orgNotes: [note()], ledger: [led(), led({ id: 'led-c', type: 'combine_request_created', detail: { requestId: 'cr', protocols: ['a@1'] } })], opsEvents: [ops()], sourceChanges: [srcc()], idvQueue: [idv()] };
+  const dir = tempDir('sa-snap'); fixtureFile(dir, audit);
+  const tool = openStore(dir);
+  const read = () => SAFETY_AUDIT_SNAPSHOT.read(tool.sqlite);
+  assert.deepEqual(plain(read()), plain(audit), 'round trip, record for record');
+  tool.save({ idCounter: 1000, db: fixtureDb({ blocks: [] }) }); assert.deepEqual(read().blocks, []); assert.deepEqual(plain(read().ledger), plain(audit.ledger), 'an omitted collection is kept');
+  const before = dump(tool.sqlite); const SECRET = 'SECRET-NOTE-44';
+  for (const [label, extra, re] of [
+    ['duplicate', { ledger: [led(), led()] }, /SAFETY_AUDIT_IMPORT_BLOCKED[^]*ledger entry #1 duplicates/],
+    ['not an object', { blocks: ['blk-2'] }, /blocks entry #0 is not an object/],
+    ['not an array', { reports: { id: 'r' } }, /reports: the snapshot collection must be an array/],
+    ['unknown field', { orgNotes: [note({ secret: SECRET })] }, /orgNotes entry #0 note-1 carries field\(s\)[^]*secret/],
+    ['wrong type', { orgNotes: [note({ text: [SECRET] })] }, /orgNotes entry #0 note-1\.text must be text/],
+    ['missing org', { blocks: [block({ orgId: 'org-nobody' })] }, /SAFETY_AUDIT_REFERENCE_MISSING[^]*blocks blk-1 orgId → orgs org-nobody/],
+    ['missing guardian', { idvQueue: [idv({ guardianId: 'gd-missing' })] }, /IDV_GUARDIAN_MISSING[^]*idv-1/],
+  ]) {
+    assert.throws(() => tool.save({ idCounter: 1000, db: fixtureDb(extra) }), (e) => re.test(e.message) && !e.message.includes(SECRET), label);
+    assert.equal(dump(tool.sqlite), before, `${label}: nothing changed`);
   }
-  assert.throws(() => L.repo.reports.patch('rep-1', { status: 'resolved', bogus: 1 }), /patch changes status, outcome and resolvedAt only/); assert.deepEqual(state(), before, 'an unknown key changes nothing');
-  assert.throws(() => L.repo.idvQueue.patch('idv-1', { status: () => 'revoked' }), /idvQueue\.status/); assert.deepEqual(state(), before, 'a rejected IDV patch changes nothing');
-  assert.equal(L.repo.reports.byId('rep-1'), held, 'held-view identity kept after the refusals');
-  // A later valid patch of ANOTHER field persists only that field.
-  L.repo.reports.patch('rep-1', { outcome: 'Later valid outcome.' }); assert.equal(L.repo.pending(), 2);
-  L.save();
-  assert.deepEqual(fileReport(), { status: 'pending_review', outcome: 'Later valid outcome.', resolved_at: null }, 'the rejected status never lands'); assert.deepEqual(idsIn(dir, 'ledger'), ['led-queued'], 'the write queued before the refusal landed with the save');
-  assert.deepEqual([held.status, held.outcome], ['pending_review', 'Later valid outcome.'], 'the held view follows the committed write');
-  // Inside a unit of work: the caught refusal still refuses the unit, which restores the pre-unit state.
-  const beforeUnit = state(); let caught = null; let outer = null;
-  try { L.store.unitOfWork(() => { L.repo.ledger.append(led({ id: 'led-unit' })); try { L.repo.reports.patch('rep-1', { status: 'resolved', outcome: () => 'x' }); } catch (e) { caught = e; } }); } catch (e) { outer = e; }
-  assert.match(caught?.message ?? '', /reports\.outcome/); assert.ok(outer, 'the caught participant failure still refuses the unit'); assert.equal(outer.unitOfWork, 'rolled_back');
-  assert.deepEqual(state(), beforeUnit, 'the unit restored everything'); assert.equal(L.store.sqlite.isTransaction, false);
-  // An ACCEPTED staged patch whose save COMMIT fails stays pending and lands once on the retry (unchanged behaviour).
-  L.repo.reports.patch('rep-1', { status: 'resolved', resolvedAt: NOW, outcome: 'Resolved.' }); assert.equal(held.status, 'resolved');
-  L.store.sqlite.exec('CREATE TEMP TABLE f1_parent (id TEXT PRIMARY KEY); CREATE TEMP TABLE f1_child (parent_id TEXT NOT NULL REFERENCES f1_parent(id) DEFERRABLE INITIALLY DEFERRED); CREATE TEMP TRIGGER f1_commit AFTER UPDATE ON reports BEGIN INSERT INTO f1_child (parent_id) VALUES (\'missing-on-purpose\'); END');
-  assert.throws(() => L.save(), /FOREIGN KEY constraint failed/); assert.equal(fileReport().status, 'pending_review'); assert.equal(L.repo.pending(), 1); assert.equal(held.status, 'resolved', 'the accepted write stays in memory');
-  L.store.sqlite.exec('DROP TRIGGER f1_commit'); L.save();
-  assert.deepEqual(fileReport(), { status: 'resolved', outcome: 'Resolved.', resolved_at: NOW }); assert.equal(L.repo.pending(), 0); L.save(); assert.equal(fileReport().status, 'resolved', 'no replay');
-  L.close(); rm(dir);
+  const { idvQueue: _q, ...noQueue } = fixtureDb();
+  assert.throws(() => tool.save({ idCounter: 1000, db: { ...noQueue, guardians: noQueue.guardians.filter((g) => g.id !== 'gd-primary'), players: noQueue.players.filter((p) => !p.guardianId) } }), /IDV_GUARDIAN_MISSING|guardian/, 'the queue still names gd-primary');
+  assert.equal(dump(tool.sqlite), before);
+  tool.save({ idCounter: 1000, db: fixtureDb({ ledger: [led({ playerId: 'pl-gone' })], sourceChanges: [srcc({ playerId: 'pl-gone' })] }) });
+  assert.equal(read().ledger[0].playerId, 'pl-gone', 'Q4: a player id that resolves to nothing is stored as it is');
+  tool.sqlite.close(); rm(dir);
 });
 
-test('a nested OPTIONAL value that JSON cannot carry is stored the way JSON.stringify stores it, never refused: ledger detail { share: undefined } (the Box Cam prefs writer on a partial prefs row) is accepted, the key is ABSENT in the mirror, the file and the export; an undefined array entry becomes null; the same holds for a nested context; a TOP-LEVEL undefined is a NULL column (null in the record); an unknown top-level field is dropped; a nested function, a Map, a BigInt or a cyclic object is still refused by path', () => {
-  const dir = tempDir('sa-f2'); s7dFile(dir, { blobs: { reports: [report()] } });
-  const L = live(dir); L.save();
-  const detail = { by: 'player', share: undefined, retainClips: true };
-  const row = L.repo.ledger.append({ ...led({ id: 'led-prefs', type: 'box_prefs_changed', orgId: null, userId: undefined }), detail });
-  assert.deepEqual(Object.keys(row.detail), ['by', 'retainClips'], 'the undefined nested key is absent, as JSON would have it'); assert.equal(row.userId, null, 'a top-level undefined is a NULL column');
-  assert.equal(JSON.stringify(row), JSON.stringify(canonRow('ledger', { ...led({ id: 'led-prefs', type: 'box_prefs_changed', orgId: null, userId: null }), detail })), 'the mirror is the typed record of what the writer passed');
-  L.repo.moderationLog.append(modHit({ id: 'mod-u', context: { kind: 'player_message', channelId: undefined, list: [1, undefined, 3] }, flags: ['email', undefined] }));
-  const m = L.repo.moderationLog.byId('mod-u'); assert.deepEqual(plain(m.context), { kind: 'player_message', list: [1, null, 3] }); assert.deepEqual(plain(m.flags), ['email', null]); assert.equal(Object.hasOwn(m.context, 'channelId'), false);
-  L.repo.opsEvents.append({ ...ops({ id: 'ops-u' }), futureNested: { a: undefined, b: [undefined] } }); assert.deepEqual(Object.keys(L.repo.opsEvents.byId('ops-u')), KEYS.opsEvents, 'an unknown top-level field is dropped');
-  L.repo.reports.patch('rep-1', { outcome: 'x' }); // a patch value that is a plain string (the route's) is unchanged
-  for (const [label, bad] of [['a nested function', { f: () => 1 }], ['a nested Map', { m: new Map() }], ['a nested BigInt', { n: 10n }]]) assert.throws(() => L.repo.ledger.append({ ...led({ id: `led-bad-${label}` }), detail: bad }), /ledger\.detail\.[fmn] .*cannot be stored as JSON/, `${label} is still refused`);
-  const cyc = { a: 1 }; cyc.self = cyc; assert.throws(() => L.repo.ledger.append({ ...led({ id: 'led-cyc' }), detail: cyc }), /ledger\.detail\.self is cyclic/, 'a cyclic object is still refused (no partial row)');
-  assert.equal(L.repo.ledger.byId('led-cyc'), null); assert.equal(L.repo.ledger.byId('led-bad-a nested function'), null);
-  L.save();
-  const fileRow = rowsOf(dir, 'ledger').find((r) => r.id === 'led-prefs'); assert.equal(fileRow.detail_json, JSON.stringify({ by: 'player', retainClips: true }));
-  assert.equal(JSON.stringify(stored(L.store.sqlite).ledger.find((r) => r.id === 'led-prefs')), JSON.stringify(row), 'the file reads back the same row');
-  assert.equal(JSON.stringify(L.repo.exportAll().ledger.find((r) => r.id === 'led-prefs')), JSON.stringify(row), 'the export (the admin backup) carries the same row');
-  L.close();
-  // A restart serves the same row.
-  const L2 = live(dir); assert.equal(JSON.stringify(L2.repo.ledger.byId('led-prefs')), JSON.stringify(row)); L2.close();
-  rm(dir);
-});
-
-console.log(`\n${passed} safety-audit checks passed`);
+console.log(`safety audit: ${passed} checks passed`);

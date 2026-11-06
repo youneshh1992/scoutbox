@@ -23,18 +23,13 @@
  * source identity, when it happened, and a small structured detail used for
  * copy. It is not a second copy of anything.
  *
- * S6b: the store is the source_changes table (repositories/safetyAudit.mjs,
- * migration 0013); `db.sourceChanges` is the repository's read-only view in
- * insertion order and a recorded change is a row appended through the
- * repository, then the cap deletes the OLDEST rows beyond 20 000 (the same
- * splice the array had), both staged into the persistNow() that follows. A bare
- * context without the repository (a reviewer feasibility script built around an
- * array) keeps the array push exactly as before the cutover.
+ * The store is the source_changes table (repositories/safetyAudit.mjs): a
+ * recorded change is one explicit write that also drops the OLDEST rows beyond
+ * the cap (SOURCE_CHANGE_CAP), in the caller's unit of work when one is open.
  */
 
 export function registerSourceChanges(ctx) {
-  const { db, nextId, persistNow, safetyAudit } = ctx;
-  const CAP = 20_000;
+  const { nextId, safetyAudit } = ctx;
 
   /**
    * Append a canonical source change. `occurredAt` must be the moment the fact
@@ -42,28 +37,15 @@ export function registerSourceChanges(ctx) {
    */
   ctx.recordSourceChange = ({ playerId, type, sourceSystem, sourceId, occurredAt = Date.now(), detail = null }) => {
     if (!playerId || !type || !sourceSystem) return null;
-    const row = {
+    return safetyAudit.sourceChanges.record({
       id: nextId('srcc'),
       playerId, type, sourceSystem,
       sourceId: sourceId ?? null,
       occurredAt,
       detail: detail ?? null,
-    };
-    // Bounded: this is a change LOG, not history of record. The canonical rows
-    // it points at are the history.
-    if (safetyAudit) {
-      safetyAudit.sourceChanges.append(row);
-      safetyAudit.sourceChanges.trimTo(CAP);
-    } else {
-      db.sourceChanges.push(row);
-      if (db.sourceChanges.length > CAP) db.sourceChanges.splice(0, db.sourceChanges.length - CAP);
-    }
-    persistNow();
-    return row;
+    });
   };
 
   /** Every recorded change for a player, oldest first. */
-  ctx.sourceChangesFor = (playerId) => (db.sourceChanges ?? [])
-    .filter((c) => c.playerId === playerId)
-    .sort((a, b) => (a.occurredAt ?? 0) - (b.occurredAt ?? 0));
+  ctx.sourceChangesFor = (playerId) => safetyAudit.sourceChanges.forPlayer(playerId);
 }

@@ -383,6 +383,8 @@ export function buildRecruitmentJourney(db, caseId, viewer, opts = {}) {
   const allAssessments = rec.assessments.filter((a) => !ownedByAnotherCase(rec, kase, { caseId: trialCaseOf(rec, a.context?.trialId), at: a.createdAt }));
   const journeyBlock = journeyFor(db, rec, kase, {
     status, role, now,
+    // `reads.blocks` (the safety repository's queries) in the server; a fixture may plant `db.blocks`.
+    blocked: reads.blocks ? reads.blocks.has(kase.playerId, kase.orgId) : (db.blocks ?? []).some((b) => b && b.playerId === kase.playerId && b.orgId === kase.orgId),
     contacts: rec.contacts.filter((c) => c && c.caseId === kase.id && c.orgId === kase.orgId && contactIntegrity(c, { orgId: kase.orgId, caseId: kase.id }).length === 0),
     trials: trialRows, trialRequests: trialInvitations, assessments: allAssessments,
     decisions: rec.decisions.filter((d) => d?.roomId === kase.id && d.orgId === kase.orgId),
@@ -591,7 +593,7 @@ function journeyFor(db, rec, kase, f) {
   const offer = currentOfferForCase(f.offers, f.now);
   const signing = currentSigningForCase(f.packages, f.now);
   const facts = { ...f, kase, createdAt: kase.createdAt ?? null, history: Array.isArray(kase.history) ? kase.history : [], historyMalformed: kase.history !== undefined && !Array.isArray(kase.history), signingRowIds: new Set(rec.signings.filter((s) => s && s.orgId === kase.orgId && s.playerId === kase.playerId).map((s) => s.id)) };
-  const blocked = (db.blocks ?? []).some((b) => b && b.playerId === kase.playerId && b.orgId === kase.orgId);
+  const blocked = f.blocked;
   const subjectRemoved = !!kase.subjectRemovedAt || !(db.players ?? []).some((p) => p?.id === kase.playerId);
   const verdict = validateRecruitmentJourney(facts);
   const next = nextActionFor({ status: f.status, role: f.role, now: f.now, blocked, subjectRemoved, contact, trial, trialRequest, assessed, decision, offer, signing, signingRow: f.signingRow });

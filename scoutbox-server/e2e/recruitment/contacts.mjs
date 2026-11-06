@@ -550,7 +550,7 @@ section('I — internal-note isolation: the sentinel reaches no recipient surfac
     'player feed': (await j('GET', '/player/feed', undefined, kola.token)).body,
     'guardian inbox': (await j('GET', '/guardian/inbox', undefined, amara.token)).body.items,
     'guardian notifications': (await j('GET', '/guardian/notifications', undefined, amara.token)).body,
-    'guardian log': (await j('GET', '/guardian/log', undefined, amara.token)).body,
+    'guardian log': (await j('GET', '/guardian/log?limit=100', undefined, amara.token)).body.items,
     'outbox': (await j('GET', '/admin/outbox', undefined, undefined, ADMIN)).body,
     'push log': (await j('GET', '/admin/push-log', undefined, undefined, ADMIN)).body,
     'foreign org journey': (await j('GET', `/org/rooms/${J.RID}/journey`, undefined, rita.token)).body,

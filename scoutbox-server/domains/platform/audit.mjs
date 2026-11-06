@@ -182,8 +182,7 @@ export function registerAudit(ctx) {
     if (org.type === 'agency') rows.push(...agentAuditRows(ctx.agentReads, org, { findPlayer, orgCanSee }));
     // M23 P5.6C: the compliance domain — contexts, consents and reviews, content-free.
     if (org.type === 'agency') rows.push(...complianceAuditRows(ctx.complianceReads, org));
-    for (const l of db.ledger ?? []) {
-      if (l.orgId !== org.id || !LEDGER_ACTIONS.has(l.type)) continue;
+    for (const l of ctx.safetyReads.ledger.forOrg(org.id, [...LEDGER_ACTIONS])) {
       rows.push({
         id: l.id, at: l.ts, action: l.type, domain: 'organisation',
         actor: l.userId ? { userId: l.userId, name: l.scoutName ?? null } : null,

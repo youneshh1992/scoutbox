@@ -527,7 +527,7 @@ let clubPlanId = null; let clubGoalId = null;
   ok(stale.status === 404, 'H11: and a deep link to its own plan for that player answers as a nonexistent record');
   ok(!JSON.stringify(stale.body).includes('Kola'), 'H11: the refusal names nobody — no stale identity leaks through the URL');
 
-  const blocks = (await j('GET', '/admin/blocks', undefined, undefined, ADMIN)).body ?? [];
+  const blocks = (await j('GET', '/admin/blocks?limit=100', undefined, undefined, ADMIN)).body?.items ?? [];
   const mine = blocks.find((b) => b.playerId === 'pl-adeyemi' && b.orgId === 'org-eastport');
   if (mine) await j('POST', `/admin/blocks/${mine.id}/lift`, {}, undefined, ADMIN);
   ok((await j('GET', `/org/development/plans/${clubPlanId}`, undefined, MARIA)).status === 200,

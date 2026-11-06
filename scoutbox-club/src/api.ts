@@ -623,7 +623,8 @@ export const httpApi: ScoutboxApi = {
       body: JSON.stringify(report),
     }),
 
-  getLedger: (s) => request<LedgerEntry[]>('/org/ledger', { headers: headers(s) }),
+  // Pages by cursor (S14b), newest first: the first page is read; the ledger screen still needs a "load more" (nextCursor).
+  getLedger: async (s) => (await request<{ items: LedgerEntry[]; nextCursor: string | null }>('/org/ledger', { headers: headers(s) })).items,
   getProofPack: (s, playerId) => request<ProofPack>(`/org/players/${playerId}/proofpack`, { headers: headers(s) }),
   getPlan: (s) => request<PlanInfo>('/org/plan', { headers: headers(s) }),
   getReputation: (s) => request<Reputation>('/org/reputation', { headers: headers(s) }),

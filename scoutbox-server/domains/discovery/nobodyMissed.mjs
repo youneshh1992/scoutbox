@@ -131,7 +131,7 @@ export function registerNobodyMissed(ctx) {
       assessment_submitted: ctx.scoutingReads.assessments.forOrgPlayer(org.id, playerId).some((a) => a.state !== 'draft'),
       trial: reads.trials.forOrgPlayer(org.id, playerId).length > 0,
       signing: reads.signings.forOrgPlayer(org.id, playerId).length > 0,
-      shortlisted: (db.ledger ?? []).some((l) => l.type === 'shortlist' && l.orgId === org.id && l.playerId === playerId),
+      shortlisted: ctx.safetyReads.ledger.isListedBy(org.id, playerId),
       review_deferred: ctx.insightReads.reviewLater.isDeferred(org.id, playerId, now()), // S12d
       // S9c: on the squad, or on the shadow list — either way the club has already considered the player.
       squad: ctx.scoutingReads.squad.has(org.id, playerId) || ctx.scoutingReads.shadow.has(org.id, playerId),

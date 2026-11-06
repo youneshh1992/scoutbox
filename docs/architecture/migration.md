@@ -75,10 +75,12 @@ takes the next free id; the placeholder ids in `sqlite-schema.md` mean nothing.
 | S13d | grassroots operations: open days, match days, the friendlies board | `0037` | `grassroots` | done |
 | S13e | uploads, saved searches, invoices, the demo reputation seed, the delivery centre's bookkeeping (plans and archetypes became constants) | `0038` | `operations` | done |
 | S14a | retire the blob itself: the `collections` table, `db.schema` and the snapshot migration registry, the store contract, the `??=` and `migrateMxx` lines; the id counter becomes a table | `0039` | `counters` | done |
-| S14b… | the staged repositories become explicit, one per step (§4.6) | | | **next** |
+| S14b | safety and audit become explicit writes and SQL reads; their tables re-typed (vocabulary CHECKs, details as typed columns by type, organisation and staff keys) | `0013` (amended in place) | `safetyAudit` | done |
+| S14c… | the remaining staged repositories become explicit, one per step (§4.6) | | | **next** |
 | S14 last | the save path, `db` and snapshot mode go (§4.6) | | | |
 
-Steps before S8 were staged (written at save) rather than explicit; S4a's identity writes are explicit since §4.3.1.
+Steps before S8 were staged (written at save) rather than explicit; S4a's identity writes are explicit since §4.3.1, and
+S6b's since S14b.
 
 ## 4. The order of work
 
@@ -103,7 +105,7 @@ and the DDL, so these cannot drift, and include a `date` type for football dates
   lines and `Array.isArray` guards quietly see an empty collection. The repository answers indexed queries (`byId`,
   `forOrg`, `forPlayer`, counts…) with fresh deep-frozen records; a read inside a unit sees the unit's writes. Modules
   receive a per-domain reads object on their context (`recruitmentReads`, `scoutingReads`, `verificationReads`,
-  `agentReads`, `complianceReads`, `transactionReads`, `developmentReads`, `boxCamReads`, `discoveryReads`, `insightReads`, `integrationReads`, `enterpriseReads`, `groupReads`, `grassrootsReads`; S13e's few readers take the `operations` repository itself); pure projectors take `reads`. Sweeps are indexed predicates, admin figures are
+  `agentReads`, `complianceReads`, `transactionReads`, `developmentReads`, `boxCamReads`, `discoveryReads`, `insightReads`, `integrationReads`, `enterpriseReads`, `groupReads`, `grassrootsReads`, `safetyReads`; S13e's few readers take the `operations` repository itself); pure projectors take `reads`. Sweeps are indexed predicates, admin figures are
   `GROUP BY`s. Lists decode their records' child rows in one batch (`childRowsOf` in `repositories/database.mjs`),
   never a query per record.
 - **Reads that write become sweeps or upserts.** A notice a read used to create comes from a sweep, its marker
@@ -179,6 +181,10 @@ separate risk; the script moves the fixtures' instants to today to measure the s
   box on the host club's location, the exact 50 km test in code, so a board page is cut after filtering. The player
   opportunity board (opportunities and open days) is filtered per player in code and then paged. Bounded by the
   clubs and upcoming events, not the player base.
+- Safety and audit (S14b): `/org/reputation` is a `GROUP BY` over the whole ledger (every club's actors), one pass
+  per request that grows with the ledger; it needs its own projection. A player's "who's watching" insights and the
+  data export read that player's ledger whole (per-player, unpaged by rule).
+  The admin report triage orders by a computed rank, so each page sorts the whole reports table (no index serves it).
 - Operations (S13e): a new player's saved-search alerts read the searches of current staff that SQL prefilters by
   position, foot, country and availability, then apply the whole filter in code. Bounded by the clubs' saved searches,
   not the player base. A provider callback's id is remembered at once while the dispatch changes it applies are still
@@ -234,7 +240,13 @@ Split in parts, like S12 and S13.
   longer loads a snapshot: `attachDataLayer` takes the seed as `seed` and imports it only on a first installation.
   The schema version is the latest table migration's number. A snapshot-mode save refuses a collection that has no
   table (`SNAPSHOT_COLLECTION_UNKNOWN`). `e2e/platform/storeGuarantees.mjs` asserts there is no blob table.
-- **S14b onwards: the staged repositories become explicit**, one per step, the S8 way: safety and audit, message
+- **S14b (done): safety and audit** are explicit writes and SQL reads. Migration `0013` was amended in place: typed
+  columns with vocabulary CHECKs, the moderation context as columns and its flags as child rows, the ledger and
+  ops-event details as typed columns by type (the Combine protocols as child rows), the source change's positions as
+  columns; organisations and staff are RESTRICT keys. Routes that wrote several rows are units (a block and its ledger
+  row, a moderation hit and its escalation, an urgent report and its suspension, a resolution and the org's suspension).
+  The admin reports, blocks and moderation lists, the club's ledger and the guardian's log page by cursor.
+- **S14c onwards: the remaining staged repositories become explicit**, one per step, the S8 way: message
   threads, outbox and push with dispatches, notifications, staff and sessions, the organisations' remaining facets,
   players and guardians. Each loses its mirror, its `db.<name>` view and its save hook, and its reads become queries.
   This is also what closes §4.3.1's cost of an empty unit of work.

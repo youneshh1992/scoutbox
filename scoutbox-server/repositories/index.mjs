@@ -87,7 +87,7 @@ import { createNotificationsRepository, NOTIFICATIONS_TABLE, NOTIFICATION_PREFS_
 import { createDispatchesRepository, DISPATCHES_TABLE, DISPATCHES_MIGRATION } from './dispatches.mjs';
 import { createOutboxPushRepository, OUTBOX_PUSH_SNAPSHOT_TABLES, OUTBOX_PUSH_MIGRATION } from './outboxPush.mjs';
 import { createChannelsRepository, CHANNELS_TABLE, CHANNELS_MIGRATION, assertChannelReferencesConsistent } from './channels.mjs';
-import { createSafetyAuditRepository, AUDIT_COLLECTIONS, AUDIT_SNAPSHOT_TABLES, SAFETY_AUDIT_MIGRATION, assertIdvQueueGuardiansConsistent, unresolvedPlayerReferences, retainedPlayerReferences } from './safetyAudit.mjs';
+import { createSafetyAuditRepository, AUDIT_COLLECTIONS, SAFETY_AUDIT_SNAPSHOT, SAFETY_AUDIT_MIGRATION, assertIdvQueueGuardiansConsistent, unresolvedPlayerReferences, retainedPlayerReferences } from './safetyAudit.mjs';
 
 export const DATA_MIGRATIONS = Object.freeze([m0001, m0002, m0003, m0004, m0005, m0006, m0007, m0008, m0009, m0010, m0011, m0012, m0013, m0014, m0015, m0016, m0017, m0018, m0019, m0020, m0021, m0022, m0023, m0024, m0025, m0026, m0027, m0028, m0029, m0030, m0031, m0032, m0033, m0034, m0035, m0036, m0037, m0038, m0039]);
 
@@ -126,10 +126,12 @@ export function readTableBacked(sqlite) {
   if (retained) out[PLAYERS_RETAINED.name] = retained;
   const queue = MEDIA_DELETIONS_TABLE.read(sqlite);
   if (queue) out[MEDIA_DELETIONS_TABLE.name] = queue;
-  for (const table of [...CODE_TABLES, ...NOTIFICATION_TABLE_DISPATCH, CHANNELS_TABLE, ...AUDIT_SNAPSHOT_TABLES]) {
+  for (const table of [...CODE_TABLES, ...NOTIFICATION_TABLE_DISPATCH, CHANNELS_TABLE]) {
     const rows = table.read(sqlite);
     if (rows) out[table.name] = rows;
   }
+  const audit = SAFETY_AUDIT_SNAPSHOT.read(sqlite); // S6b, explicit since S14b: the eight audit collections (null before the 0013 record)
+  if (audit) Object.assign(out, audit);
   const recruitment = RECRUITMENT_SNAPSHOT.read(sqlite); // S8a: requests and trials from their typed tables (null before the 0015 record)
   if (recruitment) Object.assign(out, recruitment);
   const cases = RECRUITMENT_CASES_SNAPSHOT.read(sqlite); // S8b: the five collections from their tables (null before the 0016 record)
@@ -228,6 +230,9 @@ export function writeTableBacked(sqlite, snapshot, { now = Date.now() } = {}) {
   if (present.includes('users') && single('users').replace(sqlite, snapshot.users, { prune: false })) written.push('users');
   // The media-removal queue: validated entry by entry and rewritten.
   if (present.includes(MEDIA_DELETIONS_TABLE.name) && MEDIA_DELETIONS_TABLE.replace(sqlite, snapshot[MEDIA_DELETIONS_TABLE.name])) written.push(MEDIA_DELETIONS_TABLE.name);
+  // S6b (explicit since S14b): the audit collections, after the staff upsert and before the staff and organisation
+  // prunes (their RESTRICT keys refuse a pruned organisation or staff member a kept audit row still names).
+  written.push(...SAFETY_AUDIT_SNAPSHOT.replace(sqlite, snapshot));
   // S7d: the message threads are dispatched after the identity pair and the staff
   // (their guardians and organisations are then the snapshot's) and BEFORE the
   // organisation prune, so an organisation the snapshot removed while a thread
@@ -377,16 +382,7 @@ export function writeTableBacked(sqlite, snapshot, { now = Date.now() } = {}) {
   if (written.includes(CHANNELS_TABLE.name) || requestsSupplied || written.some((n) => IDENTITY_COLLECTIONS.includes(n))) {
     assertChannelReferencesConsistent(sqlite, { requests: requestsSupplied ? snapshot.requests : undefined, label: 'the snapshot (channels, requests and guardians together)' });
   }
-  // S6b: the eight audit tables go after the identity pair and the prunes. They carry
-  // no foreign key. Domain P (the five player references): a snapshot that rewrites
-  // the players and omits an audit collection keeps every audit row as it is, and a
-  // supplied audit collection may name players that are absent — tolerated and
-  // counted, never refused (Q4). Domain G (the IDV guardian reference, Q4b): an
-  // incoming queue is checked against the guardians table as it stands (the identity
-  // pair was dispatched above), and the FINAL combined state is asserted whenever this
-  // snapshot wrote the queue OR rewrote the identity pair — the queue omitted
-  // included — so a guardian removed under a retained entry refuses the whole save.
-  for (const table of AUDIT_SNAPSHOT_TABLES) if (present.includes(table.name) && table.replace(sqlite, snapshot[table.name])) written.push(table.name);
+  // The ID-check queue's guardians (Q4b), on the FINAL state, whenever this snapshot wrote the queue or the identity pair.
   if (written.includes('idvQueue') || written.some((n) => IDENTITY_COLLECTIONS.includes(n))) {
     assertIdvQueueGuardiansConsistent(sqlite, { label: 'the snapshot (idvQueue and guardians together)' });
   }
@@ -427,6 +423,7 @@ export function writeTableBacked(sqlite, snapshot, { now = Date.now() } = {}) {
   if (written.some((n) => ENTERPRISE_COLLECTIONS.includes(n))) ENTERPRISE_SNAPSHOT.assert(sqlite);
   if (written.some((n) => GROUPS_COLLECTIONS.includes(n))) GROUPS_SNAPSHOT.assert(sqlite);
   if (written.some((n) => GRASSROOTS_COLLECTIONS.includes(n))) GRASSROOTS_SNAPSHOT.assert(sqlite);
+  if (written.some((n) => AUDIT_COLLECTIONS.includes(n))) SAFETY_AUDIT_SNAPSHOT.assert(sqlite);
   if (written.some((n) => OPERATIONS_COLLECTIONS.includes(n))) OPERATIONS_SNAPSHOT.assert(sqlite);
   // A saved snapshot is never a first installation: the server attaches to the
   // tables it wrote and never initialises them from its seed.
@@ -654,11 +651,10 @@ export function attachDataLayer({ db, seed = {}, store, nextId, sessionTtlMs, no
   store.setSaveHook?.(channels.saveHook());
   Object.defineProperty(db, CHANNELS_TABLE.name, { value: channels.view, writable: false, configurable: false, enumerable: true });
 
-  const safetyAudit = createSafetyAuditRepository({ sqlite, log, unit: store.unit, staged: true });
+  const safetyAudit = createSafetyAuditRepository({ sqlite, log, now, unit: store.unit });
   const safetyAuditBoot = safetyAudit.attach();
-  store.setSaveHook?.(safetyAudit.saveHook());
   for (const name of AUDIT_COLLECTIONS) {
-    Object.defineProperty(db, name, { value: safetyAudit.views[name], writable: false, configurable: false, enumerable: true });
+    retireCollection(db, name, 'safetyAudit');
   }
 
   return {
@@ -753,7 +749,7 @@ export function attachDataLayer({ db, seed = {}, store, nextId, sessionTtlMs, no
         groups: { mode: 'live', rows: groups.counts(), pendingWrites: 0, writeMode: 'explicit: groups created, organisations invited, joining and leaving, templates shared and programmes added; grants created and revoked, and ended on departure when the owner no longer shares a group with any recipient (inside the route\'s unit of work when one is open)' },
         grassroots: { mode: 'live', rows: grassroots.counts(), pendingWrites: 0, writeMode: 'explicit: open days posted and deleted (a stamp; the row stays for the coverage assignments that name it), registrations made and answered once, a deleted player\'s name redacted; match days logged with their credited players; friendlies posted and answered once per club (inside the route\'s unit of work when one is open)', readMode: 'SQL: an organisation\'s open days and match days (paged), the friendlies board by date with a radius prefilter on the host club\'s location (paged), the no-ghosting count, the upcoming open days by club or area, counts; no mirror and no db.* view', typing: 'typed columns only: positions, registrations, credited players and responses as rows; calendar days checked; no JSON columns', references: 'player and guardian ids no foreign key (tolerant); organisations and staff RESTRICT; child rows cascade with their owner' },
         operations: { mode: 'live', rows: operations.counts(), pendingWrites: 0, writeMode: 'explicit: upload sessions opened, chunks recorded, finalised (with the media row), aborted, abandoned by the sweep and deleted with the player; saved searches created and deleted; one invoice issued per signing after it commits; provider callback ids remembered at once (the newest 5,000); injected failures added and used up (inside the route\'s unit of work when one is open)', readMode: 'SQL: a player\'s upload by id, an organisation\'s saved searches, the saved searches a new player could match (prefiltered by position, foot, country and availability), invoices by organisation and in all (paged), the demo reputation rows, the delivery centre\'s start; no mirror and no db.* view', typing: 'typed columns only: chunks received as rows, search filters as columns, invoice amounts in minor units; no JSON columns; plans and archetypes are constants (catalogue.mjs)', references: 'player ids no foreign key (sessions deleted with the player explicitly); organisations, staff and signings RESTRICT' },
-        safetyAudit: { mode: 'live', rows: safetyAudit.counts(), pendingWrites: safetyAudit.pending(), unresolvedPlayerReferences: unresolvedPlayerReferences(sqlite), retainedPlayerReferences: retainedPlayerReferences(sqlite), writeMode: 'staged: a block with its ledger row, a report with its suspension blocks, a note and a moderation hit land in the next save; a source change in its writer\'s save; an ops event in its caller\'s save; the IDV entry and the admin toggle land in their units\' commits', references: 'no foreign key on any of the eight tables. The five player references (blocks, reports, org_notes, ledger, source_changes) are tolerant historical references (Q4): an id that resolves to no player is counted here, never refused, never given a fabricated parent, never deleted; a count, not a claim about why it is absent. idv_queue.guardian_id is strict (Q4b): a write or import naming a missing guardian is refused and every snapshot that touches the queue or the identity pair is checked against the FINAL guardians table. A lifted block is deleted, as before (Q5). Organisation and staff references are historical pointers the routes never checked' },
+        safetyAudit: { mode: 'live', rows: safetyAudit.counts(), pendingWrites: safetyAudit.pending(), unresolvedPlayerReferences: unresolvedPlayerReferences(sqlite), retainedPlayerReferences: retainedPlayerReferences(sqlite), writeMode: 'explicit: a block with its ledger row, a report with its suspension blocks and frozen requests, a moderation hit with its automatic escalation, a report\'s resolution with the organisation\'s suspension, an ID check with the guardian\'s column, each in one unit of work; a lifted block is deleted (Q5); the source-change log keeps the newest 20,000 rows', references: 'organisations and staff are RESTRICT keys. The five player references (blocks, reports, org_notes, ledger, source_changes) carry no key (Q4): an id that resolves to no player is counted here, never refused. The ID-check queue names an existing guardian, checked on every write and on every snapshot (Q4b)' },
       },
       identity: { initState: identity.initState() },
       mediaDeletions: { queued: mediaDeletions.count(), conflicts: mediaDeletions.conflicts().length },

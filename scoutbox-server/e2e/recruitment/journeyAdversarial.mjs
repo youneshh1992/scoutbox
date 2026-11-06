@@ -309,7 +309,7 @@ section('B — adjacent-stage races: one authoritative result (§6)');
   const blk = await j('POST', '/player/block', { orgId: 'org-eastport', reason: 'test' }, P[pid].token);
   const send = await j('POST', `/org/rooms/${RID}/contacts/${d.body.contact.id}/send`, { expectedRev: d.body.contact.rev, clientKey: key() }, maria.token);
   neg(blk.status === 201 && expect(send, 403, 'CONTACT_BLOCKED') && (await stage(RID)) === 'contact_planned', 'B1 send vs block: the block landed first, the send is refused, nothing moved');
-  const blocks = (await j('GET', '/admin/blocks', undefined, undefined, ADMIN)).body;
+  const blocks = (await j('GET', '/admin/blocks?limit=100', undefined, undefined, ADMIN)).body.items;
   for (const b of blocks.filter((x) => x.playerId === pid)) await j('POST', `/admin/blocks/${b.id}/lift`, {}, undefined, ADMIN);
   const send2 = await j('POST', `/org/rooms/${RID}/contacts/${d.body.contact.id}/send`, { expectedRev: d.body.contact.rev, clientKey: key() }, maria.token);
   ok(send2.status === 200 && (await stage(RID)) === 'contacted', 'B1b after the lift the same send delivers and the case moves once');
@@ -497,7 +497,7 @@ section('E — cross-org: foreign real ids and fabricated ids are the same answe
   for (const [m, u, b] of routes) { const r = await j(m, u, b, rita.token); neg(r.status === 404 && r.body?.error === 'PLAYER_NOT_FOUND', `E3 blocked: ${m} ${u.replace(pid, ':id')} → 404 PLAYER_NOT_FOUND`); }
   const room = await j('POST', '/org/rooms', { playerId: pid, sourceContext: 'search' }, rita.token);
   neg((room.status === 404 && room.body?.error === 'PLAYER_NOT_FOUND') || (room.status === 403 && room.body?.error === 'NOT_VISIBLE'), `E4 a blocked player cannot be watched (${room.status} ${room.body?.error}: the standing-rules refusal, N-P81-2)`);
-  const blocks = (await j('GET', '/admin/blocks', undefined, undefined, ADMIN)).body;
+  const blocks = (await j('GET', '/admin/blocks?limit=100', undefined, undefined, ADMIN)).body.items;
   for (const b of blocks.filter((x) => x.playerId === pid && x.orgId === 'org-harbour')) await j('POST', `/admin/blocks/${b.id}/lift`, {}, undefined, ADMIN);
   ok((await j('GET', `/org/players/${pid}`, undefined, rita.token)).status === 200, 'E5 after the lift the profile reads again');
   // Box Cam link: consent before existence (D-P81-9).
@@ -632,7 +632,7 @@ section('I — a block inserted mid-stage stops what comes next and erases nothi
 {
   const pid = 'pl-alvarez'; const RID = G.contact;
   await offline((db) => { db.recruitmentContacts = db.recruitmentContacts.filter((c) => c.id !== 'rct-drift-1'); });
-  const lift = async () => { const bl = (await j('GET', '/admin/blocks', undefined, undefined, ADMIN)).body; for (const b of bl.filter((x) => x.playerId === pid && x.orgId === 'org-eastport')) await j('POST', `/admin/blocks/${b.id}/lift`, {}, undefined, ADMIN); };
+  const lift = async () => { const bl = (await j('GET', '/admin/blocks?limit=100', undefined, undefined, ADMIN)).body.items; for (const b of bl.filter((x) => x.playerId === pid && x.orgId === 'org-eastport')) await j('POST', `/admin/blocks/${b.id}/lift`, {}, undefined, ADMIN); };
   const block = () => j('POST', '/player/block', { orgId: 'org-eastport', reason: 'test' }, P[pid].token);
   if ((await stage(RID)) !== 'contact_planned') await lifecycle(RID, 'planContact');
   const d = await j('POST', `/org/rooms/${RID}/contacts`, { subject: 'Interest', body: 'Talk?', clientKey: key() }, maria.token);
@@ -670,7 +670,7 @@ section('I — a block inserted mid-stage stops what comes next and erases nothi
   ok(jrN.offer.records.length === 1 && (await jb(Hh.R5)).stage === 'acceptance', 'I5b the accepted Offer stays on record; the stage is unchanged');
   const pj = (await playerJourneys(P[Hh.pid5].token)).items.find((x) => x.club.id === 'org-eastport');
   ok(pj && pj.journey.stage === 'offer_accepted', 'I5c the player still sees their accepted Offer (a block hides nothing from them)');
-  const bl = (await j('GET', '/admin/blocks', undefined, undefined, ADMIN)).body;
+  const bl = (await j('GET', '/admin/blocks?limit=100', undefined, undefined, ADMIN)).body.items;
   for (const b of bl.filter((x) => x.playerId === Hh.pid5 && x.orgId === 'org-eastport')) await j('POST', `/admin/blocks/${b.id}/lift`, {}, undefined, ADMIN);
   const st2 = await start(Hh.O5, { clientKey: key() });
   ok(st2.status === 201, 'I6 after the lift the signing starts');
@@ -681,7 +681,7 @@ section('I — a block inserted mid-stage stops what comes next and erases nothi
   await j('POST', '/player/block', { orgId: 'org-eastport', reason: 'test' }, P[Hh.pid5].token);
   const cmp = await complete(sv(st2).id, { expectedRev: (await sGet(sv(st2).id)).body.signing.rev, clientKey: key() });
   neg(cs.status === 200 && ps.status === 200 && cmp.status >= 400 && (await stage(Hh.R5)) === 'offer_accepted' && (await signings()).every((x) => x.signingPackageId !== sv(st2).id), `I7 signing stage: completion refused while blocked (${cmp.status} ${cmp.body?.error}); no row, no signed`);
-  const bl2 = (await j('GET', '/admin/blocks', undefined, undefined, ADMIN)).body;
+  const bl2 = (await j('GET', '/admin/blocks?limit=100', undefined, undefined, ADMIN)).body.items;
   for (const b of bl2.filter((x) => x.playerId === Hh.pid5 && x.orgId === 'org-eastport')) await j('POST', `/admin/blocks/${b.id}/lift`, {}, undefined, ADMIN);
   const cmp2 = await complete(sv(st2).id, { expectedRev: (await sGet(sv(st2).id)).body.signing.rev, clientKey: key() });
   ok(cmp2.status === 200 && (await stage(Hh.R5)) === 'signed', 'I8 after the lift the same completion succeeds');

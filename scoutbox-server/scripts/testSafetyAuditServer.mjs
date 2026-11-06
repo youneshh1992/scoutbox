@@ -1,23 +1,23 @@
-// S6b through the REAL server (server.mjs booted as a child process on temporary data
+// S6b, explicit since S14b, through the REAL server (server.mjs booted as a child process on temporary data
 // directories, synthetic seed records only): the eight audit collections as tables —
 // every writer through its route (guardian and player blocks, the three report callers
 // and the automatic escalation, moderation hits, organisation notes, the ledger, the
 // IDV queue, source changes, ops events), every reader (the admin triage, lists and
 // counts, the reporters' own lists, the guardian's log, the org ledger and notes, the
 // data-layer report), the admin actions (report resolution, the block lift — Q5: the
-// row is deleted as today — and the IDV toggle on the FIRST entry), what a route stores
-// without a lookup (a report naming an unknown player, a block naming an organisation
-// that does not exist) and the junk it refuses (400 FIELD_INVALID for a numeric
-// targetPlayerId, an object orgId or reason, an object documentType; TEXT_REQUIRED for
-// a non-text note), a REAL adult account deletion
-// that retains every audit row with its now-unresolved id — through an unchanged save,
-// the admin backup and a restore into a new directory — plus the cutover
-// itself: migration 0013 recorded at boot, the eight tables with no blob behind them, a
-// block and its ledger row durable together in one save, the IDV entry committed with
-// the guardian's column (both failure seams, real COMMIT failure, SIGKILL, retry), a
-// failed ordinary save keeping the row and landing it once, and the admin backup (a
-// database copy) restored row for row into a new directory. Every database read goes
-// through a second read-only connection. Nothing here touches DATA_DIR or real data.
+// row is deleted — and the IDV toggle on the FIRST entry), what a route stores
+// without a lookup (a report naming an unknown player, Q4) and the junk it refuses (404
+// ORG_NOT_FOUND for a block or report naming no organisation; 400 FIELD_INVALID for a
+// numeric targetPlayerId, an object orgId or reason, an object documentType, an
+// over-long reason or note; TEXT_REQUIRED for a non-text note), a REAL adult account
+// deletion that retains every audit row with its now-unresolved id — through the admin
+// backup and a restore into a new directory — plus the cutover: migration 0013 recorded
+// at boot, a block and its ledger row committed together before the response, the IDV
+// entry committed with the guardian's column (both failure seams, real COMMIT failure,
+// SIGKILL, retry), an urgent report and its suspension block failing together at the
+// real COMMIT and landing once on retry, and the admin backup (a database copy)
+// restored row for row into a new directory. Every database read goes through a second
+// read-only connection. Nothing here touches DATA_DIR or real data.
 // Run with: npm test
 import assert from 'node:assert/strict';
 import { spawnChild } from './testChildren.mjs';
@@ -27,6 +27,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import { tempDir } from './coreIdentityTestFixtures.mjs';
+import { SAFETY_AUDIT_SNAPSHOT } from '../repositories/safetyAudit.mjs';
 
 let passed = 0;
 const only = process.env.TEST_ONLY || '';
@@ -40,18 +41,17 @@ const until = async (check, ms = 10_000, step = 40) => { const t0 = Date.now(); 
 const MIGRATION = '0013_safety_audit';
 const COLLECTIONS = ['blocks', 'reports', 'moderationLog', 'orgNotes', 'ledger', 'opsEvents', 'sourceChanges', 'idvQueue'];
 const TABLES = { blocks: 'blocks', reports: 'reports', moderationLog: 'moderation_log', orgNotes: 'org_notes', ledger: 'ledger', opsEvents: 'ops_events', sourceChanges: 'source_changes', idvQueue: 'idv_queue' };
-/** The column mapping, in the writers' key order: [column, key, kind] — the same mapping repositories/safetyAudit.mjs applies. */
-const COLS = {
-  blocks: [['id', 'id', 'text'], ['player_id', 'playerId', 'text'], ['org_id', 'orgId', 'text'], ['by_kind', 'by', 'text'], ['reason', 'reason', 'text'], ['created_at', 'ts', 'int']],
-  reports: [['id', 'id', 'text'], ['created_at', 'ts', 'int'], ['by_kind', 'by', 'text'], ['by_id', 'byId', 'text'], ['by_org_id', 'byOrgId', 'text'], ['target_kind', 'targetKind', 'text'], ['target_org_id', 'targetOrgId', 'text'], ['target_scout_name', 'targetScoutName', 'text'], ['target_player_id', 'targetPlayerId', 'text'], ['reason', 'reason', 'text'], ['urgent', 'urgent', 'bool'], ['status', 'status', 'text'], ['outcome', 'outcome', 'text'], ['resolved_at', 'resolvedAt', 'int']],
-  moderationLog: [['id', 'id', 'text'], ['created_at', 'ts', 'int'], ['context_json', 'context', 'json'], ['flags_json', 'flags', 'json'], ['severity', 'severity', 'text'], ['excerpt', 'excerpt', 'text']],
-  orgNotes: [['id', 'id', 'text'], ['org_id', 'orgId', 'text'], ['player_id', 'playerId', 'text'], ['user_id', 'userId', 'text'], ['scout_name', 'scoutName', 'text'], ['text', 'text', 'text'], ['created_at', 'ts', 'int']],
-  ledger: [['id', 'id', 'text'], ['occurred_at', 'ts', 'int'], ['type', 'type', 'text'], ['player_id', 'playerId', 'text'], ['org_id', 'orgId', 'text'], ['org_name', 'orgName', 'text'], ['user_id', 'userId', 'text'], ['actor_name', 'scoutName', 'text'], ['detail_json', 'detail', 'json']],
-  opsEvents: [['id', 'id', 'text'], ['occurred_at', 'at', 'int'], ['kind', 'kind', 'text'], ['detail_json', 'detail', 'json']],
-  sourceChanges: [['id', 'id', 'text'], ['player_id', 'playerId', 'text'], ['type', 'type', 'text'], ['source_system', 'sourceSystem', 'text'], ['source_id', 'sourceId', 'text'], ['occurred_at', 'occurredAt', 'int'], ['detail_json', 'detail', 'json']],
-  idvQueue: [['id', 'id', 'text'], ['guardian_id', 'guardianId', 'text'], ['guardian_name', 'guardianName', 'text'], ['document_type', 'documentType', 'text'], ['document_ref_last4', 'documentRef', 'text'], ['provider', 'provider', 'text'], ['reference', 'reference', 'text'], ['created_at', 'ts', 'int'], ['status', 'status', 'text']],
+/** The keys of each record, in the writers' order (repositories/safetyAudit.mjs). */
+const KEYS = {
+  blocks: ['id', 'playerId', 'orgId', 'by', 'reason', 'ts'],
+  reports: ['id', 'ts', 'by', 'byId', 'byOrgId', 'targetKind', 'targetOrgId', 'targetScoutName', 'targetPlayerId', 'reason', 'urgent', 'status', 'outcome', 'resolvedAt'],
+  moderationLog: ['id', 'ts', 'context', 'flags', 'severity', 'excerpt'],
+  orgNotes: ['id', 'orgId', 'playerId', 'userId', 'scoutName', 'text', 'ts'],
+  ledger: ['id', 'ts', 'type', 'playerId', 'orgId', 'orgName', 'userId', 'scoutName', 'detail'],
+  opsEvents: ['id', 'at', 'kind', 'detail'],
+  sourceChanges: ['id', 'playerId', 'type', 'sourceSystem', 'sourceId', 'occurredAt', 'detail'],
+  idvQueue: ['id', 'guardianId', 'guardianName', 'documentType', 'documentRef', 'provider', 'reference', 'ts', 'status'],
 };
-const KEYS = Object.fromEntries(Object.entries(COLS).map(([n, cols]) => [n, cols.map((c) => c[1])]));
 
 async function boot(dir, env = {}, server = SERVER) {
   const port = await freePort();
@@ -79,11 +79,8 @@ const live = (dir) => !!q1(dir, 'SELECT 1 AS one FROM data_migrations WHERE id =
 const hasBlobTable = (dir) => !!q1(dir, "SELECT 1 AS one FROM sqlite_master WHERE type = 'table' AND name = 'collections'");
 /** The typed record: every key of the collection in the writer's order, an absent key null. */
 const ordered = (row, keys) => Object.fromEntries(keys.map((k) => [k, row[k] === undefined ? null : row[k]]));
-/** The rows as the DATABASE holds them, in insertion order, as typed records. */
-function readStored(c, name) {
-  return c.all(`SELECT * FROM ${TABLES[name]} ORDER BY seq`).map((r) => Object.fromEntries(COLS[name].map(([col, key, kind]) => { const v = r[col]; return [key, v === null ? null : kind === 'bool' ? v === 1 : kind === 'json' ? JSON.parse(v) : v]; })));
-}
-const stored = (dir, name) => snap(dir, (c) => readStored(c, name));
+/** The rows as the DATABASE holds them, in insertion order, as typed records (decoded by the repository's snapshot reader on a second connection). */
+const stored = (dir, name) => { const s = new DatabaseSync(path.join(dir, 'scoutbox.db'), { readOnly: true }); try { return SAFETY_AUDIT_SNAPSHOT.read(s)[name].map((r) => ordered(r, KEYS[name])); } finally { s.close(); } };
 const storedAll = (dir) => Object.fromEntries(COLLECTIONS.map((n) => [n, stored(dir, n)]));
 const canon = (name, rows) => rows.map((r) => ordered(r, KEYS[name]));
 
@@ -92,11 +89,11 @@ const playerLogin = async (S, playerId) => { const r = await S.j('POST', '/auth/
 const guardianLogin = async (S, guardianId) => { const r = await S.j('POST', '/auth/guardian/login', { guardianId }); assert.equal(r.status, 200, r.text); return r.body.token; };
 const signupAdult = async (S, name) => { const r = await S.j('POST', '/auth/player/signup', { name, dob: '2000-01-01', country: 'GB', password: 'synthetic-pass-1' }); assert.equal(r.status, 201, r.text); return { pid: r.body.playerId, token: r.body.token }; };
 const signupGuardian = async (S, name, email) => { const r = await S.j('POST', '/auth/guardian/signup', { name, email, password: 'synthetic-pass-1' }); assert.equal(r.status, 201, r.text); assert.equal((await S.j('POST', '/auth/guardian/verify-email', { guardianId: r.body.guardianId, code: r.body.devEmailCode })).status, 200); return { gid: r.body.guardianId, token: r.body.token }; };
-const adminReports = async (S) => (await S.j('GET', '/admin/reports', undefined, null, A)).body;
-const adminBlocks = async (S) => (await S.j('GET', '/admin/blocks', undefined, null, A)).body;
-const adminModeration = async (S) => (await S.j('GET', '/admin/moderation', undefined, null, A)).body;
+const adminReports = async (S) => (await S.j('GET', '/admin/reports?limit=100', undefined, null, A)).body.items;
+const adminBlocks = async (S) => (await S.j('GET', '/admin/blocks?limit=100', undefined, null, A)).body.items;
+const adminModeration = async (S) => (await S.j('GET', '/admin/moderation?limit=100', undefined, null, A)).body.items;
 const adminIdv = async (S) => (await S.j('GET', '/admin/guardians', undefined, null, A)).body.idvQueue;
-const orgLedger = async (S, token) => (await S.j('GET', '/org/ledger', undefined, token)).body;
+const orgLedger = async (S, token) => (await S.j('GET', '/org/ledger?limit=100', undefined, token)).body.items;
 const orgNotesOf = async (S, token, pid) => (await S.j('GET', `/org/players/${pid}`, undefined, token)).body.orgNotes;
 const count = (text, re) => (text.match(re) ?? []).length;
 const waitForLog = async (S, re, above) => { for (let i = 0; i < 80 && count(S.log(), re) <= above; i++) await sleep(25); return count(S.log(), re) > above; };
@@ -106,7 +103,7 @@ async function audited(S, maria) {
 }
 
 // ============================================================= [compat] the behaviour the storage move must preserve
-await test('[compat] every writer through its route and every reader: a guardian\'s block and report (urgent → the suspension block and the frozen request), an adult\'s block naming an organisation that does not exist and a report naming an unknown player (accepted: no lookup), the junk the routes refuse (a NUMERIC targetPlayerId, an object targetOrgId, an object orgId or reason on a block, a non-text note, an object documentType — 400, nothing stored), an organisation\'s report and private note, two moderation hits (a contact hit; a grooming hit that escalates to an automatic urgent report with no targetPlayerId key), the IDV entry, a source change, a backup ops event, the ledger rows the blocks write; the admin triage order, the reporters\' own lists, the guardian\'s log, the org ledger, the data; report resolution, the block lift (Q5: the row is deleted and returned once), the IDV toggle (the FIRST entry); the stored rows equal the views; a restart serves the same', async () => {
+await test('[compat] every writer through its route and every reader: a guardian\'s block and report (urgent → the suspension block and the frozen request), a report naming an unknown player (accepted: Q4), the junk the routes refuse (a block or a report naming an organisation that does not exist — 404 ORG_NOT_FOUND since S14b —, a NUMERIC targetPlayerId, an object targetOrgId, an object orgId or reason on a block, a non-text note, an object documentType — 400, nothing stored), an organisation\'s report and private note, two moderation hits (a contact hit; a grooming hit that escalates to an automatic urgent report with no targetPlayerId key), the IDV entry, a source change, a backup ops event, the ledger rows the blocks write; the admin triage order, the reporters\' own lists, the guardian\'s log, the org ledger, the data; report resolution, the block lift (Q5: the row is deleted and returned once), the IDV toggle (the FIRST entry); the stored rows equal the views; a restart serves the same', async () => {
   const dir = tempDir('s6b-compat'); let S = await boot(dir);
   const maria = await orgLogin(S); const amara = await guardianLogin(S, 'gd-amara'); const { pid, token: adult } = await signupAdult(S, 'Audit Adult');
   // Guardian: a block of the child, then an urgent report against the club that suspends the pending request.
@@ -114,8 +111,15 @@ await test('[compat] every writer through its route and every reader: a guardian
   assert.equal((await S.j('POST', '/guardian/block', { orgId: 'org-harbour', playerId: 'pl-guni', reason: 'synthetic guardian block' }, amara)).status, 201);
   const gRep = await S.j('POST', '/guardian/report', { targetKind: 'club', targetOrgId: 'org-eastport', reason: 'Synthetic urgent guardian report.', urgent: true }, amara); assert.equal(gRep.status, 201, gRep.text); assert.equal(gRep.body.suspended, true);
   assert.equal((await S.j('GET', '/guardian/inbox', undefined, amara)).body.items.find((r) => r.id === req.body.requestId)?.status, 'suspended', 'the pending request froze with the suspension block');
-  // Adult: a block naming an organisation that does not exist (the route checks truthiness only), reports naming an unknown player and a numeric id (handleReport stores what it received).
-  assert.equal((await S.j('POST', '/player/block', { orgId: 'org-does-not-exist', reason: 'synthetic' }, adult)).status, 201, 'a block naming an unknown organisation is accepted, as before');
+  // Adult: a block or a report naming an organisation that does not exist is refused (S14b: organisations are keys); a report naming an unknown player is accepted (Q4).
+  for (const [route, body] of [['/player/block', { orgId: 'org-does-not-exist', reason: 'synthetic' }], ['/player/report', { targetKind: 'club', targetOrgId: 'org-does-not-exist', reason: 'Synthetic report naming no club.' }]]) {
+    const r = await S.j('POST', route, body, adult); assert.deepEqual([r.status, r.body?.error], [404, 'ORG_NOT_FOUND'], `${route}: an unknown organisation is refused (${r.text})`);
+  }
+  assert.equal((await S.j('POST', '/player/block', { orgId: 'org-harbour', reason: 'synthetic' }, adult)).status, 201, 'a block naming a real organisation');
+  // Over-long text is refused, naming the field.
+  for (const [route, body, field, token] of [['/player/report', { targetKind: 'scout', targetScoutName: 'Synthetic Scout', reason: 'x'.repeat(2001) }, 'reason', adult], [`/org/players/${pid}/notes`, { text: 'x'.repeat(2001) }, 'text', maria]]) {
+    const r = await S.j('POST', route, body, token); assert.deepEqual([r.status, r.body?.error, r.body?.field], [400, 'FIELD_INVALID', field], `${route}: over-long ${field} (${r.text})`);
+  }
   const pRep1 = await S.j('POST', '/player/report', { targetKind: 'player', targetPlayerId: 'pl-nobody', reason: 'Synthetic report naming an unknown player.' }, adult); assert.equal(pRep1.status, 201, pRep1.text);
   // Junk the text columns cannot hold is refused at the route (400 FIELD_INVALID, naming the field), and nothing is stored.
   for (const [route, body, field, token] of [
@@ -149,15 +153,15 @@ await test('[compat] every writer through its route and every reader: a guardian
   const auto = reports.find((r) => r.by === 'system'); assert.ok(auto, 'the grooming hit escalated'); assert.equal(auto.urgent, true); assert.equal(auto.targetPlayerId, null, 'the automatic report has no player target'); assert.equal(auto.targetKind, 'player'); assert.equal(auto.targetOrgId, null);
   assert.equal(reports.find((r) => r.id === pRep1.body.reportId).targetPlayerId, 'pl-nobody'); assert.equal(reports.find((r) => r.id === pRep2.body.reportId).targetScoutName, 'Synthetic Scout'); assert.equal(reports.find((r) => r.id === pRep2.body.reportId).targetPlayerId, null); assert.equal(reports.find((r) => r.id === oRep.body.reportId).byOrgId, 'org-eastport');
   assert.deepEqual((await S.j('GET', '/player/reports', undefined, adult)).body.map((r) => r.id), [pRep2.body.reportId, pRep1.body.reportId], 'the reporter\'s own list, newest first'); assert.deepEqual((await S.j('GET', '/guardian/reports', undefined, amara)).body.map((r) => r.id), [gRep.body.reportId]); assert.deepEqual((await S.j('GET', '/org/reports', undefined, maria)).body.map((r) => r.id), [oRep.body.reportId]);
-  const blocks = await adminBlocks(S); assert.deepEqual(blocks.map((b) => [b.playerId, b.orgId, b.by, b.reason]), [[pid, 'org-does-not-exist', 'player', 'synthetic'], ['pl-guni', 'org-eastport', 'guardian', 'suspended_pending_review'], ['pl-guni', 'org-harbour', 'guardian', 'synthetic guardian block']], 'newest first');
+  const blocks = await adminBlocks(S); assert.deepEqual(blocks.map((b) => [b.playerId, b.orgId, b.by, b.reason]), [[pid, 'org-harbour', 'player', 'synthetic'], ['pl-guni', 'org-eastport', 'guardian', 'suspended_pending_review'], ['pl-guni', 'org-harbour', 'guardian', 'synthetic guardian block']], 'newest first');
   const moderation = await adminModeration(S); assert.deepEqual(moderation.map((m) => [m.severity, m.flags, m.context.kind, m.context.playerId]), [['grooming', ['secrecy'], 'timeline_event', pid], ['contact', ['phone_number'], 'timeline_event', pid]]); assert.equal(moderation[1].excerpt, 'Call me on +44 7700 900123 please');
   const idvRows = await adminIdv(S); assert.deepEqual(idvRows.filter((q) => q.guardianId === gid).map((q) => [q.documentType, q.documentRef, q.provider, q.status]), [['passport', '4567', 'dev-attestation', 'approved'], ['licence', '4321', 'dev-attestation', 'approved']]);
-  const ledger = await orgLedger(S, maria); assert.ok(ledger.some((l) => l.type === 'org_blocked_by_guardian' && l.playerId === 'pl-guni' && l.orgId === 'org-harbour') === false, 'the guardian block of ANOTHER club is not in this club\'s ledger'); assert.ok((await S.j('GET', '/guardian/log', undefined, amara)).body.some((l) => l.type === 'org_blocked_by_guardian' && l.playerId === 'pl-guni'), 'the guardian\'s log carries the block row');
+  const ledger = await orgLedger(S, maria); assert.ok(ledger.some((l) => l.type === 'org_blocked_by_guardian' && l.playerId === 'pl-guni' && l.orgId === 'org-harbour') === false, 'the guardian block of ANOTHER club is not in this club\'s ledger'); assert.ok((await S.j('GET', '/guardian/log?limit=100', undefined, amara)).body.items.some((l) => l.type === 'org_blocked_by_guardian' && l.playerId === 'pl-guni'), 'the guardian\'s log carries the block row');
   assert.deepEqual((await orgNotesOf(S, maria, pid)).map((n) => n.text), ['Synthetic private note.']);
   assert.ok((await S.j('GET', '/player/export', undefined, adult)).body.ledgerEvents.some((l) => l.type === 'org_blocked_by_player'));
   const overview = (await S.j('GET', '/admin/overview', undefined, null, A)).body; assert.equal(overview.openReports, 5); assert.equal(overview.blocks, 3); assert.equal(overview.moderationHits, 2); assert.equal(overview.groomingEscalations, 1);
   const metrics = (await S.j('GET', '/admin/metrics', undefined, null, A)).body; assert.ok(metrics.opsEvents.some((e) => e.kind === 'backup_created'), 'the backup ops event');
-  const sc = stored(dir, 'sourceChanges'); assert.deepEqual(sc.map((c) => [c.playerId, c.type, c.sourceSystem, c.detail]), [[pid, 'position_changed', 'passport_prefs', { from: null, to: 'ST', submittedBy: 'player' }]]);
+  const sc = stored(dir, 'sourceChanges'); assert.deepEqual(sc.map((c) => [c.playerId, c.type, c.sourceSystem, c.detail]), [[pid, 'position_changed', 'passport_prefs', { to: 'ST', submittedBy: 'player' }]]);
   // Admin actions: resolve, lift (Q5), toggle (first entry).
   const resolved = await S.j('POST', `/admin/reports/${gRep.body.reportId}/resolve`, { outcome: 'Synthetic outcome.', action: 'dismiss' }, null, A); assert.equal(resolved.status, 200, resolved.text);
   assert.equal((await S.j('POST', `/admin/reports/${gRep.body.reportId}/resolve`, { outcome: 'again' }, null, A)).status, 409, 'ALREADY_RESOLVED');
@@ -215,18 +219,18 @@ await test('[compat] a REAL adult account deletion retains every audit row that 
 });
 
 // ============================================================= [cutover] the tables, the save points, the strict reference at boot
-await test('[cutover] the cutover and the save points: a fresh boot records 0013_safety_audit after 0012 and creates the eight tables and the file has no blob table (the data layer reports the domain); a player\'s block and its ledger row land together with the next save; the IDV entry commits with the guardian\'s column before the 200 — both failure seams and the real COMMIT leave nothing, the retry lands, a SIGKILL right after the response loses nothing, a restart serves it; a failed ordinary save at the REAL COMMIT keeps a report in memory and lands it ONCE with the next save; the block lift is durable in its route\'s save', async () => {
+await test('[cutover] the cutover and the save points: a fresh boot records 0013_safety_audit after 0012 and creates the eight tables and the file has no blob table (the data layer reports the domain); a player\'s block and its ledger row are committed together before the 201 (S14b: explicit writes); the IDV entry commits with the guardian\'s column before the 200 — both failure seams and the real COMMIT leave nothing, the retry lands, a SIGKILL right after the response loses nothing, a restart serves it; an urgent report whose unit fails at the REAL COMMIT is answered 500 and leaves neither the report nor its suspension block, and the retry lands each ONCE; the block lift is durable before its response', async () => {
   const dir = tempDir('s6b-cutover'); let S = await boot(dir, { M13_FAST_RETRY: '' });
   assert.ok(live(dir), 'the boot recorded 0013'); // fails on 1792fc7: no such record
   assert.deepEqual(snap(dir, (c) => c.all('SELECT id FROM data_migrations ORDER BY applied_at, id').map((r) => r.id).filter((id) => id < '0019').slice(-7)), ['0012_channels', MIGRATION, '0014_player_erasure', '0015_recruitment', '0016_recruitment_cases', '0017_recruitment_contacts_offers', '0018_signings_follow_ups']); // S4b-R, S8a, S8b and S8c registered after this step
   for (const t of Object.values(TABLES)) assert.ok(q1(dir, "SELECT 1 AS one FROM sqlite_master WHERE type = 'table' AND name = ?", t), `${t} exists`);
   assert.equal(hasBlobTable(dir), false, 'no blob table (rewritten in S14a)');
   const cap = (await S.j('GET', '/capabilities')).body; const domains = cap?.persistence?.dataLayer?.domains ?? cap?.dataLayer?.domains ?? {}; assert.ok(domains.safetyAudit, `the data layer reports the safetyAudit domain (${Object.keys(domains).join(', ')})`);
-  // A block and its ledger row: one save (read in one read transaction: the first committed state holding the block holds its ledger row).
+  // A block and its ledger row: one unit, committed before the response (read in one read transaction).
   const { pid, token: adult } = await signupAdult(S, 'Cutover Adult');
   assert.equal((await S.j('POST', '/player/block', { orgId: 'org-harbour', reason: 'synthetic' }, adult)).status, 201); // not org-eastport: its user writes the note below, and a blocked organisation reads the player as absent
-  const landed = await until(async () => snap(dir, (c) => { const block = c.get('SELECT org_id, reason FROM blocks WHERE player_id = ?', pid); return block ? { block, ledger: c.all('SELECT type FROM ledger WHERE player_id = ? AND type = ?', pid, 'org_blocked_by_player') } : null; }), 8000);
-  assert.ok(landed, 'the block lands with the next save'); assert.deepEqual(landed.block, { org_id: 'org-harbour', reason: 'synthetic' }); assert.equal(landed.ledger.length, 1, 'the ledger row landed in the same save');
+  const landed = snap(dir, (c) => { const block = c.get('SELECT org_id, reason FROM blocks WHERE player_id = ?', pid); return block ? { block, ledger: c.all('SELECT type FROM ledger WHERE player_id = ? AND type = ?', pid, 'org_blocked_by_player') } : null; });
+  assert.ok(landed, 'the block is committed when the response is sent'); assert.deepEqual(landed.block, { org_id: 'org-harbour', reason: 'synthetic' }); assert.equal(landed.ledger.length, 1, 'the ledger row committed with it');
   // The IDV unit: the column and the entry together (both seams, the real COMMIT, SIGKILL, restart).
   const { gid, token: gtok } = await signupGuardian(S, 'Cutover Parent', 'cutover-parent@example.test');
   const dbState = () => ({ idVerified: q1(dir, 'SELECT id_verified AS v FROM guardians WHERE id = ?', gid).v, audit: snap(dir, (c) => c.all('SELECT status FROM idv_queue WHERE guardian_id = ? ORDER BY seq', gid)).map((r) => r.status) });
@@ -242,26 +246,26 @@ await test('[cutover] the cutover and the save points: a fresh boot records 0013
   assert.deepEqual(dbState(), { idVerified: 1, audit: ['approved'] }, 'the column and the entry are committed when the response is sent'); assert.deepEqual(await view(S), [true, ['approved']]);
   await S.kill(); assert.deepEqual(dbState(), { idVerified: 1, audit: ['approved'] }, 'a SIGKILL right after the response loses nothing');
   S = await boot(dir, { M13_FAST_RETRY: '' }); assert.deepEqual(await view(S), [true, ['approved']], 'a restart serves the committed state');
-  // A failed ordinary save at the REAL COMMIT: the report stays in memory and lands once.
-  const maria = await orgLogin(S); const logBefore = S.log().length;
-  assert.equal((await S.j('POST', '/__faults', { rules: 'internal:save.sqlite_commit:1' })).status, 200);
-  const rep = await S.j('POST', '/org/report', { targetKind: 'player', targetPlayerId: pid, reason: 'Synthetic report whose save fails at COMMIT.' }, maria); assert.equal(rep.status, 201, 'the route answers although its save fails');
-  assert.ok(await until(async () => /save failed: FOREIGN KEY constraint failed/.test(S.log().slice(logBefore)), 8000), 'the save failed at the real COMMIT');
+  // An urgent report and its suspension are one unit: a failure at the REAL COMMIT leaves neither, the retry lands each once.
+  const maria = await orgLogin(S);
+  const reportOf = (reason) => snap(dir, (c) => c.all('SELECT id FROM reports WHERE reason = ?', reason));
+  const suspensions = () => snap(dir, (c) => c.all("SELECT id FROM blocks WHERE player_id = ? AND org_id = 'org-eastport' AND reason = 'suspended_pending_review'", pid));
+  const urgent = { targetKind: 'club', targetOrgId: 'org-eastport', reason: 'Synthetic urgent report whose unit fails at COMMIT.', urgent: true };
+  assert.equal((await S.j('POST', '/__faults', { rules: 'internal:unit.sqlite_commit' })).status, 200); const commitFailures = count(S.log(), /FOREIGN KEY constraint failed/g);
+  const failed = await S.j('POST', '/player/report', urgent, adult); assert.equal(failed.status, 500, `not answered as success (${failed.text})`);
+  assert.ok(await waitForLog(S, /FOREIGN KEY constraint failed/g, commitFailures), 'the unit failed at the real COMMIT');
   assert.equal((await S.j('POST', '/__faults', { rules: '' })).status, 200);
-  assert.equal(q1(dir, 'SELECT 1 AS one FROM reports WHERE id = ?', rep.body.reportId), undefined, 'the report did not land');
-  assert.ok((await adminReports(S)).some((r) => r.id === rep.body.reportId), 'memory is the intended state');
-  const note = await S.j('POST', `/org/players/${pid}/notes`, { text: 'Synthetic note that carries the next save.' }, maria); assert.equal(note.status, 201);
-  assert.ok(await until(async () => q1(dir, 'SELECT 1 AS one FROM reports WHERE id = ?', rep.body.reportId), 8000), 'the next save landed the report');
-  assert.equal(q1(dir, 'SELECT COUNT(*) AS n FROM reports WHERE id = ?', rep.body.reportId).n, 1, 'once'); assert.ok(q1(dir, 'SELECT 1 AS one FROM org_notes WHERE id = ?', note.body.id));
-  // The block lift (Q5) is durable in its route's save.
+  assert.deepEqual([reportOf(urgent.reason).length, suspensions().length], [0, 0], 'neither the report nor its suspension block landed');
+  assert.equal((await adminReports(S)).some((r) => r.reason === urgent.reason), false, 'and the admin does not list it');
+  const retry = await S.j('POST', '/player/report', urgent, adult); assert.equal(retry.status, 201, retry.text); assert.equal(retry.body.suspended, true);
+  assert.deepEqual([reportOf(urgent.reason).length, suspensions().length], [1, 1], 'the retry landed the report and its suspension block, once each');
+  const liftSuspension = await S.j('POST', `/admin/blocks/${suspensions()[0].id}/lift`, {}, null, A); assert.equal(liftSuspension.status, 200, liftSuspension.text); // Maria writes a note on the player below
+  const note = await S.j('POST', `/org/players/${pid}/notes`, { text: 'Synthetic note.' }, maria); assert.equal(note.status, 201, note.text);
+  assert.ok(q1(dir, 'SELECT 1 AS one FROM org_notes WHERE id = ?', note.body.id), 'the note is committed when the response is sent');
+  // The block lift (Q5) is durable before its response.
   const blockId = (await adminBlocks(S)).find((b) => b.playerId === pid).id;
-  const logLift = S.log().length; const liftAt = Date.now();
   const lift = await S.j('POST', `/admin/blocks/${blockId}/lift`, {}, null, A); assert.equal(lift.status, 200, lift.text);
-  const gone = await until(async () => !q1(dir, 'SELECT 1 AS one FROM blocks WHERE id = ?', blockId), 8000);
-  // Diagnostics on failure only (the review of c6cf5e1 saw this assertion fail once): the clocks,
-  // the in-memory list, the lift answer and the child server's output since the lift (save failures are logged there).
-  const diag = async () => JSON.stringify({ waitedMs: Date.now() - liftAt, liftAnswer: lift.body, inMemory: (await adminBlocks(S)).map((b) => b.id), inFile: snap(dir, (c) => c.all('SELECT id FROM blocks ORDER BY seq')).map((r) => r.id), childExit: S.proc.exitCode, childLogSinceLift: S.log().slice(logLift).slice(-2500) });
-  assert.ok(gone, `the lifted block row is deleted in the file — ${gone ? '' : await diag()}`);
+  assert.equal(q1(dir, 'SELECT 1 AS one FROM blocks WHERE id = ?', blockId), undefined, 'the lifted block row is deleted in the file');
   await S.stop(); rm(dir);
 });
 

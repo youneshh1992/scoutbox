@@ -269,7 +269,8 @@ export const httpClient: PlayerClient = {
   guardianRespond: (guardianId, requestId, accept, chosenSlot, message) =>
     guardianRequest<void>(`/guardian/requests/${requestId}/respond`, guardianId, { method: 'POST', body: JSON.stringify({ accept, chosenSlot, ...(message ? { message } : {}) }) }),
 
-  guardianLog: (guardianId) => guardianRequest<{ id: string; ts: number; type: string; orgName: string; scoutName: string; playerId: string }[]>('/guardian/log', guardianId),
+  // Paged by cursor (S14b), newest 50 first; only the first page is read, a "load more" is not built yet (by decision).
+  guardianLog: async (guardianId) => (await guardianRequest<{ items: { id: string; ts: number; type: string; orgName: string; scoutName: string; playerId: string }[]; nextCursor: string | null }>('/guardian/log', guardianId)).items,
 
   guardianSetMedicalShared: (guardianId, childId, shared) =>
     guardianRequest<void>(`/guardian/children/${childId}/medical/share`, guardianId, { method: 'POST', body: JSON.stringify({ shared }) }),

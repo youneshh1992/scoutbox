@@ -50,9 +50,8 @@ export function registerImports(ctx) {
   } = ctx;
   if (!integrations?.batches) throw new TypeError('registerImports needs the integrations repository (ctx.integrations)');
   const { batches, prospects, reviews, apiKeys, endpoints, deliveries } = integrations;
-  // S6b: an exhausted webhook delivery's ops event is a row of ops_events (repositories/safetyAudit.mjs),
-  // staged into the save that follows the webhook sweep; a bare context without the repository keeps the array push.
-  const opsEvent = (row) => (safetyAudit ? safetyAudit.opsEvents.append(row) : db.opsEvents.push(row));
+  // An exhausted webhook delivery's ops event is a row of ops_events (repositories/safetyAudit.mjs), written at once.
+  const opsEvent = (row) => safetyAudit.opsEvents.record(row);
   const fieldInvalid = (res, field, message) => res.status(400).json({ error: 'FIELD_INVALID', field, message });
   const isObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
   /** A refusal of the repository the route can answer (a live duplicate, a stale dry run); anything else is a defect. */
@@ -339,8 +338,8 @@ export function registerImports(ctx) {
 
   app.get('/api/v1/export/shortlist', apiKeyAuth('export:shortlist'), (req, res) => {
     // Live visibility re-check on every export row — revoked access exports nothing.
-    const ids = db.ledger.filter((l) => l.type === 'shortlist' && l.orgId === req.apiOrg.id).map((l) => l.playerId);
-    const visible = [...new Set(ids)].map(findPlayer).filter((p) => p && orgCanSee(req.apiOrg, p));
+    const ids = safetyAudit.ledger.playersListedBy(req.apiOrg.id);
+    const visible = ids.map(findPlayer).filter((p) => p && orgCanSee(req.apiOrg, p));
     res.json({
       contract: EXPORT_CONTRACT_VERSION, kind: 'shortlist', orgId: req.apiOrg.id,
       items: visible.map((p) => ({ id: p.id, name: p.name, position: p.position, level: p.level, externalIds: (p.externalIds ?? []).map(({ provider, externalId }) => ({ provider, externalId })) })),

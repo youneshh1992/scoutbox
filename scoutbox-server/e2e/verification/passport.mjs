@@ -633,7 +633,7 @@ section('H16 — deletion: shares die with the subject (§79#19/§89)');
 section('H17 — audit + metrics honesty (§51/§52/§64)');
 {
   const ledger = await j('GET', '/org/ledger', undefined, maria.token);
-  ok(ledger.body.some((l) => l.type === 'passport_recruitment_view' && l.playerId === 'pl-adeyemi'), 'recruitment passport views land in the existing ledger');
+  ok(ledger.body.items.some((l) => l.type === 'passport_recruitment_view' && l.playerId === 'pl-adeyemi'), 'recruitment passport views land in the existing ledger');
   const m = await j('GET', '/admin/metrics', undefined, null, A);
   const p = m.body.passport;
   ok(p && p.views_self > 0 && p.views_recruitment > 0 && p.share_created >= 4 && p.share_opened_public > 0 && p.correction_filed > 0 && p.achievement_confirmed > 0, 'passport product metrics count events');

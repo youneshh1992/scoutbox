@@ -196,9 +196,9 @@ ok(trials.body.items.some((t) => t.requestId === gReqId && t.proposedDate === '2
 const guniChannel = (await j('/guardian/channels', {}, bearer(AMARA))).body.find((c) => c.requestId === gReqId);
 r = await j(`/org/channels/${guniChannel.id}/messages`, { method: 'POST', body: JSON.stringify({ text: "Great session. Don't tell your parents but we should keep this between us." }) }, bearer(EASTPORT));
 ok(r.status === 400 && r.body.error === 'MODERATION_BLOCKED', 'grooming-pattern message is blocked');
-let adminReports = await j('/admin/reports', {}, admin);
-ok(adminReports.body.some((x) => x.by === 'system' && x.urgent && /grooming/.test(x.reason)), 'grooming hit auto-escalates as an urgent report');
-ok(adminReports.body[0].urgent === true, 'admin triage puts urgent reports first');
+let adminReports = await j('/admin/reports?limit=100', {}, admin);
+ok(adminReports.body.items.some((x) => x.by === 'system' && x.urgent && /grooming/.test(x.reason)), 'grooming hit auto-escalates as an urgent report');
+ok(adminReports.body.items[0].urgent === true, 'admin triage puts urgent reports first');
 
 // ---- 8. funnel + signing → invoice
 r = await j('/org/players/pl-svensson/request', { method: 'POST', body: JSON.stringify({ type: 'contact', message: 'First-team conversation.' }) }, bearer(EASTPORT));
@@ -237,7 +237,7 @@ ok(r.status === 200, 'aging-up handover completes');
 
 // ---- 11. admin resolve reaches the reporter; push log records delivery
 await j('/player/report', { method: 'POST', body: JSON.stringify({ targetKind: 'club', targetOrgId: 'org-harbour', reason: 'Asked to move to WhatsApp', urgent: true }) }, bearer(KOLA));
-const rep = (await j('/admin/reports', {}, admin)).body.find((x) => x.status === 'pending_review' && x.by === 'player');
+const rep = (await j('/admin/reports?limit=100', {}, admin)).body.items.find((x) => x.status === 'pending_review' && x.by === 'player');
 r = await j(`/admin/reports/${rep.id}/resolve`, { method: 'POST', body: JSON.stringify({ outcome: 'Warning issued to the club.', action: 'warning' }) }, admin);
 ok(r.status === 200, 'admin resolves the report');
 const myReports = await j('/player/reports', {}, bearer(KOLA));

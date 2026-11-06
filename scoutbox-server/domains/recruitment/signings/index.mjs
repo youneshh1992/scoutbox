@@ -303,7 +303,7 @@ export function registerSigning(rawCtx) {
       // P7.1 §20, §29: one completed signing per Offer, whatever package claims it — a structural check, not a timing one.
       const byOffer = pkg.offerId ? sg.forOffer(pkg.offerId) : null; if (byOffer) return { signing: byOffer, duplicate: true };
     }
-    const events = (db.ledger ?? []).filter((l) => l.playerId === player.id && l.orgId === org.id);
+    const events = ctx.safetyReads.ledger.forPlayerOrg(player.id, org.id);
     const first = events[0] ?? null;
     const windowMonths = PLANS[org.plan].attributionWindowMonths; // orgs.plan is one of the catalogue's plans (its CHECK)
     const windowEnds = first ? first.ts + windowMonths * 30.44 * 24 * 3600 * 1000 : null;

@@ -200,10 +200,11 @@ await test('[cutover] the admin backup is a copy of the database that keeps the 
   const restored = tempDir('s4br-restored'); fs.cpSync(bk.body.dir, restored, { recursive: true });
   S = await boot(restored);
   assert.deepEqual(retainedRowsOf(restored), retained, 'the retained rows, exactly');
+  // Before any route reads a profile: a club's profile view is a ledger row written at once (S14b).
+  assert.equal(auditRows(restored), auditBefore, 'the audit rows restored row for row');
   assert.equal((await S.j('GET', '/capabilities')).body.dataLayer.domains.players.retained, 2);
   const mariaR = await orgLogin(S); assert.equal((await S.j('GET', `/org/players/${a.pid}`, undefined, mariaR)).status, 404); assert.equal((await S.j('GET', `/org/players/${b.pid}`, undefined, mariaR)).status, 200);
   assert.equal((await S.j('POST', '/auth/player/login', { playerId: a.pid, password: 'synthetic-pass-1' })).status, 404);
-  assert.equal(auditRows(restored), auditBefore, 'the audit rows restored row for row');
   await S.stop();
   rm(dir, restored);
 });

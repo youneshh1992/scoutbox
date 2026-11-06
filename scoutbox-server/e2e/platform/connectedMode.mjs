@@ -191,7 +191,7 @@ let chView = await j('/org/channels', {}, bearer(EASTPORT));
 ok(chView.body.find((c) => c.id === chan.id)?.closed === true, 'the org sees the thread marked closed (history retained)');
 ok((await fetch(`${API}${signedUrl}`)).status === 401, "the block also kills the org's previously-issued media links — possession is not authority");
 // lift the block via admin so suspension can be tested on a live channel
-const blockRow = (await j('/admin/blocks', {}, admin)).body.find((b) => b.orgId === 'org-eastport' && b.playerId === 'pl-adeyemi');
+const blockRow = (await j('/admin/blocks?limit=100', {}, admin)).body.items.find((b) => b.orgId === 'org-eastport' && b.playerId === 'pl-adeyemi');
 await j(`/admin/blocks/${blockRow.id}/lift`, { method: 'POST' }, admin);
 ok((await fetch(`${API}${signedUrl}`)).ok, 'lifting the block restores the link — revocation tracks live entitlement, not reissue');
 await j('/admin/clubs/org-eastport/verification', { method: 'POST', body: JSON.stringify({ suspended: true }) }, admin);
