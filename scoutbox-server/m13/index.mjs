@@ -14,7 +14,7 @@ import { registerTransitions } from '../domains/verification/transitions.mjs';
 import { registerInsight } from '../domains/insight/insight.mjs';
 import { registerCoverage } from '../domains/insight/coverage.mjs';
 import { registerBudgets } from '../domains/recruitment/budgets.mjs';
-import { registerGroups } from './groups.mjs';
+import { registerGroups } from '../domains/groups/groups.mjs';
 
 export function registerM13(ctx) {
   migrateM13(ctx.db, ctx.players);
