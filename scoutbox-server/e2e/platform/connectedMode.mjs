@@ -173,7 +173,7 @@ const HARBOUR = (await j('/auth/org/login', { method: 'POST', body: JSON.stringi
 r = await j(`/org/channels/${chan.id}/messages`, { method: 'POST', body: JSON.stringify({ text: 'not my thread' }) }, bearer(HARBOUR));
 ok(r.status === 404, "another organisation cannot write into a channel it isn't part of");
 r = await j('/org/channels', {}, bearer(HARBOUR));
-ok(!r.body.some((c) => c.id === chan.id), "another organisation's channel list never contains the thread");
+ok(!r.body.items.some((c) => c.id === chan.id), "another organisation's channel list never contains the thread");
 const MOSS = (await j('/auth/org/login', { method: 'POST', body: JSON.stringify({ orgId: 'org-mossside', scoutName: 'Pat Doyle', platform: 'grassroots' }) })).body.token;
 const svenMediaId = (await j('/org/players/pl-svensson', {}, bearer(EASTPORT))).body.media.find((m) => m.url) ? /\/media\/([a-z0-9-]+)\?/i.exec((await j('/org/players/pl-svensson', {}, bearer(EASTPORT))).body.media.find((m) => m.url).url)[1] : null;
 if (svenMediaId) {
@@ -188,7 +188,7 @@ ok(r.status === 403 && r.body.error === 'BLOCKED', 'a block closes the org side 
 r = await j(`/player/channels/${chan.id}/messages`, { method: 'POST', body: JSON.stringify({ text: 'ignore' }) }, bearer(KOLA));
 ok(r.status === 403 && r.body.error === 'BLOCKED', 'the blocking side cannot message through its own block either');
 let chView = await j('/org/channels', {}, bearer(EASTPORT));
-ok(chView.body.find((c) => c.id === chan.id)?.closed === true, 'the org sees the thread marked closed (history retained)');
+ok(chView.body.items.find((c) => c.id === chan.id)?.closed === true, 'the org sees the thread marked closed (history retained)');
 ok((await fetch(`${API}${signedUrl}`)).status === 401, "the block also kills the org's previously-issued media links — possession is not authority");
 // lift the block via admin so suspension can be tested on a live channel
 const blockRow = (await j('/admin/blocks?limit=100', {}, admin)).body.items.find((b) => b.orgId === 'org-eastport' && b.playerId === 'pl-adeyemi');

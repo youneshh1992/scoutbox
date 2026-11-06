@@ -226,7 +226,7 @@ export function SecondLookPanel({ session, room }: CasePanelProps) {
 
 // -------------------------------------------------------------------- Inbox
 export function InboxPanel({ session, room }: CasePanelProps) {
-  const r = useRead(() => api.getChannels(session), [session, room.roomId, room.rev]);
+  const r = useRead(() => api.getChannels(session, { playerId: room.playerId }), [session, room.roomId, room.rev]);
   if (!room.playerAvailable) return <div className="notice block">{room.unavailableNote ?? t('rm.unavailable')}</div>;
   if (r.error) return <div className="section" aria-label={t('rm.tab.inbox')}><Refusal message={r.error} onRetry={r.reload} /></div>;
   if (!r.data) return <Loading />;

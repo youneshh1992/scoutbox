@@ -600,7 +600,12 @@ export const demoApi: ScoutboxApi = {
     return delay(undefined);
   },
 
-  getChannels: (s) => delay(channels.slice()),
+  getChannels: (s, opts) => delay(channels.filter((c) => !opts?.playerId || c.playerId === opts.playerId)),
+
+  getChannelCounts: (s) => delay({
+    threads: channels.length,
+    unreadMessages: channels.reduce((sum, c) => sum + c.messages.filter((m) => m.sender.kind !== 'org_user' && m.ts > (c.readBy?.org ?? 0)).length, 0),
+  }),
 
   sendMessage: (s, channelId, text, attachTrialReportId) => {
     if (MOD_RES.some((re) => re.test(text))) {

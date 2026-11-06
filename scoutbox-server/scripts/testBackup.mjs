@@ -174,7 +174,7 @@ await test('restore: the backup copied into a NEW directory boots; the sessions 
   let S = await boot(restored);
   assert.deepEqual((await S.j('GET', '/player/notifications', undefined, src.kola)).body.map((n) => n.id), src.feed, 'the player feed is back (the session travelled)');
   const ch = await S.j('GET', '/org/channels', undefined, src.maria);
-  assert.equal(ch.status, 200, ch.text); assert.ok(ch.body.some((c) => c.id === src.channelId), 'the thread is back');
+  assert.equal(ch.status, 200, ch.text); assert.ok(ch.body.items.some((c) => c.id === src.channelId), 'the thread is back');
   assert.ok(ch.text.includes('A synthetic message to back up.'), 'with its message');
   const prefs = await S.j('GET', '/org/notification-preferences', undefined, src.maria); assert.equal(prefs.status, 200, prefs.text);
   assert.equal(prefs.body.preferences.categories.find((c) => c.id === 'mentions').enabled, false, 'the preference is back');

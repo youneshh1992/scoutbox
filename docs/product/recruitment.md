@@ -57,7 +57,13 @@ How a club takes a player from "watching" to a decision. The case lifecycle, the
   accepted.
   - The org must exist.
   - A guardian named on the thread must exist.
-  - Messages are acknowledged (201) only after they are durable.
+  - Messages are acknowledged (201) only after they are durable: the message, its ledger row and its
+    notification are saved together, or the sender gets an error and nothing is saved.
+  - A message is at most 4,000 characters. A retried send with the same client id returns the
+    message already saved.
+  - A club's inbox and the Trust & Safety thread audit show the most recently active conversations
+    first, 50 at a time ("load more" is still to build). The unread badge is counted by the server
+    over every thread.
 - Deleting a player deletes their threads.
 - Request/trial rules:
   - At most one trial per request.

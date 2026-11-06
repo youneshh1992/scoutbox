@@ -657,8 +657,9 @@ section('K/§35 — scoped notes, absent rather than redacted for the lanes they
 section('L/§36/§37/§81 — the canonical Inbox is referenced; membership alone opens nothing');
 {
   neg(expect(collect('L1', await j('POST', `/org/transactions/${TX2}/messages/link`, { channelId: 'chan-nope' }, maria.token)), 404, 'MESSAGE_THREAD_NOT_FOUND'), 'L1 a channel that is not this club\'s conversation with this individual cannot be linked');
-  const channels = (await j('GET', '/org/channels', undefined, maria.token)).body;
-  const mineWithKola = Array.isArray(channels) ? channels.find((c) => c.playerId === 'pl-adeyemi') : null;
+  const channels = (await j('GET', '/org/channels', undefined, maria.token)).body.items; // S14c: a page
+  ok(Array.isArray(channels), 'L the club\'s inbox is a page of threads');
+  const mineWithKola = channels.find((c) => c.playerId === 'pl-adeyemi');
   if (mineWithKola) {
     const link = await j('POST', `/org/transactions/${TX2}/messages/link`, { channelId: mineWithKola.id }, maria.token);
     ok(link.status === 201, 'L2 the club links its own canonical thread with the individual');

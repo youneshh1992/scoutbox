@@ -1,27 +1,13 @@
-// S7d through the REAL server (server.mjs booted as a child process on temporary
-// data directories, synthetic seed records only): message threads as tables —
-// both acceptance paths (an adult player accepts; a guardian accepts for a minor),
-// messages from all three sender kinds, both attachment shapes (a clip of the
-// player's media, a filed trial report), the duplicate-clientMsgId answer, the three
-// read-receipt routes, typing, the per-audience views (the player's and the
-// guardian's views carry no orgId/guardianId; the org's carries orgId; the admin's
-// everything), the export, the SSE lookup, the blocked-organisation refusal, the
-// account deletion reproducing today's behaviour (D-B: the deleted player's threads
-// go, guardian–club threads included, other players' threads stay) — plus the
-// cutover itself: migration 0012 recorded at boot, the three tables with no blob
-// behind them, a thread durable in the acceptance route's own save (SIGKILL right
-// after the answer), a message durable before the sender hears 201 (SIGKILL), a
-// failed ordinary save at the REAL COMMIT keeping the message in memory and landing
-// it ONCE with the next save, unknown fields (the legacy orgUserIdForNotify included)
-// dropped and reported by the import, the admin backup, a restore importing
-// through 0012. Every database read goes through a
-// second read-only connection. Nothing here touches DATA_DIR or real data. Run with: npm test
-//
-// FAILING-FIRST NOTE (recorded on the unchanged b67bce5 tree before the implementation):
-// [compat] tests read the threads through a storage adapter (the tables after the
-// cutover, the blob before it) and PASS on both trees — they are the behaviour the
-// migration must preserve; [cutover] tests assert the 0012 record, the tables, the
-// absence of the blob and FAIL on b67bce5 on concrete assertions.
+// Message threads through the REAL server (server.mjs booted as a child process on temporary data directories,
+// synthetic seed records only; S7d, explicit since S14c): both acceptance paths (an adult player accepts; a guardian
+// accepts for a minor), messages from all three sender kinds, both attachment shapes, the duplicate-clientMsgId
+// answer, the three read-receipt routes, typing, the per-audience views (the player's and the guardian's carry no
+// orgId/guardianId; the org's carries orgId; the admin's both), the export, the SSE lookup, the blocked-organisation
+// refusal, the account deletion (D-B: the deleted player's threads go, guardian–club threads included, other players'
+// threads stay); migration 0012 recorded at boot, a thread durable with the acceptance's unit (SIGKILL right after),
+// a message durable before the sender hears 201 (SIGKILL), a message whose unit fails at the REAL COMMIT answered 500
+// with nothing stored, the admin backup and a restore. Every database read goes through a second read-only
+// connection. Nothing here touches DATA_DIR or real data. Run with: npm test
 import assert from 'node:assert/strict';
 import { spawnChild } from './testChildren.mjs';
 import { freePort } from './testPort.mjs';
@@ -85,19 +71,23 @@ const readStored = (c) => {
   const attachments = new Map(c.all('SELECT * FROM message_attachments').map((r) => [r.message_id, r]));
   const messages = new Map();
   for (const m of c.all('SELECT * FROM messages ORDER BY channel_id, position')) {
-    const row = { id: m.id, ts: m.created_at, sender: { kind: m.sender_kind, id: m.sender_id, name: m.sender_name }, text: m.text, attachment: attachments.has(m.id) ? attachmentOf(attachments.get(m.id)) : null };
+    const row = { id: m.id, ts: m.created_at, sender: { kind: m.sender_kind, id: m.sender_user_id ?? m.sender_person_id, name: m.sender_name }, text: m.text, attachment: attachments.has(m.id) ? attachmentOf(attachments.get(m.id)) : null };
     if (m.client_msg_id !== null) row.clientMsgId = m.client_msg_id;
     if (!messages.has(m.channel_id)) messages.set(m.channel_id, []);
     messages.get(m.channel_id).push(row);
   }
+  // In the admin audit's key order (the organisation's view, then the guardian's id).
   return c.all('SELECT * FROM channels ORDER BY seq').map((r) => ({
     id: r.id, requestId: r.request_id, playerId: r.player_id, playerName: r.player_name, orgId: r.org_id, orgName: r.org_name,
     orgVerified: r.org_verified === null ? null : r.org_verified === 1, scoutName: r.scout_name, scoutRole: r.scout_role, counterparty: r.counterparty,
-    guardianId: r.guardian_id, createdAt: r.created_at, messages: messages.get(r.id) ?? [], readBy: { org: r.read_by_org_at, counterparty: r.read_by_counterparty_at },
+    createdAt: r.created_at, lastActivityAt: r.last_activity_at, messages: messages.get(r.id) ?? [], readBy: { org: r.read_by_org_at, counterparty: r.read_by_counterparty_at }, guardianId: r.guardian_id,
   }));
 };
 const stored = (dir) => snap(dir, readStored);
 const storedIds = (dir) => stored(dir).map((c) => [c.id, c.messages.map((m) => m.id)]);
+/** S14c: the admin audit and the org's list page most recently active first; the first page, put in insertion order to compare with the file. */
+const inStoredOrder = (dir, items) => { const order = stored(dir).map((c) => c.id); return [...items].sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id)); };
+const adminAudit = async (S) => { const r = await S.j('GET', '/admin/channels', undefined, null, A); assert.equal(r.status, 200, r.text); assert.equal(r.body.nextCursor, null); return inStoredOrder(S.dir, r.body.items); };
 
 const orgLogin = async (S, orgId = 'org-eastport', scoutName = 'Maria Keane', role = 'Head of Recruitment') => { const r = await S.j('POST', '/auth/org/login', { orgId, scoutName, role }); assert.equal(r.status, 200, `org login ${orgId}: ${r.text}`); return r.body.token; };
 const playerLogin = async (S, playerId) => { const r = await S.j('POST', '/auth/player/login', { playerId }); assert.equal(r.status, 200, r.text); return r.body.token; };
@@ -144,7 +134,7 @@ await test('[compat] both acceptance paths, all three sender kinds, both attachm
   assert.deepEqual(st.threads.map((c) => [c.id, c.requestId, c.playerId, c.orgId, c.counterparty, c.guardianId]), [[adult.id, reqA, 'pl-adeyemi', 'org-eastport', 'player', null], [guardian.id, reqG, 'pl-guni', 'org-eastport', 'guardian', 'gd-amara']], 'stored in insertion order with the ids the views withhold');
   assert.deepEqual(st.requests.filter((r) => [reqA, reqG].includes(r.id)).map((r) => [r.status, r.contactChannel]), [['accepted', adult.id], ['accepted', guardian.id]], 'the request\'s status and contactChannel in the same committed state');
   // The org's view carries orgId; the three audiences post.
-  const orgView = (await S.j('GET', '/org/channels', undefined, maria)).body; assert.deepEqual(orgView.map((c) => c.id), [adult.id, guardian.id]); assert.ok(orgView.every((c) => c.orgId === 'org-eastport' && !Object.hasOwn(c, 'guardianId')));
+  const orgView = (await S.j('GET', '/org/channels', undefined, maria)).body.items; assert.deepEqual(orgView.map((c) => c.id), [guardian.id, adult.id], 'most recently active first'); assert.ok(orgView.every((c) => c.orgId === 'org-eastport' && !Object.hasOwn(c, 'guardianId')));
   const m1 = await S.j('POST', `/org/channels/${adult.id}/messages`, { text: 'Synthetic club message to the player.' }, maria); assert.equal(m1.status, 201, m1.text);
   assert.deepEqual(m1.body.sender, { kind: 'org_user', id: m1.body.sender.id, name: 'Maria Keane · Head of Recruitment · Eastport FC' }); assert.equal(m1.body.attachment, null); assert.equal(Object.hasOwn(m1.body, 'clientMsgId'), false, 'no clientMsgId key when the client sent none');
   const m2 = await S.j('POST', `/player/channels/${adult.id}/messages`, { text: 'Synthetic reply with a clip.', attachMediaId: MEDIA_ID, clientMsgId: 'client-clip-1' }, kola); assert.equal(m2.status, 201, m2.text);
@@ -182,7 +172,7 @@ await test('[compat] both acceptance paths, all three sender kinds, both attachm
     assert.deepEqual(rows[0].readBy, r2.body.readBy, `${label}: the adult thread's receipts`); assert.deepEqual(rows[1].readBy, r3.body.readBy);
     assert.ok(rows[0].messages.every((m) => typeof m.ts === 'number' && Object.hasOwn(m, 'attachment')), `${label}: every message carries ts and the attachment key`);
   };
-  const admin = (await S.j('GET', '/admin/channels', undefined, null, A)).body; expectThreads(admin, 'the admin audit');
+  const admin = await adminAudit(S); expectThreads(admin, 'the admin audit');
   assert.deepEqual(admin.map((c) => [c.orgId, c.guardianId]), [['org-eastport', null], ['org-eastport', 'gd-amara'], ['org-eastport', null]], 'the admin audit carries both ids');
   const onDisk = stored(dir); expectThreads(onDisk, 'the database');
   assert.deepEqual(onDisk.map((c) => Object.keys(c)), admin.map((c) => Object.keys(c)), 'the stored shape is the literal\'s shape, key for key');
@@ -193,7 +183,7 @@ await test('[compat] both acceptance paths, all three sender kinds, both attachm
   const gexp = (await S.j('GET', '/guardian/export', undefined, amara)).body; assert.deepEqual(gexp.children.flatMap((c) => c.threads.map((t) => t.id)), [guardian.id], 'the guardian\'s export carries the child\'s thread');
   // A restart serves the same.
   await S.stop(); S = await boot(dir); kola = await playerLogin(S, 'pl-adeyemi');
-  assert.deepEqual((await S.j('GET', '/admin/channels', undefined, null, A)).body, admin, 'the restart serves the same threads');
+  assert.deepEqual(await adminAudit(S), admin, 'the restart serves the same threads');
   assert.deepEqual((await S.j('GET', '/player/channels', undefined, kola)).body.map((c) => [c.id, c.messages.length]), [[adult.id, 3], [trialThread.id, 0]]);
   await S.stop(); rm(dir);
 });
@@ -221,7 +211,7 @@ await test('[compat] privacy, visibility and the live lookup: another adult play
   const blocked = await S.j('POST', `/player/channels/${adult.id}/messages`, { text: 'Synthetic after the block.' }, kola); assert.equal(blocked.status, 403); assert.equal(blocked.body.error, 'BLOCKED');
   assert.equal((await S.j('GET', '/player/channels', undefined, kola)).body[0].messages.length, 1, 'the history stays');
   const clubBlocked = await S.j('POST', `/org/channels/${adult.id}/messages`, { text: 'Synthetic club message after the block.' }, maria); assert.equal(clubBlocked.status, 403); assert.equal(clubBlocked.body.error, 'BLOCKED', 'the club\'s side is closed by the same standing check, as before');
-  assert.equal((await S.j('GET', '/org/channels', undefined, maria)).body.find((c) => c.id === adult.id).closed, true, 'the club\'s list marks the thread closed');
+  assert.equal((await S.j('GET', '/org/channels', undefined, maria)).body.items.find((c) => c.id === adult.id).closed, true, 'the club\'s list marks the thread closed');
   assert.deepEqual(stored(dir).map((c) => c.messages.length), [1, 1], 'nothing new after the block; the history stays');
   await S.stop(); rm(dir);
 });
@@ -239,20 +229,20 @@ await test('[compat] account deletion reproduces today\'s behaviour (D-B, as app
   assert.equal((await S.j('DELETE', '/player/account', {}, kola)).status, 200);
   assert.deepEqual(storedIds(dir).map(([id, ms]) => [id, ms.length]), [[guardian.id, 1], [other.id, 1]], 'the adult\'s thread went with its message when the route answered; the others stay');
   if (live(dir)) assert.deepEqual(snap(dir, (c) => [c.get('SELECT COUNT(*) AS n FROM messages').n, c.get('SELECT COUNT(*) AS n FROM message_attachments').n]), [2, 0], 'its message and attachment rows went with it (the cascades)');
-  assert.deepEqual((await S.j('GET', '/org/channels', undefined, maria)).body.map((c) => c.id), [guardian.id, other.id]);
+  assert.deepEqual((await S.j('GET', '/org/channels', undefined, maria)).body.items.map((c) => c.id), [other.id, guardian.id], 'most recently active first');
   assert.equal((await S.j('DELETE', `/guardian/children/pl-guni`, {}, amara)).status, 200);
   assert.deepEqual(storedIds(dir).map(([id]) => id), [other.id], 'the guardian–club thread of the deleted child went too (today\'s behaviour, kept)');
   assert.deepEqual((await S.j('GET', '/guardian/channels', undefined, amara)).body, []);
-  assert.deepEqual((await S.j('GET', '/admin/channels', undefined, null, A)).body.map((c) => c.id), [other.id]);
+  assert.deepEqual((await adminAudit(S)).map((c) => c.id), [other.id]);
   assert.equal(ledgerRows(dir).filter((l) => l.type === 'message').length, ledgerBefore, 'the ledger rows stay (append-only, ids only)');
   await S.stop(); S = await boot(dir);
-  assert.deepEqual((await S.j('GET', '/admin/channels', undefined, null, A)).body.map((c) => [c.id, c.messages.length]), [[other.id, 1]]);
+  assert.deepEqual((await adminAudit(S)).map((c) => [c.id, c.messages.length]), [[other.id, 1]]);
   assert.deepEqual((await S.j('GET', '/player/channels', undefined, await playerLogin(S, 'pl-carvalho'))).body.map((c) => c.id), [other.id], 'the other player\'s thread is intact after the restart');
   await S.stop(); rm(dir);
 });
 
 // ============================================================= [cutover] the tables, the save points, the crash windows
-await test('[cutover] the cutover and the save points: a fresh boot records 0012_channels after 0011 and creates channels, messages and message_attachments and the file has no blob table (the data layer reports the domain); the thread opened by an acceptance is committed with the request\'s answer and survives a SIGKILL right after the response; a message is in the file before the sender hears 201 (SIGKILL right after); a FAILED ORDINARY SAVE at the REAL COMMIT (internal:save.sqlite_commit) leaves the message in memory and absent from the table while the route answered 201, and the next save (a receipt) lands the message and the receipt ONCE — a later save does not replay; rows carry seq/position in post order', async () => {
+await test('[cutover] the cutover and the save points: a fresh boot records 0012_channels after 0011 and creates channels, messages and message_attachments and the file has no blob table (the data layer reports the domain); the thread opened by an acceptance is committed with the request\'s answer and survives a SIGKILL right after the response; a message is in the file before the sender hears 201 (SIGKILL right after); a message whose unit fails at the REAL COMMIT (internal:unit.sqlite_commit) is answered 500 and leaves no message and no ledger row, and the retry lands once at the next position; a receipt is in the file when its route answers', async () => {
   const dir = tempDir('s7d-cutover'); let S = await boot(dir, { M13_FAST_RETRY: '' });
   assert.ok(live(dir), 'the boot recorded 0012'); // fails on b67bce5: no such record
   assert.deepEqual(snap(dir, (c) => c.all('SELECT id FROM data_migrations ORDER BY applied_at, id').map((r) => r.id).filter((id) => id < '0019').slice(-8)), ['0011_outbox_push', MIGRATION, '0013_safety_audit', '0014_player_erasure', '0015_recruitment', '0016_recruitment_cases', '0017_recruitment_contacts_offers', '0018_signings_follow_ups']); // S6b: 0013 follows on the same boot; S4b-R, S8a, S8b and S8c after it
@@ -272,20 +262,19 @@ await test('[cutover] the cutover and the save points: a fresh boot records 0012
   await S.kill();
   assert.deepEqual(snap(dir, (c) => c.all('SELECT id, position FROM messages WHERE channel_id = ? ORDER BY position', channelId)), [{ id: m1.body.id, position: 0 }], 'the message is in the file when the sender hears 201');
   assert.equal(q1(dir, 'SELECT kind FROM message_attachments WHERE message_id = ?', m1.body.id).kind, 'clip');
-  // The real COMMIT failure.
+  // The real COMMIT failure (S14c: a message is one unit with its ledger row and notifications).
   S = await boot(dir, { M13_FAST_RETRY: '' }); kola = await playerLogin(S, 'pl-adeyemi'); const maria3 = await orgLogin(S);
-  const logBefore = S.log().length;
-  assert.equal((await S.j('POST', '/__faults', { rules: 'internal:save.sqlite_commit:1' })).status, 200);
-  const m2 = await S.j('POST', `/org/channels/${channelId}/messages`, { text: 'Synthetic message whose save fails at COMMIT.' }, maria3); assert.equal(m2.status, 201, 'the route answers although its save failed');
-  assert.ok(await until(async () => /save failed: FOREIGN KEY constraint failed/.test(S.log().slice(logBefore)), 5000), 'the save failed at the real COMMIT');
+  assert.equal((await S.j('POST', '/__faults', { rules: 'internal:unit.sqlite_commit:1' })).status, 200);
+  const ledgerBefore = ledgerRows(dir).filter((l) => l.type === 'message').length;
+  const m2 = await S.j('POST', `/org/channels/${channelId}/messages`, { text: 'Synthetic message whose unit fails at COMMIT.' }, maria3); assert.equal(m2.status, 500, 'the sender hears the failure');
   assert.equal((await S.j('POST', '/__faults', { rules: '' })).status, 200);
-  assert.deepEqual(snap(dir, (c) => c.all('SELECT id FROM messages WHERE channel_id = ? ORDER BY position', channelId)).map((r) => r.id), [m1.body.id], 'the message did not land'); assert.equal(q1(dir, 'SELECT read_by_org_at AS r FROM channels WHERE id = ?', channelId).r, null, 'nothing of the failed save is in the file');
-  assert.deepEqual((await S.j('GET', '/org/channels', undefined, maria3)).body[0].messages.map((m) => m.id), [m1.body.id, m2.body.id], 'memory is the intended state');
+  assert.deepEqual(snap(dir, (c) => c.all('SELECT id FROM messages WHERE channel_id = ? ORDER BY position', channelId)).map((r) => r.id), [m1.body.id], 'the message did not land');
+  assert.equal(ledgerRows(dir).filter((l) => l.type === 'message').length, ledgerBefore, 'nor its ledger row');
+  assert.deepEqual((await S.j('GET', '/org/channels', undefined, maria3)).body.items[0].messages.map((m) => m.id), [m1.body.id], 'the thread reads as the file holds it');
+  const m3 = await S.j('POST', `/org/channels/${channelId}/messages`, { text: 'Synthetic message whose unit fails at COMMIT.' }, maria3); assert.equal(m3.status, 201, 'the retry lands');
+  assert.deepEqual(snap(dir, (c) => c.all('SELECT id, position FROM messages WHERE channel_id = ? ORDER BY position', channelId)), [{ id: m1.body.id, position: 0 }, { id: m3.body.id, position: 1 }], 'once, at the next position');
   const rc = await S.j('POST', `/org/channels/${channelId}/read`, {}, maria3); assert.equal(rc.status, 200);
-  const landed = snap(dir, (c) => ({ messages: c.all('SELECT id, position FROM messages WHERE channel_id = ? ORDER BY position', channelId), read: c.get('SELECT read_by_org_at FROM channels WHERE id = ?', channelId).read_by_org_at }));
-  assert.deepEqual(landed.messages, [{ id: m1.body.id, position: 0 }, { id: m2.body.id, position: 1 }], 'the next save landed the message once, at the next position'); assert.equal(landed.read, rc.body.readBy.org, 'with the receipt');
-  assert.equal((await S.j('POST', `/player/channels/${channelId}/read`, {}, kola)).status, 200);
-  assert.deepEqual(snap(dir, (c) => c.all('SELECT id FROM messages WHERE channel_id = ?', channelId)).length, 2, 'a later save does not replay');
+  assert.equal(q1(dir, 'SELECT read_by_org_at AS r FROM channels WHERE id = ?', channelId).r, rc.body.readBy.org, 'the receipt is in the file when the route answers');
   void maria; void maria2;
   await S.stop(); rm(dir);
 });
@@ -305,7 +294,7 @@ await test('[cutover] the admin backup and a restore: the backup\'s database cop
   const restored = tempDir('s7d-restored'); fs.cpSync(bk.body.dir, restored, { recursive: true });
   S = await boot(restored); assert.ok(live(restored));
   assert.equal(JSON.stringify(stored(restored)), JSON.stringify(original), 'row for row'); assert.equal(hasBlobTable(restored), false, 'no blob table');
-  const audit = (await S.j('GET', '/admin/channels', undefined, null, A)).body;
+  const audit = await adminAudit(S);
   assert.equal(JSON.stringify(audit), JSON.stringify(original), 'the admin audit shows the restored threads');
   kola = await playerLogin(S, 'pl-adeyemi'); const m = await S.j('POST', `/player/channels/${adult.id}/messages`, { text: 'Synthetic after the restore.' }, kola); assert.equal(m.status, 201, m.text);
   assert.deepEqual(stored(restored)[0].messages.map((x) => x.id), [...original[0].messages.map((x) => x.id), m.body.id]);

@@ -8,7 +8,7 @@
  *   trial_revision_sessions, trial_attendance, trial_history, trial_keys, trial_reminders,
  *   trial_reports, trial_day_staff, trial_day_consents, trial_day_checkins,
  *   trial_day_status_events                                                         → db.trials
- * and `channels`, rebuilt by 0015 so its `request_id` is a real key.
+ * (`channels` names its request with a real key: repositories/channels.mjs.)
  *
  * EVERY FIELD IS A TYPED COLUMN with the vocabulary CHECKs of the domain rules (server.mjs issueRecruitmentRequest and
  * issueAcceptedTrial, domains/recruitment/lifecycle/trial.mjs, domains/recruitment/lifecycle/trialRoutes.mjs, domains/scouting/journeys.mjs). There is no `absent_keys_json`,
@@ -378,29 +378,6 @@ ${ownedBy('trials')},
 ) STRICT;
 `;
 
-/** `channels` as migration 0015 rebuilds it: the 0012 definition with the REAL request key (messages and attachments unchanged). */
-export const CHANNELS_DDL_WITH_KEY = `
-CREATE TABLE channels (
-  seq                     INTEGER PRIMARY KEY,
-  id                      TEXT NOT NULL UNIQUE,
-  request_id              TEXT NOT NULL REFERENCES recruitment_requests(id) ON DELETE RESTRICT,
-  player_id               TEXT NOT NULL,
-  player_name             TEXT,
-  org_id                  TEXT NOT NULL REFERENCES orgs(id) ON DELETE RESTRICT,
-  org_name                TEXT NOT NULL,
-  org_verified            INTEGER CHECK (org_verified IS NULL OR org_verified IN (0, 1)),
-  scout_name              TEXT,
-  scout_role              TEXT,
-  counterparty            TEXT NOT NULL CHECK (counterparty IN ('player', 'guardian')),
-  guardian_id             TEXT,
-  created_at              INTEGER NOT NULL,
-  read_by_org_at          INTEGER,
-  read_by_counterparty_at INTEGER
-) STRICT;
-CREATE UNIQUE INDEX channels_request_id ON channels (request_id);
-CREATE INDEX channels_org_id ON channels (org_id);
-CREATE INDEX channels_guardian_id ON channels (guardian_id);
-CREATE INDEX channels_player_id_counterparty ON channels (player_id, counterparty);`;
 
 // ------------------------------------------------------------------ typing (the one place a value is judged)
 const isInt = (v) => Number.isSafeInteger(v);

@@ -551,7 +551,10 @@ export interface ScoutboxApi {
   act(s: Session, playerId: string, action: 'save' | 'shortlist' | 'signing'): Promise<void>;
   getShortlist(s: Session): Promise<Player[]>;
   sendRequest(s: Session, playerId: string, type: 'contact' | 'trial', message: string, details?: TrialDetails): Promise<void>;
-  getChannels(s: Session): Promise<Channel[]>;
+  /** The first page of the organisation's threads, most recently active first; `playerId` limits it to one player's. */
+  getChannels(s: Session, opts?: { playerId?: string }): Promise<Channel[]>;
+  /** The inbox figures: the organisation's threads and the unread messages from players and guardians. */
+  getChannelCounts(s: Session): Promise<{ threads: number; unreadMessages: number }>;
   sendMessage(s: Session, channelId: string, text: string, attachTrialReportId?: string, clientMsgId?: string): Promise<void>;
   markChannelRead(s: Session, channelId: string): Promise<void>;
   sendTyping(s: Session, channelId: string): Promise<void>;
@@ -670,7 +673,10 @@ export const httpApi: ScoutboxApi = {
       body: JSON.stringify({ type, message, ...details }),
     }),
 
-  getChannels: (s) => request<Channel[]>('/org/channels', { headers: headers(s) }),
+  // Pages by cursor (S14c), most recently active first: the first page (50) is read; "load more" (nextCursor) is still needed.
+  getChannels: (s, opts) => request<{ items: Channel[]; nextCursor: string | null }>(`/org/channels${opts?.playerId ? `?playerId=${encodeURIComponent(opts.playerId)}` : ''}`, { headers: headers(s) }).then((r) => r.items),
+
+  getChannelCounts: (s) => request<{ threads: number; unreadMessages: number }>('/org/channels/counts', { headers: headers(s) }),
 
   sendMessage: (s, channelId, text, attachTrialReportId, clientMsgId) =>
     request<void>(`/org/channels/${channelId}/messages`, { method: 'POST', headers: headers(s), body: JSON.stringify({ text, attachTrialReportId, clientMsgId }) }),

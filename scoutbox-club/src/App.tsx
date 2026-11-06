@@ -6,7 +6,7 @@ import { Icon } from './icons';
 import stadiumImage from './assets/pro-stadium.jpg';
 import { ClubCrest, ProBrand } from './proExperience';
 import { ProMasthead, ProOverview } from './proDesign';
-import { api, ApiError, DEMO_MODE, revokeSession, type Channel, type Notification, type Org, type Session } from './api';
+import { api, ApiError, DEMO_MODE, revokeSession, type Notification, type Org, type Session } from './api';
 import {
   FeedScreen, FilmRoomScreen, SearchScreen, ShortlistScreen, RequestsScreen, MessagesScreen,
   TrialsScreen, FixturesScreen, LedgerScreen, FunnelScreen, ReputationScreen, PlanScreen,
@@ -419,7 +419,7 @@ function Workspace({ session, onLogout, theme, onToggleTheme }: { session: Sessi
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [bellOpen, drawerOpen]);
-  const [channels, setChannels] = useState<Channel[]>([]);
+  const [unreadMessages, setUnreadMessages] = useState(0);
   const seenNotifIds = useRef<Set<string> | null>(null);
 
   const [live, setLive] = useState(true);
@@ -455,17 +455,13 @@ function Workspace({ session, onLogout, theme, onToggleTheme }: { session: Sessi
     // noticed. Only a 401 ends the session; anything else is a transient
     // failure the workspace survives.
     api.getNotifications(session).then(setNotifications).catch((e) => { if (e instanceof ApiError && e.status === 401) onLogout(); });
-    api.getChannels(session).then(setChannels).catch(() => {});
+    api.getChannelCounts(session).then((c) => setUnreadMessages(c.unreadMessages)).catch(() => {});
   }, [session, tick]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const unread = notifications.filter((n) => !n.read).length;
 
-  // Unread messages: anything from the player/guardian side newer than the
-  // last time we opened that thread.
-  const unreadMessages = channels.reduce(
-    (sum, c) => sum + c.messages.filter((m) => m.sender.kind !== 'org_user' && m.ts > (c.readBy?.org ?? 0)).length,
-    0
-  );
+  // Unread messages (the server's count): anything from the player/guardian side
+  // newer than the last time we opened that thread.
 
   // Pop up a toast the moment something new lands (messages, acceptances…).
   useEffect(() => {

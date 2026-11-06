@@ -194,7 +194,8 @@ export default function App() {
       setGuardians(g.guardians); setIdvQueue(g.idvQueue);
       setBlocks((await call<{ items: BlockRow[]; nextCursor: string | null }>(key, '/admin/blocks')).items);
       setModeration((await call<{ items: ModRow[]; nextCursor: string | null }>(key, '/admin/moderation')).items);
-      setThreads(await call<ThreadRow[]>(key, '/admin/channels'));
+      // Pages by cursor (S14c), most recently active first: the first page is read; "load more" (nextCursor) is still needed.
+      setThreads((await call<{ items: ThreadRow[]; nextCursor: string | null }>(key, '/admin/channels')).items);
       setOutbox(await call<MailRow[]>(key, '/admin/outbox'));
       // Pages by cursor (S13e), newest first: the first page is read; "load more" (nextCursor) is still needed.
       setInvoices((await call<{ items: InvoiceRow[]; nextCursor: string | null }>(key, '/admin/invoices')).items);

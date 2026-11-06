@@ -92,7 +92,7 @@ A trust-weights total other than 100 is also fatal (`TRUST_WEIGHTS_INVALID`).
 every mint).
 
 Most repositories write their rows at once. The staged ones (organisations' facets, players and guardians,
-notifications, dispatches, outbox and push, message threads) keep a mirror in memory and
+notifications, dispatches, outbox and push) keep a mirror in memory and
 write what changed at the next save: a 2-second debounce (`persist()`), immediately with `persistNow()`, or in the
 commit of the unit of work they joined.
 

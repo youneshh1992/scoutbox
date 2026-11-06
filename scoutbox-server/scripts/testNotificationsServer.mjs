@@ -299,7 +299,7 @@ async function openSse(S, token, { lastEventId = null } = {}) {
   return { frames, notifyFrames, lastId: () => Math.max(0, ...frames.map((f) => f.sseId ?? 0)), caughtUp: () => frames.some((f) => f.event === 'caught_up'), resync: () => frames.some((f) => f.event === 'resync'), close: () => ctl.abort() };
 }
 
-await test('through the real server: a message whose save fails at the REAL COMMIT (development seam internal:save.sqlite_commit) delivers NO push (admin push log), NO notify SSE frame and NO replay-log entry (a reconnect with a real Last-Event-ID cursor catches up to nothing new, while the same cursor mechanism does replay an earlier committed notify event — the positive control), and leaves no notification row; the next successful save (a second write) commits the pending notification and delivers its push and its SSE frame exactly once, and a cursor reconnect now replays exactly that event; a coalescing repeat delivers one SSE frame and no second push', async () => {
+await test('through the real server: a message whose unit fails at the REAL COMMIT (development seam internal:unit.sqlite_commit) is answered 500 and delivers NO push (admin push log), NO notify SSE frame and NO replay-log entry (a reconnect with a real Last-Event-ID cursor catches up to nothing new, while the same cursor mechanism does replay an earlier committed notify event — the positive control), and leaves no message and no notification row; the retry commits the message with its notification and delivers its push and its SSE frame exactly once, and a cursor reconnect now replays exactly that event; a coalescing repeat delivers one SSE frame and no second push', async () => {
   const dir = tempDir('s7a-rv-effects'); const S = await boot(dir);
   const maria = await orgLogin(S, 'org-eastport', 'Maria Keane', 'Head of Recruitment'); const kola = await playerLogin(S, 'pl-adeyemi');
   const { channelId } = await openThread(S, maria, kola);
@@ -319,23 +319,23 @@ await test('through the real server: a message whose save fails at the REAL COMM
   // The recipient reads the feed, so the next identical sentence is a NEW row (and a new push), not a coalesce.
   assert.equal((await S.j('POST', '/player/notifications/read', {}, kola)).status, 200);
   await settle(async () => q1(dir, 'SELECT read AS r FROM notifications WHERE audience_id = ? AND type = ?', 'pl-adeyemi', 'message')?.r === 1);
-  // 2. The save that carries the next message and its notification fails at COMMIT.
-  assert.equal((await S.j('POST', '/__faults', { rules: 'internal:save.sqlite_commit:1' })).status, 200);
-  const logBefore = S.log().length;
-  const first = await S.j('POST', `/org/channels/${channelId}/messages`, { text: 'First, under a failing save.' }, maria);
-  assert.equal(first.status, 201, first.text);
-  for (let i = 0; i < 100 && !/save failed/.test(S.log().slice(logBefore)); i++) await new Promise((r) => setTimeout(r, 20));
-  assert.match(S.log().slice(logBefore), /save failed: FOREIGN KEY constraint failed/, 'the save really failed at COMMIT');
+  // 2. The unit that carries the next message and its notification fails at COMMIT (S14c: a message is one unit with
+  //    its ledger row and notifications, so the sender hears 500 and nothing of it is stored or announced).
+  const messagesBefore = q1(dir, 'SELECT COUNT(*) AS n FROM messages WHERE channel_id = ?', channelId).n;
+  assert.equal((await S.j('POST', '/__faults', { rules: 'internal:unit.sqlite_commit:1' })).status, 200);
+  const first = await S.j('POST', `/org/channels/${channelId}/messages`, { text: 'First, under a failing commit.' }, maria);
+  assert.equal(first.status, 500, first.text);
   await new Promise((r) => setTimeout(r, 200));
-  assert.equal(rows(), 1, 'no second notification row (the save rolled back)');
-  assert.equal((await pushes()).length, 1, 'no push before the durable save'); assert.equal(sse.notifyFrames().length, 1, 'no SSE notify frame before the durable save');
+  assert.equal(q1(dir, 'SELECT COUNT(*) AS n FROM messages WHERE channel_id = ?', channelId).n, messagesBefore, 'no message row (the unit rolled back)');
+  assert.equal(rows(), 1, 'no second notification row (the unit rolled back)');
+  assert.equal((await pushes()).length, 1, 'no push for the refused message'); assert.equal(sse.notifyFrames().length, 1, 'no SSE notify frame for the refused message');
   const replay = await openSse(S, kola, { lastEventId: n0 }); // a real catch-up from the committed frame: the replay log holds no notify entry after it
   assert.ok(replay.caughtUp(), 'the cursor branch ran (caught_up received)'); assert.equal(replay.notifyFrames().length, 0, 'no replay-log entry for the uncommitted notification'); replay.close();
-  const feed = await feedOf(S, '/player/notifications', kola); assert.equal(feed.filter((n) => n.type === 'message').length, 2, 'the feed (memory) shows the pending notification, as every staged write shows');
-  // 3. A second write saves successfully: the pending notification commits and its effects run once.
-  assert.equal((await S.j('POST', `/org/channels/${channelId}/read`, {}, maria)).status, 200);
+  const feed = await feedOf(S, '/player/notifications', kola); assert.equal(feed.filter((n) => n.type === 'message').length, 1, 'the feed shows no notification for the refused message');
+  // 3. The sender retries: the message, its notification and their effects land once.
+  assert.equal((await S.j('POST', `/org/channels/${channelId}/messages`, { text: 'First, under a failing commit.' }, maria)).status, 201);
   await settle(async () => rows() === 2);
-  assert.equal(rows(), 2, 'the retry committed the notification with the read receipt');
+  assert.equal(rows(), 2, 'the retry committed the notification with its message');
   await settle(async () => sse.notifyFrames().length === 2);
   assert.equal((await pushes()).length, 2, 'exactly one more push, after the commit'); assert.equal(sse.notifyFrames().length, 2, 'exactly one more SSE notify frame, after the commit');
   const n1 = sse.notifyFrames()[1].sseId; assert.ok(n1 > n0);

@@ -26,6 +26,7 @@ import { fileURLToPath } from 'node:url';
 import { buildSeed } from './seed.mjs';
 import { openStore } from './store.mjs';
 import { attachDataLayer, TABLE_BACKED } from './repositories/index.mjs';
+import { MESSAGE_LIMITS } from './repositories/channels.mjs';
 import { createIdCounter } from './repositories/counters.mjs';
 import { GRASSROOTS_LIMITS, boxAround } from './repositories/grassroots.mjs';
 import { CLUB_SETUP_LIMITS, LOOKING_FOR_POSITIONS } from './repositories/clubSetup.mjs';
@@ -460,7 +461,7 @@ function shouldDeliver(identity, event, payload) {
     if (!u || u.removedAt) return false;
   }
   if (event === 'typing' || event === 'messages') {
-    const channel = db.channels.find((c) => c.id === payload.channelId);
+    const channel = channels.parties(payload.channelId);
     if (!channel) return false;
     if (identity.kind === 'org') return channel.orgId === org.id;
     if (identity.kind === 'player') return channel.playerId === identity.playerId && channel.counterparty === 'player';
@@ -903,24 +904,23 @@ function markNotificationsRead(kind, id) {
 // A channel is the ONLY conversation surface, and it exists solely because a
 // request was accepted. For minors the counterparty is the guardian — the
 // child is never in the thread. Every message is moderated and logged.
-// S7d: the thread is a row of the `channels` table (repositories/channels.mjs,
-// migration 0012), written through the repository in its staged mode — it lands
-// in the acceptance route's own persistNow() with the request's answer, exactly
-// where the blob entry landed before. The repository checks the request against
-// the live requests collection (the transitional reference, D-A), the
-// organisation and the guardian, and refuses a second thread for one request.
-// The literal below is unchanged; what comes back is the read-only view of it.
+// The thread is a row of the `channels` table (repositories/channels.mjs), written
+// at once inside the acceptance route's unit of work with the request's answer.
+// The repository refuses a second thread for one request and a request,
+// organisation or guardian that does not exist; it returns the stored thread.
+// Names have no limit at signup: a thread keeps them shortened, never refused.
+const threadName = (v) => (typeof v === 'string' ? v.slice(0, MESSAGE_LIMITS.name) : v);
 function openChannel(request) {
   const channel = {
     id: nextId('chan'),
     requestId: request.id,
     playerId: request.playerId,
-    playerName: request.playerName,
+    playerName: threadName(request.playerName),
     orgId: request.orgId,
-    orgName: request.orgName,
+    orgName: threadName(request.orgName),
     orgVerified: request.orgVerified,
-    scoutName: request.scoutName,
-    scoutRole: request.scoutRole,
+    scoutName: threadName(request.scoutName),
+    scoutRole: threadName(request.scoutRole),
     counterparty: request.routedTo, // 'player' | 'guardian'
     guardianId: request.guardianId,
     createdAt: Date.now(),
@@ -952,39 +952,54 @@ function buildAttachment(channel, body, senderSide) {
   };
 }
 
-function postMessage(channel, sender, text, attachment = null, clientMsgId = null) {
+/**
+ * A message route's text and retry id, checked before moderation: `{ text, clientMsgId }`, or null once a 400 has
+ * been sent. Junk is refused, never cut down (S14c).
+ */
+function messageInput(req, res) {
+  const { text, clientMsgId = null } = req.body || {};
+  if (typeof text !== 'string' || !text.trim()) { res.status(400).json({ error: 'TEXT_REQUIRED' }); return null; }
+  if (text.trim().length > MESSAGE_LIMITS.text) { fieldInvalid(res, 'text', `A message is at most ${MESSAGE_LIMITS.text} characters.`); return null; }
+  if (clientMsgId !== null && clientMsgId !== '' && (typeof clientMsgId !== 'string' || clientMsgId.length > MESSAGE_LIMITS.clientMsgId)) { fieldInvalid(res, 'clientMsgId', `clientMsgId is text of at most ${MESSAGE_LIMITS.clientMsgId} characters.`); return null; }
+  return { text: text.trim(), clientMsgId: clientMsgId || null };
+}
+
+function postMessage(channel, rawSender, text, attachment = null, clientMsgId = null) {
+  const sender = { ...rawSender, name: threadName(rawSender.name) };
   // Idempotency: a retried send with the same client id returns the message
   // that already landed instead of duplicating it.
-  if (clientMsgId) {
-    const dup = channel.messages.find((m) => m.clientMsgId === clientMsgId && m.sender.kind === sender.kind && m.sender.id === sender.id);
-    if (dup) return dup;
-  }
-  // S7d: the message is a row of the `messages` table (its attachment a row of
-  // `message_attachments`), appended at the end of the thread through the
-  // repository; it lands in the persistNow() below, before the sender hears 201.
-  const msg = channels.appendMessage(channel.id, { id: nextId('msg'), ts: Date.now(), sender, text, attachment, ...(clientMsgId ? { clientMsgId } : {}) });
-  ledgerAppend({ type: 'message', playerId: channel.playerId, orgId: channel.orgId, orgName: channel.orgName, userId: sender.kind === 'org_user' ? sender.id : null, scoutName: sender.name });
-  // The counterparty an org user's message notifies (a player's or guardian's message notifies the org users below).
-  const recipient = channel.counterparty === 'guardian'
-    ? { kind: 'guardian', id: channel.guardianId }
-    : { kind: 'player', id: channel.playerId };
-  if (sender.kind !== 'org_user') {
-    // notify every org user who has messaged or created the request
-    const userIds = new Set([...channel.messages.filter((m) => m.sender.kind === 'org_user').map((m) => m.sender.id)]);
-    const req = recruitment.requests.byId(channel.requestId);
-    if (req) userIds.add(req.userId);
-    for (const uid of userIds) {
-      if (uid) notify({ kind: 'org_user', id: uid }, 'message', `${sender.name} replied in the ${channel.playerName} thread.`, channel.id);
+  const dup = clientMsgId ? channels.byClientMsgId(channel.id, sender, clientMsgId) : null;
+  if (dup) return messageView(dup);
+  // One unit: the message (and its attachment), its ledger row and its
+  // notifications commit together, before the sender hears 201.
+  const msg = unit(() => {
+    const stored = channels.appendMessage(channel.id, { id: nextId('msg'), ts: Date.now(), sender, text, attachment, ...(clientMsgId ? { clientMsgId } : {}) });
+    ledgerAppend({ type: 'message', playerId: channel.playerId, orgId: channel.orgId, orgName: channel.orgName, userId: sender.kind === 'org_user' ? sender.id : null, scoutName: sender.name });
+    // The counterparty an org user's message notifies (a player's or guardian's message notifies the org users below).
+    const recipient = channel.counterparty === 'guardian'
+      ? { kind: 'guardian', id: channel.guardianId }
+      : { kind: 'player', id: channel.playerId };
+    if (sender.kind !== 'org_user') {
+      // notify every org user who has messaged or created the request
+      const userIds = new Set(channels.staffSenders(channel.id));
+      const req = recruitment.requests.byId(channel.requestId);
+      if (req) userIds.add(req.userId);
+      for (const uid of userIds) {
+        if (uid) notify({ kind: 'org_user', id: uid }, 'message', `${sender.name} replied in the ${channel.playerName} thread.`, channel.id);
+      }
+    } else if (recipient.id) {
+      notify(recipient, 'message', `${channel.orgName} (${channel.scoutRole}) sent a message.`, channel.id);
     }
-  } else if (recipient.id) {
-    notify(recipient, 'message', `${channel.orgName} (${channel.scoutRole}) sent a message.`, channel.id);
-  }
-  // A message is durable before the sender hears "delivered" — no debounce
-  // window in which a hard crash could lose it.
-  persistNow();
+    return stored;
+  });
   broadcast('messages', { channelId: channel.id });
-  return msg;
+  return messageView(msg);
 }
+
+// The thread a route names, if it is the caller's: the organisation's, the guardian's, or an adult player's own.
+const orgThread = (req) => { const c = channels.byId(req.params.id); return c && c.orgId === req.org.id ? c : null; };
+const guardianThread = (req) => { const c = channels.byId(req.params.id); return c && c.guardianId === req.guardian.id ? c : null; };
+const playerThread = (req) => { const c = channels.byId(req.params.id); return c && c.playerId === req.player.id && c.counterparty === 'player' ? c : null; };
 
 // Re-check a channel's standing on every use. A block, a suspension, or a
 // player leaving the org's platform (level or radius change) closes the
@@ -1005,10 +1020,22 @@ function channelClosedForCounterparty(channel, playerId) {
   return null;
 }
 
-// Channel view without internal ids the caller shouldn't hold.
-function channelViewFor(channel, viewer) {
-  const { orgId, guardianId, ...rest } = channel;
-  return { ...rest, ...(viewer === 'org' ? { orgId } : {}) };
+// Channel view without internal ids the caller shouldn't hold (an allowlist: the organisation's id only for the
+// organisation itself, the guardian's id never).
+const attachmentView = (a) => (a === null ? null : a.kind === 'clip'
+  ? { kind: 'clip', mediaId: a.mediaId, title: a.title, url: a.url, verifiedClip: a.verifiedClip }
+  : { kind: 'trial_report', reportId: a.reportId, orgName: a.orgName, summary: a.summary });
+function messageView(m) {
+  return { id: m.id, ts: m.ts, sender: { kind: m.sender.kind, id: m.sender.id, name: m.sender.name }, text: m.text, attachment: attachmentView(m.attachment), ...(m.clientMsgId !== undefined ? { clientMsgId: m.clientMsgId } : {}) };
+}
+function channelViewFor(c, viewer) {
+  return {
+    id: c.id, requestId: c.requestId, playerId: c.playerId, playerName: c.playerName,
+    ...(viewer === 'org' ? { orgId: c.orgId } : {}),
+    orgName: c.orgName, orgVerified: c.orgVerified, scoutName: c.scoutName, scoutRole: c.scoutRole, counterparty: c.counterparty,
+    createdAt: c.createdAt, lastActivityAt: c.lastActivityAt, messages: c.messages.map(messageView),
+    readBy: { org: c.readBy.org, counterparty: c.readBy.counterparty },
+  };
 }
 
 // Football activity feeds the streak/weekly-goal habit loop.
@@ -1580,34 +1607,31 @@ guardianRouter.post('/requests/:id/respond', (req, res) => {
 
 // Guardian-side message threads (adult-to-adult, moderated, logged).
 guardianRouter.get('/channels', (req, res) => {
-  res.json(db.channels.filter((c) => c.guardianId === req.guardian.id).map((c) => channelViewFor(c, 'guardian')));
+  res.json(channels.forGuardian(req.guardian.id).map((c) => channelViewFor(c, 'guardian')));
 });
 
 guardianRouter.post('/channels/:id/messages', (req, res) => {
-  const channel = db.channels.find((c) => c.id === req.params.id && c.guardianId === req.guardian.id);
+  const channel = guardianThread(req);
   if (!channel) return res.status(404).json({ error: 'CHANNEL_NOT_FOUND' });
   const closed = channelClosedForCounterparty(channel, channel.playerId);
   if (closed) return res.status(403).json(closed);
-  const { text } = req.body || {};
-  if (typeof text !== 'string' || !text.trim()) return res.status(400).json({ error: 'TEXT_REQUIRED' });
-  if (!moderateOrRefuse(res, text, { kind: 'guardian_message', channelId: channel.id })) return;
+  const input = messageInput(req, res); if (!input) return;
+  if (!moderateOrRefuse(res, input.text, { kind: 'guardian_message', channelId: channel.id })) return;
   const att = buildAttachment(channel, req.body, 'guardian');
   if (!att.ok) return res.status(400).json({ error: att.error });
-  const clientMsgId = req.body?.clientMsgId ? String(req.body.clientMsgId).slice(0, 64) : null;
-  res.status(201).json(postMessage(channel, { kind: 'guardian', id: req.guardian.id, name: req.guardian.name }, text.trim(), att.attachment, clientMsgId));
+  res.status(201).json(postMessage(channel, { kind: 'guardian', id: req.guardian.id, name: req.guardian.name }, input.text, att.attachment, input.clientMsgId));
 });
 
 guardianRouter.post('/channels/:id/read', (req, res) => {
-  const channel = db.channels.find((c) => c.id === req.params.id && c.guardianId === req.guardian.id);
+  const channel = guardianThread(req);
   if (!channel) return res.status(404).json({ error: 'CHANNEL_NOT_FOUND' });
-  channels.markRead(channel.id, 'counterparty', Date.now()); // S7d: the receipt column, in this route's save
-  persistNow();
+  const readBy = channels.markRead(channel.id, 'counterparty', Date.now());
   broadcast('messages', { channelId: channel.id });
-  res.json({ readBy: channel.readBy });
+  res.json({ readBy: { org: readBy.org, counterparty: readBy.counterparty } });
 });
 
 guardianRouter.post('/channels/:id/typing', (req, res) => {
-  const channel = db.channels.find((c) => c.id === req.params.id && c.guardianId === req.guardian.id);
+  const channel = guardianThread(req);
   if (!channel) return res.status(404).json({ error: 'CHANNEL_NOT_FOUND' });
   broadcast('typing', { channelId: channel.id, side: 'counterparty' });
   res.json({ ok: true });
@@ -2351,42 +2375,46 @@ orgRouter.get('/reports', (req, res) => {
   res.json(safetyAudit.reports.forReporter('org_user', req.orgUser.id).map(filedReportView));
 });
 
-// Message threads for this org — only exist where a request was accepted.
+// Message threads for this org — only exist where a request was accepted. Pages by cursor, most recently active
+// first (S14c); `playerId` limits the page to one player's threads (a Room's inbox panel).
 orgRouter.get('/channels', (req, res) => {
-  res.json(db.channels.filter((c) => c.orgId === req.org.id).map((c) => ({
-    ...channelViewFor(c, 'org'),
-    closed: !!channelClosedForOrg(c, req.org),
-  })));
+  let page;
+  try { page = readPage(req.query, ['number', 'number']); } catch (e) { return sendPageError(res, e); }
+  const { playerId } = req.query;
+  if (playerId !== undefined && (typeof playerId !== 'string' || !playerId || playerId.length > MESSAGE_LIMITS.id)) return fieldInvalid(res, 'playerId', 'playerId is the id of a player, as text.');
+  const out = channels.pageForOrg(req.org.id, { playerId: playerId ?? null }, page);
+  res.json({ items: out.items.map((c) => ({ ...channelViewFor(c, 'org'), closed: !!channelClosedForOrg(c, req.org) })), nextCursor: out.nextCursor });
 });
 
+// The inbox figures the home screens show: the organisation's threads and the messages from players and guardians
+// since the club last opened each thread.
+orgRouter.get('/channels/counts', (req, res) => res.json(channels.countsForOrg(req.org.id)));
+
 orgRouter.post('/channels/:id/messages', (req, res) => {
-  const channel = db.channels.find((c) => c.id === req.params.id && c.orgId === req.org.id);
+  const channel = orgThread(req);
   if (!channel) return res.status(404).json({ error: 'CHANNEL_NOT_FOUND' });
   // Eligibility is rechecked on every send, not just when the channel opened.
   const closed = channelClosedForOrg(channel, req.org);
   if (closed) return res.status(403).json(closed);
-  const { text } = req.body || {};
-  if (typeof text !== 'string' || !text.trim()) return res.status(400).json({ error: 'TEXT_REQUIRED' });
-  if (!moderateOrRefuse(res, text, { kind: 'org_message', channelId: channel.id })) return;
+  const input = messageInput(req, res); if (!input) return;
+  if (!moderateOrRefuse(res, input.text, { kind: 'org_message', channelId: channel.id })) return;
   const att = buildAttachment(channel, req.body, 'org');
   if (!att.ok) return res.status(400).json({ error: att.error });
   // postMessage notifies the counterparty (guardian or adult player).
-  const clientMsgId = req.body?.clientMsgId ? String(req.body.clientMsgId).slice(0, 64) : null;
-  const msg = postMessage(channel, { kind: 'org_user', id: req.orgUser.id, name: `${req.orgUser.name} · ${req.orgUser.role || 'Scout'} · ${req.org.name}` }, text.trim(), att.attachment, clientMsgId);
+  const msg = postMessage(channel, { kind: 'org_user', id: req.orgUser.id, name: `${req.orgUser.name} · ${req.orgUser.role || 'Scout'} · ${req.org.name}` }, input.text, att.attachment, input.clientMsgId);
   res.status(201).json(msg);
 });
 
 orgRouter.post('/channels/:id/read', (req, res) => {
-  const channel = db.channels.find((c) => c.id === req.params.id && c.orgId === req.org.id);
+  const channel = orgThread(req);
   if (!channel) return res.status(404).json({ error: 'CHANNEL_NOT_FOUND' });
-  channels.markRead(channel.id, 'org', Date.now()); // S7d: the receipt column, in this route's save
-  persistNow();
+  const readBy = channels.markRead(channel.id, 'org', Date.now());
   broadcast('messages', { channelId: channel.id });
-  res.json({ readBy: channel.readBy });
+  res.json({ readBy: { org: readBy.org, counterparty: readBy.counterparty } });
 });
 
 orgRouter.post('/channels/:id/typing', (req, res) => {
-  const channel = db.channels.find((c) => c.id === req.params.id && c.orgId === req.org.id);
+  const channel = orgThread(req);
   if (!channel) return res.status(404).json({ error: 'CHANNEL_NOT_FOUND' });
   if (channelClosedForOrg(channel, req.org)) return res.status(403).json({ error: 'CHANNEL_CLOSED' });
   broadcast('typing', { channelId: channel.id, side: 'org' });
@@ -3472,37 +3500,34 @@ playerRouter.post('/requests/:id/respond', (req, res) => {
 // Adult players talk in their own threads; a child never has one.
 playerRouter.get('/channels', (req, res) => {
   if (req.playerIsMinor) return res.json([]); // threads live with the guardian
-  res.json(db.channels.filter((c) => c.playerId === req.player.id && c.counterparty === 'player').map((c) => channelViewFor(c, 'player')));
+  res.json(channels.forPlayer(req.player.id, { counterparty: 'player' }).map((c) => channelViewFor(c, 'player')));
 });
 
 playerRouter.post('/channels/:id/messages', (req, res) => {
   if (guardianManagedOnly(req, res)) return;
-  const channel = db.channels.find((c) => c.id === req.params.id && c.playerId === req.player.id && c.counterparty === 'player');
+  const channel = playerThread(req);
   if (!channel) return res.status(404).json({ error: 'CHANNEL_NOT_FOUND' });
   const closed = channelClosedForCounterparty(channel, req.player.id);
   if (closed) return res.status(403).json(closed);
-  const { text } = req.body || {};
-  if (typeof text !== 'string' || !text.trim()) return res.status(400).json({ error: 'TEXT_REQUIRED' });
-  if (!moderateOrRefuse(res, text, { kind: 'player_message', channelId: channel.id })) return;
+  const input = messageInput(req, res); if (!input) return;
+  if (!moderateOrRefuse(res, input.text, { kind: 'player_message', channelId: channel.id })) return;
   const att = buildAttachment(channel, req.body, 'player');
   if (!att.ok) return res.status(400).json({ error: att.error });
-  const clientMsgId = req.body?.clientMsgId ? String(req.body.clientMsgId).slice(0, 64) : null;
-  res.status(201).json(postMessage(channel, { kind: 'player', id: req.player.id, name: req.player.name }, text.trim(), att.attachment, clientMsgId));
+  res.status(201).json(postMessage(channel, { kind: 'player', id: req.player.id, name: req.player.name }, input.text, att.attachment, input.clientMsgId));
 });
 
 playerRouter.post('/channels/:id/read', (req, res) => {
   if (guardianManagedOnly(req, res)) return;
-  const channel = db.channels.find((c) => c.id === req.params.id && c.playerId === req.player.id && c.counterparty === 'player');
+  const channel = playerThread(req);
   if (!channel) return res.status(404).json({ error: 'CHANNEL_NOT_FOUND' });
-  channels.markRead(channel.id, 'counterparty', Date.now()); // S7d: the receipt column, in this route's save
-  persistNow();
+  const readBy = channels.markRead(channel.id, 'counterparty', Date.now());
   broadcast('messages', { channelId: channel.id });
-  res.json({ readBy: channel.readBy });
+  res.json({ readBy: { org: readBy.org, counterparty: readBy.counterparty } });
 });
 
 playerRouter.post('/channels/:id/typing', (req, res) => {
   if (guardianManagedOnly(req, res)) return;
-  const channel = db.channels.find((c) => c.id === req.params.id && c.playerId === req.player.id && c.counterparty === 'player');
+  const channel = playerThread(req);
   if (!channel) return res.status(404).json({ error: 'CHANNEL_NOT_FOUND' });
   broadcast('typing', { channelId: channel.id, side: 'counterparty' });
   res.json({ ok: true });
@@ -4182,7 +4207,7 @@ function exportPlayer(p) {
     exportedAt: new Date().toISOString(),
     profile,
     requests: recruitment.requests.forPlayer(p.id).map(requestForRecipient),
-    threads: db.channels.filter((c) => c.playerId === p.id).map((c) => channelViewFor(c, 'player')),
+    threads: channels.forPlayer(p.id).map((c) => channelViewFor(c, 'player')),
     notifications: notificationsFor('player', p.id),
     insights: insightsFor(p.id),
     ledgerEvents: safetyAudit.ledger.forPlayer(p.id).map(ledgerView),
@@ -4322,10 +4347,9 @@ function deletePlayerData(playerId) {
   // M23 P6.1: Offers keep ids, states and times and lose the person's name and words.
   m28Ctx?.onPlayerDeleted?.(playerId, at);
   m29Ctx?.onPlayerDeleted?.(playerId, at);
-  // S7d (D-B, approved for this storage-only step): today's behaviour, reproduced
-  // — every thread of the player goes, guardian–club threads included, with its
-  // messages, attachments and receipts, inside this unit. No retention rule is
-  // introduced here; the retention question stays open for S4b.
+  // D-B: every thread of the player goes, guardian–club threads included, with
+  // its messages, attachments and receipts, inside this unit. The retention
+  // question stays open (S4b).
   channels.deleteForPlayer(playerId);
   notifications.deleteForAudience('player', playerId); // S7a: the person's rows go in this unit; their preferences are retained (no cascade, by decision)
   // (The pairing code row was revoked above, inside this unit, before the player row went.)
@@ -4462,7 +4486,7 @@ adminRouter.get('/overview', (_req, res) => {
     openReports: safetyAudit.reports.countOpen(),
     blocks: safetyAudit.blocks.count(),
     moderationHits: safetyAudit.moderationLog.count(),
-    channels: db.channels.length,
+    channels: channels.count(),
     signings: signingsFollowUps.signings.count(),
     invoices: operations.invoices.count(),
     emailsSent: db.outbox.length,
@@ -4609,7 +4633,13 @@ adminRouter.get('/moderation', (req, res) => {
 });
 
 // Thread audit — the "all communications logged" promise, made inspectable.
-adminRouter.get('/channels', (_req, res) => res.json(db.channels.map((c) => ({ ...c }))));
+// Pages by cursor, most recently active first (S14c).
+adminRouter.get('/channels', (req, res) => {
+  let page;
+  try { page = readPage(req.query, ['number', 'number']); } catch (e) { return sendPageError(res, e); }
+  const out = channels.page(page);
+  res.json({ items: out.items.map((c) => ({ ...channelViewFor(c, 'org'), guardianId: c.guardianId })), nextCursor: out.nextCursor });
+});
 
 // Serve uploaded media. Access is authorised, not public: either a valid
 // short-lived signature (minted only inside authorisation-checked API
