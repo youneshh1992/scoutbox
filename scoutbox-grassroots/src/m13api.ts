@@ -177,6 +177,7 @@ const G = (s: Session, path: string) => req<any>(path, { headers: H(s) });
 export const httpM13: M13Api = {
   importTemplateUrl: () => `${API_URL}/org/imports/template`,
   createImport: (s, csv) => P(s, '/org/imports', { csv }),
+  // The server pages this list ({ items, nextCursor }, newest first, S13a); the first page is shown. TODO: "load more" with ?cursor=.
   listImports: async (s) => (await G(s, '/org/imports')).items,
   commitImport: (s, id) => P(s, `/org/imports/${id}/commit`, { confirm: true }),
   reverseImport: (s, id) => P(s, `/org/imports/${id}/reverse`),

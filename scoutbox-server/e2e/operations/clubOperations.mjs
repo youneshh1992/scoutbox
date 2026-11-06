@@ -272,6 +272,58 @@ section('F1 — CSV import, identity, API keys, webhooks');
   r = await j('GET', '/org/connectors', undefined, maria.token);
   ok(r.body.items.every((c) => c.status === 'not_configured'), 'every provider connector honestly reports not_configured');
   receiver.close();
+
+  // S13a: integrations are typed tables — junk is refused naming the field, lists page by cursor, one live prospect
+  // per provider and external id holds on every path.
+  r = await j('POST', '/org/api-keys', { scopes: ['export:everything'] }, maria.token);
+  ok(r.status === 400 && r.body.error === 'FIELD_INVALID' && r.body.field === 'scopes[0]', 'an unknown API scope is refused, naming it (not silently dropped)');
+  r = await j('POST', '/org/api-keys', { scopes: 'export:shortlist' }, maria.token);
+  ok(r.status === 400 && r.body.field === 'scopes', 'scopes must be a list');
+  r = await j('POST', '/org/api-keys', { scopes: ['export:prospects'], label: 42 }, maria.token);
+  ok(r.status === 400 && r.body.field === 'label', 'a label that is not text is refused');
+  r = await j('POST', '/org/webhooks', { url: 'https://hooks.example.test/x', events: ['import.committed', 'nope'] }, maria.token);
+  ok(r.status === 400 && r.body.field === 'events[1]', 'an unknown webhook event is refused, naming it');
+  r = await j('POST', '/org/imports', { csv: 42 }, maria.token);
+  ok(r.status === 400 && r.body.field === 'csv', 'a csv that is not text is refused');
+  const head = 'name,dob,position,foot,heightCm,provider,externalId,notes';
+  r = await j('POST', '/org/imports', { csv: `${head}\nA B,,,,,p,1,`, mapping: { shoe: 'name' } }, maria.token);
+  ok(r.status === 400 && r.body.field === 'mapping', 'a mapping naming a column the CSV does not have is refused');
+  r = await j('POST', '/org/imports', { csv: `${head}\nA B,,,,,p,1,`, mapping: { name: 'shoeSize' } }, maria.token);
+  ok(r.status === 400 && r.body.field === 'mapping.name', 'a mapping to a field prospects do not have is refused');
+  r = await j('POST', '/org/imports', { csv: `${head}\nLong Notes,,,,,statsprovider,SP-LONG,${'x'.repeat(2001)}` }, maria.token);
+  ok(r.status === 201 && r.body.batch.rows[0].disposition === 'error' && r.body.batch.rows[0].errors.some((e) => e.includes('notes exceeds 2000')), 'an over-long cell is a row error, not a stored blob');
+
+  r = await j('GET', '/org/imports?limit=1', undefined, maria.token);
+  ok(r.status === 200 && r.body.items.length === 1 && typeof r.body.nextCursor === 'string' && r.body.items[0].rows === undefined && Number.isInteger(r.body.items[0].rowCount), 'import batches page by cursor, newest first, without their rows');
+  const nextImports = await j('GET', `/org/imports?limit=1&cursor=${r.body.nextCursor}`, undefined, maria.token);
+  ok(nextImports.status === 200 && nextImports.body.items[0]?.id !== r.body.items[0].id, 'the cursor continues where the first page ended');
+  ok((await j('GET', '/org/imports?limit=0', undefined, maria.token)).body.error === 'PAGE_LIMIT_INVALID', 'a junk page limit is refused');
+  r = await j('GET', '/org/prospects', undefined, maria.token);
+  ok(r.status === 200 && Array.isArray(r.body.items) && 'nextCursor' in r.body && r.body.items.some((p) => p.externalId === 'SP-77' && p.dob === '2002-01-01' && p.heightCm === 190), 'prospects page by cursor, typed (height a number, dob a day)');
+
+  // "Keep separate" honours the same identity rule the import applies.
+  r = await j('POST', '/org/imports', { csv: `${head}\nKola Adeyemi,2004-03-14,ST,right,181,statsprovider,SP-500,again` }, maria.token);
+  const ambiguousBatch = r.body.batch.id;
+  ok(r.body.batch.summary.ambiguous === 1, 'a name + dob match is queued as ambiguous');
+  await j('POST', `/org/imports/${ambiguousBatch}/commit`, { confirm: true }, maria.token);
+  const sepReview = (await j('GET', '/org/identity-reviews', undefined, maria.token)).body.items.find((x) => x.batchId === ambiguousBatch);
+  ok(sepReview?.record?.externalId === 'SP-500', 'the review shows its batch row\'s record');
+  const takenBatch = (await j('POST', '/org/imports', { csv: `${head}\nSomeone Else,,,,,statsprovider,SP-500,` }, maria.token)).body.batch.id;
+  r = await j('POST', `/org/imports/${takenBatch}/commit`, { confirm: true }, maria.token);
+  ok(r.status === 200 && r.body.created === 1, 'another import takes SP-500 meanwhile');
+  r = await j('POST', `/org/identity-reviews/${sepReview.id}/resolve`, { action: 'separate' }, maria.token);
+  ok(r.status === 409 && r.body.error === 'ALREADY_IMPORTED', 'keeping the record separate is refused while SP-500 is a live prospect');
+  r = await j('POST', `/org/imports/${takenBatch}/reverse`, {}, maria.token);
+  ok(r.status === 200 && r.body.removed === 1, 'the other import is reversed');
+  r = await j('POST', `/org/identity-reviews/${sepReview.id}/resolve`, { action: 'separate' }, maria.token);
+  ok(r.status === 200 && r.body.review.resolution === 'kept_separate', 'then the record is kept separate');
+  r = await j('GET', '/org/prospects', undefined, maria.token);
+  ok(r.body.items.filter((p) => p.externalId === 'SP-500').length === 1 && r.body.items.find((p) => p.externalId === 'SP-500').minor === false, 'one live SP-500 prospect, with its minor flag computed');
+  const prospectsKey = (await j('POST', '/org/api-keys', { scopes: ['export:prospects'] }, maria.token)).body.plaintext;
+  const exp2 = await (await fetch(`${BASE}/api/v1/export/prospects`, { headers: { Authorization: `ApiKey ${prospectsKey}` } })).json();
+  ok(exp2.items.length >= 1 && exp2.items.every((p) => p.linkedPlayerId === null), 'the prospects export keeps linkedPlayerId in its contract (null)');
+  const usedKey = (await j('GET', '/org/api-keys', undefined, maria.token)).body.items.at(-1);
+  ok(Number.isInteger(usedKey.lastUsedAt) && usedKey.keyHash === undefined, 'a use of the key is recorded; its hash is never served');
 }
 
 // ================================================================ F12

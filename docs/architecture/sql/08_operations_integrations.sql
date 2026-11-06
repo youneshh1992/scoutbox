@@ -22,125 +22,249 @@
 -- =====================================================================
 
 
--- ---------------------------------------------------------------------
--- api_keys
--- source: db.apiKeys  created at m13/shared.mjs:13 (migrateM13); rows minted at domains/integrations/imports.mjs:259-265
--- owner/writer: domains/integrations/imports.mjs   lifecycle: live until revoked_at set (soft revoke, never deleted)
--- mapping: id -> id (key-N); orgId -> org_id; scopes[] -> api_key_scopes child table;
---          keyHash -> key_hash (already sha256 hex of the plaintext, unsalted, imports.mjs:261 — unchanged);
---          label -> label; createdBy -> created_by_name (code stores req.orgUser.name, not an id);
---          createdAt -> created_at; revokedAt -> revoked_at; lastUsedAt -> last_used_at
--- notes: plaintext key shown once at creation, never stored. Lookup by key_hash where
---        revoked_at IS NULL on every /api/v1 request (imports.mjs:284) — unique index is NEW
---        (48 random hex bytes make collisions impossible; code never checked). last_used_at is
---        written on every API call without persist() (imports.mjs:287) — lost on crash today.
--- ---------------------------------------------------------------------
+-- =====================================================================
+-- M13 F1 — imports, prospects, identity reviews, API keys, webhooks
+-- S13a: IMPLEMENTED, migration 0034_integrations REGISTERED (repositories/integrations.mjs, 6 Nov 2026).
+-- The DDL below is the migration's, generated from the repository's field specs (scripts/testSchemaDdl.mjs compares
+-- them column for column).
+-- =====================================================================
+--
+-- An import batch (imp-*) is one CSV upload's dry run (domains/integrations/imports.mjs). Its header row is ordered
+-- import_batch_columns rows; `field` is the prospect field the column mapping named for that column (NULL when no
+-- mapping named it), and import_batches.mapped says whether a mapping was given at all (the response's `mapping` is
+-- null otherwise). Every data row is an import_batch_rows row: the record's fields are columns (NULL when the CSV did
+-- not map the field, '' when the mapped cell was empty; a cell longer than its column holds is a row error, kept cut to
+-- the limit), its validation messages are ordered import_batch_row_errors rows, match_player_id names the platform
+-- player it matched (no key: a tombstone survives an account deletion). The summary counts are columns (they must add
+-- up). The history (validated, committed, reversed) is typed: a commit's detail is created_count, a reversal's
+-- removed_count and kept_count, a validation's the batch summary itself (not stored twice). No JSON column: the
+-- header, the mapping and the messages were JSON blobs in the target design.
+--
+-- A prospect (prs-*) is an organisation-private record, never a platform account. At most one live (not reversed)
+-- prospect per (org_id, provider, external_id): the import's validation and the identity review's "keep separate"
+-- both check it, and the partial unique index holds it. The never-written linked_player_id and modified_at of the
+-- target design are gone (the export still answers linkedPlayerId: null). import_batch_created_prospects lists the
+-- prospects a commit created, in order: the ones a reversal undoes (a review kept separate is not among them).
+--
+-- An identity review (idr-*) names its batch row with a key (batch_id, row_no); its record is that row's, never a copy.
+--
+-- An API key (key-*) is stored only as the sha-256 of the plain key (shown once); scopes are ordered rows. last_used_at
+-- is written by an explicit UPDATE on each authorised call.
+--
+-- A webhook endpoint (whk-*): the signing secrets are plain because the server signs with them (OPERATIONS.md), and no
+-- list serves them; events are ordered rows. A delivery (dlv-*) carries a typed payload: subject_id is the record the
+-- event names (the batch, review, transition or dispatch), created_count only for import.committed, resolution only
+-- for identity.resolved; event_id is the receivers' replay key, unique. Attempts are numbered rows, each an HTTP status
+-- or an error.
+--
+-- Keys: organisations and staff RESTRICT; inside the domain RESTRICT (a prospect's batch, a review's row, a delivery's
+-- endpoint) or a child's CASCADE. Player ids carry no key.
+CREATE TABLE import_batches (
+  id                                       TEXT PRIMARY KEY CHECK (length(id) > 0 AND length(id) <= 80),
+  org_id                                   TEXT NOT NULL CHECK (length(org_id) <= 80 AND length(org_id) > 0),
+  kind                                     TEXT NOT NULL CHECK (kind IN ('prospects')),
+  created_by_user_id                       TEXT NOT NULL CHECK (length(created_by_user_id) <= 80 AND length(created_by_user_id) > 0),
+  created_by_name                          TEXT CHECK (created_by_name IS NULL OR length(created_by_name) <= 200),
+  created_at                               INTEGER NOT NULL,
+  mapped                                   INTEGER NOT NULL CHECK (mapped IN (0,1)),
+  status                                   TEXT NOT NULL CHECK (status IN ('validated','committed','reversed')),
+  summary_total                            INTEGER NOT NULL,
+  summary_creatable                        INTEGER NOT NULL,
+  summary_errors                           INTEGER NOT NULL,
+  summary_duplicates_in_file               INTEGER NOT NULL,
+  summary_already_imported                 INTEGER NOT NULL,
+  summary_linked_existing                  INTEGER NOT NULL,
+  summary_ambiguous                        INTEGER NOT NULL,
+  committed_at                             INTEGER,
+  reversed_at                              INTEGER,
+  FOREIGN KEY (org_id) REFERENCES orgs(id) ON DELETE RESTRICT,
+  FOREIGN KEY (created_by_user_id) REFERENCES org_users(id) ON DELETE RESTRICT,
+  CHECK (summary_total >= 0 AND summary_total <= 2000),
+  CHECK (summary_creatable >= 0 AND summary_errors >= 0 AND summary_duplicates_in_file >= 0 AND summary_already_imported >= 0 AND summary_linked_existing >= 0 AND summary_ambiguous >= 0),
+  CHECK (summary_total = summary_creatable + summary_errors + summary_duplicates_in_file + summary_already_imported + summary_linked_existing + summary_ambiguous),
+  CHECK ((status = 'validated') = (committed_at IS NULL)),
+  CHECK ((status = 'reversed') = (reversed_at IS NOT NULL))
+) STRICT;
+CREATE INDEX import_batches_org_status ON import_batches (org_id, status);
+CREATE TABLE import_batch_columns (
+  batch_id                                 TEXT NOT NULL CHECK (length(batch_id) > 0 AND length(batch_id) <= 80),
+  ord                                      INTEGER NOT NULL CHECK (ord >= 0),
+  header                                   TEXT NOT NULL CHECK (length(header) <= 200),
+  field                                    TEXT CHECK (field IS NULL OR field IN ('name','dob','position','foot','heightCm','provider','externalId','notes')),
+  FOREIGN KEY (batch_id) REFERENCES import_batches(id) ON DELETE CASCADE,
+  PRIMARY KEY (batch_id, ord)
+) STRICT;
+CREATE TABLE import_batch_rows (
+  batch_id                                 TEXT NOT NULL CHECK (length(batch_id) > 0 AND length(batch_id) <= 80),
+  row_no                                   INTEGER NOT NULL CHECK (row_no >= 2),
+  record_name                              TEXT CHECK (record_name IS NULL OR length(record_name) <= 200),
+  record_dob                               TEXT CHECK (record_dob IS NULL OR length(record_dob) <= 40),
+  record_position                          TEXT CHECK (record_position IS NULL OR length(record_position) <= 20),
+  record_foot                              TEXT CHECK (record_foot IS NULL OR length(record_foot) <= 20),
+  record_height_cm                         TEXT CHECK (record_height_cm IS NULL OR length(record_height_cm) <= 20),
+  record_provider                          TEXT CHECK (record_provider IS NULL OR length(record_provider) <= 80),
+  record_external_id                       TEXT CHECK (record_external_id IS NULL OR length(record_external_id) <= 80),
+  record_notes                             TEXT CHECK (record_notes IS NULL OR length(record_notes) <= 2000),
+  disposition                              TEXT NOT NULL CHECK (disposition IN ('create','error','duplicate_in_file','already_imported','linked_player_exists','ambiguous_identity')),
+  match_player_id                          TEXT CHECK (match_player_id IS NULL OR (length(match_player_id) > 0 AND length(match_player_id) <= 80)),
+  FOREIGN KEY (batch_id) REFERENCES import_batches(id) ON DELETE CASCADE,
+  PRIMARY KEY (batch_id, row_no),
+  CHECK ((match_player_id IS NOT NULL) = (disposition IN ('linked_player_exists','ambiguous_identity')))
+) STRICT;
+CREATE TABLE import_batch_row_errors (
+  batch_id                                 TEXT NOT NULL CHECK (length(batch_id) > 0 AND length(batch_id) <= 80),
+  row_no                                   INTEGER NOT NULL,
+  ord                                      INTEGER NOT NULL CHECK (ord >= 0),
+  message                                  TEXT NOT NULL CHECK (length(message) > 0 AND length(message) <= 300),
+  FOREIGN KEY (batch_id, row_no) REFERENCES import_batch_rows(batch_id, row_no) ON DELETE CASCADE,
+  PRIMARY KEY (batch_id, row_no, ord)
+) STRICT;
+CREATE TABLE import_batch_history (
+  id                                       TEXT PRIMARY KEY CHECK (length(id) > 0 AND length(id) <= 80),
+  batch_id                                 TEXT NOT NULL CHECK (length(batch_id) <= 80 AND length(batch_id) > 0),
+  at                                       INTEGER NOT NULL,
+  by_kind                                  TEXT NOT NULL CHECK (by_kind IN ('org_user')),
+  by_user_id                               TEXT NOT NULL CHECK (length(by_user_id) <= 80 AND length(by_user_id) > 0),
+  by_name                                  TEXT CHECK (by_name IS NULL OR length(by_name) <= 200),
+  action                                   TEXT NOT NULL CHECK (action IN ('validated','committed','reversed')),
+  created_count                            INTEGER,
+  removed_count                            INTEGER,
+  kept_count                               INTEGER,
+  FOREIGN KEY (batch_id) REFERENCES import_batches(id) ON DELETE CASCADE,
+  FOREIGN KEY (by_user_id) REFERENCES org_users(id) ON DELETE RESTRICT,
+  CHECK ((action = 'committed') = (created_count IS NOT NULL)),
+  CHECK ((action = 'reversed') = (removed_count IS NOT NULL)),
+  CHECK ((action = 'reversed') = (kept_count IS NOT NULL)),
+  CHECK (created_count IS NULL OR created_count >= 0),
+  CHECK (removed_count IS NULL OR (removed_count >= 0 AND kept_count >= 0))
+) STRICT;
+CREATE INDEX import_batch_history_batch ON import_batch_history (batch_id, at);
+CREATE TABLE prospects (
+  id                                       TEXT PRIMARY KEY CHECK (length(id) > 0 AND length(id) <= 80),
+  org_id                                   TEXT NOT NULL CHECK (length(org_id) <= 80 AND length(org_id) > 0),
+  batch_id                                 TEXT NOT NULL CHECK (length(batch_id) <= 80 AND length(batch_id) > 0),
+  name                                     TEXT NOT NULL CHECK (length(name) <= 200 AND length(name) > 0),
+  dob                                      TEXT CHECK (dob IS NULL OR length(dob) <= 10),
+  position                                 TEXT CHECK (position IS NULL OR position IN ('GK','CB','RB','LB','RWB','LWB','CDM','CM','CAM','RW','LW','ST','CF')),
+  foot                                     TEXT CHECK (foot IS NULL OR length(foot) <= 20 AND length(foot) > 0),
+  height_cm                                INTEGER,
+  provider                                 TEXT NOT NULL CHECK (length(provider) <= 80 AND length(provider) > 0),
+  external_id                              TEXT NOT NULL CHECK (length(external_id) <= 80 AND length(external_id) > 0),
+  notes                                    TEXT CHECK (notes IS NULL OR length(notes) <= 2000 AND length(notes) > 0),
+  minor                                    INTEGER CHECK (minor IS NULL OR minor IN (0,1)),
+  created_at                               INTEGER NOT NULL,
+  reversed_at                              INTEGER,
+  FOREIGN KEY (org_id) REFERENCES orgs(id) ON DELETE RESTRICT,
+  FOREIGN KEY (batch_id) REFERENCES import_batches(id) ON DELETE RESTRICT,
+  CHECK (dob IS NULL OR dob GLOB '[0-9][0-9][0-9][0-9]-[0-1][0-9]-[0-3][0-9]'),
+  CHECK (height_cm IS NULL OR (height_cm >= 100 AND height_cm <= 230))
+) STRICT;
+CREATE UNIQUE INDEX prospects_live_identity ON prospects (org_id, provider, external_id) WHERE reversed_at IS NULL;
+CREATE INDEX prospects_org ON prospects (org_id, reversed_at);
+CREATE INDEX prospects_batch ON prospects (batch_id);
+CREATE TABLE import_batch_created_prospects (
+  batch_id                                 TEXT NOT NULL CHECK (length(batch_id) > 0 AND length(batch_id) <= 80),
+  ord                                      INTEGER NOT NULL CHECK (ord >= 0),
+  prospect_id                              TEXT NOT NULL CHECK (length(prospect_id) > 0 AND length(prospect_id) <= 80),
+  FOREIGN KEY (batch_id) REFERENCES import_batches(id) ON DELETE CASCADE,
+  FOREIGN KEY (prospect_id) REFERENCES prospects(id) ON DELETE RESTRICT,
+  PRIMARY KEY (batch_id, ord),
+  UNIQUE (prospect_id)
+) STRICT;
+CREATE TABLE identity_reviews (
+  id                                       TEXT PRIMARY KEY CHECK (length(id) > 0 AND length(id) <= 80),
+  org_id                                   TEXT NOT NULL CHECK (length(org_id) <= 80 AND length(org_id) > 0),
+  batch_id                                 TEXT NOT NULL CHECK (length(batch_id) <= 80 AND length(batch_id) > 0),
+  row_no                                   INTEGER NOT NULL,
+  candidate_player_id                      TEXT NOT NULL CHECK (length(candidate_player_id) <= 80 AND length(candidate_player_id) > 0),
+  status                                   TEXT NOT NULL CHECK (status IN ('open','resolved')),
+  resolved_by_name                         TEXT CHECK (resolved_by_name IS NULL OR length(resolved_by_name) <= 200),
+  resolved_at                              INTEGER,
+  resolution                               TEXT CHECK (resolution IS NULL OR resolution IN ('linked','kept_separate')),
+  created_at                               INTEGER NOT NULL,
+  FOREIGN KEY (org_id) REFERENCES orgs(id) ON DELETE RESTRICT,
+  FOREIGN KEY (batch_id, row_no) REFERENCES import_batch_rows(batch_id, row_no) ON DELETE RESTRICT,
+  CHECK ((status = 'resolved') = (resolution IS NOT NULL)),
+  CHECK ((status = 'resolved') = (resolved_at IS NOT NULL)),
+  UNIQUE (batch_id, row_no)
+) STRICT;
+CREATE INDEX identity_reviews_org_status ON identity_reviews (org_id, status);
 CREATE TABLE api_keys (
-  id              TEXT PRIMARY KEY,
-  org_id          TEXT NOT NULL REFERENCES orgs(id) ON DELETE RESTRICT,
-  key_hash        TEXT NOT NULL,                       -- sha256 hex; plain never stored (same as today)
-  label           TEXT NOT NULL,
-  created_by_name TEXT NOT NULL,                       -- snapshot
-  created_at      INTEGER NOT NULL,
-  revoked_at      INTEGER,
-  last_used_at    INTEGER
+  id                                       TEXT PRIMARY KEY CHECK (length(id) > 0 AND length(id) <= 80),
+  org_id                                   TEXT NOT NULL CHECK (length(org_id) <= 80 AND length(org_id) > 0),
+  key_hash                                 TEXT NOT NULL CHECK (length(key_hash) <= 64),
+  label                                    TEXT NOT NULL CHECK (length(label) <= 60),
+  created_by_name                          TEXT CHECK (created_by_name IS NULL OR length(created_by_name) <= 200),
+  created_at                               INTEGER NOT NULL,
+  revoked_at                               INTEGER,
+  last_used_at                             INTEGER,
+  FOREIGN KEY (org_id) REFERENCES orgs(id) ON DELETE RESTRICT,
+  CHECK (key_hash GLOB '[0-9a-f]*' AND length(key_hash) = 64),
+  UNIQUE (key_hash)
 ) STRICT;
-CREATE UNIQUE INDEX api_keys_key_hash ON api_keys(key_hash);
-CREATE INDEX api_keys_org_id ON api_keys(org_id);
-
--- source: db.apiKeys[].scopes[]  (string array, imports.mjs:256)
--- owner/writer: domains/integrations/imports.mjs   lifecycle: set once at creation, never changed
--- mapping: each scope string -> one row (api_key_id, scope); PK is the natural pair
--- notes: values limited to API_SCOPES (imports.mjs:253). At least one scope is enforced by code.
+CREATE INDEX api_keys_org ON api_keys (org_id);
 CREATE TABLE api_key_scopes (
-  api_key_id TEXT NOT NULL REFERENCES api_keys(id) ON DELETE CASCADE,
-  scope      TEXT NOT NULL CHECK (scope IN ('export:prospects', 'export:shortlist')),
-  PRIMARY KEY (api_key_id, scope)
+  api_key_id                               TEXT NOT NULL CHECK (length(api_key_id) > 0 AND length(api_key_id) <= 80),
+  ord                                      INTEGER NOT NULL CHECK (ord >= 0),
+  scope                                    TEXT NOT NULL CHECK (scope IN ('export:prospects','export:shortlist')),
+  FOREIGN KEY (api_key_id) REFERENCES api_keys(id) ON DELETE CASCADE,
+  PRIMARY KEY (api_key_id, ord),
+  UNIQUE (api_key_id, scope)
 ) STRICT;
-
-
--- ---------------------------------------------------------------------
--- webhook_endpoints
--- source: db.webhookEndpoints  created at m13/shared.mjs:14; rows minted at domains/integrations/imports.mjs:329-334
--- owner/writer: domains/integrations/imports.mjs   lifecycle: active 1 -> 0 on deactivate (never deleted)
--- mapping: id -> id (whk-N); orgId -> org_id; url -> url; events[] -> webhook_endpoint_events child table;
---          secret -> secret; secretPrev -> secret_prev; secretPrevValidUntil -> secret_prev_valid_until;
---          active -> active; createdBy -> created_by_name (name string, imports.mjs:332); createdAt -> created_at
--- notes: secret / secret_prev are NOT hashed: the server must sign outgoing bodies with the plain
---        secret (imports.mjs:401 signBody(w.secret, ...)) so a hash cannot replace it.
---        -- secret material, encrypt at rest (open question). OPERATIONS.md:12 states these are tenant
---        data that live in the database by design. Both are stripped from every API response.
---        Rotation keeps the previous secret 24h (imports.mjs:343-345). URL is SSRF-checked on write
---        and again on every delivery (webhookUrlProblem). Read patterns: by org; by org+active+event
---        on emit (imports.mjs:367); by id on delivery (imports.mjs:386).
--- ---------------------------------------------------------------------
 CREATE TABLE webhook_endpoints (
-  id                     TEXT PRIMARY KEY,
-  org_id                 TEXT NOT NULL REFERENCES orgs(id) ON DELETE RESTRICT,
-  url                    TEXT NOT NULL,
-  secret                 TEXT NOT NULL,                -- secret material, encrypt at rest (open question)
-  secret_prev            TEXT,                         -- secret material, encrypt at rest (open question)
-  secret_prev_valid_until INTEGER,
-  active                 INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1)),
-  created_by_name        TEXT NOT NULL,                -- snapshot
-  created_at             INTEGER NOT NULL
+  id                                       TEXT PRIMARY KEY CHECK (length(id) > 0 AND length(id) <= 80),
+  org_id                                   TEXT NOT NULL CHECK (length(org_id) <= 80 AND length(org_id) > 0),
+  url                                      TEXT NOT NULL CHECK (length(url) <= 2000 AND length(url) > 0),
+  secret                                   TEXT NOT NULL CHECK (length(secret) <= 200 AND length(secret) > 0),
+  secret_prev                              TEXT CHECK (secret_prev IS NULL OR length(secret_prev) <= 200 AND length(secret_prev) > 0),
+  secret_prev_valid_until                  INTEGER,
+  active                                   INTEGER NOT NULL CHECK (active IN (0,1)),
+  created_by_name                          TEXT CHECK (created_by_name IS NULL OR length(created_by_name) <= 200),
+  created_at                               INTEGER NOT NULL,
+  FOREIGN KEY (org_id) REFERENCES orgs(id) ON DELETE RESTRICT,
+  CHECK ((secret_prev IS NULL) = (secret_prev_valid_until IS NULL))
 ) STRICT;
-CREATE INDEX webhook_endpoints_org_id_active ON webhook_endpoints(org_id, active);
-
--- source: db.webhookEndpoints[].events[]  (string array filtered to WEBHOOK_EVENTS, imports.mjs:321,327)
--- owner/writer: domains/integrations/imports.mjs   lifecycle: set once at creation
--- mapping: each event string -> one row (endpoint_id, event); natural PK
--- notes: emit filters `x.events.includes(type)` — served by the PK.
+CREATE INDEX webhook_endpoints_org ON webhook_endpoints (org_id, active);
 CREATE TABLE webhook_endpoint_events (
-  endpoint_id TEXT NOT NULL REFERENCES webhook_endpoints(id) ON DELETE CASCADE,
-  event       TEXT NOT NULL CHECK (event IN ('import.committed', 'identity.resolved', 'transition.granted', 'transition.revoked', 'delivery.failed')),
-  PRIMARY KEY (endpoint_id, event)
+  endpoint_id                              TEXT NOT NULL CHECK (length(endpoint_id) > 0 AND length(endpoint_id) <= 80),
+  ord                                      INTEGER NOT NULL CHECK (ord >= 0),
+  event                                    TEXT NOT NULL CHECK (event IN ('import.committed','identity.resolved','transition.granted','transition.revoked','delivery.failed')),
+  FOREIGN KEY (endpoint_id) REFERENCES webhook_endpoints(id) ON DELETE CASCADE,
+  PRIMARY KEY (endpoint_id, ord),
+  UNIQUE (endpoint_id, event)
 ) STRICT;
-
-
--- ---------------------------------------------------------------------
--- webhook_deliveries
--- source: db.webhookDeliveries  created at m13/shared.mjs:15; rows minted at domains/integrations/imports.mjs:368-372
--- owner/writer: domains/integrations/imports.mjs (emitWebhook, deliverOne, webhookSweep)
--- lifecycle: queued -> retrying* -> delivered | failed | abandoned; NEVER pruned
--- mapping: id -> id (dlv-N); endpointId -> endpoint_id; orgId -> org_id; eventId -> event_id;
---          type -> type; data -> data_json; status -> status; attempts[] -> webhook_delivery_attempts child table;
---          nextAt -> next_at; createdAt -> created_at; deliveredAt (added on success only, imports.mjs:407) -> delivered_at
--- notes: data_json stays JSON because it is the free-form event payload by design (each event type
---        carries its own small object: {batchId,created} / {reviewId,resolution} / {dispatchId} / transition
---        payloads) — it is serialised verbatim into the signed body and never queried. event_id is the
---        receiver-side replay key (guidance imports.mjs:317) so it is unique here (NEW, 12 random bytes).
---        Read patterns: sweep = status IN ('queued','retrying') AND next_at <= now (imports.mjs:421);
---        per-endpoint last 100 (imports.mjs:362); backlog count by status (enterprise.mjs:511).
--- ---------------------------------------------------------------------
 CREATE TABLE webhook_deliveries (
-  id           TEXT PRIMARY KEY,
-  endpoint_id  TEXT NOT NULL REFERENCES webhook_endpoints(id) ON DELETE RESTRICT,
-  org_id       TEXT NOT NULL REFERENCES orgs(id) ON DELETE RESTRICT,
-  event_id     TEXT NOT NULL,
-  type         TEXT NOT NULL CHECK (type IN ('import.committed', 'identity.resolved', 'transition.granted', 'transition.revoked', 'delivery.failed')),
-  data_json    TEXT NOT NULL CHECK (json_valid(data_json)),  -- free-form event payload by design (signed verbatim)
-  status       TEXT NOT NULL CHECK (status IN ('queued', 'retrying', 'delivered', 'failed', 'abandoned')),
-  next_at      INTEGER NOT NULL,
-  created_at   INTEGER NOT NULL,
-  delivered_at INTEGER
+  id                                       TEXT PRIMARY KEY CHECK (length(id) > 0 AND length(id) <= 80),
+  endpoint_id                              TEXT NOT NULL CHECK (length(endpoint_id) <= 80 AND length(endpoint_id) > 0),
+  org_id                                   TEXT NOT NULL CHECK (length(org_id) <= 80 AND length(org_id) > 0),
+  event_id                                 TEXT NOT NULL CHECK (length(event_id) <= 80 AND length(event_id) > 0),
+  type                                     TEXT NOT NULL CHECK (type IN ('import.committed','identity.resolved','transition.granted','transition.revoked','delivery.failed')),
+  subject_id                               TEXT NOT NULL CHECK (length(subject_id) <= 80 AND length(subject_id) > 0),
+  created_count                            INTEGER,
+  resolution                               TEXT CHECK (resolution IS NULL OR resolution IN ('linked','kept_separate')),
+  status                                   TEXT NOT NULL CHECK (status IN ('queued','retrying','delivered','failed','abandoned')),
+  next_at                                  INTEGER NOT NULL,
+  created_at                               INTEGER NOT NULL,
+  delivered_at                             INTEGER,
+  FOREIGN KEY (endpoint_id) REFERENCES webhook_endpoints(id) ON DELETE RESTRICT,
+  FOREIGN KEY (org_id) REFERENCES orgs(id) ON DELETE RESTRICT,
+  UNIQUE (event_id),
+  CHECK ((type = 'import.committed') = (created_count IS NOT NULL)),
+  CHECK (created_count IS NULL OR created_count >= 0),
+  CHECK ((type = 'identity.resolved') = (resolution IS NOT NULL)),
+  CHECK ((status = 'delivered') = (delivered_at IS NOT NULL))
 ) STRICT;
-CREATE UNIQUE INDEX webhook_deliveries_event_id ON webhook_deliveries(event_id);
-CREATE INDEX webhook_deliveries_endpoint_id_created_at ON webhook_deliveries(endpoint_id, created_at);
-CREATE INDEX webhook_deliveries_status_next_at ON webhook_deliveries(status, next_at);
-
--- source: db.webhookDeliveries[].attempts[]  ({at,status} on HTTP response, {at,error} on fetch error /
---         rejected destination; imports.mjs:389,406,409)
--- owner/writer: domains/integrations/imports.mjs deliverOne   lifecycle: append-only, max 5 per delivery (MAX_ATTEMPTS)
--- mapping: array index -> attempt_no (1-based); at -> attempted_at; status -> http_status; error -> error
--- notes: no id in source; natural PK (delivery_id, attempt_no). Retry ladder RETRY_MS is code, not data.
+CREATE INDEX webhook_deliveries_endpoint ON webhook_deliveries (endpoint_id);
+CREATE INDEX webhook_deliveries_due ON webhook_deliveries (status, next_at);
 CREATE TABLE webhook_delivery_attempts (
-  delivery_id  TEXT NOT NULL REFERENCES webhook_deliveries(id) ON DELETE CASCADE,
-  attempt_no   INTEGER NOT NULL CHECK (attempt_no >= 1),
-  attempted_at INTEGER NOT NULL,
-  http_status  INTEGER,
-  error        TEXT,                                   -- <=120 chars, imports.mjs:409
-  PRIMARY KEY (delivery_id, attempt_no)
+  delivery_id                              TEXT NOT NULL CHECK (length(delivery_id) > 0 AND length(delivery_id) <= 80),
+  attempt_no                               INTEGER NOT NULL CHECK (attempt_no >= 1),
+  attempted_at                             INTEGER NOT NULL,
+  http_status                              INTEGER CHECK (http_status IS NULL OR (http_status >= 100 AND http_status <= 599)),
+  error                                    TEXT CHECK (error IS NULL OR length(error) <= 200),
+  FOREIGN KEY (delivery_id) REFERENCES webhook_deliveries(id) ON DELETE CASCADE,
+  PRIMARY KEY (delivery_id, attempt_no),
+  CHECK ((http_status IS NULL) <> (error IS NULL))
 ) STRICT;
 
 
@@ -311,175 +435,6 @@ CREATE TABLE support_access_log (
   what        TEXT NOT NULL,
   PRIMARY KEY (grant_id, access_no)
 ) STRICT;
-
-
--- ---------------------------------------------------------------------
--- import_batches
--- source: db.importBatches  created at m13/shared.mjs:10; rows minted at domains/integrations/imports.mjs:112-127
--- owner/writer: domains/integrations/imports.mjs   lifecycle: validated -> committed -> reversed; never deleted
--- mapping: id -> id (imp-N); orgId -> org_id; kind -> kind; createdBy -> created_by_user_id (user id);
---          createdByName -> created_by_name; createdAt -> created_at;
---          header[] -> header_json (the uploaded CSV's header row — free-form by design, user-supplied column names);
---          mapping{} -> mapping_json (csvColumn -> prospect field, or null — free-form by design, keyed by user column names);
---          rows[] -> import_batch_rows child table; status -> status;
---          summary.total -> summary_total; summary.creatable -> summary_creatable; summary.errors -> summary_errors;
---          summary.duplicatesInFile -> summary_duplicates_in_file; summary.alreadyImported -> summary_already_imported;
---          summary.linkedExisting -> summary_linked_existing; summary.ambiguous -> summary_ambiguous;
---          committedAt -> committed_at; reversedAt -> reversed_at;
---          createdProspectIds[] -> import_batch_created_prospects child table;
---          history[] -> import_batches_history
--- notes: summary is a stored snapshot of counts over rows (kept as columns: it is what the list endpoint
---        serves without loading rows). Read patterns: by org newest first (imports.mjs:136); by id+org;
---        by org+status='committed' (enterprise.mjs:135 onboarding); admin last 50; support view by id.
---        The batch (not its rows) is the unit of the dry run: POST /imports writes only this record.
--- ---------------------------------------------------------------------
-CREATE TABLE import_batches (
-  id                          TEXT PRIMARY KEY,
-  org_id                      TEXT NOT NULL REFERENCES orgs(id) ON DELETE RESTRICT,
-  kind                        TEXT NOT NULL CHECK (kind IN ('prospects')),
-  created_by_user_id          TEXT NOT NULL REFERENCES org_users(id) ON DELETE RESTRICT,
-  created_by_name             TEXT NOT NULL,           -- snapshot
-  created_at                  INTEGER NOT NULL,
-  header_json                 TEXT NOT NULL CHECK (json_valid(header_json)),      -- CSV header row, free-form by design
-  mapping_json                TEXT CHECK (mapping_json IS NULL OR json_valid(mapping_json)),  -- user column map, free-form by design
-  status                      TEXT NOT NULL CHECK (status IN ('validated', 'committed', 'reversed')),
-  summary_total               INTEGER NOT NULL,
-  summary_creatable           INTEGER NOT NULL,
-  summary_errors              INTEGER NOT NULL,
-  summary_duplicates_in_file  INTEGER NOT NULL,
-  summary_already_imported    INTEGER NOT NULL,
-  summary_linked_existing     INTEGER NOT NULL,
-  summary_ambiguous           INTEGER NOT NULL,
-  committed_at                INTEGER,
-  reversed_at                 INTEGER
-) STRICT;
-CREATE INDEX import_batches_org_id_created_at ON import_batches(org_id, created_at);
-CREATE INDEX import_batches_org_id_status ON import_batches(org_id, status);
-
--- source: db.importBatches[].rows[]  ({row, record{...}, errors[], disposition, matchPlayerId}, imports.mjs:99)
--- owner/writer: domains/integrations/imports.mjs validateRows   lifecycle: written once at validation; NEVER mutated or pruned
--- mapping: row (CSV line number, header = 1) -> row_no (natural key within the batch);
---          record.name -> record_name; record.dob -> record_dob (raw text: on 'error' rows it may be
---          malformed, so no length CHECK here); record.position -> record_position; record.foot -> record_foot;
---          record.heightCm -> record_height_cm_raw (raw string, validated only on non-error rows);
---          record.provider -> record_provider; record.externalId -> record_external_id; record.notes -> record_notes;
---          errors[] -> errors_json (array of validation messages — free-form by design, human text);
---          disposition -> disposition; matchPlayerId -> match_player_id
--- notes: PII — name + dob of people who may be minors and have no platform account, up to 2000 per batch,
---        never deleted (not even on reversal). Retention policy needed. match_player_id has no FK: players
---        are hard-deleted and the id stays as a tombstone. Absent record fields are '' in source -> NULL here.
-CREATE TABLE import_batch_rows (
-  batch_id             TEXT NOT NULL REFERENCES import_batches(id) ON DELETE CASCADE,
-  row_no               INTEGER NOT NULL CHECK (row_no >= 2),
-  record_name          TEXT,                           -- personal data
-  record_dob           TEXT,                           -- personal data (minor); raw, may be malformed on error rows
-  record_position      TEXT,
-  record_foot          TEXT,
-  record_height_cm_raw TEXT,
-  record_provider      TEXT,
-  record_external_id   TEXT,
-  record_notes         TEXT,
-  errors_json          TEXT NOT NULL CHECK (json_valid(errors_json)),  -- free-form validation messages
-  disposition          TEXT NOT NULL CHECK (disposition IN ('create', 'error', 'duplicate_in_file', 'already_imported', 'linked_player_exists', 'ambiguous_identity')),
-  match_player_id      TEXT,                           -- no FK: tombstone survives player deletion
-  PRIMARY KEY (batch_id, row_no)
-) STRICT;
-
--- source: db.importBatches[].history[]  (histAppend, m13/shared.mjs:206-209: {id aud-N, at, byKind, byId, byName, action, detail})
--- owner/writer: domains/integrations/imports.mjs   lifecycle: append-only (actions: validated, committed, reversed)
--- mapping: id -> id; at -> at; byKind -> by_kind; byId -> by_id; byName -> by_name; action -> action; detail -> detail_json
--- notes: exported in the org audit export (enterprise.mjs:333). detail is the summary object / counts.
-CREATE TABLE import_batches_history (
-  id          TEXT PRIMARY KEY,
-  batch_id    TEXT NOT NULL REFERENCES import_batches(id) ON DELETE RESTRICT,
-  at          INTEGER NOT NULL,
-  by_kind     TEXT NOT NULL CHECK (by_kind IN ('player', 'guardian', 'org', 'org_user', 'admin', 'system')),
-  by_id       TEXT,
-  by_name     TEXT,                                    -- snapshot
-  action      TEXT NOT NULL,
-  detail_json TEXT CHECK (json_valid(detail_json) OR detail_json IS NULL)
-) STRICT;
-CREATE INDEX import_batches_history_batch_id_at ON import_batches_history(batch_id, at);
-
-
--- ---------------------------------------------------------------------
--- prospects
--- source: db.prospects  created at m13/shared.mjs:11; rows minted at domains/integrations/imports.mjs:155-160 (commit) and 227-231 (review 'separate')
--- owner/writer: domains/integrations/imports.mjs   lifecycle: live until reversed_at set (soft delete by batch reversal); never hard-deleted
--- mapping: id -> id (prs-N); orgId -> org_id; batchId -> batch_id; name -> name; dob -> dob ('' in source -> NULL);
---          position -> position; foot -> foot; heightCm -> height_cm; provider -> provider; externalId -> external_id;
---          notes -> notes; minor -> minor (tri-state: null when no dob, and ABSENT on the review-'separate' path -> NULL);
---          linkedPlayerId -> linked_player_id (-- dead field, never written (only read at imports.mjs:188,299); kept nullable, not migrated beyond NULL);
---          createdAt -> created_at; modifiedAt -> modified_at (-- dead field, never written; read at imports.mjs:188; kept nullable);
---          reversedAt -> reversed_at
--- notes: ORG-PRIVATE records; never platform accounts; minors possible (dob) — tenant isolation is the
---        privacy control. Natural key (org_id, provider, external_id) among non-reversed rows is enforced by
---        code at validation ('already_imported', imports.mjs:88) BUT the review-'separate' path does not
---        re-check it — the partial unique index below is therefore stricter than today; dedupe before migrating.
---        Read patterns: by org where reversed_at IS NULL newest first (imports.mjs:201,298); by org for
---        onboarding (enterprise.mjs:135); by id on reversal; natural-key lookup on validation.
--- ---------------------------------------------------------------------
-CREATE TABLE prospects (
-  id                TEXT PRIMARY KEY,
-  org_id            TEXT NOT NULL REFERENCES orgs(id) ON DELETE RESTRICT,
-  batch_id          TEXT NOT NULL REFERENCES import_batches(id) ON DELETE RESTRICT,
-  name              TEXT NOT NULL,                     -- personal data
-  dob               TEXT CHECK (dob IS NULL OR length(dob) = 10),   -- personal data (minor)
-  position          TEXT,
-  foot              TEXT,
-  height_cm         INTEGER,
-  provider          TEXT NOT NULL,
-  external_id       TEXT NOT NULL,
-  notes             TEXT,
-  minor             INTEGER CHECK (minor IS NULL OR minor IN (0, 1)),   -- conservative UI flag, tri-state
-  linked_player_id  TEXT,                              -- dead field, never written; no FK
-  created_at        INTEGER NOT NULL,
-  modified_at       INTEGER,                           -- dead field, never written
-  reversed_at       INTEGER
-) STRICT;
-CREATE UNIQUE INDEX prospects_org_id_provider_external_id ON prospects(org_id, provider, external_id) WHERE reversed_at IS NULL;
-CREATE INDEX prospects_org_id_created_at ON prospects(org_id, created_at);
-CREATE INDEX prospects_batch_id ON prospects(batch_id);
-
--- source: db.importBatches[].createdProspectIds[]  (imports.mjs:162)
--- owner/writer: domains/integrations/imports.mjs commit   lifecycle: append at commit; read by reverse (imports.mjs:185)
--- mapping: each id -> one row (batch_id, prospect_id)
--- notes: NOT derivable from prospects.batch_id — prospects created via identity-review 'separate'
---        (imports.mjs:227-232) carry batch_id but are NOT in this list and are NOT reversed with the batch.
---        Created after prospects (not next to import_batches) so the FK can be declared.
-CREATE TABLE import_batch_created_prospects (
-  batch_id    TEXT NOT NULL REFERENCES import_batches(id) ON DELETE CASCADE,
-  prospect_id TEXT NOT NULL REFERENCES prospects(id) ON DELETE RESTRICT,
-  PRIMARY KEY (batch_id, prospect_id)
-) STRICT;
-
-
--- ---------------------------------------------------------------------
--- identity_reviews
--- source: db.identityReviews  created at m13/shared.mjs:12; rows minted at domains/integrations/imports.mjs:164-168
--- owner/writer: domains/integrations/imports.mjs   lifecycle: open -> resolved; never deleted
--- mapping: id -> id (idr-N); orgId -> org_id; batchId -> batch_id; row -> row_no;
---          record -> NOT duplicated: it is the same object as import_batch_rows(batch_id,row_no).record_*
---          (imports.mjs:166 passes r.record of that row; rows are immutable) — read through the composite FK;
---          candidatePlayerId -> candidate_player_id; status -> status; resolvedBy -> resolved_by_name (name string, imports.mjs:238);
---          resolvedAt -> resolved_at; resolution -> resolution; createdAt -> created_at
--- notes: candidate_player_id has no FK (player may be hard-deleted; the review then fails 'NOT_VISIBLE').
---        Read patterns: by org+status='open' (imports.mjs:207); by id+org.
--- ---------------------------------------------------------------------
-CREATE TABLE identity_reviews (
-  id                  TEXT PRIMARY KEY,
-  org_id              TEXT NOT NULL REFERENCES orgs(id) ON DELETE RESTRICT,
-  batch_id            TEXT NOT NULL,
-  row_no              INTEGER NOT NULL,
-  candidate_player_id TEXT NOT NULL,                   -- no FK: tombstone survives player deletion
-  status              TEXT NOT NULL CHECK (status IN ('open', 'resolved')),
-  resolved_by_name    TEXT,                            -- snapshot
-  resolved_at         INTEGER,
-  resolution          TEXT CHECK (resolution IS NULL OR resolution IN ('linked', 'kept_separate')),
-  created_at          INTEGER NOT NULL,
-  FOREIGN KEY (batch_id, row_no) REFERENCES import_batch_rows(batch_id, row_no) ON DELETE RESTRICT
-) STRICT;
-CREATE INDEX identity_reviews_org_id_status ON identity_reviews(org_id, status);
 
 
 -- ---------------------------------------------------------------------

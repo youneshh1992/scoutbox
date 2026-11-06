@@ -49,7 +49,9 @@
 // running server fails the build.
 
 export const PRODUCTION_STORE_CONTRACT = Object.freeze({
-  apiKeys: { guarantee: 'module', owner: 'm13', reason: 'M13 feature collection, created by migrateM13 at registration' },
+  // importBatches, prospects, identityReviews, apiKeys, webhookEndpoints, webhookDeliveries: never a db.* read since S13a —
+  // typed tables (migration 0034), read through repositories/integrations.mjs (integrationReads). Each db.* name throws;
+  // migrateM13 no longer creates them.
   // applications: never a db.* read since S9d — a typed table (migration 0022), read through repositories/opportunitiesCampaigns.mjs
   // (scoutingReads). db.applications throws.
   archetypes: { guarantee: 'migration', owner: 'core', reason: 'product configuration, restored from catalogue.mjs; empty is a lie with consequences (D2)' },
@@ -103,9 +105,7 @@ export const PRODUCTION_STORE_CONTRACT = Object.freeze({
   groupGrants: { guarantee: 'module', owner: 'm13', reason: 'M13 feature collection, created by migrateM13 at registration' },
   groups: { guarantee: 'module', owner: 'm13', reason: 'M13 feature collection, created by migrateM13 at registration' },
   guardians: { guarantee: 'migration', owner: 'core', reason: 'core platform collection, guaranteed by the migration registry so it survives an arbitrary restore' },
-  identityReviews: { guarantee: 'module', owner: 'm13', reason: 'M13 feature collection, created by migrateM13 at registration' },
   idvQueue: { guarantee: 'migration', owner: 'core', reason: 'guardian identity-verification queue; was created by ??= inside a request handler, so it existed only after the first write; since S6b a read-only view over the idv_queue table, written only through the safetyAudit repository (Q4b: every entry names an existing guardian, checked in code)' },
-  importBatches: { guarantee: 'module', owner: 'm13', reason: 'M13 feature collection, created by migrateM13 at registration' },
   invoices: { guarantee: 'module', owner: 'core', reason: 'owned by server.mjs, which has no register() of its own; created during synchronous composition before the socket opens' },
   ledger: { guarantee: 'migration', owner: 'core', reason: 'core platform collection, guaranteed by the migration registry so it survives an arbitrary restore; since S6b a read-only view over the ledger table (insertion order), written only through ledgerAppend → the safetyAudit repository (userId / scoutName verbatim)' },
   matchdays: { guarantee: 'module', owner: 'core', reason: 'owned by server.mjs, which has no register() of its own; created during synchronous composition before the socket opens' },
@@ -140,7 +140,6 @@ export const PRODUCTION_STORE_CONTRACT = Object.freeze({
   // playersRetained: never a production db.* read — the retained records live in players_retained (migration 0014,
   // repositories/identity.mjs) and the backup reads them through players.retainedRecords(); the data layer defines a
   // read-only view at db.playersRetained, like the other table-backed collections.
-  prospects: { guarantee: 'module', owner: 'm13', reason: 'M13 feature collection, created by migrateM13 at registration' },
   pushLog: { guarantee: 'module', owner: 'core', reason: 'owned by server.mjs, created during synchronous composition before the socket opens; since S7c a read-only view over the push_log table (defined by attachDataLayer), written only through the push log repository' },
   pushTokens: { guarantee: 'module', owner: 'core', reason: 'owned by server.mjs, created during synchronous composition before the socket opens; since S7c a read-only view over the push_tokens table (defined by attachDataLayer), written only through the push tokens repository' },
   // recruitmentContacts, recruitmentOffers: never a db.* read since §4.3 step 2 — the contacts and offers live in their
@@ -183,8 +182,7 @@ export const PRODUCTION_STORE_CONTRACT = Object.freeze({
   // passportPrefs, passportCareerEntries, passportAchievements, passportShares, passportCorrections: never a db.* read since
   // S10b — typed tables (migration 0024), read through repositories/passport.mjs (verificationReads). db.<name> throws.
   // vouches: never a db.* read since S10c — a typed table (migration 0025), read through repositories/transitionsVouches.mjs (verificationReads). db.vouches throws.
-  webhookDeliveries: { guarantee: 'module', owner: 'm13', reason: 'M13 feature collection, created by migrateM13 at registration' },
-  webhookEndpoints: { guarantee: 'module', owner: 'm13', reason: 'M13 feature collection, created by migrateM13 at registration' },});
+});
 
 /** Every store name the contract knows about. */
 export const CONTRACT_STORES = Object.freeze(Object.keys(PRODUCTION_STORE_CONTRACT));

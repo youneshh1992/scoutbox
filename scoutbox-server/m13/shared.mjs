@@ -8,12 +8,8 @@ import { isLeadUser, isFinanceUser } from '../roles.mjs';
 // ------------------------------------------------------------- migrations
 /** `players` (S5): the identity repository, for the external-ids default (a row write). */
 export function migrateM13(db, players) {
-  db.importBatches ??= [];        // F1 — CSV import batches (draft→validated→committed→reversed)
-  db.prospects ??= [];            // F1 — org-PRIVATE imported records; never platform accounts
-  db.identityReviews ??= [];      // F1 — ambiguous identity matches awaiting review
-  db.apiKeys ??= [];              // F1 — scoped org API credentials (hash only)
-  db.webhookEndpoints ??= [];     // F1 — outgoing webhook destinations + secrets
-  db.webhookDeliveries ??= [];    // F1 — durable delivery attempts (bounded retries)
+  // F1 import batches, prospects, identity reviews, API keys, webhook endpoints and deliveries: tables of
+  // repositories/integrations.mjs (S13a), read through integrationReads.
   // F3 private suitability preferences: the player_prefs tables of the opportunities and campaigns repository (S9d).
   // F2 transition cases: tables of repositories/transitionsVouches.mjs (S10c), read through verificationReads.
   // F10 adult representation (the legacy lane): removed in S11a; agent relationships are repositories/agentCore.mjs.

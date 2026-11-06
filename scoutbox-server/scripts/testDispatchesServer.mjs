@@ -59,6 +59,11 @@ const qAll = (dir, sql, ...p) => { const s = new DatabaseSync(path.join(dir, 'sc
 const seqOf = (dir) => Number(q1(dir, "SELECT value FROM meta WHERE key = 'saveSeq'")?.value) || 0;
 // S6b: opsEvents is the ops_events table since 0013 — read in the writer's literal through the repository's own reader when the blob is retired.
 const blobRows = (dir, name) => { const r = q1(dir, 'SELECT value FROM collections WHERE name = ?', name); if (r) return JSON.parse(r.value); const t = AUDIT_SNAPSHOT_TABLES.find((x) => x.name === name); if (!t) return null; const s = new DatabaseSync(path.join(dir, 'scoutbox.db'), { readOnly: true }); try { return s.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(t.table) ? t.read(s) : null; } finally { s.close(); } };
+/** The webhook deliveries as the DATABASE holds them (S13a: rows of webhook_deliveries, the payload typed, attempts counted). */
+const webhookRows = (dir) => qAll(dir, "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'webhook_deliveries'").length
+  ? qAll(dir, 'SELECT d.id, d.type, d.endpoint_id, d.subject_id, (SELECT COUNT(*) FROM webhook_delivery_attempts a WHERE a.delivery_id = d.id) AS attempts FROM webhook_deliveries d ORDER BY d.rowid')
+    .map((r) => ({ id: r.id, type: r.type, endpointId: r.endpoint_id, data: r.type === 'delivery.failed' ? { dispatchId: r.subject_id } : null, attempts: r.attempts }))
+  : null;
 /** The mail outbox as the DATABASE holds it, in insertion order. */
 const outboxRows = (dir) => qAll(dir, 'SELECT id, provider_message_id FROM outbox ORDER BY seq').map((r) => ({ id: r.id, providerMessageId: r.provider_message_id }));
 /** The dispatch records as the DATABASE holds them, in insertion order, with attempts re-nested. */
@@ -239,7 +244,7 @@ await test('ordinary account deletion: the player\'s notification rows go and ev
 });
 
 // ------------------------------------------------------------- 6. a configured webhook: the delivery row lands with the failed dispatch
-await test('coupled webhook intent (synthetic configured endpoint, ALLOW_LOCAL_WEBHOOKS=1): when the retries of an org user\'s e-mail dispatch are exhausted, the failed dispatch row, the delivery_failed ops event and the webhookDeliveries row for the org\'s endpoint are all durable (second connection) and the webhook sweep then attempts the (unreachable) destination without touching the dispatch row', async () => {
+await test('coupled webhook intent (synthetic configured endpoint, ALLOW_LOCAL_WEBHOOKS=1): when the retries of an org user\'s e-mail dispatch are exhausted, the failed dispatch row, the delivery_failed ops event and the webhook_deliveries row for the org\'s endpoint are all durable (second connection) and the webhook sweep then attempts the (unreachable) destination without touching the dispatch row', async () => {
   const dir = tempDir('s7b-webhook'); const S = await boot(dir, { ALLOW_LOCAL_WEBHOOKS: '1' });
   const maria = await orgLogin(S, 'org-eastport', 'Maria Keane', 'Head of Recruitment');
   const unreachable = await freePort();
@@ -258,11 +263,11 @@ await test('coupled webhook intent (synthetic configured endpoint, ALLOW_LOCAL_W
   const failed = await until(async () => { await sweep(S); return stored(dir).find((d) => d.channel === 'email' && d.to === 'synthetic.scout@example.test' && d.status === 'failed'); }, 20_000);
   assert.ok(failed, `the e-mail dispatch exhausted its retries: ${JSON.stringify(stored(dir).map((d) => [d.channel, d.to, d.status]))}`);
   assert.equal(failed.attempts.length, 4);
-  await until(async () => (blobRows(dir, 'webhookDeliveries') ?? []).some((w) => w.type === 'delivery.failed' && w.data?.dispatchId === failed.id));
-  const delivery = (blobRows(dir, 'webhookDeliveries') ?? []).find((w) => w.type === 'delivery.failed' && w.data?.dispatchId === failed.id);
+  await until(async () => (webhookRows(dir) ?? []).some((w) => w.type === 'delivery.failed' && w.data?.dispatchId === failed.id));
+  const delivery = (webhookRows(dir) ?? []).find((w) => w.type === 'delivery.failed' && w.data?.dispatchId === failed.id);
   assert.ok(delivery, 'the webhook delivery row is durable'); assert.equal(delivery.endpointId, hook.body.endpoint.id);
   assert.ok((blobRows(dir, 'opsEvents') ?? []).some((e) => e.kind === 'delivery_failed' && e.detail?.dispatchId === failed.id));
-  await until(async () => (blobRows(dir, 'webhookDeliveries') ?? []).find((w) => w.id === delivery.id)?.attempts?.length >= 1, 8000);
+  await until(async () => (webhookRows(dir) ?? []).find((w) => w.id === delivery.id)?.attempts >= 1, 8000);
   assert.deepEqual(storedRow(dir, failed.id).attempts.length, 4, 'the webhook sweep touched the webhook row, not the dispatch');
   await S.stop(); rm(dir);
 });

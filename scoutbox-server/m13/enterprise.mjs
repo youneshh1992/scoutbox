@@ -137,7 +137,7 @@ export function registerEnterprise(ctx) {
       { id: 'safeguarding', label: 'Sign the safeguarding contract', done: !!org.safeguardingContractSigned, help: 'Required for under-18 access. The club safeguarding officer signs.' },
       { id: 'invite_staff', label: 'Invite your staff', done: staff.length > 1, help: 'Each person works under their own named account — no shared logins.' },
       { id: 'mfa_leads', label: 'Enable MFA for privileged accounts', done: leads.every((u) => u.mfa?.enabledAt), help: 'Leads approve signings and manage staff — protect those accounts first.' },
-      { id: 'first_import', label: 'Import or add your player records', done: db.importBatches.some((b) => b.orgId === org.id && b.status === 'committed') || db.prospects.some((p) => p.orgId === org.id), help: 'CSV import with dry-run preview, or add prospects by hand.' },
+      { id: 'first_import', label: 'Import or add your player records', done: ctx.integrationReads.batches.hasCommitted(org.id) || ctx.integrationReads.prospects.anyForOrg(org.id), help: 'CSV import with dry-run preview, or add prospects by hand.' },
       { id: 'coverage_plan', label: 'Set up a coverage plan', done: ctx.insightReads.plans.countForOrg(org.id) > 0, help: 'Fixtures, assignments and observation tracking live under Coverage.' },
     ];
     return {
@@ -336,7 +336,7 @@ export function registerEnterprise(ctx) {
       contract: 'audit-export.2026-09.v1', orgId, exportedAt: Date.now(), exportedBy: req.orgUser.name,
       ledger: db.ledger.filter((l) => l.orgId === orgId),
       caseHistories: ctx.recruitmentReads.cases.forOrg(orgId).map((c) => ({ id: c.id, playerId: c.playerId, history: c.history })),
-      importHistories: db.importBatches.filter((b) => b.orgId === orgId).map((b) => ({ id: b.id, history: b.history })),
+      importHistories: ctx.integrationReads.batches.historiesForOrg(orgId),
       grantsGiven: db.groupGrants.filter((g) => g.fromOrgId === orgId),
       grantsReceived: db.groupGrants.filter((g) => g.toOrgIds?.includes(orgId)),
       supportAccess: db.supportAccessGrants.filter((g) => g.orgId === orgId),
@@ -420,7 +420,7 @@ export function registerEnterprise(ctx) {
       records: {
         refs: t.refs,
         cases: t.refs.filter((r) => r.kind === 'case').map((r) => ctx.recruitmentReads.cases.byId(r.id)).filter((c) => c && c.orgId === orgId),
-        imports: db.importBatches.filter((b) => b.orgId === orgId && t.refs.some((r) => r.kind === 'import' && r.id === b.id)).map(({ rows, ...b }) => b),
+        imports: ctx.integrationReads.batches.forOrgByIds(orgId, t.refs.filter((r) => r.kind === 'import').map((r) => r.id)),
       },
       note: 'Only records the ticket references, only while the grant lives, only logged.',
     });
@@ -556,7 +556,7 @@ export function registerEnterprise(ctx) {
       deliveryFailures: db.opsEvents.filter((e) => e.kind === 'delivery_failed').length,
       webhookFailures: db.opsEvents.filter((e) => e.kind === 'webhook_failed').length,
       dispatchBacklog: dispatches.backlogCount(), // S7b: queued or retrying, the same definition as before, counted on the repository's mirror
-      webhookBacklog: db.webhookDeliveries.filter((d) => ['queued', 'retrying'].includes(d.status)).length,
+      webhookBacklog: ctx.integrationReads.deliveries.backlogCount(), // S13a: queued or retrying, counted in SQL
       opsEvents: db.opsEvents.slice(-50).reverse(),
       note: 'Counters cover this process since boot. Local development metrics — not a production SLA measurement.',
     });

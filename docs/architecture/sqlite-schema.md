@@ -241,17 +241,17 @@ them.
 | `fixtures` | persistent | 07 | `fixtures` (read-time union with `fr-`/`tr-` synthetic rows stays derived) | S12d (0033) |
 | `coveragePlans` | persistent | 07 | `coverage_plans` | S12d (0033) |
 | `coverageAssignments` | persistent | 07 | `coverage_assignments`, `_targets`, `_warnings` | S12d (0033) |
-| `apiKeys` | persistent | 08 | `api_keys`, `api_key_scopes` | S13 |
-| `webhookEndpoints` | persistent | 08 | `webhook_endpoints`, `webhook_endpoint_events` | S13 |
-| `webhookDeliveries` | audit (never pruned) | 08 | `webhook_deliveries`, `webhook_delivery_attempts` | S13 |
+| `apiKeys` | persistent (hash only) | 08 | `api_keys`, `api_key_scopes` | S13a (0034) |
+| `webhookEndpoints` | persistent | 08 | `webhook_endpoints`, `webhook_endpoint_events` | S13a (0034) |
+| `webhookDeliveries` | audit (never pruned; typed payload) | 08 | `webhook_deliveries`, `webhook_delivery_attempts` | S13a (0034) |
 | `orgInvites` | temporary | 08 | `org_invites` (`token_hash`) | S13 |
 | `ssoConfigs` | persistent | 08 | `sso_configs` | S13 |
 | `ssoStates` | temporary | 08 | `sso_states` (`state_hash`, `nonce_hash`) | S13 |
 | `supportTickets` | persistent | 08 | `support_tickets`, `support_ticket_replies`, `support_ticket_refs` | S13 |
 | `supportAccessGrants` | persistent | 08 | `support_access_grants`, `support_access_log` | S13 |
-| `importBatches` | persistent (PII rows) | 08 | `import_batches`, `import_batch_rows`, `import_batches_history`, `import_batch_created_prospects` | S13 |
-| `prospects` | persistent | 08 | `prospects` | S13 |
-| `identityReviews` | persistent | 08 | `identity_reviews` | S13 |
+| `importBatches` | persistent (PII rows) | 08 | `import_batches`, `import_batch_columns`, `import_batch_rows`, `import_batch_row_errors`, `import_batch_history`, `import_batch_created_prospects` | S13a (0034) |
+| `prospects` | persistent (one live per provider and external id) | 08 | `prospects` | S13a (0034) |
+| `identityReviews` | persistent (the record is its batch row's) | 08 | `identity_reviews` | S13a (0034) |
 | `groups` | persistent | 08 | `groups`, `group_admins`, `group_members`, `group_pending_invites`, `group_shared_templates`, `group_programmes` | S13 |
 | `groupGrants` | persistent | 08 | `group_grants`, `group_grant_recipients` | S13 |
 | `uploadSessions` | temporary | 08 | `upload_sessions`, `upload_session_chunks` (chunk bytes stay on disk) | S13 |
