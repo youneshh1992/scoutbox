@@ -29,8 +29,6 @@
  * outside the media directory); one invalid entry refuses the whole import.
  */
 import { migrationApplied } from './database.mjs';
-import { PLAYER_COLUMNS, playerFromRow } from './identityMapping.mjs';
-import { CORE_IDENTITY_LIVE_MIGRATION } from './identityPreflight.mjs';
 import { subrecordsLive } from './playerSubrecords.mjs';
 
 export const MEDIA_DELETIONS_MIGRATION = '0006_media_deletions';
@@ -73,8 +71,6 @@ export function liveMediaReferences(sqlite, { records = [] } = {}) {
       if (!refs.has(r.id)) refs.set(r.id, []);
       if (!refs.get(r.id).includes(r.player_id)) refs.get(r.id).push(r.player_id);
     }
-  } else if (migrationApplied(sqlite, CORE_IDENTITY_LIVE_MIGRATION)) {
-    for (const r of sqlite.prepare(`SELECT ${PLAYER_COLUMNS.join(', ')} FROM players WHERE deleted_at IS NULL`).all()) add(playerFromRow(r)); // S4b-R: a retained row owns nothing
   }
   for (const p of records) add(p);
   return refs;

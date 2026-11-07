@@ -1,20 +1,12 @@
 -- ScoutBox target schema — 01 identity and tenancy
 -- Organisations, staff accounts, guardians, players (with their owned sub-records) and sessions.
 -- Executed first; every other file references these tables. Conventions: docs/architecture/sqlite-schema.md §4.
--- Status: org_users is LIVE (migration 0001). orgs, guardians, guardian_children, players (scalar part) and
--- sessions were created by migration 0002 as a verified SHADOW of the blob snapshot (plan step S1); sessions is
--- LIVE since migration 0003 (S2), orgs since 0004 (S3; explicit and without facets_json since S14g), and guardians, players and guardian_children since
--- migration 0005 (S4a, repositories/migrations/0005_core_identity_live.mjs, REGISTERED: the cutover replaces the
--- three shadow definitions with the ones below, imports both blobs through the reviewed preflight and retires them;
--- repositories/identity.mjs owns the rows). players and guardians carry one transitional column, `facets_json TEXT
--- CHECK (json_valid)` (S3's pattern: every field not yet in a column — the S5 arrays, medical.records,
--- programme.completed, coGuardians, the outstanding e-mail code, unknown fields — with the record's shape
--- metadata), shown below and compared with the registered migrations by scripts/testSchemaDdl.mjs. The shadow
--- projection is retired. The twelve player_* child tables are LIVE since migration 0007_player_subrecords (S5,
--- REGISTERED: the arrays move out of facets_json into their tables; see the sub-record section below), so facets_json on
--- players now holds unknown fields and shape metadata only (medical.records and programme.completed are tables too).
--- Since migration.md §4.3.1 (S4a-E, 4 November 2026) every write is explicit: nothing edits a record in place and no
--- save rewrites facets_json; guardians.update writes the coGuardians list, and players.update refuses an unknown field.
+-- Status: every table here is LIVE and explicit: org_users (migration 0001; explicit since S14f), sessions (0003),
+-- orgs (0004; explicit since S14g), guardians, players and guardian_children (migration 0005, REGISTERED; explicit
+-- since S14h, amended in place: no facets_json, typed columns only) and the twelve player_* child tables
+-- (0007_player_subrecords, REGISTERED). Each table is owned by one
+-- repository (repositories/orgs.mjs, users.mjs, sessions.mjs, identity.mjs); writes are explicit operations, reads are
+-- SQL, and scripts/testSchemaDdl.mjs compares this file with the registered migrations column by column.
 -- The media-deletion queue (migration 0006) is in 08_operations_integrations.sql.
 
 -- source: the organisations (repositories/orgs.mjs)
@@ -116,37 +108,35 @@ CREATE TABLE org_user_recovery_codes (
 --   disclaimerAccepted→disclaimer_accepted (+ disclaimer_accepted_at, new, NULL for imported rows),
 --   childIds[]→guardian_children, coGuardianOf→co_guardian_of, coGuardians[]→derived from guardian rows with
 --   co_guardian_of (not stored: duplicate), notificationPrefs.{quietStart,quietEnd,schoolHoursMute,timezone}→prefs_* columns
--- notes: email uniqueness is enforced only on the signup path today (co-guardian path 1576-1590 does not check), so the
---   index is UNIQUE on lower(email) in the target and the import reports duplicates (S4 reconciles them first).
---   co-guardian rows carry no password and an undefined emailVerified (reads as not false): both become explicit here.
+-- notes (S14h): typed columns only, no facet storage; the e-mail unique case-insensitively (repository and index);
+--   coGuardians is worked out from co_guardian_of; childIds is the guardian_children rows; the password and e-mail
+--   code hashes are never on a record (repositories/identity.mjs). Keys inside the domain are RESTRICT.
 CREATE TABLE guardians (
-  id                      TEXT PRIMARY KEY,
-  name                    TEXT NOT NULL,
-  email                   TEXT NOT NULL,                  -- personal data
-  password_hash           TEXT,
+  id                      TEXT PRIMARY KEY CHECK (length(id) BETWEEN 1 AND 80),
+  name                    TEXT NOT NULL CHECK (length(name) BETWEEN 1 AND 120),
+  email                   TEXT NOT NULL CHECK (length(email) BETWEEN 3 AND 254),
+  password_hash           TEXT CHECK (password_hash IS NULL OR length(password_hash) BETWEEN 1 AND 512),
   email_verified          INTEGER NOT NULL DEFAULT 0 CHECK (email_verified IN (0,1)),
-  email_code_hash         TEXT,                           -- sha256 of the 6-char code (hashCode, oneTimeCodes.mjs)
+  email_code_hash         TEXT CHECK (email_code_hash IS NULL OR length(email_code_hash) = 64),
   id_verified             INTEGER NOT NULL DEFAULT 0 CHECK (id_verified IN (0,1)),
-  idv_reference           TEXT,
+  idv_reference           TEXT CHECK (idv_reference IS NULL OR length(idv_reference) BETWEEN 1 AND 120),
   disclaimer_accepted     INTEGER NOT NULL DEFAULT 0 CHECK (disclaimer_accepted IN (0,1)),
   disclaimer_accepted_at  INTEGER,
-  co_guardian_of          TEXT REFERENCES guardians(id) ON DELETE SET NULL,
-  prefs_quiet_start       TEXT,                           -- 'HH:MM'
-  prefs_quiet_end         TEXT,
-  prefs_school_hours_mute INTEGER CHECK (prefs_school_hours_mute IN (0,1)),
-  prefs_timezone          TEXT,
+  co_guardian_of          TEXT REFERENCES guardians(id) ON DELETE RESTRICT,
+  prefs_quiet_start       TEXT CHECK (prefs_quiet_start IS NULL OR (length(prefs_quiet_start) = 5 AND prefs_quiet_start GLOB '[0-2][0-9]:[0-5][0-9]')),
+  prefs_quiet_end         TEXT CHECK (prefs_quiet_end IS NULL OR (length(prefs_quiet_end) = 5 AND prefs_quiet_end GLOB '[0-2][0-9]:[0-5][0-9]')),
+  prefs_school_hours_mute INTEGER CHECK (prefs_school_hours_mute IS NULL OR prefs_school_hours_mute IN (0,1)),
+  prefs_timezone          TEXT CHECK (prefs_timezone IS NULL OR length(prefs_timezone) BETWEEN 1 AND 64),
   created_at              INTEGER,
-  deleted_at              INTEGER,                        -- new: tombstone (no guardian deletion route exists today)
-  facets_json             TEXT CHECK (facets_json IS NULL OR json_valid(facets_json)) -- S4a transitional storage (coGuardians, unknown fields, shape metadata)
+  CHECK (co_guardian_of IS NULL OR co_guardian_of <> id)
 ) STRICT;
-CREATE UNIQUE INDEX guardians_email ON guardians (lower(email));   -- new: enforced by code only on signup today
+CREATE UNIQUE INDEX guardians_email ON guardians (lower(email));
 CREATE INDEX guardians_co_guardian_of ON guardians (co_guardian_of);
 
 -- source: db.players  (seed.mjs:496-522; signup server.mjs:1179; guardian child 1419)
 -- owner/writer: server.mjs (core); m29 writes level/contractStatus/availability/timeline; m12/m13/m16 add fields
--- lifecycle: hard-deleted by deletePlayerData (server.mjs:3978-4023) → in the target the row becomes a TOMBSTONE
---   (deleted_at set, personal columns redacted, owned sub-records deleted) so that audit rows which reference
---   players(id) with ON DELETE RESTRICT (ledger, blocks, reports, org_notes: 03) keep a valid id; see schema doc §8
+-- lifecycle: an account deletion keeps the row as the retained record (S4b-R, migration 0014): id, deleted_at, birth_date,
+--   country; placeholders and NULL elsewhere; its lists and links deleted in the same unit
 -- mapping (scalar): id, name, dob→birth_date, country, city, position, foot, heightCm→height_cm, weightKg→weight_kg,
 --   squadNumber→squad_number, contractUntil→contract_until_date, marketValueRange→market_value_range, agentName→agent_name,
 --   academyPlus→academy_plus, availability, contractStatus→contract_status, identityVerified→identity_verified,
@@ -162,67 +152,73 @@ CREATE INDEX guardians_co_guardian_of ON guardians (co_guardian_of);
 --   trialReports[]→NOT stored: a duplicate of trials.report, served as a DERIVED value from the trials since S5 (trial_reports at S8)
 -- notes: dob is never shown to orgs; medical rows are private unless medical_shared; location fails closed for grassroots
 --   visibility when NULL; password NULL = seeded/dev or guardian-created child (login only via pairing code).
+--   S14h: typed columns only (lengths, ranges, vocabularies, quiet hours as HH:MM), no facet storage; a stats, prefs or
+--   programme block whose columns are all NULL reads as null; the guardian link and the primary guardian_children row
+--   are written together.
 CREATE TABLE players (
-  id                       TEXT PRIMARY KEY,
-  name                     TEXT NOT NULL,
-  birth_date               TEXT NOT NULL CHECK (length(birth_date) = 10),   -- YYYY-MM-DD; minor data
-  country                  TEXT NOT NULL,
-  city                     TEXT,
-  position                 TEXT CHECK (position IS NULL OR position IN ('GK','CB','RB','LB','RWB','LWB','CDM','CM','CAM','RW','LW','ST','CF')),
-  foot                     TEXT CHECK (foot IS NULL OR foot IN ('left','right')),
-  height_cm                INTEGER,
-  weight_kg                INTEGER,
-  squad_number             INTEGER,
-  contract_until_date      TEXT CHECK (contract_until_date IS NULL OR length(contract_until_date) = 10),
-  market_value_range       TEXT,
-  agent_name               TEXT,                          -- snapshot (free text)
-  academy_plus             INTEGER NOT NULL DEFAULT 0 CHECK (academy_plus IN (0,1)),
-  first_team_seeker        INTEGER NOT NULL DEFAULT 0 CHECK (first_team_seeker IN (0,1)),
-  availability             TEXT NOT NULL DEFAULT 'not_seeking' CHECK (availability IN ('available_now','end_of_season','loan_open','overseas_open','not_seeking')),
-  contract_status          TEXT NOT NULL DEFAULT 'unknown' CHECK (contract_status IN ('under_contract','expiring_summer','scholarship_ending','release_approaching','free_agent','unknown')),
-  level                    TEXT NOT NULL DEFAULT 'amateur' CHECK (level IN ('amateur','semi_pro','pro')),
-  football_category        TEXT,
-  identity_verified        INTEGER NOT NULL DEFAULT 0 CHECK (identity_verified IN (0,1)),
-  guardian_id              TEXT REFERENCES guardians(id) ON DELETE SET NULL,   -- primary guardian; NULL for adults
-  lat                      REAL,
-  lng                      REAL,
-  stats_appearances        INTEGER,
-  stats_goals              INTEGER,
-  stats_assists            INTEGER,
-  stats_pace_kmh           REAL,
-  stats_pass_completion_pct REAL,
-  stats_duel_success_pct   REAL,
-  stats_clean_sheets       INTEGER,
-  medical_shared           INTEGER NOT NULL DEFAULT 0 CHECK (medical_shared IN (0,1)),
-  medical_condition_status TEXT NOT NULL DEFAULT 'unknown',
-  prefs_quiet_start        TEXT,
-  prefs_quiet_end          TEXT,
-  prefs_school_hours_mute  INTEGER CHECK (prefs_school_hours_mute IN (0,1)),
-  prefs_timezone           TEXT,
-  programme_track          TEXT,
-  programme_started_at     INTEGER,
-  password_hash            TEXT,
-  created_at               INTEGER,
-  deleted_at               INTEGER,                       -- set by account deletion since migration 0014 (S4b-R): the row stays as the retained record — id, deleted_at, birth_date, country; placeholders and NULL elsewhere (plan §D.6.1)
-  facets_json              TEXT CHECK (facets_json IS NULL OR json_valid(facets_json)), -- transitional storage: unknown fields and shape metadata (S5 moved the arrays into the player_* tables)
-  CHECK ((lat IS NULL) = (lng IS NULL))
+  id                        TEXT PRIMARY KEY CHECK (length(id) BETWEEN 1 AND 80),
+  name                      TEXT NOT NULL CHECK (length(name) BETWEEN 1 AND 120),
+  birth_date                TEXT NOT NULL CHECK (length(birth_date) = 10),
+  country                   TEXT NOT NULL CHECK (length(country) BETWEEN 1 AND 40),
+  city                      TEXT CHECK (city IS NULL OR length(city) BETWEEN 1 AND 80),
+  position                  TEXT CHECK (position IS NULL OR position IN ('GK', 'CB', 'RB', 'LB', 'RWB', 'LWB', 'CDM', 'CM', 'CAM', 'RW', 'LW', 'ST', 'CF')),
+  foot                      TEXT CHECK (foot IS NULL OR foot IN ('left', 'right')),
+  height_cm                 INTEGER CHECK (height_cm IS NULL OR height_cm BETWEEN 50 AND 250),
+  weight_kg                 INTEGER CHECK (weight_kg IS NULL OR weight_kg BETWEEN 15 AND 200),
+  squad_number              INTEGER CHECK (squad_number IS NULL OR squad_number BETWEEN 0 AND 999),
+  contract_until_date       TEXT CHECK (contract_until_date IS NULL OR length(contract_until_date) = 10),
+  market_value_range        TEXT CHECK (market_value_range IS NULL OR length(market_value_range) BETWEEN 1 AND 60),
+  agent_name                TEXT CHECK (agent_name IS NULL OR length(agent_name) BETWEEN 1 AND 120),
+  academy_plus              INTEGER NOT NULL DEFAULT 0 CHECK (academy_plus IN (0,1)),
+  first_team_seeker         INTEGER NOT NULL DEFAULT 0 CHECK (first_team_seeker IN (0,1)),
+  availability              TEXT NOT NULL DEFAULT 'not_seeking' CHECK (availability IN ('available_now', 'end_of_season', 'loan_open', 'overseas_open', 'not_seeking')),
+  contract_status           TEXT NOT NULL DEFAULT 'unknown' CHECK (contract_status IN ('under_contract', 'expiring_summer', 'scholarship_ending', 'release_approaching', 'free_agent', 'unknown')),
+  level                     TEXT NOT NULL DEFAULT 'amateur' CHECK (level IN ('amateur', 'semi_pro', 'pro')),
+  football_category         TEXT CHECK (football_category IS NULL OR length(football_category) BETWEEN 1 AND 40),
+  identity_verified         INTEGER NOT NULL DEFAULT 0 CHECK (identity_verified IN (0,1)),
+  guardian_id               TEXT REFERENCES guardians(id) ON DELETE RESTRICT,
+  lat                       REAL CHECK (lat IS NULL OR lat BETWEEN -90 AND 90),
+  lng                       REAL CHECK (lng IS NULL OR lng BETWEEN -180 AND 180),
+  stats_appearances         INTEGER CHECK (stats_appearances IS NULL OR stats_appearances >= 0),
+  stats_goals               INTEGER CHECK (stats_goals IS NULL OR stats_goals >= 0),
+  stats_assists             INTEGER CHECK (stats_assists IS NULL OR stats_assists >= 0),
+  stats_pace_kmh            REAL CHECK (stats_pace_kmh IS NULL OR stats_pace_kmh >= 0),
+  stats_pass_completion_pct REAL CHECK (stats_pass_completion_pct IS NULL OR stats_pass_completion_pct BETWEEN 0 AND 100),
+  stats_duel_success_pct    REAL CHECK (stats_duel_success_pct IS NULL OR stats_duel_success_pct BETWEEN 0 AND 100),
+  stats_clean_sheets        INTEGER CHECK (stats_clean_sheets IS NULL OR stats_clean_sheets >= 0),
+  medical_shared            INTEGER NOT NULL DEFAULT 0 CHECK (medical_shared IN (0,1)),
+  medical_condition_status  TEXT NOT NULL DEFAULT 'unknown' CHECK (length(medical_condition_status) BETWEEN 1 AND 40),
+  prefs_quiet_start         TEXT CHECK (prefs_quiet_start IS NULL OR (length(prefs_quiet_start) = 5 AND prefs_quiet_start GLOB '[0-2][0-9]:[0-5][0-9]')),
+  prefs_quiet_end           TEXT CHECK (prefs_quiet_end IS NULL OR (length(prefs_quiet_end) = 5 AND prefs_quiet_end GLOB '[0-2][0-9]:[0-5][0-9]')),
+  prefs_school_hours_mute   INTEGER CHECK (prefs_school_hours_mute IS NULL OR prefs_school_hours_mute IN (0,1)),
+  prefs_timezone            TEXT CHECK (prefs_timezone IS NULL OR length(prefs_timezone) BETWEEN 1 AND 64),
+  programme_track           TEXT CHECK (programme_track IS NULL OR length(programme_track) BETWEEN 1 AND 60),
+  programme_started_at      INTEGER,
+  password_hash             TEXT CHECK (password_hash IS NULL OR length(password_hash) BETWEEN 1 AND 512),
+  created_at                INTEGER,
+  deleted_at                INTEGER,
+  CHECK ((lat IS NULL) = (lng IS NULL)),
+  CHECK (deleted_at IS NULL OR guardian_id IS NULL)
 ) STRICT;
-CREATE INDEX players_guardian ON players (guardian_id);                      -- guardian child routes (server.mjs:474, 4259)
-CREATE INDEX players_created_at ON players (created_at);                     -- "new this week" (1910-1913)
-CREATE INDEX players_search ON players (country, position, availability);   -- /org/players filters (1890-1913)
-CREATE INDEX players_level ON players (level);                               -- grassroots ceiling (domain.mjs:115-119)
+CREATE INDEX players_guardian ON players (guardian_id);
+CREATE INDEX players_created_at ON players (created_at);
+CREATE INDEX players_birth_date ON players (birth_date);
+CREATE INDEX players_search ON players (country, position, availability);
+CREATE INDEX players_level ON players (level);
+CREATE INDEX players_located ON players (lat, lng) WHERE lat IS NOT NULL;
 
 -- source: db.guardians[].childIds[]  (mirrors players.guardianId; both maintained by hand: server.mjs:1420, 3137, 4018)
 -- owner/writer: server.mjs (core)
 -- lifecycle: row removed when the child is deleted or ages up (3132-3146); co-guardians keep the id today (gap)
 -- mapping: childIds[i]→(guardian_id, player_id); role 'primary' when players.guardian_id = guardian_id, else 'co'
 CREATE TABLE guardian_children (
-  guardian_id TEXT NOT NULL REFERENCES guardians(id) ON DELETE CASCADE,
-  player_id   TEXT NOT NULL REFERENCES players(id) ON DELETE CASCADE,
-  role        TEXT NOT NULL DEFAULT 'primary' CHECK (role IN ('primary','co')),
+  guardian_id TEXT NOT NULL REFERENCES guardians(id) ON DELETE RESTRICT,
+  player_id   TEXT NOT NULL REFERENCES players(id) ON DELETE RESTRICT,
+  role        TEXT NOT NULL CHECK (role IN ('primary', 'co')),
   PRIMARY KEY (guardian_id, player_id)
 ) STRICT;
 CREATE INDEX guardian_children_player ON guardian_children (player_id);
+CREATE UNIQUE INDEX guardian_children_one_primary ON guardian_children (player_id) WHERE role = 'primary';
 
 -- source: db.sessions  (createSession server.mjs:650-659)
 -- owner/writer: server.mjs (createSession, logout, revokeOrgUserAccess, prune), m13 (own-session revoke), m25 (reviewer revoke)
@@ -262,7 +258,7 @@ CREATE INDEX sessions_expires ON sessions (expires_at);                      -- 
 --     unknown ones; a value a column cannot hold refuses the write with the field and the index. An item reads back
 --     with its fields in the spec's order (a NULL column is null for the fields writers set explicitly — a clip's url,
 --     verifiedClip, captions; an attendance's gps; a medical record's layoffWeeks, cleared — and omitted otherwise);
---     every array is on every player record ([] when it has no rows); players.facets_json keeps nothing of them;
+--     every array is on every player record ([] when it has no rows);
 --   - natural keys the code enforces are UNIQUE (season per player, drill per player, provider+external id per player,
 --     tag per clip, every item id); a legacy array that violates one is refused by the migration, never deduplicated.
 --     The migration's blob import drops an unknown item field, converts a wrong-typed value whose meaning is obvious
@@ -291,7 +287,7 @@ CREATE INDEX sessions_expires ON sessions (expires_at);                      -- 
 --     ts→recorded_at)
 --   activityLog[] → player_activity_log (occurred_at)
 --   externalIds[] → player_external_ids (provider, externalId→external_id, source, by→linked_by_name, at→linked_at,
---     claim→claim_json)
+--     reviewId→review_id; S14h: the copied claim is gone, the identity review keeps the imported row)
 --   programme.completed[] → player_programme_completions (sessionId→session_id, ts→completed_at)
 -- notes: media bytes live in DATA_DIR/media (adapters.mjs), never in the database; medical rows are private unless
 --   players.medical_shared (views/playerViews.mjs leaves them out of the org view); attendance GPS is never served to an
@@ -419,10 +415,11 @@ CREATE TABLE player_external_ids (
   source         TEXT NOT NULL,
   linked_by_name TEXT,
   linked_at      INTEGER NOT NULL,
-  claim_json TEXT CHECK (claim_json IS NULL OR json_valid(claim_json)),
+  review_id      TEXT,                                   -- S14h: the identity review it was linked from (the review keeps the imported row)
   PRIMARY KEY (player_id, provider, external_id)
 ) STRICT;
 CREATE UNIQUE INDEX player_external_ids_position ON player_external_ids (player_id, position);
+CREATE INDEX player_external_ids_lookup ON player_external_ids (provider, external_id);
 
 CREATE TABLE player_programme_completions (
   player_id    TEXT NOT NULL REFERENCES players(id) ON DELETE CASCADE,

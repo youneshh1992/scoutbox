@@ -57,7 +57,6 @@ import * as m0036 from './migrations/0036_groups.mjs';
 import * as m0037 from './migrations/0037_grassroots.mjs';
 import * as m0038 from './migrations/0038_operations.mjs';
 import * as m0039 from './migrations/0039_retire_blob.mjs';
-import { trialReportsFor } from './playerSubrecords.mjs';
 import { createRecruitmentRepository, RECRUITMENT_SNAPSHOT, RECRUITMENT_COLLECTIONS, RECRUITMENT_MIGRATION, assertRecruitmentConsistent, unresolvedPlayerReferences as unresolvedRecruitmentPlayers, retainedPlayerReferences as retainedRecruitmentPlayers } from './recruitment.mjs';
 import { createRecruitmentCasesRepository, RECRUITMENT_CASES_SNAPSHOT, RECRUITMENT_CASES_COLLECTIONS, RECRUITMENT_CASES_MIGRATION, unresolvedPlayerReferences as unresolvedCasePlayers, retainedPlayerReferences as retainedCasePlayers } from './recruitmentCases.mjs';
 import { createRecruitmentContactsOffersRepository, CONTACTS_OFFERS_SNAPSHOT, RECRUITMENT_CONTACTS_OFFERS_COLLECTIONS, RECRUITMENT_CONTACTS_OFFERS_MIGRATION, unresolvedPlayerReferences as unresolvedContactOfferPlayers, retainedPlayerReferences as retainedContactOfferPlayers } from './recruitmentContactsOffers.mjs';
@@ -217,8 +216,7 @@ export function writeTableBacked(sqlite, snapshot, { now = Date.now() } = {}) {
   const single = (name) => TABLES.find((t) => t.name === name);
   // `replace` THROWS on a row the table refuses, which rolls the caller's whole transaction back.
   if (present.includes('orgs') && single('orgs').replace(sqlite, snapshot.orgs, { now })) written.push('orgs');
-  // S5: the `trials` the snapshot carries (written below, in the same transaction) judge every `trialReports` claim on its players; a snapshot without them is judged by the stored trials.
-  if (IDENTITY_COLLECTIONS.every((n) => present.includes(n)) && IDENTITY_SNAPSHOT.replace(sqlite, { players: snapshot.players, guardians: snapshot.guardians }, { now, trials: Object.hasOwn(snapshot, 'trials') && snapshot.trials !== undefined ? snapshot.trials : undefined })) written.push(...IDENTITY_COLLECTIONS);
+  if (IDENTITY_COLLECTIONS.every((n) => present.includes(n)) && IDENTITY_SNAPSHOT.replace(sqlite, { players: snapshot.players, guardians: snapshot.guardians }, { now })) written.push(...IDENTITY_COLLECTIONS);
   // S4b-R: the retained records go right after the identity pair (which carried the
   // existing ones through its rewrite). PROTECTED (review of 6d66655, F1): a supplied
   // collection may only ADD records — every stored record must be listed unchanged or
@@ -469,29 +467,25 @@ export function attachDataLayer({ db, seed = {}, store, nextId, sessionTtlMs, no
   if (!sqlite) throw new TypeError('the data layer needs a store with a SQLite connection (node:sqlite); there is no in-memory or JSON fallback');
   const migrations = runDataMigrations(sqlite, DATA_MIGRATIONS, { now: now(), log, context: { sessionTtlMs } });
 
-  // The staged repositories (players and guardians)
-  // keep a mirror in memory, expose it as a read-only `db.<name>` view
-  // and write what changed at the next save (`store.save()`, scheduled by persist()) or the unit of work's commit.
-  // Every other repository writes its rows at once and reads through SQL; its old `db.<name>` throws.
+  // Every repository writes its rows at once and reads through SQL; a retired collection's old `db.<name>` throws.
   // The organisations attach first: org_users, and most tables after them, reference orgs.
   // S14g: the organisations are explicit, with no mirror; their old collection name throws.
   const orgs = createOrgsRepository({ sqlite, nextId, log, now, unit: store.unit });
   const orgsBoot = orgs.initState() === 'pending' ? orgs.initialize(seed.orgs ?? []) : orgs.attach();
   retireCollection(db, 'orgs', 'orgs');
 
-  // The identity pair: a first installation's players are checked against the trials handed in with them (none in
-  // the seed); afterwards their trial reports come from the recruitment repository, attached below.
+  // S14h: players and guardians are explicit, with no mirror; their old collection names throw. Their trial reports
+  // come from the recruitment repository, attached below (a first installation's seed carries none).
   let recruitment = null;
   /** A collection the caller handed in before its table took over (the seed's or a fixture's plain array), or []. */
   const handedIn = (name) => (Object.hasOwn(seed, name) && Array.isArray(seed[name]) ? seed[name] : []);
-  const identity = createIdentityRepositories({ sqlite, log, warn, unit: store.unit, now, trialReports: (playerId) => (recruitment ? recruitment.trialReportsFor(playerId) : trialReportsFor(handedIn('trials'), playerId)) });
+  const identity = createIdentityRepositories({ sqlite, log, unit: store.unit, now, trialReportsOf: (ids) => (recruitment ? recruitment.trialReportsForPlayers(ids) : new Map()) });
   const identityWasPending = identity.initState() === 'pending'; // a first installation: its seed is imported once (S13e: the demo reputation rows too)
   const identityBoot = identityWasPending
     ? identity.initialize({ players: seed.players ?? [], guardians: seed.guardians ?? [] }, { now: now() })
     : identity.attach();
-  Object.defineProperty(db, 'players', { value: identity.players.view, writable: false, configurable: false, enumerable: true });
-  Object.defineProperty(db, 'guardians', { value: identity.guardians.view, writable: false, configurable: false, enumerable: true });
-  store.setSaveHook?.(identity.saveHook());
+  retireCollection(db, 'players', 'players (identity)');
+  retireCollection(db, 'guardians', 'guardians (identity)');
 
   // S14f: staff and sessions are explicit, with no mirror; their old collection names throw.
   const users = createUsersRepository({ sqlite, nextId, log, now, unit: store.unit });
@@ -502,7 +496,7 @@ export function attachDataLayer({ db, seed = {}, store, nextId, sessionTtlMs, no
   const sessionsBoot = sessions.attach();
   retireCollection(db, 'sessions', 'sessions');
 
-  const mediaDeletions = createMediaDeletionsQueue({ sqlite, log, warn, now, liveRecords: () => identity.players.view });
+  const mediaDeletions = createMediaDeletionsQueue({ sqlite, log, warn, now });
 
   const codes = createOneTimeCodesRepository({ sqlite, log, now, unit: store.unit });
   const codesBoot = codes.attach({ at: now() });
@@ -714,8 +708,8 @@ export function attachDataLayer({ db, seed = {}, store, nextId, sessionTtlMs, no
       ...dataSchemaReport(sqlite, DATA_MIGRATIONS),
       domains: {
         orgs: { rows: orgs.count(), mode: 'live', writeMode: 'explicit: create, update(id, draft => …) and setPasswordHash write at once, inside the route\'s unit of work when one is open', readMode: 'SQL: byId, list, page, locatedInBox, byName, passwordHashOf, count; no mirror and no db.* view; fresh deep-frozen records without the password hash', typing: 'typed columns only: name 1–120, the type, level and plan vocabularies, a location as latitude, longitude and city (lat/lng in range, both or neither), a federation registration as both its parts or neither, the flags as booleans, created_at required; no facet storage (an unknown field is refused)' },
-        players: { rows: identity.players.count(), retained: identity.players.retainedCount(), mode: 'live', transitional: 'facets_json (unknown fields and shape metadata)', subrecords: { mode: 'live', tables: identity.players.subrecordRows(), trialReports: 'derived from trials' }, deletion: 'S4b-R (migration 0014): an account deletion keeps the row as a retained record — id, deleted_at, birth_date, country; placeholders and NULL elsewhere; owned rows and links removed — served by no account reader; retained records travel in backups as playersRetained' },
-        guardians: { rows: identity.guardians.count(), mode: 'live', links: identity.report().links, transitional: 'facets_json (coGuardians)' },
+        players: { rows: identity.players.count(), retained: identity.players.retainedCount(), mode: 'live', writeMode: 'explicit: create, update(id, draft => …), setPasswordHash, the list operations (addItem, setItems, patchItem), the link operations and erase write at once, inside the route\'s unit of work when one is open', readMode: 'SQL: byId, byIds, byMediaId, byGuardian, byExternalId, byNameAndDob, scan / list / visibleCandidates (the under-18 wall and the grassroots box in SQL), count; no mirror and no db.* view; fresh deep-frozen records without the password hash', typing: 'typed columns only: name 1–120, the position, foot, availability, contract and level vocabularies, height, weight and squad number in range, stats non-negative (percentages 0–100), a location as both coordinates or neither, quiet hours as HH:MM; no facet storage (an unknown field is refused)', subrecords: { mode: 'live', tables: identity.players.subrecordRows(), trialReports: 'derived from trials' }, deletion: 'S4b-R (migration 0014): an account deletion keeps the row as a retained record — id, deleted_at, birth_date, country; placeholders and NULL elsewhere; owned rows and links removed — served by no account reader; retained records travel in backups as playersRetained' },
+        guardians: { rows: identity.guardians.count(), mode: 'live', links: identity.report().links, writeMode: 'explicit: create, update(id, draft => …), setPasswordHash, setEmailCodeHash and the link operations', readMode: 'SQL: byId, byIds, byEmail (case-insensitive), linksOf, forPlayer, childIds, page, count; childIds from the link rows and coGuardians from co_guardian_of; no mirror and no db.* view; no password or code hash on a record', references: 'guardian_children (both sides), players.guardian_id and co_guardian_of are RESTRICT keys; one primary link per player' },
         users: { rows: users.count(), mode: 'live', writeMode: 'explicit: create, update(id, draft => …), startMfa / enableMfa / disableMfa and useRecoveryCode (a code is spent by deleting its row) write at once, inside the route\'s unit of work when one is open', readMode: 'SQL: byId, byOrgAndName, forOrg, firstActive, activeByEmail, bySsoSubject, mfaSecretOf; no mirror and no db.* view; fresh deep-frozen records without the MFA secret or recovery codes', typing: 'typed columns: name 1–120 and unique in its organisation (case-insensitive, removed accounts included), role 1–60, an e-mail unique among current staff, an SSO subject unique in its organisation, the provenance vocabulary, MFA and delivery preferences as columns, recovery-code hashes as child rows', references: 'org_id → orgs and removed_by_id → org_users (RESTRICT); recovery codes and sessions cascade with their account' },
         sessions: { rows: sessions.count(), mode: 'live', lifetimeMs: sessions.ttlMs, readMode: 'SQL: byToken (by hash), bySid, listFor, listOrgUser; no db.* view', references: 'an org session\'s (org_user_id, ref_id) → org_users(id, org_id), cascading with the account' },
         oneTimeCodes: { mode: 'live', rows: codes.counts(), outstanding: codes.outstanding(), lifetimesMs: { emailChallenge: codes.emailChallengeTtlMs, pairingCode: codes.pairingCodeTtlMs }, maxEmailAttempts: codes.maxEmailAttempts },

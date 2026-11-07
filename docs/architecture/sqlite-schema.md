@@ -13,8 +13,8 @@
 Status: design proposed, executable DDL in `docs/architecture/sql/`, implementation steps
 S0 (staff), S1 (core identity shadow, corrected after acceptance review), S2 (sessions
 live, hashed tokens), S3 (organisations live, `org_users` rebuilt STRICT with its
-foreign key), S4a (players, guardians and `guardian_children` live with the
-transitional `facets_json`; the `media_deletions` queue; the S1 shadow retired), S5, S6a, S7a–S7d
+foreign key), S4a (players, guardians and `guardian_children` live; the transitional `facets_json` gone since S14h; the
+`media_deletions` queue; the S1 shadow retired), S5, S6a, S7a–S7d
 S6b (the eight audit tables, 19 October 2026; independently accepted at `f0abd34` on 21 October 2026) and S4b-R
 (the retained player record, migration 0014, 21 October 2026; independently accepted at `9b109dc`) done
 (§5.0 says exactly which parts are implemented, proposed, or waiting on a decision). Companion
@@ -103,7 +103,7 @@ other worktrees (`/home/user/scoutbox` on `claude/desktop-project-migration-wyk3
 | ~130 collections created with `db.x ??= []`, untyped nested records (1)    | TRUE    | 136 in `storeContract.mjs`; `server.mjs:202-235` and each module's `migrateMxx` |
 | Migration registry migrates JSON shapes, not tables (1)                    | TRUE    | `domains/platform/migrations.mjs:83-622`; now complemented by `repositories/database.mjs` which migrates tables |
 | Fresh install starts with seeded demo data (1)                             | TRUE    | `server.mjs:115` `buildSeed()`; plan step S13 separates production init from demo seeding |
-| `GET /org/players` builds a view of every player, no pagination (2)        | TRUE    | `server.mjs:1890` region (full `db.players` filter + sort) |
+| `GET /org/players` builds a view of every player, no pagination (2)        | TRUE    | S14h moved the filters and the under-18 wall into SQL (`players.visibleCandidates`); paging and the completeness sort in SQL are S14i |
 | `scryptSync` on the main thread; 20 MB JSON bodies; CV module in JS (2)    | TRUE    | `adapters.mjs:19-23`; `server.mjs:305`; `m22/` |
 | Shared org password with self-asserted role (5)                            | FIXED   | `3fe242b`: credentialed orgs refuse unknown staff (`STAFF_NOT_PROVISIONED`), roles are never taken from the request |
 | SSO test IdP secret defaulted and registered in production (5)             | FIXED   | `3fe242b`: random per-boot secret, routes refused outside dev, `TEST_IDP_IN_PRODUCTION` boot refusal |
@@ -136,7 +136,7 @@ them.
 |---|---|---|---|---|
 | `users` | persistent | 01 | `org_users` (LIVE since migration 0001) | S0 done |
 | `orgs` | persistent | 01 (+04, 05) | `orgs`; nested `tactical` → `org_tactical_setups/roles/role_criteria/windows`, `squad[]` → `org_squad_members`, `lookingFor[]` → `org_looking_for`, `federationCheck` → `org_federation_checks` (04); `verification.domains[]` → `org_verified_domains` (05); `verification.revokedAt/orgType` → columns on `orgs`; `agencySettings` → 06 | **S3 done; explicit since S14g** (typed columns only, no `facets_json`; the nested facets moved in S9c, S10a and S11a) |
-| `guardians` | persistent | 01 | `guardians` (LIVE since migration 0005; `coGuardians[]` and unknown fields in `facets_json`; the sign-up code only as `email_code_hash` since 3 Nov 2026); `childIds[]` → `guardian_children` (LIVE) | **S4a done** (S4b: lifecycle, after O1) |
+| `guardians` | persistent | 01 | `guardians` (LIVE since migration 0005; typed columns only since S14h, `coGuardians[]` worked out from `co_guardian_of`; the sign-up code only as `email_code_hash` since 3 Nov 2026); `childIds[]` → `guardian_children` (LIVE) | **S4a done; explicit since S14h** (S4b: lifecycle, after O1) |
 | `players` | persistent | 01 | `players` (scalars, `stats`, `medical.shared/conditionStatus`, `notificationPrefs`, `programme.track/startedAt`, `location`); `seasonHistory[]`, `badges[]`, `drills[]`, `attendance[]`, `timeline[]`, `media[]` (+`media[].tags` → `player_media_tags`), `medical.records[]`, `drillResults[]`, `activityLog[]`, `externalIds[]`, `programme.completed[]` → twelve `player_*` tables; `trialReports[]` derived (copy of `trials.report`); **since migration 0014 (S4b-R) an account deletion keeps the row as the retained record — `id`, `deleted_at`, `birth_date`, `country`; placeholders and NULL elsewhere — served by no account reader** | S4 (scalars, shadow since S1), S5 (sub-records), S4b-R (the retained record; implemented 21 October 2026, independently accepted at `9b109dc`) |
 | `sessions` | temporary | 01 | `sessions` (token stored as `token_hash`) | **S2 done** (live; blob retired by migration `0003`) |
 | `requests` | persistent | 02 | `recruitment_requests`, `request_trial_slots`; `keys` → `idempotency_keys` (LIVE since migration 0015, S8a-core; `player_id` tolerant with no key — Q7a; `case_id` and the guardian columns checked in code — Q7b, Q7c; absent/null/off-type/unknown fields kept) | **S8a-core — independently accepted at `7a7efc6`** (22 October 2026; plan §D.8, §D.8.11) |
@@ -411,7 +411,7 @@ this branch: 13 checks passed.
 | State | Tables | Where |
 |---|---|---|
 | **Implemented, live** (a repository owns the rows; the blob is gone) | 3: `org_users` (rebuilt STRICT with `org_id REFERENCES orgs(id)` and `json_valid` CHECKs in `0004`), `sessions` (`token_hash` only; the table was created by `0002` and became live, with the legacy blob imported and retired, in `0003`), `orgs` (created live by `0004`; typed columns only and explicit writes since S14g, `facets_json` gone) | migrations `0001` (S0), `0003` (S2), `0004` (S3) |
-| **Implemented, live** (S4a) | 3 + 1: `guardians`, `players` (scalars and the split composites as columns; since S5 only unknown fields and shape metadata in `facets_json`), `guardian_children` (derived from `childIds`, roles per side) — created live by `0005_core_identity_live` with the two blobs imported through the reviewed preflight and retired; `media_deletions` (the crash-safe media-removal queue, `0006`, file 08). The S1 shadow is retired | migrations `0005`, `0006` (S4a) |
+| **Implemented, live** (S4a) | 3 + 1: `guardians`, `players` (scalars and the split composites as columns; no `facets_json` since S14h), `guardian_children` (derived from `childIds`, roles per side) — created live by `0005_core_identity_live` with the two blobs imported through the reviewed preflight and retired; `media_deletions` (the crash-safe media-removal queue, `0006`, file 08). The S1 shadow is retired | migrations `0005`, `0006` (S4a) |
 | **Implemented, live** (S5) | 12: the `player_*` sub-record tables (`player_season_history`, `player_badges`, `player_drills`, `player_attendance`, `player_timeline`, `player_media`, `player_media_tags`, `player_medical_records`, `player_drill_results`, `player_activity_log`, `player_external_ids`, `player_programme_completions`), created by `0007_player_subrecords` from the S4a rows through the one mapping; `trialReports` is derived from the trials, not a table ([`s5-player-subrecords.md`](./s5-player-subrecords.md)) | migration `0007` (S5) |
 | **Implemented, live** (S8a-core, 22 October 2026, independently accepted at `7a7efc6`) | 15 + the `channels` rebuild: `recruitment_requests`, `request_trial_slots`, `trials` and its eleven owned child tables, `idempotency_keys`, created by `0015_recruitment` from the two blobs through the repository's own validation (plan §D.7 as accepted at `d0f0205`, §D.8; Q7a/Q7b/Q7c); `channels` rebuilt with the real `request_id` foreign key | migration `0015` (S8a-core) |
 | **Proposed** (executable DDL, asserted to load, no migration, no repository) | 287 | files 02 (the remaining 40 tables)–08 |
@@ -622,7 +622,7 @@ tolerant historical references, counted when unresolved and never refused (Q4 �
 in place, which is why they must outlive the subject), the IDV guardian reference is checked strictly in code
 (Q4b), and the `ON DELETE RESTRICT` references this document designed stay OPEN for S4b's tombstone and the
 foreign-key step (plan §D.2a) — the DESIGN below still assumes them for that later step.
-One-time codes (`email_challenges`, `pairing_codes`) are stored hashed (live since migration 0008, S6a: sha256 of the code trimmed and upper-cased; the guardian e-mail code stays plain in `guardians.facets_json` until a resend route exists, `s6-readiness-review.md` §5.3).
+One-time codes (`email_challenges`, `pairing_codes`) are stored hashed (live since migration 0008, S6a: sha256 of the code trimmed and upper-cased; the guardian e-mail code is `guardians.email_code_hash`, a hash, since 3 Nov 2026).
 
 ### 5.4 Scouting and assessment (file 04)
 

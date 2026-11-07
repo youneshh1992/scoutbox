@@ -21,7 +21,7 @@ import { DRILLS as BOX_DRILLS, latestDrill as boxLatestDrill } from '../../devel
 import { combineProtocol as combineProtocolDef, personalBest as combinePersonalBest, formatCombineValue } from '../../development/boxcam/combineShared.mjs';
 import { applicationView } from '../../scouting/journeys.mjs';
 import { blankPrefs, PASSPORT_LIMITS as L, AVAILABILITY, CORRECTION_TARGETS, CORRECTION_OUTCOMES } from '../../../repositories/passport.mjs';
-import { PLAYER_POSITIONS } from '../../../repositories/identityMapping.mjs';
+import { PLAYER_POSITIONS } from '../../../repositories/identity.mjs';
 
 const BOX_DRILLS_BY_ID = new Map(BOX_DRILLS.map((d) => [d.id, d]));
 

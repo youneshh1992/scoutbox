@@ -353,7 +353,7 @@ export function registerDevelopment(ctx) {
 
     let assignee = existing?.assignee ?? null;
     if (Object.prototype.hasOwnProperty.call(body ?? {}, 'assignee')) {
-      const a = canAssign({ assignee: body.assignee, plan, player, db, staffById: (id) => byId.user(id) });
+      const a = canAssign({ assignee: body.assignee, plan, player, guardianById: (id) => byId.guardian(id), staffById: (id) => byId.user(id) });
       if (a.error) return a;
       assignee = a.value;
     }

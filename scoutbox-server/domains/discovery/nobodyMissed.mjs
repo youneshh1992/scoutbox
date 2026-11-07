@@ -27,7 +27,7 @@ import { guardRev, bumpRev, revMeta } from '../platform/concurrency.mjs';
 
 export function registerNobodyMissed(ctx) {
   const {
-    db, orgRouter, nextId, findPlayer, orgCanSee,
+    db, players, orgRouter, nextId, findPlayer, orgCanSee,
     isLead, requireLead, playerViewForOrg, audit, vmetric, suppress, discovery, unit,
   } = ctx;
   // S12c: briefs and reviews are rows of the discovery repository, written only through its operations.
@@ -294,7 +294,7 @@ export function registerNobodyMissed(ctx) {
     let scanned = 0;
     const reviewOf = reviewsByPlayer(org.id, brief.id);
 
-    for (const player of db.players) {
+    for (const player of players.list({ visibleTo: org }, { limit: LIMITS.maxCandidateScan })) { // S14h: the SQL part of the visibility rule is the query's
       if (++scanned > LIMITS.maxCandidateScan) break;
       // 1-3: standing, visibility, blocks/minors/radius. A player who fails
       // here never becomes a candidate at all.

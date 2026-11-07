@@ -18,6 +18,8 @@ installAsyncErrorForwarding();
 const optText = (v, max = 500) => v === undefined || v === null || (typeof v === 'string' && v.length <= max);
 const reqText = (v, max = 500) => typeof v === 'string' && v.trim().length > 0 && v.length <= max;
 const badField = (res, field) => res.status(400).json({ error: 'FIELD_INVALID', field, message: `${field} must be text.` });
+/** S14h: a switch must be sent as true or false (400 FIELD_INVALID naming it), never coerced. Returns true when refused. */
+const switchRefused = (res, v, field) => { if (typeof v === 'boolean') return false; res.status(400).json({ error: 'FIELD_INVALID', field, message: `${field} must be true or false.` }); return true; };
 import cors from 'cors';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -112,6 +114,7 @@ import { parseDobStrict, parseStrictDateOnly, readInstant, utcDayOf, validateIan
 import { readPage, sendPageError, pageOf } from './domains/platform/paging.mjs';
 import { AUDIT_LIMITS } from './repositories/safetyAudit.mjs';
 import { PLANS, ARCHETYPES } from './catalogue.mjs';
+import { IDENTITY_LIMITS, PLAYER_POSITIONS, PLAYER_FEET } from './repositories/identity.mjs';
 import { invoiceView } from './adapters.mjs';
 import { createLookups } from './domains/platform/lookups.mjs';
 
@@ -236,7 +239,9 @@ function seam(step) {
 // logged as codes and ids (no names) and counted on /capabilities; the
 // process still starts, because a running server that says "two open Rooms
 // for one player" is more useful than a dead one that says nothing.
-const integrity = integrityReport({ players: db.players, orgs: orgs.list() }, { cases: recruitmentCases.cases.withRoom() });
+const integrityCases = recruitmentCases.cases.withRoom();
+// The players the Rooms name that still exist (ids are the table's primary key, so they cannot repeat).
+const integrity = integrityReport({ players: [...new Set(integrityCases.map((c) => c.playerId))].filter((id) => players.exists(id)).map((id) => ({ id })), orgs: orgs.list() }, { cases: integrityCases });
 for (const v of integrity.violations) console.error(`INTEGRITY ${v.code} key=${v.key} ids=${v.ids.join(',')}`);
 if (integrity.violations.length) console.error(`INTEGRITY ${integrity.violations.length} violation(s) in the database — nothing was repaired.`);
 
@@ -1043,13 +1048,14 @@ function channelViewFor(c, viewer) {
 // (S5: the activity log and the badges are rows of their tables, appended through the repository — inside the caller's unit of work when there is one.)
 function recordActivity(player) {
   players.addItem(player.id, 'activityLog', Date.now());
-  refreshJourneyBadges(player);
+  refreshJourneyBadges(players.byId(player.id));
 }
 
 // Grassroots journey badges: awarded automatically as the record grows.
 // Level-up moments are handled at the signing itself.
-function refreshJourneyBadges(player) {
-  if (player.level === 'pro') return;
+function refreshJourneyBadges(given) {
+  const player = players.byId(given.id); // the stored record, with the caller's writes
+  if (!player || player.level === 'pro') return;
   const earned = earnedGrassrootsBadges(player, { streak: computeStreak(player.activityLog) });
   for (const badge of earned) {
     if (!(player.badges ?? []).includes(badge)) {
@@ -1172,7 +1178,7 @@ app.get('/health', (_req, res) => res.json({
   engine: store.engine,
   devLogins: DEV_LOGINS,
   uptimeSec: Math.round(process.uptime()),
-  players: db.players.length,
+  players: players.count(),
   orgs: orgs.count(),
 }));
 
@@ -1192,9 +1198,32 @@ app.get('/meta', (_req, res) => {
 // Self sign-up is adults only. Under-18 accounts are OWNED by a verified
 // guardian and can only be created through the guardian flow below — the API
 // itself refuses a minor self-signup.
+/**
+ * S14h: the profile fields a sign-up or a guardian's child creation may carry, refused by name (400 FIELD_INVALID)
+ * instead of stored or coerced: the name 1–120 characters, the country and city text, the position and foot from
+ * their vocabularies, height and weight whole numbers in range, the coordinates numbers in range.
+ */
+function profileFieldRefused(res, body) {
+  const bad = (field, message) => { res.status(400).json({ error: 'FIELD_INVALID', field, message }); return true; };
+  const absent = (v) => v === undefined || v === null || v === '';
+  if (typeof body.name !== 'string' || !body.name.trim() || body.name.length > IDENTITY_LIMITS.name) return bad('name', `name must be text of 1 to ${IDENTITY_LIMITS.name} characters.`);
+  if (body.country !== undefined && !(typeof body.country === 'string' && body.country.length >= 1 && body.country.length <= IDENTITY_LIMITS.country)) return bad('country', `country must be text of 1 to ${IDENTITY_LIMITS.country} characters.`);
+  if (!absent(body.city) && !(typeof body.city === 'string' && body.city.length <= IDENTITY_LIMITS.city)) return bad('city', `city must be text of at most ${IDENTITY_LIMITS.city} characters.`);
+  if (!absent(body.position) && !PLAYER_POSITIONS.includes(body.position)) return bad('position', `position must be one of ${PLAYER_POSITIONS.join(', ')}.`);
+  if (!absent(body.foot) && !PLAYER_FEET.includes(body.foot)) return bad('foot', `foot must be one of ${PLAYER_FEET.join(', ')}.`);
+  for (const f of ['heightCm', 'weightKg']) {
+    const [lo, hi] = IDENTITY_LIMITS[f];
+    if (!absent(body[f]) && !(Number.isSafeInteger(body[f]) && body[f] >= lo && body[f] <= hi)) return bad(f, `${f} must be a whole number from ${lo} to ${hi}.`);
+  }
+  for (const [f, lim] of [['lat', 90], ['lng', 180]]) if (!absent(body[f]) && !(typeof body[f] === 'number' && Number.isFinite(body[f]) && Math.abs(body[f]) <= lim)) return bad(f, `${f} must be a number from -${lim} to ${lim}.`);
+  return false;
+}
+const optional = (v) => (v === undefined || v === null || v === '' ? null : v);
+
 app.post('/auth/player/signup', (req, res) => {
   const { name, dob, country = 'GB', position, foot, password } = req.body || {};
   if (!name || !dob) return res.status(400).json({ error: 'NAME_AND_DOB_REQUIRED' });
+  if (profileFieldRefused(res, req.body)) return;
   // P5.6F review: a date of birth that cannot be READ must be refused here, not
   // stored. Before F-8 an unreadable dob computed as the epoch and passed every
   // adult gate; after F-8 it fails closed as "age unknown" — but a sign-up that
@@ -1216,52 +1245,34 @@ app.post('/auth/player/signup', (req, res) => {
     name,
     dob,
     country,
-    city: req.body.city || '',
-    position: position || null,
-    foot: foot || null,
-    heightCm: req.body.heightCm || null,
-    weightKg: req.body.weightKg || null,
-    stats: null,
-    academyPlus: false,
-    badges: [],
-    availability: 'not_seeking',
-    contractStatus: 'unknown',
-    identityVerified: false,
-    attendance: [],
-    timeline: [],
-    media: [],
-    trialReports: [],
-    drills: [],
-    guardianId: null,
-    squadNumber: null,
-    contractUntil: null,
-    marketValueRange: null,
-    agentName: null,
+    city: optional(req.body.city),
+    position: optional(position),
+    foot: optional(foot),
+    heightCm: optional(req.body.heightCm),
+    weightKg: optional(req.body.weightKg),
     createdAt: Date.now(),
-    password: hashPassword(password),
-    level: 'amateur',
+    passwordHash: hashPassword(password),
     // Optional coordinates: without them the player simply is not visible to
     // grassroots clubs (the radius rule fails closed, never open).
     location: typeof req.body.lat === 'number' && typeof req.body.lng === 'number'
       ? { lat: req.body.lat, lng: req.body.lng } : null,
-    medical: { shared: false, records: [], conditionStatus: 'unknown' },
   };
+
   // One unit of work: the player row, the saved-search notifications and the
   // session; the broadcast and any push go out after COMMIT.
   let created; let token;
   try {
     unit(() => {
-      created = players.insert(p);
+      created = players.create(p);
       checkSavedSearches(created);
       token = createSession('player', created.id);
       broadcast('players');
     });
   } catch (e) {
-    if (/was refused/.test(String(e?.message))) return res.status(400).json({ error: 'PLAYER_INVALID', message: String(e.message) });
+    if (e?.code === 'PLAYER_RECORD_INVALID') return res.status(400).json({ error: 'PLAYER_INVALID', message: String(e.message) });
     throw e;
   }
-  const { password: _pw, ...safe } = JSON.parse(JSON.stringify(created));
-  res.status(201).json({ playerId: created.id, player: safe, token });
+  res.status(201).json({ playerId: created.id, player: JSON.parse(JSON.stringify(created)), token });
 });
 
 app.post('/auth/player/login', (req, res) => {
@@ -1270,10 +1281,11 @@ app.post('/auth/player/login', (req, res) => {
   if (loginLockedOut(res, `player:${req.body?.playerId}`)) return;
   const p = findPlayer(req.body?.playerId);
   if (!p) { noteLoginFailure(`player:${req.body?.playerId}`); return res.status(404).json({ error: 'PLAYER_NOT_FOUND' }); }
-  if (p.password) {
-    const check = verifyPassword(req.body?.password ?? '', p.password);
+  const hash = players.passwordHashOf(p.id);
+  if (hash) {
+    const check = verifyPassword(req.body?.password ?? '', hash);
     if (!check) { noteLoginFailure(`player:${p.id}`); return res.status(401).json({ error: 'BAD_PASSWORD', message: 'This profile is password-protected.' }); }
-    if (check === 'upgrade') players.update(p.id, { password: hashPassword(req.body.password) }); // migrate legacy plain-text
+    if (check === 'upgrade') players.setPasswordHash(p.id, hashPassword(req.body.password)); // migrate legacy plain-text
   } else if (!DEV_LOGINS) {
     return devLoginRefused(res);
   }
@@ -1313,7 +1325,7 @@ app.post('/auth/guardian/signup', async (req, res) => {
   if (!password || String(password).length < 8) {
     return res.status(400).json({ error: 'PASSWORD_REQUIRED', message: 'Pick a password of at least 8 characters.' });
   }
-  if (db.guardians.some((x) => x.email.toLowerCase() === email.toLowerCase())) {
+  if (guardians.emailTaken(email)) {
     return res.status(409).json({ error: 'EMAIL_IN_USE', message: 'A guardian account with this email already exists — log in instead.' });
   }
   const emailCode = randomCode(6);
@@ -1321,18 +1333,18 @@ app.post('/auth/guardian/signup', async (req, res) => {
     id: nextId('gd'),
     name,
     email,
-    password: hashPassword(password),
+    passwordHash: hashPassword(password),
     emailVerified: false,
     emailCodeHash: hashCode(emailCode), // like every other one-time code, only the hash is stored
     idVerified: false,
     disclaimerAccepted: false,
-    childIds: [],
+    createdAt: Date.now(),
   };
   // The row commits on its own (one transaction); the e-mail is sent afterwards, never inside a transaction.
   let g;
-  try { g = guardians.insert(record); } catch (e) {
-    if (/EMAIL_IN_USE/.test(String(e?.message))) return res.status(409).json({ error: 'EMAIL_IN_USE', message: 'A guardian account with this email already exists — log in instead.' });
-    if (/was refused/.test(String(e?.message))) return res.status(400).json({ error: 'GUARDIAN_INVALID', message: String(e.message) });
+  try { g = guardians.create(record); } catch (e) {
+    if (e?.code === 'EMAIL_IN_USE') return res.status(409).json({ error: 'EMAIL_IN_USE', message: 'A guardian account with this email already exists — log in instead.' });
+    if (e?.code === 'GUARDIAN_RECORD_INVALID') return res.status(400).json({ error: 'GUARDIAN_INVALID', message: String(e.message) });
     throw e;
   }
   await mailer.send({
@@ -1353,11 +1365,15 @@ app.post('/auth/guardian/verify-email', (req, res) => {
   const g = byId.guardian(guardianId);
   if (!g) return res.status(404).json({ error: 'GUARDIAN_NOT_FOUND' });
   if (g.emailVerified) return res.json({ emailVerified: true });
-  if (!code || !g.emailCodeHash || !timingSafeEqStr(hashCode(code), g.emailCodeHash)) {
+  const codeHash = guardians.emailCodeHashOf(g.id);
+  if (!code || !codeHash || !timingSafeEqStr(hashCode(code), codeHash)) {
     return res.status(400).json({ error: 'CODE_INVALID', message: 'That code doesn\'t match — check the email we sent you.' });
   }
   // One row write: verified, and the spent code's hash cleared.
-  guardians.update(g.id, { emailVerified: true, emailCodeHash: null });
+  unit(() => {
+    guardians.update(g.id, (d) => { d.emailVerified = true; });
+    guardians.setEmailCodeHash(g.id, null);
+  });
   res.json({ emailVerified: true });
 });
 
@@ -1368,19 +1384,20 @@ app.post('/auth/guardian/login', (req, res) => {
   // alternates id and email otherwise gets two budgets for one password.
   const tried = `guardian:${req.body?.guardianId ?? req.body?.email}`;
   if (loginLockedOut(res, tried)) return;
-  const g = db.guardians.find((x) => x.id === req.body?.guardianId || x.email === req.body?.email);
+  const g = (typeof req.body?.guardianId === 'string' ? byId.guardian(req.body.guardianId) : null) ?? guardians.byEmail(req.body?.email);
   if (!g) { noteLoginFailure(tried); return res.status(404).json({ error: 'GUARDIAN_NOT_FOUND' }); }
   const canonical = `guardian:${g.id}`;
   const aliased = loginKey(canonical) !== loginKey(tried);
   if (aliased && loginLockedOut(res, canonical)) return;
-  if (g.password) {
-    const check = verifyPassword(req.body?.password ?? '', g.password);
+  const hash = guardians.passwordHashOf(g.id);
+  if (hash) {
+    const check = verifyPassword(req.body?.password ?? '', hash);
     if (!check) {
       noteLoginFailure(tried);
       if (aliased) noteLoginFailure(canonical);
       return res.status(401).json({ error: 'BAD_PASSWORD', message: 'This account is password-protected.' });
     }
-    if (check === 'upgrade') guardians.update(g.id, { password: hashPassword(req.body.password) });
+    if (check === 'upgrade') guardians.setPasswordHash(g.id, hashPassword(req.body.password));
   } else if (!DEV_LOGINS) {
     return devLoginRefused(res);
   }
@@ -1417,7 +1434,7 @@ guardianRouter.post('/verify-id', async (req, res, next) => {
   // commit together before the response (review of 9656a4b).
   try {
     unit(() => {
-      guardians.update(req.guardian.id, { idVerified: true, idvReference: result.reference });
+      guardians.update(req.guardian.id, (d) => { d.idVerified = true; d.idvReference = result.reference; });
       seam('guardian.verify_id.after_row');
       // Every check lands in the admin IDV queue for audit — and can be revoked there.
       // S6b: a row of idv_queue in the same unit as the guardian's column (Domain G:
@@ -1438,7 +1455,7 @@ guardianRouter.post('/disclaimer', (req, res) => {
   if (req.body?.accepted !== true) {
     return res.status(400).json({ error: 'DISCLAIMER_NOT_ACCEPTED' });
   }
-  guardians.update(req.guardian.id, { disclaimerAccepted: true });
+  guardians.update(req.guardian.id, (d) => { d.disclaimerAccepted = true; d.disclaimerAcceptedAt ??= Date.now(); });
   res.json({ disclaimerAccepted: true });
 });
 
@@ -1469,6 +1486,7 @@ guardianRouter.post('/children', (req, res) => {
   }
   const { name, dob, country = 'GB', position, foot, heightCm, weightKg } = req.body || {};
   if (!name || !dob) return res.status(400).json({ error: 'NAME_AND_DOB_REQUIRED' });
+  if (profileFieldRefused(res, req.body)) return;
   // P5.6F review: a date of birth that cannot be READ must be refused here, not
   // stored. Before F-8 an unreadable dob computed as the epoch and passed every
   // adult gate; after F-8 it fails closed as "age unknown" — but a sign-up that
@@ -1483,46 +1501,28 @@ guardianRouter.post('/children', (req, res) => {
     name,
     dob,
     country,
-    city: '',
     guardianId: req.guardian.id,
-    position: position || null,
-    foot: foot || null,
-    heightCm: heightCm || null,
-    weightKg: weightKg || null,
-    stats: null,
-    academyPlus: false,
-    badges: [],
-    availability: 'not_seeking',
-    contractStatus: 'unknown',
-    identityVerified: false,
-    attendance: [],
-    timeline: [],
-    media: [],
-    trialReports: [],
-    drills: [],
-    squadNumber: null,
-    contractUntil: null,
-    marketValueRange: null,
-    agentName: null,
+    position: optional(position),
+    foot: optional(foot),
+    heightCm: optional(heightCm),
+    weightKg: optional(weightKg),
     createdAt: Date.now(),
-    password: null,
-    level: 'amateur',
     location: typeof req.body.lat === 'number' && typeof req.body.lng === 'number'
       ? { lat: req.body.lat, lng: req.body.lng } : null,
-    medical: { shared: false, records: [], conditionStatus: 'unknown' },
   };
+
   // One unit of work: the child row and its primary link (the guardian's
   // childIds follow from the link), the saved-search notifications; the
   // broadcast and any push go out after COMMIT.
   let child;
   try {
     unit(() => {
-      child = players.insert(p);
+      child = players.create(p);
       checkSavedSearches(child);
       broadcast('players');
     });
   } catch (e) {
-    if (/was refused/.test(String(e?.message))) return res.status(400).json({ error: 'PLAYER_INVALID', message: String(e.message) });
+    if (e?.code === 'PLAYER_RECORD_INVALID') return res.status(400).json({ error: 'PLAYER_INVALID', message: String(e.message) });
     throw e;
   }
   res.status(201).json({ playerId: child.id, player: guardianChildView(child, VIEW_HELPERS) });
@@ -1669,15 +1669,17 @@ guardianRouter.post('/children/:id/availability', (req, res) => {
   const AV = ['available_now', 'end_of_season', 'not_seeking'];
   const { availability } = req.body || {};
   if (!AV.includes(availability)) return res.status(400).json({ error: 'BAD_AVAILABILITY', allowed: AV });
-  players.update(child.id, { availability });
+  const stored = players.update(child.id, (d) => { d.availability = availability; });
   broadcast('players', { playerId: child.id });
-  res.json({ availability: child.availability });
+  res.json({ availability: stored.availability });
 });
 
 // Co-guardian: a second parent/guardian sharing the same children.
 guardianRouter.post('/coguardian', (req, res) => {
   const { name, email } = req.body || {};
   if (!name || !email) return res.status(400).json({ error: 'NAME_AND_EMAIL_REQUIRED' });
+  if (!reqText(name, IDENTITY_LIMITS.name)) return res.status(400).json({ error: 'FIELD_INVALID', field: 'name', message: `name must be text of 1 to ${IDENTITY_LIMITS.name} characters.` });
+  if (!reqText(email, IDENTITY_LIMITS.email) || !email.includes('@')) return res.status(400).json({ error: 'FIELD_INVALID', field: 'email', message: 'email must be an e-mail address.' });
   const co = {
     id: nextId('gd'),
     name,
@@ -1686,16 +1688,15 @@ guardianRouter.post('/coguardian', (req, res) => {
     disclaimerAccepted: false,
     childIds: [...req.guardian.childIds],
     coGuardianOf: req.guardian.id,
+    createdAt: Date.now(),
   };
-  // One unit of work: the co-guardian's row and its co links (one per child), and the primary's coGuardians list.
+  // One unit: the co-guardian's row and its co links (one per child). The primary's coGuardians list is worked out
+  // from the co-guardians' coGuardianOf (S14h).
   try {
-    unit(() => {
-      guardians.insert(co);
-      guardians.update(req.guardian.id, { coGuardians: [...(req.guardian.coGuardians ?? []), { id: co.id, name, email }] });
-    });
+    guardians.create(co);
   } catch (e) {
-    if (/EMAIL_IN_USE/.test(String(e?.message))) return res.status(409).json({ error: 'EMAIL_IN_USE', message: 'A guardian account with this email already exists.' });
-    if (/was refused/.test(String(e?.message))) return res.status(400).json({ error: 'GUARDIAN_INVALID', message: String(e.message) });
+    if (e?.code === 'EMAIL_IN_USE') return res.status(409).json({ error: 'EMAIL_IN_USE', message: 'A guardian account with this email already exists.' });
+    if (e?.code === 'GUARDIAN_RECORD_INVALID') return res.status(400).json({ error: 'GUARDIAN_INVALID', message: String(e.message) });
     throw e;
   }
   res.status(201).json({ guardianId: co.id, note: 'The co-guardian must verify their ID and accept the disclaimer before they can act.' });
@@ -1730,9 +1731,10 @@ guardianRouter.get('/log', (req, res) => {
 guardianRouter.post('/children/:id/medical/share', (req, res) => {
   const child = findPlayer(req.params.id);
   if (!child || !req.guardian.childIds.includes(child.id)) return res.status(404).json({ error: 'CHILD_NOT_FOUND' });
-  players.update(child.id, { medical: { shared: !!req.body?.shared } });
+  if (switchRefused(res, req.body?.shared, 'shared')) return;
+  const stored = players.update(child.id, (d) => { d.medical.shared = req.body.shared; });
   broadcast('players', { playerId: child.id });
-  res.json({ shared: child.medical.shared });
+  res.json({ shared: stored.medical.shared });
 });
 
 guardianRouter.post('/report', (req, res) => handleReport(req, res, { by: 'guardian', byId: req.guardian.id }));
@@ -2011,7 +2013,19 @@ app.use('/org', orgAuth, orgRouter);
 // ----------------------------------------------------------------- search
 orgRouter.get('/players', (req, res) => {
   const { q, position, academyPlus, availability, country, ageGroup, newDays } = req.query;
-  let list = db.players
+  // A filter sent twice arrives as a list: refused by name (S14h), never bound into the query.
+  for (const f of ['q', 'position', 'academyPlus', 'availability', 'country', 'ageGroup', 'newDays']) {
+    if (req.query[f] !== undefined && typeof req.query[f] !== 'string') return res.status(400).json({ error: 'FIELD_INVALID', field: f, message: `${f} is given once, as text.` });
+  }
+  // S14h: the filters the table can answer, and the SQL part of the visibility rule, are applied in the query; the
+  // exact rule (wall, radius, blocks) stays at the source, in the view.
+  const ages = { u16: { ageBelow: 16 }, u18: { ageBelow: 18 }, '18-21': { ageAtLeast: 18, ageBelow: 22 }, senior: { ageAtLeast: 22 } }[ageGroup] ?? {};
+  const days = newDays ? Number(newDays) : null;
+  let list = players.visibleCandidates(req.org, {
+    position: position || undefined, availability: availability || undefined, country: country || undefined,
+    academyPlus: academyPlus === 'true' || undefined, ...ages,
+    ...(Number.isFinite(days) ? { createdSince: Date.now() - days * 24 * 3600 * 1000 } : {}),
+  })
     .map((p) => playerViewForOrg(p, req.org)) // wall + verification + blocks, at the source
     .filter(Boolean);
 
@@ -2020,18 +2034,6 @@ orgRouter.get('/players', (req, res) => {
     list = list.filter(
       (p) => p.name.toLowerCase().includes(needle) || (p.city || '').toLowerCase().includes(needle) || (p.country || '').toLowerCase().includes(needle)
     );
-  }
-  if (position) list = list.filter((p) => p.position === position);
-  if (availability) list = list.filter((p) => p.availability === availability);
-  if (academyPlus === 'true') list = list.filter((p) => p.academyPlus);
-  if (country) list = list.filter((p) => p.country === country);
-  if (ageGroup === 'u16') list = list.filter((p) => p.age < 16);
-  if (ageGroup === 'u18') list = list.filter((p) => p.age < 18);
-  if (ageGroup === '18-21') list = list.filter((p) => p.age >= 18 && p.age <= 21);
-  if (ageGroup === 'senior') list = list.filter((p) => p.age >= 22);
-  if (newDays) {
-    const cutoff = Date.now() - Number(newDays) * 24 * 3600 * 1000;
-    list = list.filter((p) => p.createdAt && p.createdAt >= cutoff);
   }
 
   if (req.org.level === 'grassroots') {
@@ -2079,8 +2081,8 @@ orgRouter.get('/players/:id', (req, res) => {
   if (isBlocked(p.id, req.org.id)) return res.status(404).json({ error: 'PLAYER_NOT_FOUND' });
   ledgerAppend({ type: 'view', playerId: p.id, orgId: req.org.id, orgName: req.org.name, userId: req.orgUser.id, scoutName: req.orgUser.name });
   const view = playerViewForOrg(p, req.org);
-  const similar = db.players
-    .filter((c) => c.id !== p.id && visibleToOrg(c, req.org) && !isBlocked(c.id, req.org.id))
+  const similar = players.visibleCandidates(req.org, { exceptId: p.id })
+    .filter((c) => visibleToOrg(c, req.org) && !isBlocked(c.id, req.org.id))
     .map((c) => ({ playerId: c.id, name: c.name, position: c.position, score: similarityScore(p, c) }))
     .sort((a, b) => b.score - a.score)
     .slice(0, 3);
@@ -2112,8 +2114,8 @@ orgRouter.post('/players/:id/notes', (req, res) => {
 orgRouter.get('/players/:id/morelike', (req, res) => {
   const p = findPlayer(req.params.id);
   if (!p || !visibleToOrg(p, req.org) || isBlocked(p.id, req.org.id)) return res.status(404).json({ error: 'PLAYER_NOT_FOUND' });
-  const ranked = db.players
-    .filter((c) => c.id !== p.id && visibleToOrg(c, req.org) && !isBlocked(c.id, req.org.id))
+  const ranked = players.visibleCandidates(req.org, { exceptId: p.id })
+    .filter((c) => visibleToOrg(c, req.org) && !isBlocked(c.id, req.org.id))
     .map((c) => ({ ...playerViewForOrg(c, req.org), similarity: similarityScore(p, c) }))
     .sort((a, b) => b.similarity - a.similarity)
     .slice(0, 10);
@@ -2431,7 +2433,7 @@ orgRouter.post('/notifications/read', (req, res) => {
 // org is allowed to see. Verified Clips surface first.
 orgRouter.get('/filmroom', (req, res) => {
   const deck = [];
-  for (const p of db.players) {
+  for (const p of players.visibleCandidates(req.org)) {
     const view = playerViewForOrg(p, req.org);
     if (!view) continue;
     for (const m of p.media) {
@@ -2474,12 +2476,13 @@ orgRouter.post('/players/:pid/media/:mid/tags', (req, res) => {
   const next = { ...(m.tags ?? {}) };
   for (const t of tags) next[t] = (next[t] ?? 0) + 1;
   // ONE unit of work (S5): the clip's tag rows and the ledger row commit together.
+  let stored;
   unit(() => {
-    players.patchItem(p.id, 'media', { id: m.id }, { tags: next });
+    stored = players.patchItem(p.id, 'media', { id: m.id }, { tags: next });
     ledgerAppend({ type: 'clip_tagged', playerId: p.id, orgId: req.org.id, orgName: req.org.name, userId: req.orgUser.id, scoutName: req.orgUser.name });
     broadcast('players', { playerId: p.id });
   });
-  res.json({ tags: m.tags });
+  res.json({ tags: stored.tags });
 });
 
 orgRouter.get('/tags', (_req, res) => res.json(SCOUT_TAGS));
@@ -2489,7 +2492,7 @@ orgRouter.get('/feed', (req, res) => {
   const FOURTEEN_DAYS = Date.now() - 14 * 24 * 3600 * 1000;
   const items = [];
   const shortlisted = new Set(safetyAudit.ledger.playersListedBy(req.org.id, ['shortlist', 'save']));
-  for (const p of db.players) {
+  for (const p of players.visibleCandidates(req.org)) {
     const view = playerViewForOrg(p, req.org);
     if (!view) continue;
     if (p.createdAt && p.createdAt >= FOURTEEN_DAYS) {
@@ -2589,7 +2592,7 @@ orgRouter.get('/trials/:id/ics', (req, res) => {
 // Fixture-graph scouting: verified attendances form a map of real fixtures.
 orgRouter.get('/fixtures', (req, res) => {
   const groups = {};
-  for (const p of db.players) {
+  for (const p of players.visibleCandidates(req.org)) {
     if (!playerViewForOrg(p, req.org)) continue;
     for (const a of p.attendance) {
       const key = `${a.fixture}|${a.date}`;
@@ -2974,7 +2977,7 @@ orgRouter.post('/squad/:entryId/release', (req, res) => {
       // for a contract another club completed in ScoutBox. The squad row goes;
       // the canonical contract truth stays with its writer.
       const other = canonicalContractFor(p.id, Date.now(), { exceptOrgId: req.org.id });
-      if (!other) players.update(p.id, { availability: 'available_now', contractStatus: 'free_agent' });
+      if (!other) players.update(p.id, (d) => { d.availability = 'available_now'; d.contractStatus = 'free_agent'; });
       seam('squad.release.after_row');
       if (referenceText) {
         // S10c: a row of vouches, published at once (the club's identity is the session; no email, no code).
@@ -3546,23 +3549,26 @@ playerRouter.get('/reports', (req, res) => {
 // Academy+ is opt-in only and player-controlled (guardian-managed for minors).
 playerRouter.post('/academyplus', (req, res) => {
   if (guardianManagedOnly(req, res)) return;
+  if (switchRefused(res, req.body?.enabled, 'enabled')) return;
   // ONE unit of work: the column and the badge (a row of player_badges since S5) commit together (review of 9656a4b).
+  let stored;
   unit(() => {
-    players.update(req.player.id, { academyPlus: !!req.body?.enabled });
+    stored = players.update(req.player.id, (d) => { d.academyPlus = req.body.enabled; });
     seam('academyplus.after_row');
-    if (req.player.academyPlus && !(req.player.badges ?? []).includes('Fresh Start')) players.addItem(req.player.id, 'badges', 'Fresh Start');
-    if (!req.player.academyPlus && (req.player.badges ?? []).includes('Fresh Start')) players.setItems(req.player.id, 'badges', req.player.badges.filter((b) => b !== 'Fresh Start'));
+    if (stored.academyPlus && !stored.badges.includes('Fresh Start')) players.addItem(req.player.id, 'badges', 'Fresh Start');
+    if (!stored.academyPlus && stored.badges.includes('Fresh Start')) players.setItems(req.player.id, 'badges', stored.badges.filter((b) => b !== 'Fresh Start'));
+    stored = players.byId(req.player.id);
     broadcast('players', { playerId: req.player.id });
   });
-  res.json({ academyPlus: req.player.academyPlus, badges: req.player.badges });
+  res.json({ academyPlus: stored.academyPlus, badges: stored.badges });
 });
 
 playerRouter.post('/badges', (req, res) => {
   const { badges } = req.body || {};
   if (!Array.isArray(badges)) return res.status(400).json({ error: 'BADGES_MUST_BE_ARRAY' });
-  players.setItems(req.player.id, 'badges', badges.slice(0, 6).map(String)); // S5: the whole list rewritten as rows, duplicates kept as given
+  const stored = players.setItems(req.player.id, 'badges', badges.slice(0, 6).map(String)); // S5: the whole list rewritten as rows, duplicates kept as given
   broadcast('players', { playerId: req.player.id });
-  res.json({ badges: req.player.badges });
+  res.json({ badges: stored });
 });
 
 // Media upload. `dataUrl` carries the actual video (prototype in-memory
@@ -3600,19 +3606,20 @@ playerRouter.post('/media', (req, res) => {
       broadcast('players', { playerId: req.player.id });
     });
   } catch (e) {
-    if (/was refused/.test(String(e?.message))) return res.status(400).json({ error: 'PLAYER_INVALID', message: String(e.message) });
+    if (e?.code === 'PLAYER_RECORD_INVALID' || e?.code === 'PLAYER_SUBRECORD_INVALID') return res.status(400).json({ error: 'PLAYER_INVALID', message: String(e.message) });
     throw e;
   }
-  res.status(201).json({ media: item, trustScore: computeTrustScore(req.player) });
+  res.status(201).json({ media: item, trustScore: computeTrustScore(players.byId(req.player.id)) });
 });
 
 // Medical data is player-controlled per data-protection law.
 // For a minor, that control sits with the guardian.
 playerRouter.post('/medical/share', (req, res) => {
   if (guardianManagedOnly(req, res)) return;
-  players.update(req.player.id, { medical: { shared: !!req.body?.shared } });
+  if (switchRefused(res, req.body?.shared, 'shared')) return;
+  const stored = players.update(req.player.id, (d) => { d.medical.shared = req.body.shared; });
   broadcast('players', { playerId: req.player.id });
-  res.json({ shared: req.player.medical.shared });
+  res.json({ shared: stored.medical.shared });
 });
 
 playerRouter.post('/medical/records', (req, res) => {
@@ -3627,7 +3634,7 @@ playerRouter.post('/medical/records', (req, res) => {
   // crash after the answer can never leave the column without its record.
   try {
     unit(() => {
-      if (conditionStatus) players.update(req.player.id, { medical: { conditionStatus } });
+      if (conditionStatus) players.update(req.player.id, (d) => { d.medical.conditionStatus = conditionStatus; });
       seam('medical.records.after_row');
       if (title) {
         players.addItem(req.player.id, 'medical.records', { id: nextId('md'), type: type || 'note', title, date: date || new Date().toISOString().slice(0, 10), layoffWeeks: layoffWeeks ?? null, cleared: cleared ?? null });
@@ -3635,10 +3642,10 @@ playerRouter.post('/medical/records', (req, res) => {
       broadcast('players', { playerId: req.player.id });
     });
   } catch (e) {
-    if (/was refused/.test(String(e?.message))) return res.status(400).json({ error: 'PLAYER_INVALID', message: String(e.message) });
+    if (e?.code === 'PLAYER_RECORD_INVALID' || e?.code === 'PLAYER_SUBRECORD_INVALID') return res.status(400).json({ error: 'PLAYER_INVALID', message: String(e.message) });
     throw e;
   }
-  res.status(201).json(req.player.medical);
+  res.status(201).json(players.byId(req.player.id).medical);
 });
 
 // Location powers the Grassroots 50km radius. Coordinates never appear in
@@ -3648,7 +3655,7 @@ playerRouter.post('/location', (req, res) => {
   if (typeof lat !== 'number' || typeof lng !== 'number' || Math.abs(lat) > 90 || Math.abs(lng) > 180) {
     return res.status(400).json({ error: 'BAD_COORDINATES' });
   }
-  players.update(req.player.id, { location: { lat, lng } });
+  players.update(req.player.id, (d) => { d.location = { lat, lng }; });
   persist();
   broadcast('players', { playerId: req.player.id });
   res.json({ ok: true });
@@ -3678,10 +3685,11 @@ playerRouter.post('/availability', (req, res) => {
       return res.status(409).json({ error: 'CONTRACT_STATUS_CANONICAL', message: 'Your contract status is set by a signing completed in ScoutBox and cannot be changed here while that contract stands.', contractStatus: req.player.contractStatus, endDate: canonical.endDate ?? null });
     }
   }
-  if (availability || contractStatus) players.update(req.player.id, { ...(availability ? { availability } : {}), ...(contractStatus ? { contractStatus } : {}) });
-  persist();
+  const stored = availability || contractStatus
+    ? players.update(req.player.id, (d) => { if (availability) d.availability = availability; if (contractStatus) d.contractStatus = contractStatus; })
+    : req.player;
   broadcast('players', { playerId: req.player.id });
-  res.json({ availability: req.player.availability, contractStatus: req.player.contractStatus });
+  res.json({ availability: stored.availability, contractStatus: stored.contractStatus });
 });
 
 // Verified Match Attendance: fixture + venue + date + GPS + device required.
@@ -3710,10 +3718,10 @@ playerRouter.post('/attendance', (req, res) => {
       broadcast('players', { playerId: req.player.id });
     });
   } catch (e) {
-    if (/was refused/.test(String(e?.message))) return res.status(400).json({ error: 'PLAYER_INVALID', message: String(e.message) });
+    if (e?.code === 'PLAYER_RECORD_INVALID' || e?.code === 'PLAYER_SUBRECORD_INVALID') return res.status(400).json({ error: 'PLAYER_INVALID', message: String(e.message) });
     throw e;
   }
-  res.status(201).json({ attendance: item, trustScore: computeTrustScore(req.player) });
+  res.status(201).json({ attendance: item, trustScore: computeTrustScore(players.byId(req.player.id)) });
 });
 
 playerRouter.post('/timeline', (req, res) => {
@@ -3722,7 +3730,7 @@ playerRouter.post('/timeline', (req, res) => {
   if (!moderateOrRefuse(res, event, { kind: 'timeline_event', playerId: req.player.id })) return;
   players.addItem(req.player.id, 'timeline', { year: String(year), event: String(event) }); // S5: one row, committed before the response
   broadcast('players', { playerId: req.player.id });
-  res.status(201).json({ timeline: req.player.timeline });
+  res.status(201).json({ timeline: players.byId(req.player.id).timeline });
 });
 
 // Children keep their football life: stats edits and drills stay open.
@@ -3733,8 +3741,10 @@ playerRouter.post('/stats', (req, res) => {
   const updates = {};
   for (const f of FIELDS) {
     if (req.body?.[f] !== undefined) {
-      const v = Number(req.body[f]);
-      if (Number.isNaN(v) || v < 0) return res.status(400).json({ error: 'BAD_STAT', field: f });
+      // S14h: a number, never text turned into one; the counts whole, the percentages at most 100.
+      const v = req.body[f];
+      const count = ['appearances', 'goals', 'assists', 'cleanSheets'].includes(f);
+      if (typeof v !== 'number' || !Number.isFinite(v) || v < 0 || (count && !Number.isSafeInteger(v)) || (f.endsWith('Pct') && v > 100)) return res.status(400).json({ error: 'BAD_STAT', field: f });
       updates[f] = v;
     }
   }
@@ -3753,13 +3763,14 @@ playerRouter.post('/stats', (req, res) => {
       history.sort((a, b) => (a.season < b.season ? 1 : -1));
       players.setItems(req.player.id, 'seasonHistory', history);
     } else {
-      players.update(req.player.id, { stats: { appearances: 0, goals: 0, assists: 0, ...JSON.parse(JSON.stringify(req.player.stats ?? {})), ...updates } });
+      players.update(req.player.id, (d) => { d.stats = { ...(d.stats ?? {}), appearances: d.stats?.appearances ?? 0, goals: d.stats?.goals ?? 0, assists: d.stats?.assists ?? 0, ...updates }; });
     }
     seam('stats.after_row');
     recordActivity(req.player);
     broadcast('players', { playerId: req.player.id });
   });
-  res.json({ stats: req.player.stats, seasonHistory: req.player.seasonHistory ?? [] });
+  const stored = players.byId(req.player.id);
+  res.json({ stats: stored.stats, seasonHistory: stored.seasonHistory });
 });
 
 // The at-home verified combine: standardised drills with a measurable metric.
@@ -3812,7 +3823,8 @@ playerRouter.post('/drills/:id/complete', (req, res) => {
     recordActivity(req.player);
     broadcast('players', { playerId: req.player.id });
   });
-  res.json({ drills: req.player.drills, drillResults: req.player.drillResults ?? [] });
+  const stored = players.byId(req.player.id);
+  res.json({ drills: stored.drills, drillResults: stored.drillResults });
 });
 
 // ---------------------------------------------- the Grassroots journey
@@ -3843,12 +3855,12 @@ playerRouter.post('/programme', (req, res) => {
   // player_programme_completions (S5). ONE unit of work: the new track and the
   // reset of the completed sessions commit together (review of 9656a4b).
   unit(() => {
-    players.update(req.player.id, { programme: { track: track.key, startedAt: Date.now() } });
+    players.update(req.player.id, (d) => { d.programme = { track: track.key, startedAt: Date.now(), completed: d.programme?.completed ?? [] }; });
     seam('programme.select.after_row');
     players.setItems(req.player.id, 'programme.completed', []);
     broadcast('players', { playerId: req.player.id });
   });
-  res.status(201).json({ current: programmeProgress(req.player) });
+  res.status(201).json({ current: programmeProgress(players.byId(req.player.id)) });
 });
 
 playerRouter.post('/programme/sessions/:id/complete', (req, res) => {
@@ -3863,14 +3875,14 @@ playerRouter.post('/programme/sessions/:id/complete', (req, res) => {
     recordActivity(req.player); // programme work feeds streaks + the weekly goal
     broadcast('players', { playerId: req.player.id });
   });
-  res.json({ current: programmeProgress(req.player) });
+  res.json({ current: programmeProgress(players.byId(req.player.id)) });
 });
 
 // Honest context, never a leaderboard: percentiles vs the amateur/semi-pro
 // cohort in the same position group. Small cohorts return null.
 playerRouter.get('/benchmarks', (req, res) => {
   if (grassrootsOnly(req, res)) return;
-  const cohort = db.players.filter((c) => c.id !== req.player.id && inCohort(req.player, c));
+  const cohort = players.list({ notLevel: 'pro', exceptId: req.player.id }).filter((c) => inCohort(req.player, c));
   const drillBests = (playerX, drillId, lowerIsBetter) => {
     const results = (playerX.drillResults ?? []).filter((r) => r.drillId === drillId);
     if (!results.length) return null;
@@ -3950,10 +3962,10 @@ playerRouter.post('/open-trials/:id/register', (req, res) => {
 playerRouter.post('/first-team-seeker', (req, res) => {
   if (grassrootsOnly(req, res)) return;
   if (guardianManagedOnly(req, res)) return;
-  players.update(req.player.id, { firstTeamSeeker: !!req.body?.enabled });
-  persist();
+  if (switchRefused(res, req.body?.enabled, 'enabled')) return;
+  const stored = players.update(req.player.id, (d) => { d.firstTeamSeeker = req.body.enabled; });
   broadcast('players', { playerId: req.player.id });
-  res.json({ firstTeamSeeker: req.player.firstTeamSeeker });
+  res.json({ firstTeamSeeker: stored.firstTeamSeeker });
 });
 
 // Coach vouches: a named, verified local coach is the most valuable
@@ -4151,10 +4163,10 @@ guardianRouter.post('/children/:id/first-team-seeker', (req, res) => {
   const child = findPlayer(req.params.id);
   if (!child || !req.guardian.childIds.includes(child.id)) return res.status(404).json({ error: 'CHILD_NOT_FOUND' });
   if (child.level === 'pro') return res.status(403).json({ error: 'GRASSROOTS_ONLY' });
-  players.update(child.id, { firstTeamSeeker: !!req.body?.enabled });
-  persist();
+  if (switchRefused(res, req.body?.enabled, 'enabled')) return;
+  const stored = players.update(child.id, (d) => { d.firstTeamSeeker = req.body.enabled; });
   broadcast('players', { playerId: child.id });
-  res.json({ firstTeamSeeker: child.firstTeamSeeker });
+  res.json({ firstTeamSeeker: stored.firstTeamSeeker });
 });
 
 guardianRouter.post('/children/:id/vouches/request', (req, res) => {
@@ -4167,7 +4179,7 @@ guardianRouter.post('/children/:id/vouches/request', (req, res) => {
 // Notification preferences — quiet hours + the minors' school-hours mute.
 function prefsHandler(getTarget) {
   return (req, res) => {
-    const target = getTarget(req);
+    let target = getTarget(req);
     if (req.method === 'POST') {
       const { quietStart, quietEnd, schoolHoursMute, timezone } = req.body || {};
       // M23 P5.7: quiet hours are HH:MM wall-clock values in a named zone.
@@ -4182,8 +4194,10 @@ function prefsHandler(getTarget) {
         timezone: timezone === undefined ? target.notificationPrefs?.timezone ?? null : (timezone || null),
       };
       // A column-backed composite on both records: through the owning repository.
-      if (players.byId(target.id)) players.update(target.id, { notificationPrefs });
-      else guardians.update(target.id, { notificationPrefs });
+      if (schoolHoursMute != null && typeof schoolHoursMute !== 'boolean') return res.status(400).json({ error: 'FIELD_INVALID', field: 'schoolHoursMute', message: 'schoolHoursMute must be true or false.' });
+      const empty = Object.values(notificationPrefs).every((v) => v === null);
+      const write = (d) => { d.notificationPrefs = empty ? null : notificationPrefs; };
+      target = players.byId(target.id) ? players.update(target.id, write) : guardians.update(target.id, write);
     }
     res.json({ prefs: target.notificationPrefs ?? null, note: 'Quiet hours and the school-hours mute apply to push delivery; the in-app feed always keeps the record.' });
   };
@@ -4478,8 +4492,8 @@ adminRouter.get('/data-layer', (_req, res) => {
 
 adminRouter.get('/overview', (_req, res) => {
   res.json({
-    players: db.players.length,
-    guardians: db.guardians.length,
+    players: players.count(),
+    guardians: guardians.count(),
     orgs: orgs.count(),
     openReports: safetyAudit.reports.countOpen(),
     blocks: safetyAudit.blocks.count(),
@@ -4605,22 +4619,28 @@ adminRouter.post('/clubs/:id/verification', (req, res) => {
 });
 
 // §6.5 — Trust & Safety sees an allowlist of each guardian: never the password hash, never the e-mail code.
-adminRouter.get('/guardians', (_req, res) => {
-  res.json({ guardians: db.guardians.map(adminGuardianView), idvQueue: safetyAudit.idvQueue.all().map(idvView) });
+// S14h: the guardians page by cursor (oldest first; `?limit=&cursor=`, `nextCursor`), the ID-check queue beside them.
+adminRouter.get('/guardians', (req, res) => {
+  let page;
+  try { page = readPage(req.query, ['number']); } catch (e) { return sendPageError(res, e); }
+  const { items, nextCursor } = guardians.page(page);
+  res.json({ guardians: items.map(adminGuardianView), nextCursor, idvQueue: safetyAudit.idvQueue.all().map(idvView) });
 });
 
 adminRouter.post('/guardians/:id/idv', (req, res) => {
   const g = byId.guardian(req.params.id);
   if (!g) return res.status(404).json({ error: 'GUARDIAN_NOT_FOUND' });
-  const approved = !!req.body?.approved;
+  if (switchRefused(res, req.body?.approved, 'approved')) return;
+  const approved = req.body.approved;
   // One unit of work: the column and the review-queue row commit together
   // (S6b: the FIRST entry of the guardian in insertion order, as before).
+  let stored;
   unit(() => {
-    guardians.update(g.id, { idVerified: approved });
+    stored = guardians.update(g.id, (d) => { d.idVerified = approved; });
     const entry = safetyAudit.idvQueue.firstForGuardian(g.id);
     if (entry) safetyAudit.idvQueue.setStatus(entry.id, approved ? 'approved' : 'revoked');
   });
-  res.json(adminGuardianView(g));
+  res.json(adminGuardianView(stored));
 });
 
 // Newest first, paged by cursor (domains/platform/paging.mjs): { items, nextCursor }.
@@ -4764,7 +4784,7 @@ const m13Ctx = registerM13({
 // keep claim provenance in sync.
 const m14Ctx = registerM14({
   verification, unit, // S10a: every verification record is an explicit repository write
-  db, byId, safetyReads, scoutingReads, verificationReads, agentReads, complianceReads, developmentReads, development, boxCamReads, discoveryReads, insightReads, grassrootsReads, users, orgs, app, orgRouter, playerRouter, guardianRouter, adminRouter,
+  db, byId, players, guardians, safetyReads, scoutingReads, verificationReads, agentReads, complianceReads, developmentReads, development, boxCamReads, discoveryReads, insightReads, grassrootsReads, users, orgs, app, orgRouter, playerRouter, guardianRouter, adminRouter,
   nextId, persist, persistNow, notify, ledgerAppend, broadcast, safetyAudit,
   findPlayer, isBlocked, moderateOrRefuse, playerViewForOrg, sessionFor,
   storage, mailer, orgSafe, recordActivity, revokeOrgUserAccess,
@@ -4783,7 +4803,7 @@ registerSourceChanges(srcCtx);
 // routers exist and before the milestone modules that emit notifications, so
 // the preference gate is in place for every notify() call that follows.
 m182Ctx = {
-  db, byId, safetyReads, scoutingReads, verificationReads, agentReads, complianceReads, developmentReads, development, boxCamReads, discoveryReads, insightReads, grassrootsReads, recruitmentReads, notifications, orgRouter, playerRouter, guardianRouter, persist, findPlayer,
+  db, byId, players, guardians, safetyReads, scoutingReads, verificationReads, agentReads, complianceReads, developmentReads, development, boxCamReads, discoveryReads, insightReads, grassrootsReads, recruitmentReads, notifications, orgRouter, playerRouter, guardianRouter, persist, findPlayer,
   // The same standing-gate composition M12's shared helpers use.
   orgCanSee: (org, p) => !!p && visibleToOrg(p, org) && !isBlocked(p.id, org.id),
   requireLead: (req, res) => {
@@ -4805,7 +4825,7 @@ const rateLimit = createRateLimiter();
 // records. Registered after M14 so it can read verification stores; it
 // receives the same context and adds no new authorization surface.
 const m15Ctx = registerM15({
-  db, byId, safetyReads, scoutingReads, verificationReads, agentReads, complianceReads, developmentReads, development, boxCamReads, discoveryReads, insightReads, grassrootsReads, recruitmentReads, app, orgRouter, playerRouter, guardianRouter, adminRouter,
+  db, byId, players, guardians, safetyReads, scoutingReads, verificationReads, agentReads, complianceReads, developmentReads, development, boxCamReads, discoveryReads, insightReads, grassrootsReads, recruitmentReads, app, orgRouter, playerRouter, guardianRouter, adminRouter,
   nextId, persist, persistNow, notify, ledgerAppend, broadcast, safetyAudit,
   findPlayer, isBlocked, moderateOrRefuse, playerViewForOrg,
   storage, m14: m14Ctx,
@@ -4814,7 +4834,7 @@ const m15Ctx = registerM15({
 });
 const m16Ctx = registerM16({
   rateLimit,
-  db, byId, safetyReads, scoutingReads, verificationReads, agentReads, complianceReads, developmentReads, development, boxCamReads, discoveryReads, insightReads, grassrootsReads, app, orgRouter, playerRouter, guardianRouter, adminRouter,
+  db, byId, players, guardians, safetyReads, scoutingReads, verificationReads, agentReads, complianceReads, developmentReads, development, boxCamReads, discoveryReads, insightReads, grassrootsReads, app, orgRouter, playerRouter, guardianRouter, adminRouter,
   nextId, persist, persistNow, notify, ledgerAppend, broadcast, safetyAudit,
   findPlayer, isBlocked, moderateOrRefuse,
   players, unit, // S5: a Box Clip marks a media row through the repository, inside a unit with the session and the ledger
@@ -4826,7 +4846,7 @@ const m16Ctx = registerM16({
 // Registered last because it consumes all of them; it adds no storage and no
 // authorization surface (a Trust Score grants nothing).
 const m162Ctx = registerM162({
-  db, byId, safetyReads, scoutingReads, verificationReads, agentReads, complianceReads, developmentReads, development, boxCamReads, discoveryReads, insightReads, grassrootsReads, app, orgRouter, playerRouter, guardianRouter, adminRouter,
+  db, byId, players, guardians, safetyReads, scoutingReads, verificationReads, agentReads, complianceReads, developmentReads, development, boxCamReads, discoveryReads, insightReads, grassrootsReads, app, orgRouter, playerRouter, guardianRouter, adminRouter,
   nextId, persist, persistNow, notify, ledgerAppend, broadcast, safetyAudit,
   findPlayer, isBlocked, moderateOrRefuse,
   assemblePassport: m15Ctx.assemblePassport,
@@ -4841,7 +4861,7 @@ const m162Ctx = registerM162({
 const m17Ctx = registerM17({
   rateLimit,
   faults: faultLayer, // M23 P8.1 — the development fault seam inside the ONE lifecycle writer
-  db, byId, users, safetyReads, scoutingReads, verificationReads, agentReads, complianceReads, developmentReads, development, boxCamReads, discoveryReads, insightReads, grassrootsReads, recruitmentReads, app, orgRouter, playerRouter, guardianRouter, adminRouter,
+  db, byId, players, guardians, users, safetyReads, scoutingReads, verificationReads, agentReads, complianceReads, developmentReads, development, boxCamReads, discoveryReads, insightReads, grassrootsReads, recruitmentReads, app, orgRouter, playerRouter, guardianRouter, adminRouter,
   nextId, persist, persistNow, notify, ledgerAppend, broadcast, safetyAudit, recruitmentCases, unit,
   findPlayer, isBlocked, moderateOrRefuse, playerViewForOrg,
   storage, publishedVouchesFor, pathwayRecord, DRILLS, DATA_DIR,
@@ -4874,7 +4894,7 @@ const m17Ctx = registerM17({
 // M18 registers no player, guardian or public route at all.
 const m18Ctx = registerM18({
   rateLimit,
-  db, byId, users, safetyReads, scoutingReads, verificationReads, agentReads, complianceReads, developmentReads, development, boxCamReads, discoveryReads, insightReads, grassrootsReads, recruitmentReads, app, orgRouter, playerRouter, guardianRouter, adminRouter,
+  db, byId, players, guardians, users, safetyReads, scoutingReads, verificationReads, agentReads, complianceReads, developmentReads, development, boxCamReads, discoveryReads, insightReads, grassrootsReads, recruitmentReads, app, orgRouter, playerRouter, guardianRouter, adminRouter,
   discovery, unit, // S12c: every brief, review, Second Look item and watchlist is an explicit repository write
   combineProtocolIds: () => COMBINE_PROTOCOLS.map((p) => p.id), // a brief's Combine protocols are refused unless known (S12c)
   nextId, persist, persistNow, notify, ledgerAppend, broadcast, safetyAudit,
@@ -5309,5 +5329,5 @@ app.use((err, req, res, _next) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`scoutbox-server listening on :${PORT} — ${db.players.length} players, ${orgs.count()} orgs`);
+  console.log(`scoutbox-server listening on :${PORT} — ${players.count()} players, ${orgs.count()} orgs`);
 });

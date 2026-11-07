@@ -5,7 +5,7 @@
  * through the repository.
  */
 import { migrationApplied } from '../database.mjs';
-import { CORE_IDENTITY_LIVE_MIGRATION } from '../identityPreflight.mjs';
+import { CORE_IDENTITY_LIVE_MIGRATION } from '../identity.mjs';
 import { ONE_TIME_CODES_MIGRATION, ONE_TIME_CODES_DDL, ONE_TIME_CODE_TABLES } from '../oneTimeCodes.mjs';
 
 export const id = ONE_TIME_CODES_MIGRATION;

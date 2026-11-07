@@ -36,7 +36,7 @@ export function boundGap(hit) {
 
 export function registerInsight(ctx) {
   const {
-    db, byId, orgRouter, playerRouter, nextId,
+    db, byId, players, orgRouter, playerRouter, nextId,
     notify, findPlayer, isAdult, orgCanSee, suppress,
     isLead, requireLead, playerViewForOrg, insightCoverage, unit,
   } = ctx;
@@ -182,7 +182,7 @@ export function registerInsight(ctx) {
   orgRouter.get('/discovery-rotation', (req, res) => {
     const week = Math.floor(dayKey() / 7);
     const assessedIds = new Set(ctx.scoutingReads.assessments.forOrg(req.org.id).filter((a) => a.state !== 'draft').map((a) => a.playerId));
-    const pool = db.players.filter((p) => orgCanSee(req.org, p) && !assessedIds.has(p.id));
+    const pool = players.visibleCandidates(req.org).filter((p) => orgCanSee(req.org, p) && !assessedIds.has(p.id));
     const scored = pool.map((p) => ({
       p, r: crypto.createHash('sha256').update(`${p.id}:${req.org.id}:${week}`).digest()[0],
     })).sort((a, b) => a.r - b.r).slice(0, 6);

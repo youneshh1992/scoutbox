@@ -7,18 +7,16 @@
 // testRecruitmentServer.mjs and the handoff bench.
 import { NOW, FIXTURE, USERS, SESSIONS, ORGS } from './coreIdentityTestFixtures.mjs';
 import { openStore } from '../store.mjs';
-import { trialReportsFor } from '../repositories/playerSubrecords.mjs';
 
 /**
  * A test database written the way fixtures are written now: a snapshot-mode save
  * (openStore(dir).save), which migrates the file and writes every table-backed
  * collection into its tables. `db` is laid over the core fixture (staff, sessions,
- * organisations, players with the trial reports their trials imply, guardians).
+ * organisations, players (their trial reports are the trials': S14h, no copy on the record), guardians).
  * Returns the directory.
  */
 export const fixtureDb = (db = {}) => {
-  const trials = Array.isArray(db.trials) ? JSON.parse(JSON.stringify(db.trials)) : [];
-  const players = FIXTURE().players.map((p) => ({ ...p, trialReports: trialReportsFor(trials, p.id) }));
+  const players = FIXTURE().players;
   return { users: USERS(), sessions: SESSIONS(), orgs: ORGS(), players, guardians: FIXTURE().guardians, ledger: [], ...db };
 };
 export function saveFixture(dir, db = {}, { savedAt = NOW, idCounter = 1000 } = {}) {

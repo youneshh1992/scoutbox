@@ -36,7 +36,7 @@ export function registerJourneyRoutes(ctx) {
     const items = [];
     // Every case's records read once for the whole list (journeyReads.mjs), not a dozen queries a case.
     const cases = recruitmentReads.cases.forPlayer(playerId);
-    const reads = { ...playerJourneyReads(recruitmentReads, playerId, cases.filter((k) => k.room)), assessments: scoutingReads.assessments, blocks: safetyReads.blocks };
+    const reads = { ...playerJourneyReads(recruitmentReads, playerId, cases.filter((k) => k.room)), assessments: scoutingReads.assessments, blocks: safetyReads.blocks, player: (id) => ctx.byId.player(id) };
     for (const k of cases) {
       if (!k.room) continue;
       const out = buildRecruitmentJourney(db, k.id, viewer, { now: at, evidence: evidence(), reads });
@@ -89,7 +89,7 @@ export function registerJourneyRoutes(ctx) {
     if (!g.ok) return res.status(403).json({ error: g.decision.code, rule: g.decision.rule ?? null, message: 'This client\'s record is not open to you right now.' });
     const items = [];
     const cases = recruitmentReads.cases.forPlayer(a.clientId);
-    const reads = { ...playerJourneyReads(recruitmentReads, a.clientId, cases.filter((k) => k.room)), assessments: scoutingReads.assessments, blocks: safetyReads.blocks };
+    const reads = { ...playerJourneyReads(recruitmentReads, a.clientId, cases.filter((k) => k.room)), assessments: scoutingReads.assessments, blocks: safetyReads.blocks, player: (id) => ctx.byId.player(id) };
     for (const k of cases) {
       if (!k.room) continue;
       const out = buildRecruitmentJourney(db, k.id, { kind: 'agent', authorized: true, playerId: a.clientId, userId: req.orgUser.id, grants: g.grants }, { now: at, evidence: evidence(), reads });

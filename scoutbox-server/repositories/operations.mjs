@@ -27,7 +27,7 @@ import { isPlainObject, ids, describe } from './recruitment.mjs';
 import { transaction, migrationApplied, childRowsOf } from './database.mjs';
 import { deepFreeze } from './scoutingEvidence.mjs';
 import { text, int, num, bool, oneOf, group, tableDdl, bad, typeSpec, encode, decode, insertSql } from './fieldSpecs.mjs';
-import { PLAYER_POSITIONS, PLAYER_FEET, PLAYER_AVAILABILITY } from './identityMapping.mjs';
+import { PLAYER_POSITIONS, PLAYER_FEET, PLAYER_AVAILABILITY } from './identity.mjs';
 import { pageOf } from '../domains/platform/paging.mjs';
 
 export const OPERATIONS_MIGRATION = '0038_operations';

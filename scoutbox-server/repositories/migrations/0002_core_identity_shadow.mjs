@@ -1,12 +1,7 @@
 /**
- * Core identity tables — organisations, guardians, players (scalar part),
- * guardian/child links and sessions — created as a VERIFIED SHADOW of the
- * blob snapshot (migration plan step S1, docs/architecture/sqlite-migration-plan.md).
- *
- * Every table this step created has since cut over: sessions (0003), orgs
- * (0004), players / guardians / guardian_children (0005, which replaces the
- * three shadow definitions with the live ones). This module stays as the
- * recorded first step of a database's schema history.
+ * Core identity tables — organisations and sessions — created as a shadow of the blob snapshot (migration plan step
+ * S1). Both have since cut over: sessions (0003), orgs (0004). S14h: the players, guardians and guardian–child links
+ * are no longer created here; 0005 creates their final tables.
  *
  * S14f amended the sessions table in place: an org session's staff member and organisation are one key,
  * (org_user_id, ref_id) → org_users(id, org_id), so a session cannot name staff of another organisation.
@@ -15,7 +10,7 @@
  * (the player_* sub-record tables of that file arrive with step S5).
  */
 export const id = '0002_core_identity_shadow';
-export const note = 'orgs, guardians, players, guardian_children and sessions tables (shadow of the snapshot; projection opt-in)';
+export const note = 'orgs and sessions tables (shadow of the snapshot)';
 
 export function up(sqlite) {
   sqlite.exec(`
@@ -46,85 +41,6 @@ export function up(sqlite) {
       CHECK ((lat IS NULL) = (lng IS NULL))
     ) STRICT;
     CREATE INDEX orgs_type_level ON orgs (type, level);
-
-    CREATE TABLE guardians (
-      id                      TEXT PRIMARY KEY,
-      name                    TEXT NOT NULL,
-      email                   TEXT NOT NULL,
-      password_hash           TEXT,
-      email_verified          INTEGER NOT NULL DEFAULT 0 CHECK (email_verified IN (0,1)),
-      email_code_hash         TEXT,
-      id_verified             INTEGER NOT NULL DEFAULT 0 CHECK (id_verified IN (0,1)),
-      idv_reference           TEXT,
-      disclaimer_accepted     INTEGER NOT NULL DEFAULT 0 CHECK (disclaimer_accepted IN (0,1)),
-      disclaimer_accepted_at  INTEGER,
-      co_guardian_of          TEXT REFERENCES guardians(id) ON DELETE SET NULL,
-      prefs_quiet_start       TEXT,
-      prefs_quiet_end         TEXT,
-      prefs_school_hours_mute INTEGER CHECK (prefs_school_hours_mute IN (0,1)),
-      prefs_timezone          TEXT,
-      created_at              INTEGER,
-      deleted_at              INTEGER
-    ) STRICT;
-    CREATE UNIQUE INDEX guardians_email ON guardians (lower(email));
-    CREATE INDEX guardians_co_guardian_of ON guardians (co_guardian_of);
-
-    CREATE TABLE players (
-      id                       TEXT PRIMARY KEY,
-      name                     TEXT NOT NULL,
-      birth_date               TEXT NOT NULL CHECK (length(birth_date) = 10),
-      country                  TEXT NOT NULL,
-      city                     TEXT,
-      position                 TEXT CHECK (position IS NULL OR position IN ('GK','CB','RB','LB','RWB','LWB','CDM','CM','CAM','RW','LW','ST','CF')),
-      foot                     TEXT CHECK (foot IS NULL OR foot IN ('left','right')),
-      height_cm                INTEGER,
-      weight_kg                INTEGER,
-      squad_number             INTEGER,
-      contract_until_date      TEXT CHECK (contract_until_date IS NULL OR length(contract_until_date) = 10),
-      market_value_range       TEXT,
-      agent_name               TEXT,
-      academy_plus             INTEGER NOT NULL DEFAULT 0 CHECK (academy_plus IN (0,1)),
-      first_team_seeker        INTEGER NOT NULL DEFAULT 0 CHECK (first_team_seeker IN (0,1)),
-      availability             TEXT NOT NULL DEFAULT 'not_seeking' CHECK (availability IN ('available_now','end_of_season','loan_open','overseas_open','not_seeking')),
-      contract_status          TEXT NOT NULL DEFAULT 'unknown' CHECK (contract_status IN ('under_contract','expiring_summer','scholarship_ending','release_approaching','free_agent','unknown')),
-      level                    TEXT NOT NULL DEFAULT 'amateur' CHECK (level IN ('amateur','semi_pro','pro')),
-      football_category        TEXT,
-      identity_verified        INTEGER NOT NULL DEFAULT 0 CHECK (identity_verified IN (0,1)),
-      guardian_id              TEXT REFERENCES guardians(id) ON DELETE SET NULL,
-      lat                      REAL,
-      lng                      REAL,
-      stats_appearances        INTEGER,
-      stats_goals              INTEGER,
-      stats_assists            INTEGER,
-      stats_pace_kmh           REAL,
-      stats_pass_completion_pct REAL,
-      stats_duel_success_pct   REAL,
-      stats_clean_sheets       INTEGER,
-      medical_shared           INTEGER NOT NULL DEFAULT 0 CHECK (medical_shared IN (0,1)),
-      medical_condition_status TEXT NOT NULL DEFAULT 'unknown',
-      prefs_quiet_start        TEXT,
-      prefs_quiet_end          TEXT,
-      prefs_school_hours_mute  INTEGER CHECK (prefs_school_hours_mute IN (0,1)),
-      prefs_timezone           TEXT,
-      programme_track          TEXT,
-      programme_started_at     INTEGER,
-      password_hash            TEXT,
-      created_at               INTEGER,
-      deleted_at               INTEGER,
-      CHECK ((lat IS NULL) = (lng IS NULL))
-    ) STRICT;
-    CREATE INDEX players_guardian ON players (guardian_id);
-    CREATE INDEX players_created_at ON players (created_at);
-    CREATE INDEX players_search ON players (country, position, availability);
-    CREATE INDEX players_level ON players (level);
-
-    CREATE TABLE guardian_children (
-      guardian_id TEXT NOT NULL REFERENCES guardians(id) ON DELETE CASCADE,
-      player_id   TEXT NOT NULL REFERENCES players(id) ON DELETE CASCADE,
-      role        TEXT NOT NULL DEFAULT 'primary' CHECK (role IN ('primary','co')),
-      PRIMARY KEY (guardian_id, player_id)
-    ) STRICT;
-    CREATE INDEX guardian_children_player ON guardian_children (player_id);
 
     CREATE TABLE sessions (
       token_hash  TEXT PRIMARY KEY,

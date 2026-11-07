@@ -542,7 +542,7 @@ export function registerEnterprise(ctx) {
       files.unshift({ path: 'scoutbox.db', sha256: fileSha256(databasePath), bytes: fs.statSync(databasePath).size });
       manifest = {
         contract: 'backup.2026-11.v2', createdAt: Date.now(), engine: 'sqlite database copy + media files',
-        counts: { players: db.players.length, retainedPlayers: players.retainedCount(), orgs: orgs.count(), notifications: notifications.count(), mediaFiles: files.length - 1 },
+        counts: { players: players.count(), retainedPlayers: players.retainedCount(), orgs: orgs.count(), notifications: notifications.count(), mediaFiles: files.length - 1 },
         media: {
           copied: files.length - 1, queuedForRemoval: leftOut,
           note: 'Files whose removal was committed but not yet completed are left out on purpose: their queue entries are in scoutbox.db, and the restored server serves nothing for them and finishes the removal at boot.',
@@ -602,7 +602,7 @@ export function registerEnterprise(ctx) {
     // Ready = the database writable (the staged repositories flush) + data loaded.
     try {
       persistNow();
-      res.json({ ready: true, players: db.players.length });
+      res.json({ ready: true, players: players.count() });
     } catch (err) {
       res.status(503).json({ ready: false, error: err.message });
     }

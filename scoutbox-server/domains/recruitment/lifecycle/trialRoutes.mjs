@@ -53,7 +53,7 @@ import {
 
 export function registerTrial(ctx) {
   const {
-    db, orgRouter, playerRouter, guardianRouter, nextId, persistNow, notify, broadcast, findPlayer, isBlocked, isAdult,
+    db, guardians, orgRouter, playerRouter, guardianRouter, nextId, persistNow, notify, broadcast, findPlayer, isBlocked, isAdult,
     rateLimit, isLead, moderateOrRefuse, issueRecruitmentRequest, audit, orgCanSee, guardianManagedOnly,
     combineOrgMaySeeResults, testProviderEnabled = false, recruitment, unit,
     recruitmentReads, // §4.3 step 2: the cases are read through SQL
@@ -166,7 +166,7 @@ export function registerTrial(ctx) {
   /** The recipient rule, in Trial vocabulary. Computed now, never trusted from a client. */
   const RECIPIENT_CODES = Object.freeze({ CONTACT_BLOCKED: 'TRIAL_BLOCKED', CONTACT_GUARDIAN_REQUIRED: 'TRIAL_GUARDIAN_REQUIRED', CONTACT_RECIPIENT_UNAVAILABLE: 'TRIAL_RECIPIENT_UNAVAILABLE' });
   function recipientFor(org, playerId) {
-    const r = resolveContactRecipient({ player: findPlayer(playerId), org, guardians: db.guardians ?? [], isAdult, visibleToOrg, isBlocked, now: new Date() });
+    const r = resolveContactRecipient({ player: findPlayer(playerId), org, guardians: guardians.forPlayer(playerId), isAdult, visibleToOrg, isBlocked, now: new Date() });
     if (r.ok) return r;
     const error = RECIPIENT_CODES[r.error] ?? 'TRIAL_RECIPIENT_UNAVAILABLE';
     return { ok: false, error, message: error === 'TRIAL_GUARDIAN_REQUIRED' ? 'This player is under the age of majority and no valid guardian route exists. The trial cannot proceed.' : error === 'TRIAL_BLOCKED' ? 'This player (or their guardian) has blocked your organisation.' : r.message };
@@ -871,7 +871,7 @@ export function registerTrial(ctx) {
     if (!t) { err(res, 'TRIAL_NOT_FOUND', 'No such trial.'); return null; }
     if (t.subjectRemovedAt) { err(res, 'TRIAL_SUBJECT_REMOVED', 'This trial can no longer be changed.'); return null; }
     const org = orgOf(t.orgId);
-    const r = resolveContactRecipient({ player: findPlayer(t.playerId), org: org ?? { id: t.orgId }, guardians: db.guardians ?? [], isAdult, visibleToOrg, isBlocked, now: new Date() });
+    const r = resolveContactRecipient({ player: findPlayer(t.playerId), org: org ?? { id: t.orgId }, guardians: guardians.forPlayer(t.playerId), isAdult, visibleToOrg, isBlocked, now: new Date() });
     // A blocked organisation cannot be confirmed with — but the recipient may
     // still cancel (the decline path). The caller decides which.
     const blocked = !r.ok && r.error === 'CONTACT_BLOCKED';

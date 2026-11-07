@@ -169,7 +169,7 @@ function orgAccess(viewer, plan, player, { orgCanSee, isLead }) {
  * removed colleague is not an assignee, and a colleague in another club never
  * was one.
  */
-export function canAssign({ assignee, plan, player, db, staffById = () => null }) {
+export function canAssign({ assignee, plan, player, guardianById = () => null, staffById = () => null }) {
   if (!assignee) return { value: null };
   const kind = String(assignee.kind ?? '');
 
@@ -179,7 +179,8 @@ export function canAssign({ assignee, plan, player, db, staffById = () => null }
   }
 
   if (kind === 'guardian') {
-    const g = (db.guardians ?? []).find((x) => x.id === assignee.id && (x.childIds ?? []).includes(plan.playerId));
+    const found = typeof assignee.id === 'string' ? guardianById(assignee.id) : null;
+    const g = found && found.childIds.includes(plan.playerId) ? found : null;
     if (!g) return { error: 'ASSIGNEE_INVALID', detail: 'That guardian does not manage this player.' };
     if (!player.isMinor) return { error: 'ASSIGNEE_INVALID', detail: 'This player is an adult; a guardian cannot be assigned their actions.' };
     return { value: { kind: 'guardian', id: g.id, name: g.name ?? null } };

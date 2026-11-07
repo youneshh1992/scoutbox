@@ -52,7 +52,7 @@ export function registerOffers(rawCtx) {
   // a Room is.
   const ctx = { ...rawCtx, ...buildShared(rawCtx) };
   const {
-    db, orgRouter, playerRouter, guardianRouter, nextId, notify, broadcast, findPlayer, isBlocked,
+    db, guardians, orgRouter, playerRouter, guardianRouter, nextId, notify, broadcast, findPlayer, isBlocked,
     rateLimit, isLead, moderateOrRefuse, audit, orgCanSee, isAdult, storage,
     agent = null, integration = null, transactions = null, faults = null,
     // S8c: every Offer write is an explicit repository operation (offers.create / update) inside `unit`.
@@ -167,7 +167,7 @@ export function registerOffers(rawCtx) {
 
   /** The recipient rule (P3), re-derived now — never trusted from the record. */
   function recipientFor(org, playerId, at) {
-    const r = resolveContactRecipient({ player: findPlayer(playerId), org, guardians: db.guardians ?? [], isAdult, visibleToOrg, isBlocked, now: new Date(at) });
+    const r = resolveContactRecipient({ player: findPlayer(playerId), org, guardians: guardians.forPlayer(playerId), isAdult, visibleToOrg, isBlocked, now: new Date(at) });
     if (r.ok) return r;
     const error = r.error === 'CONTACT_BLOCKED' ? 'OFFER_BLOCKED' : 'OFFER_RECIPIENT_INVALID';
     return { ok: false, error, message: error === 'OFFER_BLOCKED' ? 'This player (or their guardian) has blocked your organisation.' : (r.error === 'CONTACT_GUARDIAN_REQUIRED' ? 'This player is under the age of majority and no valid guardian route exists.' : r.message) };
@@ -756,7 +756,7 @@ export function registerOffers(rawCtx) {
       // The recipient rule NOW.
       const player = findPlayer(o.playerId);
       const org = orgOf(o.orgId) ?? { id: o.orgId };
-      const r = resolveContactRecipient({ player, org, guardians: db.guardians ?? [], isAdult, visibleToOrg, isBlocked, now: new Date(at) });
+      const r = resolveContactRecipient({ player, org, guardians: player ? guardians.forPlayer(player.id) : [], isAdult, visibleToOrg, isBlocked, now: new Date(at) });
       const blocked = !r.ok && r.error === 'CONTACT_BLOCKED';
       if (!r.ok && !blocked) return err(res, 'OFFER_RECIPIENT_INVALID', by === 'guardian' ? 'You are no longer the verified guardian route for this player.' : 'This Offer is not yours to answer.');
       if (!blocked) {

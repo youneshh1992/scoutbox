@@ -65,12 +65,12 @@ test('transaction coupling: an entry queued inside a unit of work that rolls bac
   let layer = attachDataLayer({ db: {}, seed: { orgs: [], players: [adult()], guardians: [] }, store, nextId, sessionTtlMs: TTL, now: () => NOW });
   storage.saveDataUrl('media-x', 'data:video/webm;base64,AAAA');
   // Rolled back: the queue entry and the player removal both go (S14a: the blob edit that went with them is gone).
-  assert.throws(() => store.unitOfWork(() => { layer.mediaDeletions.enqueue(['media-x'], { playerId: 'pl-adult', at: NOW }); layer.players.remove('pl-adult'); throw new Error('boom'); }), /boom/);
+  assert.throws(() => store.unitOfWork(() => { layer.mediaDeletions.enqueue(['media-x'], { playerId: 'pl-adult', at: NOW }); layer.players.erase('pl-adult'); throw new Error('boom'); }), /boom/);
   assert.equal(layer.mediaDeletions.count(), 0); assert.equal(layer.players.count(), 1); assert.equal(store.sqlite.prepare("SELECT COUNT(*) AS n FROM players WHERE id = 'pl-adult'").get().n, 1);
   assert.ok(fs.existsSync(path.join(storageDir, 'media', 'media-x.webm')), 'the file was never touched');
   // Committed: the entry exists after COMMIT; processing then removes the file and clears the entry.
   let seenInside = null;
-  store.unitOfWork(() => { layer.mediaDeletions.enqueue(['media-x'], { playerId: 'pl-adult', at: NOW }); layer.players.remove('pl-adult'); seenInside = layer.mediaDeletions.isQueued('media-x'); });
+  store.unitOfWork(() => { layer.mediaDeletions.enqueue(['media-x'], { playerId: 'pl-adult', at: NOW }); layer.players.erase('pl-adult'); seenInside = layer.mediaDeletions.isQueued('media-x'); });
   assert.equal(seenInside, true); assert.equal(layer.mediaDeletions.count(), 1); assert.equal(layer.players.count(), 0);
   // A failure at the filesystem boundary (a directory now sits where the file was): the entry survives a reopen.
   fs.rmSync(path.join(storageDir, 'media', 'media-x.webm')); fs.mkdirSync(path.join(storageDir, 'media', 'media-x.webm'));

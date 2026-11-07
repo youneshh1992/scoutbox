@@ -1097,6 +1097,13 @@ export function createRecruitmentRepository({ sqlite, unit = null, now = Date.no
     trialReportsFor(playerId) {
       return trials.forPlayer(playerId).filter((t) => t.report).map((t) => t.report).sort((a, b) => a.filedAt - b.filedAt);
     },
+    /** The trial reports of many players at once (one query): Map player id → reports in filing order. */
+    trialReportsForPlayers(playerIds) {
+      const out = new Map();
+      for (const t of trials.forPlayers(playerIds)) if (t.report) { if (!out.has(t.playerId)) out.set(t.playerId, []); out.get(t.playerId).push(t.report); }
+      for (const list of out.values()) list.sort((a, b) => a.filedAt - b.filedAt);
+      return out;
+    },
     /** Check the tables are authoritative (0015 recorded); there is nothing to load. */
     attach() {
       if (!recruitmentLive(sqlite)) throw new Error(`the recruitment repository needs ${RECRUITMENT_MIGRATION} recorded; it never imports an in-memory array`);

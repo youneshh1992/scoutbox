@@ -1,47 +1,29 @@
 /**
- * Player sub-records (migration plan step S5; docs/architecture/s5-player-subrecords.md).
+ * Player sub-records (S5): the eleven lists a player record carries — `media`, `attendance`, `timeline`, `badges`,
+ * `drills`, `drillResults`, `activityLog`, `externalIds`, `seasonHistory`, `medical.records`,
+ * `programme.completed` — are rows of the twelve `player_*` tables created by migration `0007_player_subrecords`
+ * (`media[].tags{}` is the twelfth, `player_media_tags`). The identity repository (identity.mjs) is the one writer.
+ * `trialReports` is not stored here: it is the trials' reports, read from the recruitment tables.
  *
- * The eleven arrays a player record carries — `media`, `attendance`, `timeline`,
- * `badges`, `drills`, `drillResults`, `activityLog`, `externalIds`,
- * `seasonHistory`, `medical.records`, `programme.completed` — become rows of the
- * twelve `player_*` tables created by migration `0007_player_subrecords`
- * (`media[].tags{}` is the twelfth, `player_media_tags`). The record the server
- * sees keeps every array in place, read-only; the repository (identity.mjs) is
- * the one writer. `trialReports` is not stored at all: it is a duplicate of
- * `trials[].report` and is served as a DERIVED value (`trialReportsFor`).
+ *   - no identifier is minted: a row without a client-visible id is keyed by `(player_id, position)`; every table
+ *     carries `position` (the list index) and reads back in that order, so order and legal duplicates survive;
+ *   - typed columns, valid input only: an item is its columns. A write stores the known fields (an unknown one is not
+ *     stored). An item reads back with its fields in the spec's order: a NULL column is `null` for the fields the
+ *     writers set explicitly (`nullable`) and omitted otherwise; a clip always carries `tags`;
+ *   - a value a column cannot hold is REFUSED with the field, the index and the reason (`media[2].title is
+ *     absent`); a natural key the code enforces (season, drill, provider and external id, tag, every item id) is
+ *     refused when a list repeats it, never deduplicated.
  *
- * Decisions this module encodes (note §2):
- *   - no identifier is minted: a row without a client-visible id is keyed by
- *     `(player_id, position)`; every table carries `position` (the array index)
- *     and reads back in that order, so order and legal duplicates survive;
- *   - typed columns, valid input only (the S8d fidelity rule, 3 Nov 2026): an
- *     item is its columns. A write (the repository, a snapshot) stores the
- *     known fields and drops unknown ones; it keeps no key order, no explicit
- *     null and no absent/null distinction. An item reads back with its fields
- *     in the spec's order: a NULL column is `null` for the fields the writers
- *     set explicitly (`nullable`: a clip's url, verifiedClip and captions, an
- *     attendance's gps, a medical record's layoffWeeks and cleared) and
- *     omitted otherwise; a clip always carries `tags`. Every array is on every
- *     record (`[]` when it has no rows);
- *   - a value a column cannot hold is REFUSED with the field, the index and the
- *     reason (`media[2].title is absent`), never adjusted; a natural key the
- *     code enforces (season per player, drill per player, provider and
- *     external id per player, tag per clip, every item id) is refused when an
- *     array violates it, never deduplicated;
- *   - the one exception is the blob import of migration 0007
- *     (`importSubrecords`): an unknown field is dropped, a wrong-typed value is
- *     converted when the meaning is obvious (a number given as text, a text
- *     given as a number, 0/1 for a boolean) and dropped otherwise, each noted
- *     with the player id, the array, the index and the field; only an item it
- *     cannot use (no id, a required field missing, a repeated natural key) blocks
- *     the step.
+ * S14h: an external id's `reviewId` names the identity review it was linked from (the review keeps the imported
+ * row; the copy that used to ride in `claim_json` is gone).
  */
-import {
-  playerFromRow, validatePlayerRecord, PLAYER_SUBRECORD_KEYS, PLAYER_COMPOSITE_SUBRECORDS, PLAYER_COMPOSITE_SUBRECORD_TABLES, PLAYER_COLUMNS,
-} from './identityMapping.mjs';
-import { migrationApplied } from './database.mjs';
+import { migrationApplied, childRowsOf } from './database.mjs';
 
 export const PLAYER_SUBRECORDS_MIGRATION = '0007_player_subrecords';
+/** The top-level lists stored as rows. */
+export const PLAYER_SUBRECORD_KEYS = Object.freeze(['media', 'attendance', 'timeline', 'badges', 'drills', 'drillResults', 'activityLog', 'externalIds', 'seasonHistory']);
+/** Composites whose list sub-key is stored as rows (`medical.records` → `player_medical_records`, …). */
+export const PLAYER_COMPOSITE_SUBRECORDS = Object.freeze({ medical: Object.freeze(['records']), programme: Object.freeze(['completed']) });
 /** Is the S5 storage authoritative on this connection? Decided by the migration record, never by the tables existing. */
 export const subrecordsLive = (sqlite) => migrationApplied(sqlite, PLAYER_SUBRECORDS_MIGRATION);
 
@@ -59,7 +41,6 @@ const describe = (v) => (v === null ? 'null' : v === undefined ? 'absent' : Arra
 const absentOrNull = (v) => v === null || v === undefined;
 const isSafeInt = (v) => typeof v === 'number' && Number.isSafeInteger(v);
 const isFinite_ = (v) => typeof v === 'number' && Number.isFinite(v);
-const JSON_CHECK = (col) => `${col} TEXT CHECK (${col} IS NULL OR json_valid(${col}))`;
 
 // ------------------------------------------------------------------ the DDL (what migration 0007 creates; 01_identity.sql documents it)
 export const SUBRECORDS_DDL = `
@@ -185,10 +166,11 @@ CREATE TABLE player_external_ids (
   source         TEXT NOT NULL,
   linked_by_name TEXT,
   linked_at      INTEGER NOT NULL,
-  ${JSON_CHECK('claim_json')},
+  review_id      TEXT,
   PRIMARY KEY (player_id, provider, external_id)
 ) STRICT;
 CREATE UNIQUE INDEX player_external_ids_position ON player_external_ids (player_id, position);
+CREATE INDEX player_external_ids_lookup ON player_external_ids (provider, external_id);
 
 CREATE TABLE player_programme_completions (
   player_id    TEXT NOT NULL REFERENCES players(id) ON DELETE CASCADE,
@@ -267,10 +249,10 @@ export const SUBRECORD_SPECS = Object.freeze({
   externalIds: Object.freeze({
     table: 'player_external_ids',
     spec: itemSpec({
-      scalars: { provider: 'provider', externalId: 'external_id', source: 'source', by: 'linked_by_name', at: 'linked_at', claim: 'claim_json' }, json: ['claim'],
-      columns: ['provider', 'external_id', 'source', 'linked_by_name', 'linked_at', 'claim_json'],
+      scalars: { provider: 'provider', externalId: 'external_id', source: 'source', by: 'linked_by_name', at: 'linked_at', reviewId: 'review_id' },
+      columns: ['provider', 'external_id', 'source', 'linked_by_name', 'linked_at', 'review_id'],
     }),
-    types: { provider: 'text', externalId: 'text', source: 'text', by: 'text', at: 'int', claim: 'json' },
+    types: { provider: 'text', externalId: 'text', source: 'text', by: 'text', at: 'int', reviewId: 'text' },
     required: ['provider', 'externalId', 'source', 'at'], unique: [['provider', 'externalId']],
   }),
   'programme.completed': Object.freeze({
@@ -283,9 +265,6 @@ export const SUBRECORD_SPECS = Object.freeze({
   drills: Object.freeze({ table: 'player_drills', primitive: 'text', column: 'drill_id', unique: true }),
   activityLog: Object.freeze({ table: 'player_activity_log', primitive: 'int', column: 'occurred_at' }),
 });
-
-// The decoder names a composite sub-key's table in its one refusal; the names must be the specs' (checked once, at load).
-for (const [key, table] of Object.entries(PLAYER_COMPOSITE_SUBRECORD_TABLES)) if (SUBRECORD_SPECS[key]?.table !== table) throw new Error(`playerSubrecords: ${key} is stored in ${SUBRECORD_SPECS[key]?.table} here but identityMapping names ${table}`);
 
 /** Read an array off a record by its writer name (`medical.records` → `rec.medical?.records`). */
 export function getSubrecords(rec, key) {
@@ -368,121 +347,6 @@ export function validateSubrecords(rec) {
   for (const key of SUBRECORD_KEYS) problems.push(...validateSubrecordArray(key, getSubrecords(rec, key)));
   return problems;
 }
-/**
- * The whole player validator since S5: the record (identityMapping's
- * `validatePlayerRecord`: scalars, composites, the arrays as arrays) AND every
- * item of every array. The repository and the snapshot writer use this one;
- * nothing is coerced.
- */
-export function validatePlayerRecordWithItems(rec) {
-  const base = validatePlayerRecord(rec);
-  const problems = base.ok ? [] : base.problems.slice();
-  if (isPlainObject(rec)) problems.push(...validateSubrecords(rec));
-  return problems.length ? { ok: false, problems } : { ok: true };
-}
-
-// ------------------------------------------------------------------ the blob import (migration 0007 only)
-const NUMERIC_TEXT = /^\s*-?(\d+\.?\d*|\.\d+)(e[+-]?\d+)?\s*$/i;
-/** The value `type` holds for `v`: `{ ok, value, converted }`; `ok: false` when there is no obvious meaning (the value is dropped). */
-const typeForImport = (v, type, enums) => {
-  let out;
-  switch (type) {
-    case 'text': case 'date':
-      if (typeof v === 'string') out = { ok: true, value: v };
-      else if (isFinite_(v) || typeof v === 'boolean') out = { ok: true, value: String(v), converted: true };
-      else return { ok: false };
-      if (type === 'date' && out.value.length !== 10) return { ok: false };
-      break;
-    case 'int': case 'real': {
-      const n = typeof v === 'string' && NUMERIC_TEXT.test(v) ? Number(v) : v;
-      if (!(type === 'int' ? isSafeInt(n) : isFinite_(n))) return { ok: false };
-      out = { ok: true, value: n, converted: n !== v };
-      break;
-    }
-    case 'bool':
-      if (typeof v === 'boolean') out = { ok: true, value: v };
-      else if (v === 0 || v === 1) out = { ok: true, value: v === 1, converted: true };
-      else return { ok: false };
-      break;
-    case 'json': try { JSON.stringify(v); out = { ok: true, value: v }; } catch { return { ok: false }; } break;
-    default: throw new Error(`unknown item type ${type}`);
-  }
-  if (enums && !enums.includes(out.value)) return { ok: false };
-  return out;
-};
-/**
- * Type one array of a decoded player for the cutover. Returns `{ items, notes,
- * problems }`: `items` holds only what the columns store, `notes` says what was
- * converted or dropped (player id, array, index, item id, field: never a
- * value), `problems` the items the tables cannot take at all.
- */
-function importArray(playerId, key, raw) {
-  const notes = []; const problems = [];
-  const at = (i, item) => `players ${playerId}: ${key}[${i}]${isPlainObject(item) && typeof item.id === 'string' ? ` (${item.id})` : ''}`;
-  if (absentOrNull(raw)) return { items: [], notes, problems };
-  if (!Array.isArray(raw)) { notes.push(`players ${playerId}: ${key} is ${describe(raw)}, not an array; dropped`); return { items: [], notes, problems }; }
-  const def = SUBRECORD_SPECS[key];
-  const items = [];
-  raw.forEach((item, i) => {
-    if (def.primitive) {
-      const t = typeForImport(item, def.primitive);
-      if (!t.ok) { notes.push(`${at(i, item)} is ${describe(item)}, not ${def.primitive === 'int' ? 'an integer' : 'text'}; the entry was dropped`); return; }
-      if (t.converted) notes.push(`${at(i, item)} was ${describe(item)}; stored as ${def.primitive === 'int' ? 'an integer' : 'text'}`);
-      items.push(t.value); return;
-    }
-    if (!isPlainObject(item)) { problems.push(`${at(i, item)} is ${describe(item)}, not an object`); return; }
-    const out = {};
-    for (const [k, type] of Object.entries(def.types)) {
-      if (absentOrNull(item[k])) continue;
-      const t = typeForImport(item[k], type, def.enums?.[k] ?? null);
-      if (!t.ok) { notes.push(`${at(i, item)}.${k} is ${describe(item[k])}, which the ${type} column cannot hold; the value was dropped`); continue; }
-      if (t.converted) notes.push(`${at(i, item)}.${k} was ${describe(item[k])}; stored as ${type}`);
-      setOwn(out, k, t.value);
-    }
-    for (const [ck, subs] of Object.entries(def.spec.composites)) {
-      const v = item[ck];
-      if (absentOrNull(v)) continue;
-      const parts = isPlainObject(v) ? Object.keys(subs).map((s) => typeForImport(v[s], 'real')) : [];
-      if (!parts.length || parts.some((p) => !p.ok)) { notes.push(`${at(i, item)}.${ck} is not a pair of finite numbers; the value was dropped`); continue; }
-      setOwn(out, ck, Object.fromEntries(Object.keys(subs).map((s, j) => [s, parts[j].value])));
-    }
-    if (def.children === 'tags' && !absentOrNull(item.tags)) {
-      const tags = {};
-      if (!isPlainObject(item.tags)) notes.push(`${at(i, item)}.tags is ${describe(item.tags)}, not an object of tag → count; dropped`);
-      else for (const [tag, n] of Object.entries(item.tags)) { if (isSafeInt(n) && n > 0) setOwn(tags, tag, n); else notes.push(`${at(i, item)}.tags: a tag whose count is not a positive integer was dropped`); }
-      out.tags = tags;
-    }
-    const known = new Set([...Object.keys(def.types), ...Object.keys(def.spec.composites), ...(def.children ? [def.children] : [])]);
-    for (const k of Object.keys(item)) if (!known.has(k)) notes.push(`${at(i, item)}: unknown field ${k} dropped`);
-    const missing = def.required.filter((k) => !hasOwn(out, k));
-    if (missing.length) { problems.push(`${at(i, item)} has no usable ${missing.join(', ')} (required by ${def.table})`); return; }
-    items.push(out);
-  });
-  if (!problems.length) problems.push(...validateSubrecordArray(key, items).map((p) => `players ${playerId}: ${p}`));
-  return { items, notes, problems };
-}
-/**
- * The cutover's typing of every array of a decoded (S4a-layout) player record:
- * `{ record, notes, problems }` where `record` is the record with every array
- * replaced by what the tables will hold (the composite sub-keys only where the
- * composite is an object).
- */
-export function importSubrecords(rec) {
-  const record = { ...rec };
-  const notes = []; const problems = [];
-  for (const key of SUBRECORD_KEYS) {
-    const [k, sub] = key.split('.');
-    if (sub && !isPlainObject(record[k])) {
-      if (!absentOrNull(getSubrecords(rec, key))) notes.push(`players ${rec.id}: ${key} has no ${k} to belong to; dropped`);
-      continue;
-    }
-    const r = importArray(rec.id, key, sub ? rec[k][sub] : rec[key]);
-    notes.push(...r.notes); problems.push(...r.problems);
-    if (sub) record[k] = { ...record[k], [sub]: r.items }; else record[key] = r.items;
-  }
-  return { record: placeSubrecords(record), notes, problems };
-}
-
 // ------------------------------------------------------------------ item ⇄ row
 const insertSql = (table, columns) => `INSERT INTO ${table} (${columns.join(', ')}) VALUES (${columns.map((c) => `@${c}`).join(', ')})`;
 
@@ -543,27 +407,6 @@ export function storedItem(key, item) {
   const { row, tags } = itemRows(key, item, 0, null);
   return itemFromRow(def, row, tags);
 }
-/**
- * Put a valid record's arrays in their stored form, IN PLACE: every array on
- * every record (`[]` for an absent or null one; a composite's sub-array only
- * where the composite is an object), each item as the tables read it back, the
- * array keys after the record's other keys (the composite's sub-array after its
- * other sub-keys) — the order a read from the tables produces. Returns the record.
- */
-export function placeSubrecords(rec) {
-  for (const key of PLAYER_SUBRECORD_KEYS) {
-    const items = Array.isArray(rec[key]) ? rec[key].map((it) => storedItem(key, it)) : [];
-    delete rec[key]; setOwn(rec, key, items);
-  }
-  for (const [k, subs] of Object.entries(PLAYER_COMPOSITE_SUBRECORDS)) {
-    if (!isPlainObject(rec[k])) continue;
-    for (const sub of subs) {
-      const items = Array.isArray(rec[k][sub]) ? rec[k][sub].map((it) => storedItem(`${k}.${sub}`, it)) : [];
-      delete rec[k][sub]; setOwn(rec[k], sub, items);
-    }
-  }
-  return rec;
-}
 const columnsOf = (key) => { const def = SUBRECORD_SPECS[key]; return def.primitive ? ['player_id', 'position', def.column] : ['player_id', 'position', ...def.spec.columns]; };
 
 /** Prepared statements for every table (built once per connection by the callers below). */
@@ -574,7 +417,6 @@ export function prepareSubrecordStatements(sqlite) {
     st[key] = {
       insert: sqlite.prepare(insertSql(def.table, columnsOf(key))),
       deleteAll: sqlite.prepare(`DELETE FROM ${def.table} WHERE player_id = ?`),
-      selectAll: sqlite.prepare(`SELECT ${columnsOf(key).join(', ')} FROM ${def.table} ORDER BY player_id, position`),
       selectPlayer: sqlite.prepare(`SELECT ${columnsOf(key).join(', ')} FROM ${def.table} WHERE player_id = ? ORDER BY position`),
       count: sqlite.prepare(`SELECT COUNT(*) AS n FROM ${def.table}`),
     };
@@ -584,8 +426,8 @@ export function prepareSubrecordStatements(sqlite) {
   st.tags = {
     insert: sqlite.prepare('INSERT INTO player_media_tags (media_id, position, tag, count) VALUES (@media_id, @position, @tag, @count)'),
     deleteMedia: sqlite.prepare('DELETE FROM player_media_tags WHERE media_id = ?'),
-    selectAll: sqlite.prepare('SELECT media_id, position, tag, count FROM player_media_tags ORDER BY media_id, position'),
-    selectMedia: sqlite.prepare('SELECT position, tag, count FROM player_media_tags WHERE media_id = ? ORDER BY position'),
+    selectPlayer: sqlite.prepare('SELECT t.media_id, t.position, t.tag, t.count FROM player_media_tags t JOIN player_media m ON m.id = t.media_id WHERE m.player_id = ? ORDER BY t.media_id, t.position'),
+    count: sqlite.prepare('SELECT COUNT(*) AS n FROM player_media_tags'),
   };
   return st;
 }
@@ -631,33 +473,32 @@ const placeChild = (children, key, item) => {
   children[k][sub].push(item);
 };
 
-/** Every player's arrays, read in one pass per table: Map player id → `{ media: [...], …, medical: { records }, programme: { completed } }`. */
-export function readAllChildren(st) {
-  const out = new Map();
-  const of = (id) => { if (!out.has(id)) out.set(id, emptyChildren()); return out.get(id); };
-  const tagsByMedia = new Map();
-  for (const t of st.tags.selectAll.all()) { if (!tagsByMedia.has(t.media_id)) tagsByMedia.set(t.media_id, []); tagsByMedia.get(t.media_id).push(t); }
-  for (const key of SUBRECORD_KEYS) {
-    for (const row of st[key].selectAll.all()) placeChild(of(row.player_id), key, itemFromRows(key, row, tagsByMedia.get(row.id)));
-  }
-  return out;
-}
-/** One player's arrays (the same shape), for a re-read after a write. */
+/** One player's lists (`{ media: [...], …, medical: { records }, programme: { completed } }`). */
 export function readChildren(st, playerId) {
   const children = emptyChildren();
-  for (const key of SUBRECORD_KEYS) {
-    for (const row of st[key].selectPlayer.all(playerId)) {
-      const tagRows = SUBRECORD_SPECS[key].children === 'tags' ? st.tags.selectMedia.all(row.id) : null;
-      placeChild(children, key, itemFromRows(key, row, tagRows));
-    }
-  }
+  const tags = new Map();
+  for (const t of st.tags.selectPlayer.all(playerId)) { if (!tags.has(t.media_id)) tags.set(t.media_id, []); tags.get(t.media_id).push(t); }
+  for (const key of SUBRECORD_KEYS) for (const row of st[key].selectPlayer.all(playerId)) placeChild(children, key, itemFromRows(key, row, tags.get(row.id)));
   return children;
+}
+/** The lists of many players in one query per table (never a query per player): Map player id → lists. */
+export function readChildrenFor(sqlite, ids) {
+  const out = new Map(ids.map((id) => [id, emptyChildren()]));
+  if (!ids.length) return out;
+  const tagRows = sqlite.prepare('SELECT t.media_id, t.position, t.tag, t.count FROM player_media_tags t JOIN player_media m ON m.id = t.media_id WHERE m.player_id IN (SELECT value FROM json_each(?)) ORDER BY t.media_id, t.position').all(JSON.stringify(ids));
+  const tags = new Map();
+  for (const t of tagRows) { if (!tags.has(t.media_id)) tags.set(t.media_id, []); tags.get(t.media_id).push(t); }
+  for (const key of SUBRECORD_KEYS) {
+    const rows = childRowsOf(sqlite, SUBRECORD_SPECS[key].table, 'player_id', ids, { order: 'position' });
+    for (const id of ids) for (const row of rows.all(id)) placeChild(out.get(id), key, itemFromRows(key, row, tags.get(row.id)));
+  }
+  return out;
 }
 /** Rows per table, for reports (counts only). */
 export function countChildRows(st) {
   const out = {};
   for (const key of SUBRECORD_KEYS) out[SUBRECORD_SPECS[key].table] = st[key].count.get().n;
-  out.player_media_tags = st.tags.selectAll.all().length;
+  out.player_media_tags = st.tags.count.get().n;
   return out;
 }
 
@@ -674,54 +515,5 @@ export function trialReportsFor(trials, playerId) {
   for (const t of trials) if (isPlainObject(t) && t.playerId === playerId && isPlainObject(t.report)) out.push(t.report);
   const at = (r) => (typeof r.filedAt === 'number' && Number.isFinite(r.filedAt) ? r.filedAt : 0);
   return out.sort((a, b) => at(a) - at(b));
-}
-/**
- * Reconcile a player's stored copy with the derived reports before the copy is
- * dropped (migration 0007). Returns `[]` when they agree entry for entry, else
- * one problem per discrepancy: a copy entry with no trial report of that id, an
- * entry whose content differs from the trial's report, a report the copy does
- * not carry, or the same entries in a different order. Nothing is repaired.
- */
-export function reconcileTrialReports(copy, derived, { hint = 'resolve by hand before the cutover' } = {}) {
-  if (copy === null || copy === undefined) return derived.length ? [`trialReports is ${describe(copy)} on the player but ${derived.length} trial report(s) name the player (${derived.map((r) => r.id).join(', ')}); the player would gain a report — ${hint}`] : [];
-  if (!Array.isArray(copy)) return [`trialReports is ${describe(copy)}, not an array`];
-  const problems = [];
-  const byId = new Map(derived.map((r) => [r.id, r]));
-  const seen = new Map();
-  copy.forEach((entry, i) => {
-    const id = isPlainObject(entry) ? entry.id : undefined;
-    if (typeof id !== 'string') { problems.push(`trialReports[${i}] has no report id`); return; }
-    if (seen.has(id)) { problems.push(`trialReports[${i}] (${id}) repeats the report listed at [${seen.get(id)}]; a report is filed once — ${hint}`); return; }
-    seen.set(id, i);
-    const source = byId.get(id);
-    if (!source) { problems.push(`trialReports[${i}] (${id}) has no trial report with that id in the trials collection; the copy would be lost — ${hint}`); return; }
-    if (JSON.stringify(entry) !== JSON.stringify(source)) problems.push(`trialReports[${i}] (${id}) differs from the trial's report; the copy would be replaced — ${hint}`);
-  });
-  for (const r of derived) if (!seen.has(r.id)) problems.push(`trial report ${r.id} names the player but the player's trialReports does not carry it; the player would gain a report — ${hint}`);
-  if (!problems.length && JSON.stringify(copy.map((r) => r.id)) !== JSON.stringify(derived.map((r) => r.id))) problems.push(`trialReports lists the same reports in a different order than their filing order (${copy.map((r) => r.id).join(', ')} vs ${derived.map((r) => r.id).join(', ')}); ${hint}`);
-  return problems;
-}
-/**
- * The rule every write path applies to a `trialReports` value that arrives WITH
- * a record (a snapshot replacement, initialize, insert, restore — review of
- * 132eda2, finding 1): an ARRAY is a claim about the trials collection and must
- * equal the derived list entry for entry (ids, content, order, no duplicate),
- * else the whole write is refused — the copy is never stored (0007 derives it),
- * so the only honest answers are "equal" or "refused", never a silent drop. An
- * absent key or a null is NO claim: the trials stand, and the record reads back
- * with whatever reports name it. Returns the problems, prefixed with the player.
- */
-export function reconcileTrialReportCopy(playerId, copy, derived, { hint = 'resolve the record before writing it' } = {}) {
-  if (copy === null || copy === undefined) return [];
-  return reconcileTrialReports(copy, derived, { hint }).map((p) => `players ${playerId}: ${p}`);
-}
-
-/** Every player of the live tables as full records (the S5 read path), for snapshot tools and rollback: `[{ record, row }]` in rowid order. */
-export function readPlayersWithChildren(sqlite, st, { trials } = {}) {
-  const children = readAllChildren(st);
-  return sqlite.prepare(`SELECT ${PLAYER_COLUMNS.join(', ')} FROM players WHERE deleted_at IS NULL ORDER BY rowid`).all().map((row) => ({ // S4b-R: a retained row is not a player record
-    row,
-    record: playerFromRow(row, { children: children.get(row.id) ?? emptyChildren(), trialReports: trials === undefined ? undefined : trialReportsFor(trials, row.id) }),
-  }));
 }
 export { emptyChildren };

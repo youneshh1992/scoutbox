@@ -44,7 +44,7 @@ import {
 
 export function registerContact(ctx) {
   const {
-    db, orgRouter, nextId, notify, broadcast, findPlayer, isBlocked, isAdult,
+    db, guardians, orgRouter, nextId, notify, broadcast, findPlayer, isBlocked, isAdult,
     rateLimit, mailer, isLead, moderateOrRefuse, issueRecruitmentRequest,
     // S8c: the recruitment contacts/offers repository. Every write is an explicit operation inside `unit`.
     recruitmentContactsOffers, unit, afterCommit,
@@ -116,7 +116,7 @@ export function registerContact(ctx) {
 
   /** The live answer to "who would this reach?", computed now, never trusted from a client. */
   const recipientFor = (req, room) => resolveContactRecipient({
-    player: findPlayer(room.playerId), org: req.org, guardians: db.guardians ?? [],
+    player: findPlayer(room.playerId), org: req.org, guardians: guardians.forPlayer(room.playerId),
     isAdult, visibleToOrg, isBlocked, now: new Date(),
   });
 
@@ -477,7 +477,7 @@ export function registerContact(ctx) {
     // email). It is a notification that something is waiting in ScoutBox —
     // never the body, never the transport of record, never "delivered". The
     // provider is called after COMMIT; its outcome is a later write of its own.
-    const guardian = recipient.type === 'guardian' && mailer ? (db.guardians ?? []).find((x) => x.id === recipient.guardianId) ?? null : null;
+    const guardian = recipient.type === 'guardian' && mailer ? guardians.byId(recipient.guardianId) : null;
     const emailCopy = recipient.type === 'guardian' && mailer ? { state: guardian?.email ? 'queued' : 'not_available', to: 'guardian', outboxId: null, at } : null;
 
     let moved = null;

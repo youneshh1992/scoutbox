@@ -61,7 +61,7 @@ test('every index references an existing table', () => {
 // applies them on a genuinely new database (migration 0005 then finds no saved
 // blobs: a first installation, nothing to import), so a migration that needs
 // the runner's bookkeeping tables is exercised the way it runs in production.
-// players and guardians carry the documented transitional `facets_json`
+// players and guardians carry no facet storage since S14h (they carried a transitional `facets_json` before)
 // column (S4a); media_deletions (0006) is documented in 08; the twelve
 // player sub-record tables (0007, S5) are in 01 with their position and
 // extra_json columns.
@@ -105,7 +105,7 @@ test('the registered migrations 0001–0018 match 01_identity.sql (identity, fac
     assert.deepEqual(idx(mig), idx(docs), `${t} indexes`);
     assert.match(mig.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?").get(t).sql, /STRICT\s*$/i, `${t} is STRICT in the migrations too`);
   }
-  for (const t of ['players', 'guardians']) assert.ok(docs.prepare(`PRAGMA table_info(${t})`).all().some((c) => c.name === 'facets_json'), `${t}: the documented transitional column`);
+  for (const t of ['players', 'guardians']) assert.ok(!docs.prepare(`PRAGMA table_info(${t})`).all().some((c) => c.name === 'facets_json'), `${t}: no facet storage (S14h)`);
   // The documents say so: the status header states that 0005 is registered and the projection retired.
   const header = fs.readFileSync(path.join(SQL_DIR, '01_identity.sql'), 'utf8').split('\n').slice(0, 20).join('\n');
   assert.match(header, /migration 0005[\s\S]{0,160}?REGISTERED/, 'the status header of 01_identity.sql states that 0005 is registered');

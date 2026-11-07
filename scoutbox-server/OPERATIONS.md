@@ -91,9 +91,9 @@ A trust-weights total other than 100 is also fatal (`TRUST_WEIGHTS_INVALID`).
 (the first installation's initialisation states, the session lifetime) and `counters` (the id counter, written at
 every mint).
 
-Most repositories write their rows at once. The staged ones (players and guardians) keep a mirror in memory and
-write what changed at the next save: a 2-second debounce (`persist()`), immediately with `persistNow()`, or in the
-commit of the unit of work they joined.
+Every repository writes its rows at once, inside the unit of work it joined (or a transaction of its own), and reads
+through SQL. Since S14h no repository keeps a mirror in memory: `persist()` and `persistNow()` have nothing of a
+domain's left to write (they go with the save path, S14 last).
 
 `GET /capabilities` → `dataLayer` lists the tables, the applied migrations and each
 domain's counts.
@@ -104,11 +104,9 @@ registration → listen.
 
 ### Rules when writing server code
 
-- **Write through the repository, never the view.** After attach, `db.<collection>` for
-  a migrated domain is a read-only view (`repositories/readonly.mjs`). Reads work as
-  before (find, filter, spread, stringify). A direct push, splice or assignment throws and
-  tells you which repository to use. Add records with the repository's `add*` / `insert`
-  methods and change rows with `update` / `setItems` / `patchItem` etc. New domains follow
+- **Write through the repository.** No domain has a `db.<collection>` any more: reading or assigning one throws and
+  names the repository. Add records with the repository's `create` / `add*` operations and change them with
+  `update(id, (draft) => …)` (or a player's lists with `addItem` / `setItems` / `patchItem`). New domains follow
   S8b (`repositories/recruitmentCases.mjs`, cases and rooms), S8a
   (`repositories/recruitment.mjs`, requests and trials), S8c
   (`repositories/recruitmentContactsOffers.mjs`) or S8d (`repositories/signingsFollowUps.mjs`):
@@ -119,10 +117,13 @@ registration → listen.
 - **Look records up by id through the index.** Every module context carries `byId`
   (`domains/platform/lookups.mjs`): `byId.player(id)`, `byId.guardian(id)`, `byId.user(id)`,
   `byId.org(id)` and `byId.mediaOwner(clipId)`, each answering the record view or null, with an
-  optional further condition (`byId.user(id, (u) => u.orgId === org.id && !u.removedAt)`). Never
-  `db.players.find((p) => p.id === id)`: that scans the whole collection on every call. Players
-  and guardians are read-only views; every change is a repository operation, written at once
-  (S4a-E), so a save has nothing of theirs to find.
+  optional further condition (`byId.user(id, (u) => u.orgId === org.id && !u.removedAt)`). Since
+  S14h these are SQL lookups answering fresh, deep-frozen records: `req.player` and `req.guardian` are
+  copies taken when the request was authenticated, so a route that writes and then answers reads the
+  record the write returned (or `players.byId` again), never the one it held. A route that needs many
+  players asks the identity repository: `players.visibleCandidates(org, filters)` (the under-18 wall
+  and the grassroots box in SQL; the caller still applies `visibleToOrg` and the blocks),
+  `players.scan` / `list`, `players.byExternalId`, `guardians.forPlayer`, `guardians.byEmail`.
 - **Read SQL where the domain has no view.** Since §4.3 step 2 a domain whose reads moved
   to SQL has no `db.<collection>` at all (reading or assigning it throws and names the
   repository). The whole recruitment domain (cases and Room records, requests, trials,
@@ -138,15 +139,13 @@ registration → listen.
   - The callback must be **synchronous**. An `async` function is refused before it runs.
     A returned promise is not cancelled and counts as a stray. Prepare async work before
     the unit and publish it after.
-  - Everything commits or rolls back together, including the staged repositories' mirrors.
-    On failure, they restore their in-memory records and the error is rethrown with
-    `err.unitOfWork = 'rolled_back'`. Nothing is left pending for a later save.
+  - Everything commits or rolls back together. On failure the error is rethrown with
+    `err.unitOfWork = 'rolled_back'`; there is no memory to restore (S14h). Nothing is left pending for a later save.
   - A nested unit joins the outer one. An inner failure fails the whole unit even if the
     caller catches it. Repository refusals do the same (participant failure).
   - Retry is explicit: rerun the whole operation.
-  - Staff (`org_users`) writes and session writes join the unit like every other
-    explicit repository (S14f), and so do organisation writes (S14g). Only the staged
-    repositories (players, guardians) still keep mirrors that the unit restores.
+  - Every repository's writes join the unit: staff and sessions since S14f, organisations since S14g, players and
+    guardians since S14h. An empty unit runs no statement on any of them (`scripts/testUnitOfWork.mjs`).
   - Expected negative results (no live code, nothing to delete) are return values and do
     not poison the unit.
 - **`store.afterCommit(fn)`** is the mechanism for side effects: broadcasts, pushes, SSE

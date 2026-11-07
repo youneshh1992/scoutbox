@@ -8,7 +8,7 @@
  *
  * Matching is the LAST step. It reads `matchFacts`, which is built from
  * `playerViewForOrg` and returns null the moment the organisation may not see
- * the player. No route here touches `db.players` for anything else, so there
+ * the player. No route here reads the players for anything else, so there
  * is no path by which a criterion can be evaluated against a player the club
  * is not allowed to know exists — including through a count (§24).
  */
@@ -34,7 +34,7 @@ export const DEFAULT_MATCH_SORT = 'recent_evidence';
 
 export function registerMatching(ctx) {
   const {
-    db, orgRouter, nextId, findPlayer, orgCanSee,
+    db, players, orgRouter, nextId, findPlayer, orgCanSee,
     isLead, requireLead, audit, vmetric, notify, broadcast, discovery, unit,
   } = ctx;
   // S12c: watchlists and their membership transitions are rows of the discovery repository, written only through it.
@@ -58,7 +58,9 @@ export function registerMatching(ctx) {
     const out = [];
     let scanned = 0;
     let truncated = false;
-    for (const player of db.players) {
+    // S14h: the SQL part of the visibility rule (the under-18 wall, the grassroots box) is the query's; the exact rule
+    // stays here. The cap counts the players the query admits.
+    for (const player of players.list({ visibleTo: org }, { limit: LIMITS.maxCandidateScan + 1 })) {
       if (++scanned > LIMITS.maxCandidateScan) { truncated = true; break; }
       if (!orgCanSee(org, player)) continue;              // standing, blocks, minors, level
       const facts = ctx.m18MatchFacts?.(player, org);      // the SAME projection Nobody Missed uses

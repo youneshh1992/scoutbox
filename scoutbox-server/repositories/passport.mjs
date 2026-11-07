@@ -25,7 +25,7 @@
 import { isPlainObject, ids, describe } from './recruitment.mjs';
 import { transaction, migrationApplied, childRowsOf } from './database.mjs';
 import { deepFreeze } from './scoutingEvidence.mjs';
-import { PLAYER_POSITIONS } from './identityMapping.mjs';
+import { PLAYER_POSITIONS } from './identity.mjs';
 import { text, int, oneOf, date, group, quote, tableDdl, bad, typeSpec, encode, decode, upsertSql } from './fieldSpecs.mjs';
 
 export const PASSPORT_MIGRATION = '0024_passport';

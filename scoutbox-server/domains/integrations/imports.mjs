@@ -75,13 +75,7 @@ export function registerImports(ctx) {
       if (field) colFor[field] = i;
     });
     const missingCols = ['name', 'provider', 'externalId'].filter((f) => colFor[f] === undefined);
-    // One pass over the players for the two identity lookups, not one scan per row.
-    const byExternal = new Map();
-    const byNameDob = new Map();
-    for (const p of db.players) {
-      for (const e of p.externalIds ?? []) { const k = `${e.provider}\u0000${e.externalId}`; if (!byExternal.has(k)) byExternal.set(k, p); }
-      const k = `${String(p.name).toLowerCase()}\u0000${p.dob}`; if (!byNameDob.has(k)) byNameDob.set(k, p);
-    }
+    // S14h: the two identity lookups are indexed queries (provider and external id; date of birth, then the name).
     const results = [];
     const seenInBatch = new Set();
     for (let r = 0; r < dataRows.length; r++) {
@@ -112,13 +106,13 @@ export function registerImports(ctx) {
       else if (seenInBatch.has(identKey)) { disposition = 'duplicate_in_file'; }
       else {
         seenInBatch.add(identKey);
-        const linkedPlayer = byExternal.get(`${rec.provider}\u0000${rec.externalId}`);
+        const linkedPlayer = players.byExternalId(rec.provider, rec.externalId);
         if (prospects.liveKeyTaken(org.id, rec.provider, rec.externalId)) disposition = 'already_imported';
         else if (linkedPlayer) { disposition = 'linked_player_exists'; matchPlayerId = linkedPlayer.id; }
         else if (rec.dob) {
           // Same name + same dob on a platform player the org can already see
           // → AMBIGUOUS. Queued for review, never auto-merged.
-          const candidate = byNameDob.get(`${rec.name.toLowerCase()}\u0000${rec.dob}`);
+          const candidate = players.byNameAndDob(rec.name, rec.dob);
           if (candidate && orgCanSee(org, candidate)) { disposition = 'ambiguous_identity'; matchPlayerId = candidate.id; }
         }
       }
@@ -256,7 +250,7 @@ export function registerImports(ctx) {
       // work: the external-id row, the review's resolution and its webhook deliveries.
       unit(() => {
         if (!(p.externalIds ?? []).some((e) => e.provider === r.record.provider && e.externalId === r.record.externalId)) {
-          players.addItem(p.id, 'externalIds', { provider: r.record.provider, externalId: r.record.externalId, source: `import:${r.batchId}`, by: req.orgUser.name, at, claim: { ...r.record } });
+          players.addItem(p.id, 'externalIds', { provider: r.record.provider, externalId: r.record.externalId, source: `import:${r.batchId}`, by: req.orgUser.name, at, reviewId: r.id });
         }
         resolved = reviews.resolve(r.id, { resolution: 'linked', by: req.orgUser.name, at });
         emitWebhook(req.org.id, 'identity.resolved', { reviewId: r.id, resolution: 'linked' });

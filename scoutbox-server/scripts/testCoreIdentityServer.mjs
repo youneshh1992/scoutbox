@@ -467,7 +467,7 @@ const pick = (rec) => Object.fromEntries(SUB_KEYS.map((k) => [k,
     // /player/me projects the programme (progress per session); the record and the export hold the completions — compared as the ids of the completed sessions
     : k === 'programme' ? (rec.programme?.completed ? rec.programme.completed.map((c) => c.sessionId) : (rec.programme?.sessions ?? []).filter((s) => s.done).map((s) => s.id))
       : rec[k]]));
-await test('S5 sub-records through the real routes: clips (a file and a null url), a club\'s view count and tags, timeline, badges with a legal duplicate, a season in the history, a medical record, a drill with its result, a programme completion, a Box Cam clip, an import link, a trial check-in and the derived trial report are rows of the twelve tables with nothing left in the facets; the club view keeps the private ones private (activity, drill results, external ids, programme, attendance GPS, medical records until shared); a SIGKILL and a restart serve the same record; the admin backup carries every array inline and a restore into a new directory re-imports them with the same ids and order; the account deletion removes every child row in the same unit and the file after COMMIT', async () => {
+await test('S5 sub-records through the real routes: clips (a file and a null url), a club\'s view count and tags, timeline, badges with a legal duplicate, a season in the history, a medical record, a drill with its result, a programme completion, a Box Cam clip, an import link, a trial check-in and the derived trial report are rows of the twelve tables (no facet storage since S14h); the club view keeps the private ones private (activity, drill results, external ids, programme, attendance GPS, medical records until shared); a SIGKILL and a restart serve the same record; the admin backup carries every array inline and a restore into a new directory re-imports them with the same ids and order; the account deletion removes every child row in the same unit and the file after COMMIT', async () => {
   const dir = tempDir('s5srv-sub');
   let S = await boot(dir, await freePort(), { BOX_CAM_TEST_PROVIDER: '1' }); // the test-only Box Cam observation provider (simulated observations, labelled so; cannot exist in production)
   const su = await S.j('POST', '/auth/player/signup', { name: 'Sub Records', dob: '2000-01-01', country: 'GB', position: 'ST', password: 'subrec-pass-1' }); assert.equal(su.status, 201, JSON.stringify(su.body));
@@ -513,7 +513,7 @@ await test('S5 sub-records through the real routes: clips (a file and a null url
   const review = (await S.j('GET', '/org/identity-reviews', undefined, pro)).body.items.find((r) => r.candidatePlayerId === pid); assert.ok(review, 'the review names this player');
   assert.equal((await S.j('POST', `/org/identity-reviews/${review.id}/resolve`, { action: 'link' }, pro)).body.review.resolution, 'linked');
   assert.deepEqual(qAll(dir, 'SELECT provider, external_id, source, linked_by_name FROM player_external_ids WHERE player_id = ?', pid), [{ provider: 'statsprovider', external_id: 'SP-S5', source: `import:${imp.body.batch.id}`, linked_by_name: 'Maria Keane' }]);
-  assert.equal(JSON.parse(q1(dir, 'SELECT claim_json FROM player_external_ids WHERE player_id = ?', pid).claim_json).externalId, 'SP-S5');
+  assert.equal(q1(dir, 'SELECT review_id FROM player_external_ids WHERE player_id = ?', pid).review_id, review.id, 'S14h: the link names the identity review it came from (the review keeps the imported row)');
   // A trial: the check-in writes the coach-signed attendance (no GPS) with the activity and the Turnstile badge; the report is served from the trial, never copied.
   const future = new Date(Date.now() + 21 * 86_400_000).toISOString().slice(0, 10);
   const rq = await S.j('POST', `/org/players/${pid}/request`, { type: 'trial', message: 'Trial with the U23s?', proposedDate: future, venue: 'Eastport Training Ground' }, pro); assert.equal(rq.status, 201, JSON.stringify(rq.body));
@@ -530,9 +530,8 @@ await test('S5 sub-records through the real routes: clips (a file and a null url
   const rep = await S.j('POST', `/org/trials/${trial.id}/report`, { acceleration: 8, sprintSpeedKmh: 33.4, distanceKm: 9.1, passCompletionPct: 81, duelSuccessPct: 63, coachRating: 8 }, pro); assert.equal(rep.status, 201, JSON.stringify(rep.body));
   const live = await me();
   assert.deepEqual(live.trialReports.map((r) => r.id), [rep.body.report.id], 'trialReports is derived from the trials collection');
-  const fac = JSON.parse(q1(dir, 'SELECT facets_json FROM players WHERE id = ?', pid).facets_json);
-  for (const k of ['media', 'timeline', 'badges', 'attendance', 'drills', 'drillResults', 'seasonHistory', 'externalIds', 'activityLog', 'trialReports']) assert.equal(k in fac, false, `${k} is not in the facets (no stale copy)`);
-  assert.equal(fac.medical?.records, undefined); assert.equal(fac.programme?.completed, undefined);
+  // S14h: there is no facet storage left to hold a stale copy; the lists are rows only.
+  assert.equal(qAll(dir, "SELECT name FROM pragma_table_info('players') WHERE name = 'facets_json'").length, 0, 'no facets_json column');
   const counts = subCounts(dir, pid);
   assert.deepEqual({ ...counts, player_activity_log: 'n' }, { player_season_history: 1, player_badges: 4, player_drills: 1, player_attendance: 1, player_timeline: 2, player_media: 2, player_media_tags: 2, player_medical_records: 1, player_drill_results: 1, player_activity_log: 'n', player_external_ids: 1, player_programme_completions: 1 });
   assert.ok(counts.player_activity_log >= 4 && counts.player_activity_log === live.activityLog.length, 'every recorded activity is a row');
@@ -595,10 +594,10 @@ await test('a trial report filed through the real route for an accepted LEGACY-s
     return { token: login.body.token, before: me0.trialReports, reportId: rep.body.report.id, me: (me.trialReports ?? []).map((r) => r.id), cv: cv.trialReports.map((r) => r.orgName), club: (club.trialReports ?? []).map((r) => r.id), trust: me.trustScore };
   };
   const absent = await file('pl-legacy-absent');
-  assert.equal(absent.before, undefined, 'the legacy record had no trialReports key');
+  assert.deepEqual(absent.before, [], 'S14h: every record carries trialReports (a record saved without the key reads an empty list)');
   assert.deepEqual(absent.me, [absent.reportId], 'the report is on /player/me at once (no restart)'); assert.deepEqual(absent.cv, ['Eastport FC']); assert.deepEqual(absent.club, [absent.reportId]);
   const nul = await file('pl-legacy-null');
-  assert.equal(nul.before, null, 'the legacy record had trialReports: null');
+  assert.deepEqual(nul.before, [], 'S14h: a record saved with trialReports: null reads an empty list too');
   assert.deepEqual(nul.me, [nul.reportId]); assert.deepEqual(nul.cv, ['Eastport FC']); assert.deepEqual(nul.club, [nul.reportId]);
   // The ordinary sign-up control.
   const su = await S.j('POST', '/auth/player/signup', { name: 'Control Signup', dob: '2000-01-01', country: 'GB', password: 'control-pass-1' }); assert.equal(su.status, 201);

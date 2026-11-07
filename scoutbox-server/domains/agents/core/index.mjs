@@ -42,7 +42,7 @@ import {
 export function registerAgent(rawCtx) {
   const ctx = { ...rawCtx, ...buildShared(rawCtx) };
   const {
-    db, byId, users, notifications, orgRouter, playerRouter, adminRouter, nextId, notify, broadcast,
+    db, byId, players, users, notifications, orgRouter, playerRouter, adminRouter, nextId, notify, broadcast,
     findPlayer, isBlocked, playerViewForOrg, orgSafe, revokeOrgUserAccess, rateLimit, isAdult,
     orgCanSee, checkEligibility, distanceBand, moderateOrRefuse, verificationProvider, agentCore, unit, log = console,
   } = ctx;
@@ -523,14 +523,15 @@ export function registerAgent(rawCtx) {
     const q = String(req.query.q ?? '').trim().toLowerCase();
     if (q.length < 2) return res.json({ items: [], note: 'Type at least two characters.' });
     const items = [];
-    for (const p of db.players) {
-      if (!isAdult(p)) continue;                       // minors never appear, whatever the query
-      if (!visibleToOrg(p, req.org) || isBlocked(p.id, req.org.id)) continue;
-      if (!String(p.name ?? '').toLowerCase().includes(q)) continue;
+    // S14h: adults and the visibility rule's SQL part in the query, a batch at a time, stopping at twenty.
+    players.scan({ visibleTo: req.org, adultsOnly: true }, (p) => {
+      if (!isAdult(p)) return true;                    // minors never appear, whatever the query
+      if (!visibleToOrg(p, req.org) || isBlocked(p.id, req.org.id)) return true;
+      if (!String(p.name ?? '').toLowerCase().includes(q)) return true;
       const view = playerViewForOrg(p, req.org) ?? {};
       items.push({ id: p.id, name: p.name, position: view.position ?? null, age: view.age ?? null, club: view.club ?? view.currentClub ?? null, country: view.country ?? null });
-      if (items.length >= 20) break;
-    }
+      return items.length < 20;
+    });
     res.json({ items, adultsOnly: true });
   });
 

@@ -37,7 +37,7 @@ const RETAINED_ROW = (id, deletedAt, birthDate, country) => ({
   football_category: null, identity_verified: 0, guardian_id: null, lat: null, lng: null, stats_appearances: null, stats_goals: null, stats_assists: null, stats_pace_kmh: null,
   stats_pass_completion_pct: null, stats_duel_success_pct: null, stats_clean_sheets: null, medical_shared: 0, medical_condition_status: 'unknown', prefs_quiet_start: null,
   prefs_quiet_end: null, prefs_school_hours_mute: null, prefs_timezone: null, programme_track: null, programme_started_at: null, password_hash: null, created_at: null,
-  deleted_at: deletedAt, facets_json: null,
+  deleted_at: deletedAt,
 });
 
 async function boot(dir, env = {}, server = SERVER) {

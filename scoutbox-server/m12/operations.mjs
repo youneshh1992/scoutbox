@@ -196,7 +196,7 @@ export function registerOperations(ctx) {
     const c = req.body?.category;
     if (!['mens', 'womens', 'boys', 'girls', 'mixed', null].includes(c)) return res.status(400).json({ error: 'CATEGORY_INVALID' });
     // S4a: a column-backed field goes through the repository (one row UPDATE, committed before the response).
-    players.update(req.player.id, { footballCategory: c });
+    players.update(req.player.id, (d) => { d.footballCategory = c; });
     res.json({ footballCategory: c });
   });
 

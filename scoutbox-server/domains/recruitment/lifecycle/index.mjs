@@ -34,7 +34,7 @@ export function registerM23(rawCtx) {
   const { db, recruitmentReads, scoutingReads, orgRouter, persistNow, isLead } = ctx;
   // The journey reads the club's assessments too (S9b: scoutingReads).
   if (!ctx.safetyReads?.blocks) throw new TypeError('the lifecycle routes need safetyReads (the safety repository\'s queries)');
-  const journeyReads = { ...recruitmentReads, ...scoutingReads, blocks: ctx.safetyReads.blocks };
+  const journeyReads = { ...recruitmentReads, ...scoutingReads, blocks: ctx.safetyReads.blocks, player: (id) => ctx.byId.player(id) };
   if (!recruitmentReads?.contacts || !recruitmentReads?.offers) throw new TypeError('registerM23 needs recruitmentReads (contacts, offers) from the data layer');
 
   /**

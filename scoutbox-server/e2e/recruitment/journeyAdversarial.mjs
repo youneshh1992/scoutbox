@@ -818,7 +818,7 @@ section('M — minors through the chain; malformed DOB fails closed (§23, §24)
   let refusal = null;
   { const store = openStore(DATA_DIR); const snap = store.load(); snap.db.players.find((x) => x.id === 'pl-guni').dob = 'not-a-date'; try { store.save({ ...snap, db: snap.db }); } catch (e) { refusal = e; } store.sqlite.close(); }
   server = await boot(); await relogin();
-  neg(/players pl-guni: dob is not a valid YYYY-MM-DD date/.test(String(refusal?.message)) && (await j('GET', '/guardian/children', undefined, amara.token)).body.find((k) => k.id === 'pl-guni')?.dob === '2012-02-10', 'M8a (S4a) a malformed DOB cannot be stored: the snapshot save is refused naming the player and the field, the stored date is unchanged');
+  neg(/players pl-guni: dob must be a YYYY-MM-DD date/.test(String(refusal?.message)) && (await j('GET', '/guardian/children', undefined, amara.token)).body.find((k) => k.id === 'pl-guni')?.dob === '2012-02-10', 'M8a (S4a) a malformed DOB cannot be stored: the snapshot save is refused naming the player and the field, the stored date is unchanged');
   const wall2 = await j('GET', '/org/players/pl-guni', undefined, alex.token);
   neg(wall2.status === 403 && wall2.body?.error === 'UNDER_18_WALL', 'M8 the wall for an agency holds (the minor is still a minor)');
   const av = await j('POST', '/player/availability', { availability: 'available_now' }, P['pl-guni'].token);

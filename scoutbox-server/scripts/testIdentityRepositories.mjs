@@ -1,641 +1,304 @@
-// The player and guardian repositories (repositories/identity.mjs), exercised
-// on temporary databases through the real data layer (attachDataLayer runs the
-// registered migrations, 0005 included, and attaches the repositories as the
-// store's unit-of-work participant) and, for the authority checks, on raw
-// connections prepared by scripts/identityLiveTestSchema.mjs. Nothing here
-// touches DATA_DIR. Synthetic records only; the clock is fixed where age
-// matters. Run with: npm test
+// The player and guardian repositories (repositories/identity.mjs; explicit since S14h), exercised on temporary
+// databases through the real data layer (attachDataLayer runs the registered migrations and attaches every
+// repository). Nothing here touches DATA_DIR. Synthetic records only; the clock is fixed where age matters.
+// Run with: npm test
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
-import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import { openStore } from '../store.mjs';
 import { attachDataLayer, TABLE_BACKED, DATA_MIGRATIONS } from '../repositories/index.mjs';
 import { runDataMigrations } from '../repositories/database.mjs';
-import { createIdentityRepositories, CORE_IDENTITY_INIT_META } from '../repositories/identity.mjs';
-import { CORE_IDENTITY_LIVE_MIGRATION, MINOR_WITHOUT_LINK_REASON } from '../repositories/identityPreflight.mjs';
-import { placeSubrecords } from '../repositories/playerSubrecords.mjs';
-import { prepareLiveIdentitySchema } from './identityLiveTestSchema.mjs';
+import { createIdentityRepositories, CORE_IDENTITY_INIT_META, PLAYER_RECORD_KEYS, GUARDIAN_RECORD_KEYS, bornByForAge } from '../repositories/identity.mjs';
+import { SUBRECORD_TABLES } from '../repositories/playerSubrecords.mjs';
+import { adult, child, gSignup, FIXTURE, T0, NOW, TTL, tempDir, clone } from './coreIdentityTestFixtures.mjs';
 
 let passed = 0;
 const only = process.env.TEST_ONLY || '';
 function test(name, fn) { if (only && !name.includes(only)) return; fn(); passed++; console.log(`  ✓ ${name}`); }
-const HERE = path.dirname(fileURLToPath(import.meta.url));
-const DAY = 86_400_000;
-const TTL = 30 * DAY;
-const NOW = Date.UTC(2026, 9, 11, 12); // 2026-10-11T12:00Z, fixed wherever age matters
-const T0 = NOW - 100 * DAY;
 let counter = 7000;
 const nextId = (p) => `${p}-${++counter}`;
-const tempDir = (tag) => fs.mkdtempSync(path.join(os.tmpdir(), `sb-${tag}-`));
-const clone = (v) => JSON.parse(JSON.stringify(v));
-const sameShape = (a, b, what) => { assert.deepEqual(Object.keys(b), Object.keys(a), `${what}: key order`); assert.equal(JSON.stringify(b), JSON.stringify(a), `${what}: byte-identical JSON`); };
+const ORGS = () => [
+  { id: 'org-pro', name: 'Eastport FC', type: 'club', level: 'pro', plan: 'Pro', country: 'GB', verified: true },
+  { id: 'org-unverified', name: 'Westfield FC', type: 'club', level: 'pro', plan: 'Pro', country: 'GB' },
+  { id: 'org-agency', name: 'Elevate', type: 'agency', level: 'agency', plan: 'Agency', country: 'GB' },
+  { id: 'org-grass', name: 'Leeds Grassroots', type: 'club', level: 'grassroots', plan: 'Grassroots', country: 'GB', verified: true, location: { lat: 53.8, lng: -1.55, city: 'Leeds' } },
+];
 
-// ------------------------------------------------------------------ fixtures (the shapes the application writes today)
-const adult = () => ({
-  id: 'pl-adult', name: 'Adult Signup', dob: '2001-05-20', country: 'GB', city: 'Leeds', position: 'ST', foot: 'right', heightCm: 182, weightKg: 77,
-  stats: null, academyPlus: false, badges: [], availability: 'not_seeking', contractStatus: 'unknown', identityVerified: false,
-  attendance: [], timeline: [], media: [], trialReports: [], drills: [], guardianId: null, squadNumber: null, contractUntil: null,
-  marketValueRange: null, agentName: null, createdAt: T0, password: 'scrypt$aa$bb', level: 'amateur', location: { lat: 53.8, lng: -1.5 },
-  medical: { shared: false, records: [], conditionStatus: 'unknown' }, notificationPrefs: null, seasonHistory: [], firstTeamSeeker: false, programme: null,
-});
-const child = (id, guardianId, dob) => ({
-  id, name: `Child ${id}`, dob, country: 'GB', city: '', guardianId, position: null, foot: null, heightCm: null, weightKg: null,
-  stats: null, academyPlus: false, badges: [], availability: 'not_seeking', contractStatus: 'unknown', identityVerified: false,
-  attendance: [], timeline: [], media: [], trialReports: [], drills: [], squadNumber: null, contractUntil: null, marketValueRange: null,
-  agentName: null, createdAt: T0 + DAY, password: null, level: 'amateur', location: null, medical: { shared: false, records: [], conditionStatus: 'unknown' },
-  notificationPrefs: null, seasonHistory: [], firstTeamSeeker: false, programme: null,
-});
-/** A seeded adult with every S5 array, split composites with remainders, prototype-named own keys (built from JSON, as a snapshot arrives). */
-const seeded = () => JSON.parse(JSON.stringify({
-  id: 'pl-seeded', name: 'Seeded Adult', dob: '2004-03-14', country: 'GB', city: 'Manchester', position: 'ST', foot: 'right', heightCm: 184, weightKg: 79,
-  badges: ['Finisher'], attendance: [{ id: 'att-1', fixture: 'Cup Final', venue: 'Hough End', date: '2026-06-01', gps: { lat: 53.43, lng: -2.26 }, verified: true }],
-  timeline: [{ year: '2019', event: 'Joined academy' }], media: [{ id: 'med-1', title: 'Highlights', kind: 'video', uploadedAt: '2026-05-01T10:00:00.000Z', url: null, views: 3, tags: { pace: 2 }, verifiedClip: null }],
-  trialReports: [], medical: { shared: true, records: [{ id: 'md-1', type: 'injury', title: 'Hamstring', date: '2025-11-02', layoffWeeks: 3, cleared: true }], conditionStatus: 'fully_fit' },
-  identityVerified: true, academyPlus: true, guardianId: null, squadNumber: 22, contractUntil: '2026-06-30', marketValueRange: '€250K – €450K', agentName: 'Team Elevate',
-  availability: 'available_now', contractStatus: 'expiring_summer', drills: ['drill-sprint'], drillResults: [{ id: 'dr-1', drillId: 'drill-sprint', metric: 'time', unit: 's', value: 4.2, verified: false, ts: T0 }],
-  activityLog: [T0], createdAt: null, password: null, level: 'semi_pro', location: { lat: 53.483, lng: -2.244 }, seasonHistory: [{ season: '2024/25', appearances: 27, goals: 14, assists: 4 }],
-  stats: { appearances: 31, goals: 22, assists: 6, paceKmh: 34.1, passCompletionPct: 78, duelSuccessPct: 61 }, notificationPrefs: { quietStart: '21:00', quietEnd: '07:00', schoolHoursMute: null, timezone: 'Europe/London' },
-  programme: { track: 'ST', startedAt: T0, completed: [{ sessionId: 's1', ts: T0 + DAY }] }, firstTeamSeeker: true, futureField: { nested: [1, 2] },
-}).replace('"futureField"', '"constructor":"own-constructor","toString":"own-toString","__proto__":{"polluted":true},"futureField"'));
-const gPrimary = () => ({
-  id: 'gd-primary', name: 'Primary Parent', email: 'primary@example.test', password: null, emailVerified: true, emailCode: null, idVerified: true, idvReference: 'idv-1',
-  disclaimerAccepted: true, childIds: ['pl-child1', 'pl-child2'], coGuardians: [{ id: 'gd-co', name: 'Co Parent', email: 'co@example.test' }],
-  notificationPrefs: { quietStart: '20:00', quietEnd: '06:30', schoolHoursMute: true, timezone: 'Europe/London' }, createdAt: T0,
-});
-const gCo = () => ({ id: 'gd-co', name: 'Co Parent', email: 'co@example.test', idVerified: false, disclaimerAccepted: false, childIds: ['pl-child1', 'pl-child2'], coGuardianOf: 'gd-primary' });
-const gSignup = () => ({ id: 'gd-signup', name: 'Signup Parent', email: 'signup@example.test', password: 'scrypt$cc$dd', emailVerified: false, emailCode: 'K7Q2ZP', idVerified: false, disclaimerAccepted: false, childIds: [] });
-const FIXTURE = () => ({ players: [adult(), child('pl-child1', 'gd-primary', '2014-03-03'), seeded(), child('pl-child2', 'gd-primary', '2016-08-08')], guardians: [gPrimary(), gCo(), gSignup()] });
-const ORGS = () => [{ id: 'org-pro', name: 'Eastport FC', type: 'club', level: 'pro', plan: 'Pro', country: 'GB' }];
-const baseSeed = (players, guardians) => ({ orgs: ORGS(), players, guardians });
-
-/**
- * A store in server mode on a NEW directory with the data layer attached the way
- * the server attaches it: the registered migrations run (0005 finds nothing saved:
- * a first installation, initialisation pending), the identity repositories
- * initialise from the fixture once and become the store's unit-of-work participant.
- */
-function boot(dir, { players = [], guardians = [], warnings = [] } = {}) {
-  const db = {};
-  const store = openStore(dir, { tableBacked: TABLE_BACKED });
-  const layer = attachDataLayer({ db, seed: baseSeed(clone(players), clone(guardians)), store, nextId, sessionTtlMs: TTL, now: () => NOW, warn: (m) => warnings.push(m) });
-  return wire({ store, layer, identity: layer.identity, db, bootResult: layer.boot.identity, warnings });
-}
-/** Reopen an existing directory the way a restart would: attach the data layer (the repositories attach to the tables; a seed handed in is never imported). */
-function reopen(dir, { stalePlayers = null, staleGuardians = null, warnings = [] } = {}) {
+/** A server-mode store on a new directory with the data layer attached the way the server attaches it (the seed imported once). */
+function boot(dir = tempDir('idrepo'), { players = FIXTURE().players, guardians = FIXTURE().guardians } = {}) {
   const store = openStore(dir, { tableBacked: TABLE_BACKED });
   const db = {};
-  const layer = attachDataLayer({ db, seed: baseSeed(stalePlayers ?? [], staleGuardians ?? []), store, nextId, sessionTtlMs: TTL, now: () => NOW, warn: (m) => warnings.push(m) });
-  return wire({ store, layer, identity: layer.identity, db, bootResult: layer.boot.identity, warnings });
-}
-function wire({ store, layer, identity, db, bootResult, warnings }) {
-  store.save();
-  const raw = (sql, ...p) => store.sqlite.prepare(sql).get(...p);
-  const all = (sql, ...p) => store.sqlite.prepare(sql).all(...p);
-  const facets = (table, id) => JSON.parse(raw(`SELECT facets_json FROM ${table} WHERE id = ?`, id).facets_json);
-  const links = () => all('SELECT guardian_id, player_id, role FROM guardian_children ORDER BY rowid').map((l) => ({ guardian_id: l.guardian_id, player_id: l.player_id, role: l.role }));
-  // The invariant: players.guardian_id and the primary row agree, and there is at most one primary per player.
-  const invariantBreaks = () => raw(`SELECT COUNT(*) AS n FROM players p LEFT JOIN guardian_children l ON l.player_id = p.id AND l.role = 'primary'
+  const layer = attachDataLayer({ db, seed: { orgs: ORGS(), players: clone(players), guardians: clone(guardians) }, store, nextId, sessionTtlMs: TTL, now: () => NOW });
+  const all = (sql, ...p) => store.sqlite.prepare(sql).all(...p).map((r) => ({ ...r }));
+  const get = (sql, ...p) => store.sqlite.prepare(sql).get(...p);
+  const invariantBreaks = () => get(`SELECT COUNT(*) AS n FROM players p LEFT JOIN guardian_children l ON l.player_id = p.id AND l.role = 'primary'
     WHERE (p.guardian_id IS NULL) <> (l.guardian_id IS NULL) OR (p.guardian_id IS NOT NULL AND l.guardian_id <> p.guardian_id)`).n
-    + raw("SELECT COUNT(*) AS n FROM (SELECT player_id FROM guardian_children WHERE role = 'primary' GROUP BY player_id HAVING COUNT(*) > 1)").n
     + store.sqlite.prepare('PRAGMA foreign_key_check').all().length;
-  return { store, layer, identity, players: identity.players, guardians: identity.guardians, db, raw, all, facets, links, invariantBreaks, bootResult, warnings,
+  return { dir, store, layer, db, identity: layer.identity, players: layer.players, guardians: layer.guardians, all, get, invariantBreaks,
     unit: (fn) => store.unitOfWork(fn), close: () => store.sqlite.close() };
 }
-// An S3-shaped in-memory database (migrations 0001–0004: the identity tables are the S1 shadow), for the authority checks.
-const freshShadowDb = () => { const s = new DatabaseSync(':memory:'); s.exec('PRAGMA foreign_keys = ON;'); runDataMigrations(s, DATA_MIGRATIONS.filter((m) => /^000[1-4]_/.test(m.id))); return s; };
+const orgOf = (t, id) => t.layer.orgs.byId(id);
+const second = (dir) => { const s = new DatabaseSync(path.join(dir, 'scoutbox.db')); s.exec('PRAGMA busy_timeout = 5000;'); return s; };
 
 // ------------------------------------------------------------------ authority and initialisation
-test('authority: the repositories attach only behind the cutover record, refuse the S1 shadow tables even with the record, never load at construction, and initialisation is explicit state — pending initialises once and atomically, done attaches and never imports', () => {
-  const s = freshShadowDb();
+test('authority and initialisation: the repositories attach only behind the cutover record; a first installation imports the seed once (links from childIds, roles from guardianId); a later boot attaches and never imports', () => {
+  const s = new DatabaseSync(':memory:'); s.exec('PRAGMA foreign_keys = ON;');
+  runDataMigrations(s, DATA_MIGRATIONS.filter((m) => /^000[1-4]_/.test(m.id)));
   assert.throws(() => createIdentityRepositories({ sqlite: s }), /cutover record 0005_core_identity_live is missing/);
-  s.prepare('INSERT INTO data_migrations (id, applied_at) VALUES (?, ?)').run(CORE_IDENTITY_LIVE_MIGRATION, NOW);
-  assert.throws(() => createIdentityRepositories({ sqlite: s }), /S1 shadow definition \(no facets_json column\)/, 'the record alone is not enough: the tables are the shadow');
-  prepareLiveIdentitySchema(s, { initState: 'pending', now: NOW });
-  const identity = createIdentityRepositories({ sqlite: s, now: () => NOW });
-  assert.equal(identity.initState(), 'pending'); assert.equal(identity.players.count(), 0, 'construction loads nothing');
-  assert.throws(() => identity.attach(FIXTURE().players, FIXTURE().guardians), /initialisation is pending/, 'attach() is not how a first installation starts');
-  // The Founder's rule: a legacy minor without any guardian link refuses the whole initialisation; nothing is written; the state stays pending.
-  const blocked = FIXTURE(); blocked.players.push(child('pl-legacy', null, '2013-04-04'));
-  let err = null; try { identity.initialize(blocked, { now: NOW }); } catch (e) { err = e; }
-  assert.equal(err.code, 'CORE_IDENTITY_CUTOVER_BLOCKED'); assert.match(err.message, /players pl-legacy: a minor on the evaluation date with no guardian link/); assert.match(err.message, /legacy minors without any guardian link .*: pl-legacy/);
-  assert.equal(err.message.includes('2013-04-04'), false, 'ids, not records'); assert.equal(err.report.legacyMinorsWithoutLink[0], 'pl-legacy');
-  assert.equal(s.prepare('SELECT COUNT(*) AS n FROM players').get().n + s.prepare('SELECT COUNT(*) AS n FROM guardians').get().n + s.prepare('SELECT COUNT(*) AS n FROM guardian_children').get().n, 0, 'nothing written');
-  assert.equal(identity.initState(), 'pending'); assert.equal(identity.players.count(), 0);
-  // A malformed batch (duplicate id, dangling guardianId, duplicate e-mail) is refused whole: no partial write.
-  const malformed = FIXTURE(); malformed.players.push({ ...adult(), id: 'pl-adult' }); malformed.players.push(child('pl-dangling', 'gd-nobody', '2015-01-01')); malformed.guardians.push({ ...gSignup(), id: 'gd-dup', email: 'PRIMARY@example.test' });
-  assert.throws(() => identity.initialize(malformed, { now: NOW }), /CORE_IDENTITY_CUTOVER_BLOCKED/);
-  assert.equal(s.prepare('SELECT COUNT(*) AS n FROM players').get().n, 0); assert.equal(identity.initState(), 'pending');
-  // The consistent fixture initialises once, atomically with the state change.
-  const r = identity.initialize(FIXTURE(), { now: NOW });
-  assert.deepEqual({ players: r.players, guardians: r.guardians, links: r.links }, { players: 4, guardians: 3, links: 4 });
-  assert.equal(identity.initState(), 'done'); assert.equal(identity.players.count(), 4); assert.equal(identity.guardians.count(), 3);
-  assert.throws(() => identity.initialize(FIXTURE(), { now: NOW }), /already initialised/);
-  // Attaching again (a restart) never imports: a stale array naming unknown records is ignored.
-  const again = createIdentityRepositories({ sqlite: s, now: () => NOW });
-  again.attach([...FIXTURE().players, { ...adult(), id: 'pl-stale' }], [{ ...gSignup(), id: 'gd-stale', email: 'stale@example.test' }]);
-  assert.equal(again.players.count(), 4); assert.equal(again.guardians.count(), 3);
-  s.close();
-  // An intentionally empty authoritative domain stays empty: pending + empty initialisation → done; later attaches with stale arrays import nothing.
-  const e = freshShadowDb(); prepareLiveIdentitySchema(e, { initState: 'pending', now: NOW });
-  const empty = createIdentityRepositories({ sqlite: e, now: () => NOW });
-  assert.deepEqual((({ players, guardians, links }) => ({ players, guardians, links }))(empty.initialize({ players: [], guardians: [] }, { now: NOW })), { players: 0, guardians: 0, links: 0 });
-  assert.equal(empty.initState(), 'done');
-  const later = createIdentityRepositories({ sqlite: e, now: () => NOW, warn: () => {} });
-  later.attach(FIXTURE().players, FIXTURE().guardians);
-  assert.equal(later.players.count(), 0); assert.equal(later.guardians.count(), 0); assert.equal(e.prepare('SELECT COUNT(*) AS n FROM players').get().n, 0);
-  e.close();
-});
-
-// ------------------------------------------------------------------ persistence and shapes
-test('persistence: every creation shape — adult signup, guardian-created children, a seeded adult with every S5 array and prototype-named own keys, a guardian with an outstanding e-mail code, a co-guardian without password — is byte-identical through initialisation, save and a fresh attach after reopening; childIds keep their order; the code is plain, once, in the facets', () => {
-  const dir = tempDir('idrepo-persist');
-  const t = boot(dir, { ...FIXTURE() });
+  assert.equal(s.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE name IN ('players', 'guardians', 'guardian_children')").get().n, 0, 'S14h: 0002 creates no identity shadow');
+  const t = boot();
+  assert.equal(t.layer.firstInstallation, true);
+  assert.deepEqual(t.layer.boot.identity, { engine: 'sqlite', players: 5, guardians: 3, links: 5, imported: 8 });
+  assert.equal(t.get('SELECT value FROM meta WHERE key = ?', CORE_IDENTITY_INIT_META).value, 'done');
+  assert.deepEqual(t.all('SELECT guardian_id, player_id, role FROM guardian_children ORDER BY rowid'), [
+    { guardian_id: 'gd-primary', player_id: 'pl-child1', role: 'primary' }, { guardian_id: 'gd-primary', player_id: 'pl-child2', role: 'primary' },
+    { guardian_id: 'gd-primary', player_id: 'pl-grown', role: 'primary' }, { guardian_id: 'gd-co', player_id: 'pl-child1', role: 'co' }, { guardian_id: 'gd-co', player_id: 'pl-child2', role: 'co' },
+  ]);
   assert.equal(t.invariantBreaks(), 0);
-  assert.equal(t.facets('guardians', 'gd-signup').emailCode, 'K7Q2ZP'); assert.equal(t.raw("SELECT email_code_hash FROM guardians WHERE id = 'gd-signup'").email_code_hash, null);
-  assert.equal(t.raw("SELECT facets_json FROM guardians WHERE id = 'gd-signup'").facets_json.split('K7Q2ZP').length - 1, 1, 'exactly one copy');
-  t.close();
-  const r = reopen(dir);
-  const want = FIXTURE();
-  for (const p of want.players) sameShape(placeSubrecords(clone(p)), r.players.byId(p.id), `player ${p.id} after reopen`); // the sub-record arrays as their tables hold them (every array, after the other keys)
-  for (const g of want.guardians) sameShape(g, r.guardians.byId(g.id), `guardian ${g.id} after reopen`);
-  assert.deepEqual([...r.guardians.byId('gd-primary').childIds], ['pl-child1', 'pl-child2'], 'order from the link rows');
-  assert.deepEqual(r.links(), [{ guardian_id: 'gd-primary', player_id: 'pl-child1', role: 'primary' }, { guardian_id: 'gd-primary', player_id: 'pl-child2', role: 'primary' }, { guardian_id: 'gd-co', player_id: 'pl-child1', role: 'co' }, { guardian_id: 'gd-co', player_id: 'pl-child2', role: 'co' }]);
-  const s = r.players.byId('pl-seeded');
-  assert.ok(Object.hasOwn(s, 'constructor') && Object.hasOwn(s, 'toString') && Object.hasOwn(s, '__proto__')); assert.equal(s.constructor, 'own-constructor'); assert.equal('polluted' in {}, false);
-  assert.equal(r.db.players.length, 4); assert.equal(r.db.guardians.length, 3); assert.equal(r.bootResult.imported, 0);
-  r.close(); fs.rmSync(dir, { recursive: true, force: true });
-});
-
-// ------------------------------------------------------------------ guards
-test('guards: the views refuse writes to the collections, to column-backed fields (nested location/stats/prefs, medical.shared/conditionStatus, programme.track/startedAt), to childIds, (S5) to every sub-record array and its items and (S4a-E) to every facet key and nested facet value; the arrays change only through addItem, the coGuardians list only through guardians.update, and each write is in the row when the call returns', () => {
-  const dir = tempDir('idrepo-guards');
-  const t = boot(dir, { ...FIXTURE() });
-  const p = t.players.byId('pl-seeded'); const g = t.guardians.byId('gd-primary'); const sg = t.guardians.byId('gd-signup');
-  const refused = /identity repositories|domain repository/;
-  assert.throws(() => { t.db.players.push({}); }, refused); assert.throws(() => { t.db.guardians[0] = {}; }, refused); assert.throws(() => { t.db.players.length = 0; }, refused);
-  for (const fn of [() => { p.name = 'x'; }, () => { p.dob = '2000-01-01'; }, () => { p.guardianId = 'gd-primary'; }, () => { delete p.country; }, () => { p.location.lat = 1; }, () => { p.stats.goals = 99; }, () => { p.notificationPrefs.timezone = 'UTC'; }, () => { p.medical.shared = false; }, () => { p.medical.conditionStatus = 'injured'; }, () => { delete p.medical.shared; }, () => { p.programme.track = 'GK'; }, () => { p.programme.startedAt = 1; }, () => { p.__meta = {}; }]) assert.throws(fn, refused);
-  // S5: the arrays and their items are rows of the player_* tables, served read-only.
-  for (const fn of [() => { p.badges.push('x'); }, () => { p.badges = []; }, () => { p.media[0].views = 9; }, () => { p.media[0].tags.pace = 3; }, () => { p.attendance.length = 0; }, () => { p.medical.records.push({}); }, () => { p.medical.records = []; }, () => { p.programme.completed.pop(); }, () => { delete p.drills; }, () => { p.trialReports.push({}); }, () => { p.trialReports = []; }]) assert.throws(fn, refused);
-  for (const fn of [() => { g.childIds.push('pl-x'); }, () => { g.childIds = []; }, () => { g.childIds.length = 0; }, () => { g.email = 'x@example.test'; }, () => { g.notificationPrefs.quietStart = '1'; }, () => { g.coGuardianOf = 'gd-co'; }]) assert.throws(fn, refused);
-  // S4a-E: a facet key, a prototype-named key and a nested facet value are refused like every other field (there is no save-time flush to find them).
-  for (const fn of [() => { p.unknownBag = { a: 1 }; }, () => { p.constructor = 'changed'; }, () => { delete p.futureField; }, () => { sg.emailCode = null; }, () => { sg.someFutureField = true; }, () => { g.coGuardians.push({ id: 'gd-x', name: 'X', email: 'x@example.test' }); }, () => { g.coGuardians[0].name = 'Y'; }]) assert.throws(fn, refused);
-  assert.throws(() => t.guardians.update('gd-signup', { someFutureField: true }), /not a guardian field/);
-  // Sub-records and the coGuardians list go through the repository: in the rows when the call returns.
-  t.players.addItem('pl-seeded', 'medical.records', { id: 'md-new', type: 'clearance', title: 'ok', date: '2026-10-01', cleared: true });
-  t.players.addItem('pl-seeded', 'programme.completed', { sessionId: 's2', ts: NOW });
-  t.players.addItem('pl-seeded', 'badges', 'Captain');
-  t.guardians.update('gd-primary', { coGuardians: [...g.coGuardians, { id: 'gd-x', name: 'X', email: 'x@example.test' }] });
-  assert.equal(t.raw("SELECT COUNT(*) AS n FROM player_medical_records WHERE player_id = 'pl-seeded'").n, 2, 'the row is committed at once'); assert.equal(t.facets('players', 'pl-seeded').medical, undefined, 'no array in the facets');
-  assert.equal(t.facets('guardians', 'gd-primary').coGuardians.length, 2, 'the list is in the row at once'); assert.equal(g.coGuardians.length, 2);
-  assert.equal(t.raw("SELECT medical_shared FROM players WHERE id = 'pl-seeded'").medical_shared, 1, 'the column-backed sub-key is untouched');
-  t.close();
-  const r = reopen(dir);
-  const p2 = r.players.byId('pl-seeded');
-  assert.equal(p2.medical.records.length, 2); assert.equal(p2.programme.completed.length, 2); assert.deepEqual([...p2.badges], ['Finisher', 'Captain']); assert.equal(p2.constructor, 'own-constructor', 'the stored prototype-named key is unchanged');
-  assert.equal(r.guardians.byId('gd-primary').coGuardians.length, 2);
-  r.close(); fs.rmSync(dir, { recursive: true, force: true });
-});
-
-// ------------------------------------------------------------------ updates
-test('updates: players.update replaces location/stats/prefs whole and merges medical/programme sub-keys in place (held references to medical.records survive), refuses guardianId, facet sub-keys, unknown and invalid values; players.restore replaces the record content in place without touching the link; guardians.update keeps e-mails unique and coGuardianOf valid; everything persists through a reopen', () => {
-  const dir = tempDir('idrepo-update');
-  const t = boot(dir, { ...FIXTURE() });
-  const p = t.players.byId('pl-seeded'); const records = p.medical.records; const completed = p.programme.completed;
-  t.players.update('pl-seeded', { academyPlus: false, availability: 'end_of_season', location: { lat: 1.5, lng: 2.5 }, stats: { goals: 1 }, notificationPrefs: null, medical: { shared: false, conditionStatus: 'injured' }, programme: { track: 'GK' } });
-  assert.equal(p.academyPlus, false); assert.equal(p.availability, 'end_of_season'); assert.deepEqual(p.location, { lat: 1.5, lng: 2.5 }); assert.deepEqual(p.stats, { goals: 1 }); assert.equal(p.notificationPrefs, null);
-  assert.equal(p.medical.shared, false); assert.equal(p.medical.conditionStatus, 'injured'); assert.equal(p.medical.records, records, 'the records array keeps its identity'); assert.equal(p.programme.track, 'GK'); assert.equal(p.programme.startedAt, T0); assert.equal(p.programme.completed, completed);
-  assert.equal(t.raw("SELECT medical_shared, medical_condition_status, programme_track, stats_goals, stats_assists, lat FROM players WHERE id = 'pl-seeded'").medical_condition_status, 'injured');
-  assert.equal(t.raw("SELECT stats_assists FROM players WHERE id = 'pl-seeded'").stats_assists, null, 'stats replaced whole');
-  for (const [patch, re] of [
-    [{ guardianId: 'gd-primary' }, /guardianId changes only through link/], [{ medical: { records: [] } }, /"medical.records" is a player sub-record/], [{ programme: { completed: [] } }, /"programme.completed" is a player sub-record/],
-    [{ badges: [] }, /"badges" is a player sub-record/], [{ trialReports: [] }, /derived from the trials collection/], [{ unknownBag: 1 }, /not a player field/], [{ foot: 'both' }, /foot is not one of/], [{ heightCm: 2 ** 53 }, /not a safe integer/], [{ id: 'other' }, /never changes/],
-  ]) assert.throws(() => t.players.update('pl-seeded', patch), re);
-  assert.equal(p.foot, 'right', 'a refused update changes nothing');
-  // restore: the signing rollback's whole-record write.
-  const snapshotOfSeeded = clone(p); snapshotOfSeeded.level = 'pro'; snapshotOfSeeded.badges = ['Restored']; delete snapshotOfSeeded.unknownBag;
-  const held = p;
-  t.players.restore('pl-seeded', snapshotOfSeeded);
-  assert.equal(held.level, 'pro'); assert.deepEqual([...held.badges], ['Restored']); assert.equal(t.players.byId('pl-seeded'), held, 'same view object');
-  assert.throws(() => t.players.restore('pl-seeded', { ...snapshotOfSeeded, guardianId: 'gd-primary' }), /cannot change the guardian link/);
-  assert.throws(() => t.players.restore('pl-seeded', { ...snapshotOfSeeded, id: 'pl-other' }), /record of the same player/);
-  // guardians.update
-  t.guardians.update('gd-signup', { emailVerified: true, idvReference: 'idv-9', notificationPrefs: { timezone: 'UTC' } });
-  assert.equal(t.guardians.byId('gd-signup').emailVerified, true); assert.deepEqual(t.guardians.byId('gd-signup').notificationPrefs, { timezone: 'UTC' });
-  assert.throws(() => t.guardians.update('gd-signup', { email: 'PRIMARY@example.test' }), /EMAIL_IN_USE/);
-  assert.throws(() => t.guardians.update('gd-signup', { coGuardianOf: 'gd-nobody' }), /does not exist/);
-  assert.throws(() => t.guardians.update('gd-signup', { coGuardianOf: 'gd-signup' }), /cannot name the guardian itself/);
-  assert.throws(() => t.guardians.update('gd-signup', { childIds: [] }), /childIds changes only through link/);
-  t.guardians.update('gd-signup', { coGuardianOf: 'gd-primary' }); t.guardians.update('gd-signup', { coGuardianOf: null });
-  assert.equal(t.raw("SELECT co_guardian_of FROM guardians WHERE id = 'gd-signup'").co_guardian_of, null);
   t.store.save(); t.close();
-  const r = reopen(dir);
-  const p2 = r.players.byId('pl-seeded');
-  assert.equal(p2.level, 'pro'); assert.equal(p2.medical.conditionStatus, 'injured'); assert.equal(p2.programme.track, 'GK'); assert.equal(p2.programme.completed.length, 1); assert.equal(p2.notificationPrefs, null);
-  assert.equal(r.guardians.byId('gd-signup').emailVerified, true); assert.equal(r.invariantBreaks(), 0);
-  r.close(); fs.rmSync(dir, { recursive: true, force: true });
+  const again = boot(t.dir, { players: [adult()], guardians: [] });
+  assert.equal(again.layer.firstInstallation, false);
+  assert.equal(again.layer.boot.identity.imported, 0, 'a later boot imports nothing, whatever seed it is handed');
+  assert.equal(again.players.count(), 5);
+  again.close();
 });
 
-// ------------------------------------------------------------------ links
-test('links: a minor is created only with its primary guardian (row and link in one transaction), a second primary, a duplicate or dangling link are refused, co links keep the child order, unlink and ageUp clear both sides, remove cascades the links and every childIds entry, the invariant and foreign keys hold throughout, and a write inside a foreign transaction is refused', () => {
-  const dir = tempDir('idrepo-links');
-  const t = boot(dir, { ...FIXTURE() });
-  const primary = t.guardians.byId('gd-primary'); const kids = primary.childIds;
-  assert.throws(() => t.players.insert(child('pl-orphan', null, '2015-05-05')), /a minor and has no guardianId/);
-  assert.throws(() => t.players.insert(child('pl-orphan', 'gd-nobody', '2015-05-05')), /does not exist/);
-  assert.equal(t.raw("SELECT COUNT(*) AS n FROM players WHERE id = 'pl-orphan'").n, 0); assert.equal(t.players.byId('pl-orphan'), null);
-  const c3 = t.players.insert(child('pl-child3', 'gd-primary', '2015-05-05'));
-  assert.equal(c3.guardianId, 'gd-primary'); assert.deepEqual([...kids], ['pl-child1', 'pl-child2', 'pl-child3'], 'the held childIds array grew in place');
-  assert.deepEqual(t.links().filter((l) => l.player_id === 'pl-child3'), [{ guardian_id: 'gd-primary', player_id: 'pl-child3', role: 'primary' }]);
-  assert.equal(t.players.insert({ ...adult(), id: 'pl-adult2' }).guardianId, null, 'an adult needs no guardian');
-  assert.throws(() => t.players.link('gd-co', 'pl-child3', 'primary'), /already has a primary guardian \(gd-primary\); a second primary is refused/);
-  assert.throws(() => t.players.link('gd-primary', 'pl-child3', 'co'), /already lists player/);
-  assert.throws(() => t.players.link('gd-nobody', 'pl-child3'), /guardian gd-nobody does not exist/);
-  assert.throws(() => t.players.link('gd-co', 'pl-nobody'), /player pl-nobody does not exist/);
-  assert.throws(() => t.players.link('gd-co', 'pl-child3', 'owner'), /"primary" or "co"/);
-  t.players.link('gd-co', 'pl-child3', 'co');
-  assert.deepEqual([...t.guardians.byId('gd-co').childIds], ['pl-child1', 'pl-child2', 'pl-child3']); assert.deepEqual(t.guardians.linksOf('pl-child3'), [{ guardianId: 'gd-primary', role: 'primary' }, { guardianId: 'gd-co', role: 'co' }]);
-  assert.deepEqual(t.players.byGuardian('gd-primary').map((p) => p.id), ['pl-child1', 'pl-child2', 'pl-child3']);
-  // unlink a co link: the player keeps its primary.
-  assert.deepEqual(t.players.unlink('gd-co', 'pl-child3'), { guardianId: 'gd-co', playerId: 'pl-child3', role: 'co' });
-  assert.equal(t.players.byId('pl-child3').guardianId, 'gd-primary'); assert.throws(() => t.players.unlink('gd-co', 'pl-child3'), /does not list player/);
-  // ageUp: today's behaviour — the primary link goes and guardianId is null; co-guardians keep listing the child.
-  assert.throws(() => t.players.ageUp('pl-adult'), /no primary guardian/);
-  assert.deepEqual(t.players.ageUp('pl-child1'), { playerId: 'pl-child1', guardianId: 'gd-primary' });
-  assert.equal(t.players.byId('pl-child1').guardianId, null); assert.deepEqual([...kids], ['pl-child2', 'pl-child3']); assert.deepEqual([...t.guardians.byId('gd-co').childIds], ['pl-child1', 'pl-child2'], 'the co-guardian still lists the player (today\'s gap, preserved)');
-  assert.equal(t.raw("SELECT guardian_id FROM players WHERE id = 'pl-child1'").guardian_id, null); assert.equal(t.raw("SELECT COUNT(*) AS n FROM guardian_children WHERE player_id = 'pl-child1'").n, 1);
-  // remove: today's hard delete — row gone, links cascaded, every guardian stops listing the id.
-  assert.equal(t.players.remove('pl-child2'), true);
-  assert.equal(t.players.byId('pl-child2'), null); assert.equal(t.db.players.some((p) => p.id === 'pl-child2'), false); assert.deepEqual([...kids], ['pl-child3']); assert.deepEqual([...t.guardians.byId('gd-co').childIds], ['pl-child1']);
-  assert.equal(t.raw("SELECT COUNT(*) AS n FROM guardian_children WHERE player_id = 'pl-child2'").n, 0); assert.equal(t.raw("SELECT COUNT(*) AS n FROM players WHERE id = 'pl-child2'").n, 0);
-  assert.throws(() => t.players.remove('pl-child2'), /does not exist/);
-  assert.equal(t.invariantBreaks(), 0);
-  // A foreign open transaction refuses every write (its bookkeeping could not follow a foreign rollback).
-  t.store.sqlite.exec('BEGIN');
-  assert.throws(() => t.players.insert({ ...adult(), id: 'pl-foreign' }), /cannot run inside an open transaction/);
-  assert.throws(() => t.players.link('gd-co', 'pl-child3'), /cannot run inside an open transaction/);
-  assert.throws(() => t.guardians.update('gd-co', { name: 'X' }), /cannot run inside an open transaction/);
-  t.store.sqlite.exec('ROLLBACK');
-  t.store.save(); t.close();
-  const r = reopen(dir);
-  assert.deepEqual([...r.guardians.byId('gd-primary').childIds], ['pl-child3']); assert.equal(r.players.byId('pl-child1').guardianId, null); assert.equal(r.players.byId('pl-child2'), null); assert.equal(r.invariantBreaks(), 0);
-  r.close(); fs.rmSync(dir, { recursive: true, force: true });
-});
-
-test('guardians: a duplicate e-mail (compared case-insensitively) is refused on insert and update, a co-guardian created with the primary\'s childIds gets co links in the same transaction, coGuardianOf must name an existing other guardian, and lookups are case-insensitive', () => {
-  const dir = tempDir('idrepo-guardians');
-  const t = boot(dir, { ...FIXTURE() });
-  assert.throws(() => t.guardians.insert({ ...gSignup(), id: 'gd-dup', email: 'Primary@Example.TEST' }), /EMAIL_IN_USE: another guardian \(gd-primary\)/);
-  assert.equal(t.guardians.count(), 3); assert.equal(t.raw('SELECT COUNT(*) AS n FROM guardians').n, 3);
-  assert.throws(() => t.guardians.insert({ ...gSignup(), id: 'gd-x', email: 'x@example.test', coGuardianOf: 'gd-nobody' }), /does not exist/);
-  assert.throws(() => t.guardians.insert({ ...gSignup(), id: 'gd-x', email: 'x@example.test', coGuardianOf: 'gd-x' }), /cannot name the guardian itself/);
-  assert.throws(() => t.guardians.insert({ ...gSignup(), id: 'gd-x', email: 'x@example.test', childIds: ['pl-nobody'] }), /childIds names player pl-nobody/);
-  assert.throws(() => t.guardians.insert({ ...gSignup(), id: 'gd-x', email: 'x@example.test', childIds: ['pl-child1', 'pl-child1'] }), /more than once/);
-  assert.equal(t.raw("SELECT COUNT(*) AS n FROM guardians WHERE id = 'gd-x'").n, 0, 'nothing of a refused insert');
-  const co2 = t.guardians.insert({ id: 'gd-co2', name: 'Second Co', email: 'co2@example.test', idVerified: false, disclaimerAccepted: false, childIds: [...t.guardians.byId('gd-primary').childIds], coGuardianOf: 'gd-primary' });
-  assert.deepEqual([...co2.childIds], ['pl-child1', 'pl-child2']); assert.equal(t.raw("SELECT COUNT(*) AS n FROM guardian_children WHERE guardian_id = 'gd-co2' AND role = 'co'").n, 2);
-  assert.equal(t.players.byId('pl-child1').guardianId, 'gd-primary', 'the primary did not change');
-  assert.equal(t.guardians.byEmail('SIGNUP@example.test').id, 'gd-signup'); assert.equal(t.guardians.emailTaken('co2@EXAMPLE.test'), true); assert.equal(t.guardians.emailTaken('co2@example.test', 'gd-co2'), false);
-  assert.equal(t.invariantBreaks(), 0);
-  t.close(); fs.rmSync(dir, { recursive: true, force: true });
-});
-
-// ------------------------------------------------------------------ the two failure contracts
-test('ordinary save: a player or guardian write is in its row when the call returns, so a FAILED ordinary save neither loses nor delays it, and the next save leaves it as it is — for players and guardians', () => {
-  const dir = tempDir('idrepo-s3');
-  const t = boot(dir, { ...FIXTURE() });
-  t.players.update('pl-adult', { city: 'Pending' }); t.guardians.update('gd-primary', { coGuardians: [...t.guardians.byId('gd-primary').coGuardians, { id: 'gd-p', name: 'P', email: 'p@example.test' }] });
-  let explode = true; t.store.setSaveHook({ flush() { if (explode) throw new Error('injected save failure'); } }); // rewritten in S14a: the save failed on a blob
-  assert.throws(() => t.store.save(), /injected save failure/);
-  assert.equal(t.raw("SELECT city FROM players WHERE id = 'pl-adult'").city, 'Pending'); assert.equal(t.facets('guardians', 'gd-primary').coGuardians.length, 2);
-  assert.equal(t.players.byId('pl-adult').city, 'Pending', 'memory is not undone');
-  explode = false;
-  t.store.save();
-  assert.equal(t.raw("SELECT city FROM players WHERE id = 'pl-adult'").city, 'Pending'); assert.equal(t.facets('guardians', 'gd-primary').coGuardians.length, 2);
-  t.close(); fs.rmSync(dir, { recursive: true, force: true });
-});
-
-/** The multi-collection operation under test: a guardian with a child (row + link), an organisation write, a player update, a sub-record and a session, in one real unit of work. */
-function operation(t, { fail = null, afterCommit = null } = {}) {
-  const seededPlayer = t.players.byId('pl-seeded');
-  let token = null;
-  const result = t.unit(() => {
-    t.guardians.insert({ id: 'gd-new', name: 'New Parent', email: 'new@example.test', password: 'scrypt$ee$ff', emailVerified: false, emailCode: 'ABC123', idVerified: false, disclaimerAccepted: false, childIds: [] });
-    t.players.insert(child('pl-new', 'gd-new', '2015-09-09'));
-    t.players.link('gd-co', 'pl-new', 'co');
-    t.players.update('pl-adult', { availability: 'available_now', medical: { shared: true } });
-    t.players.addItem('pl-seeded', 'medical.records', { id: 'md-op', type: 'x', title: 'y' });
-    t.layer.orgs.update('org-pro', (d) => { d.suspended = true; }); // S14g: an explicit organisation write (it was a staged facet)
-    token = t.layer.sessions.create('guardian', 'gd-new').token;
-    if (afterCommit) t.store.afterCommit(afterCommit);
-    if (fail === 'throw') throw new Error('operation failed late');
-    return 'done';
-  });
-  return { result, token };
-}
-function assertOperationAbsent(t) {
-  assert.equal(t.raw("SELECT COUNT(*) AS n FROM guardians WHERE id = 'gd-new'").n, 0); assert.equal(t.raw("SELECT COUNT(*) AS n FROM players WHERE id = 'pl-new'").n, 0);
-  assert.equal(t.raw("SELECT COUNT(*) AS n FROM guardian_children WHERE player_id = 'pl-new'").n, 0);
-  assert.equal(t.raw("SELECT availability, medical_shared FROM players WHERE id = 'pl-adult'").availability, 'not_seeking'); assert.equal(t.raw("SELECT medical_shared FROM players WHERE id = 'pl-adult'").medical_shared, 0);
-  assert.equal(t.raw("SELECT COUNT(*) AS n FROM player_medical_records WHERE player_id = 'pl-seeded'").n, 1);
-  assert.equal(t.raw("SELECT suspended FROM orgs WHERE id = 'org-pro'").suspended, 0);
-  assert.equal(t.raw("SELECT COUNT(*) AS n FROM sessions WHERE kind = 'guardian'").n, 0);
-  // The unrelated edit made BEFORE the unit: the player write committed at once (S4a-E).
-  assert.equal(t.raw("SELECT city FROM players WHERE id = 'pl-adult'").city, 'PreUnit');
-  assert.equal(t.invariantBreaks(), 0);
-}
-function assertMemoryRestored(t, refs) {
-  const { adultView, seededRecords, coKids, coKidsBefore } = refs;
-  assert.equal(t.players.byId('pl-new'), null); assert.equal(t.guardians.byId('gd-new'), null); assert.equal(t.db.players.length, 4); assert.equal(t.db.guardians.length, 3);
-  assert.equal(t.players.byId('pl-adult'), adultView, 'same view'); assert.equal(adultView.availability, 'not_seeking'); assert.equal(adultView.medical.shared, false);
-  assert.equal(t.players.byId('pl-seeded').medical.records, seededRecords, 'same nested array'); assert.equal(seededRecords.length, 1);
-  assert.equal(t.guardians.byId('gd-co').childIds, coKids, 'same childIds view'); assert.deepEqual([...coKids], coKidsBefore);
-  assert.equal(t.layer.orgs.byId('org-pro').suspended, false);
-  // The pre-unit edit survives.
-  assert.equal(adultView.city, 'PreUnit');
-}
-function assertOperationPersisted(t, token) {
-  assert.equal(t.raw("SELECT COUNT(*) AS n FROM guardians WHERE id = 'gd-new'").n, 1); assert.equal(t.raw("SELECT COUNT(*) AS n FROM players WHERE id = 'pl-new'").n, 1);
-  assert.deepEqual(t.links().filter((l) => l.player_id === 'pl-new'), [{ guardian_id: 'gd-new', player_id: 'pl-new', role: 'primary' }, { guardian_id: 'gd-co', player_id: 'pl-new', role: 'co' }]);
-  assert.equal(t.raw("SELECT availability FROM players WHERE id = 'pl-adult'").availability, 'available_now'); assert.equal(t.raw("SELECT medical_shared FROM players WHERE id = 'pl-adult'").medical_shared, 1);
-  assert.equal(t.raw("SELECT COUNT(*) AS n FROM player_medical_records WHERE player_id = 'pl-seeded'").n, 2); assert.equal(t.players.byId('pl-seeded').medical.records.length, 2); assert.equal(t.facets('guardians', 'gd-new').emailCode, 'ABC123');
-  assert.equal(t.raw("SELECT suspended FROM orgs WHERE id = 'org-pro'").suspended, 1);
-  assert.ok(t.layer.sessions.byToken(token), 'the session minted inside the unit is live');
-  assert.equal(t.raw("SELECT city FROM players WHERE id = 'pl-adult'").city, 'PreUnit', 'the pre-unit write is kept');
-  assert.equal(t.invariantBreaks(), 0);
-}
-const prepare = (t) => {
-  const adultView = t.players.update('pl-adult', { city: 'PreUnit' }); // an unrelated edit before the unit: a committed player write
-  return { adultView, seededRecords: t.players.byId('pl-seeded').medical.records, coKids: t.guardians.byId('gd-co').childIds, coKidsBefore: [...t.guardians.byId('gd-co').childIds] };
-};
-
-test('unit of work (real store, both repositories, an organisation facet and a session): everything commits together, after-commit work runs once after COMMIT', () => {
-  const dir = tempDir('idrepo-uow-ok');
-  const t = boot(dir, { ...FIXTURE() });
-  prepare(t);
-  const calls = [];
-  const { result, token } = operation(t, { afterCommit: () => calls.push(t.store.sqlite.isTransaction) });
-  assert.equal(result, 'done'); assert.deepEqual(calls, [false]); // S14a: there is no save revision to count; the rows below are the proof
-  assertOperationPersisted(t, token);
-  assert.deepEqual([...t.guardians.byId('gd-co').childIds], ['pl-child1', 'pl-child2', 'pl-new']); assert.equal(t.players.byId('pl-new').guardianId, 'gd-new');
-  t.close();
-  const r = reopen(dir);
-  assert.equal(r.players.byId('pl-new').guardianId, 'gd-new'); assert.deepEqual([...r.guardians.byId('gd-new').childIds], ['pl-new']); assert.equal(r.players.byId('pl-adult').medical.shared, true); assert.equal(r.invariantBreaks(), 0);
-  r.close(); fs.rmSync(dir, { recursive: true, force: true });
-});
-
-test('unit of work: a failure after the row and link writes (a save hook failing at COMMIT) rolls the database back AND restores memory — no half-linked child or guardian, held views, nested arrays and childIds arrays keep identity and content, indexes and link views agree with the tables, unrelated pending edits survive, after-commit work never runs, an ordinary save persists no fragment, an explicit retry lands everything', () => {
-  const dir = tempDir('idrepo-uow-fail');
-  const t = boot(dir, { ...FIXTURE() });
-  const refs = prepare(t);
-  let ran = false; let err = null;
-  let explode = true; t.store.setSaveHook({ flush() { if (explode) { explode = false; throw new Error('injected commit failure'); } } }); // S14g: it was a facet that could not be stored
-  try { operation(t, { fail: 'flush', afterCommit: () => { ran = true; } }); } catch (e) { err = e; }
-  assert.match(err.message, /injected commit failure/); assert.equal(err.unitOfWork, 'rolled_back'); assert.equal(ran, false); assert.equal(t.store.sqlite.isTransaction, false);
-  assertOperationAbsent(t); assertMemoryRestored(t, refs);
-  t.store.save();
-  assertOperationAbsent(t);
-  const { token } = operation(t);
-  assertOperationPersisted(t, token);
-  t.close(); fs.rmSync(dir, { recursive: true, force: true });
-});
-
-test('unit of work: a failure thrown by the work after every write, a failure during the facet flush and a failure at COMMIT take the same path — database untouched, memory restored, retry lands everything', () => {
-  // thrown late by the work
-  let dir = tempDir('idrepo-uow-throw'); let t = boot(dir, { ...FIXTURE() }); let refs = prepare(t);
-  assert.throws(() => operation(t, { fail: 'throw' }), /operation failed late/);
-  assertOperationAbsent(t); assertMemoryRestored(t, refs);
-  assertOperationPersisted(t, operation(t).token); t.close(); fs.rmSync(dir, { recursive: true, force: true });
-  // during the facet flush: a later participant throws after the identity flush wrote its rows
-  dir = tempDir('idrepo-uow-flush'); t = boot(dir, { ...FIXTURE() }); refs = prepare(t);
-  let explode = true; t.store.setSaveHook({ flush() { if (explode) { explode = false; throw new Error('flush exploded'); } } });
-  let err = null; try { operation(t); } catch (e) { err = e; }
-  assert.match(err.message, /flush exploded/); assert.equal(err.unitOfWork, 'rolled_back');
-  assertOperationAbsent(t); assertMemoryRestored(t, refs);
-  assertOperationPersisted(t, operation(t).token); t.close(); fs.rmSync(dir, { recursive: true, force: true });
-  // at COMMIT
-  dir = tempDir('idrepo-uow-commit'); t = boot(dir, { ...FIXTURE() }); refs = prepare(t);
-  const exec = t.store.sqlite.exec.bind(t.store.sqlite); let boom = true;
-  t.store.sqlite.exec = (sql) => { if (boom && sql === 'COMMIT') { boom = false; throw new Error('disk full at commit'); } return exec(sql); };
-  err = null; try { operation(t); } catch (e) { err = e; }
-  assert.match(err.message, /disk full at commit/); assert.equal(err.unitOfWork, 'rolled_back'); assert.equal(t.store.sqlite.isTransaction, false);
-  assertOperationAbsent(t); assertMemoryRestored(t, refs);
-  assertOperationPersisted(t, operation(t).token); t.store.sqlite.exec = exec; t.close(); fs.rmSync(dir, { recursive: true, force: true });
-});
-
-test('unit of work: a record written twice inside a unit (a value, then back) ends with the final value — view and table agree after commit; a failed unit restores the held view, its composite and the guardian list in place, whatever was written in between', () => {
-  const dir = tempDir('idrepo-uow-revert');
-  const t = boot(dir, { ...FIXTURE() });
-  const p = t.players.byId('pl-adult'); const g = t.guardians.byId('gd-primary'); const coList = [...g.coGuardians]; const medical = p.medical;
-  t.unit(() => {
-    t.players.update('pl-adult', { city: 'Tmp', medical: { conditionStatus: 'fit' } }); t.players.update('pl-adult', { city: 'Final' });
-    t.guardians.update('gd-primary', { coGuardians: [...coList, { id: 'gd-tmp', name: 'T', email: 't@example.test' }] }); t.guardians.update('gd-primary', { idvReference: 'idv-2' }); t.guardians.update('gd-primary', { coGuardians: coList });
-  });
-  assert.equal(p.city, 'Final'); assert.equal(t.raw("SELECT city FROM players WHERE id = 'pl-adult'").city, 'Final', 'the final value, not the intermediate one');
-  assert.equal(t.raw("SELECT medical_condition_status FROM players WHERE id = 'pl-adult'").medical_condition_status, 'fit');
-  assert.equal(g.coGuardians.length, 1); assert.equal(t.facets('guardians', 'gd-primary').coGuardians.length, 1); assert.equal(t.raw("SELECT idv_reference FROM guardians WHERE id = 'gd-primary'").idv_reference, 'idv-2');
-  // The same shape, then a failure: the committed values stay and memory is restored in place.
-  const heldList = g.coGuardians;
-  assert.throws(() => t.unit(() => { t.players.update('pl-adult', { city: 'X', medical: { conditionStatus: 'injured' } }); t.guardians.update('gd-primary', { coGuardians: [] }); throw new Error('late'); }), /late/);
-  assert.equal(p.city, 'Final'); assert.equal(p.medical, medical, 'the same composite object'); assert.equal(p.medical.conditionStatus, 'fit'); assert.equal(g.coGuardians, heldList, 'the same list object'); assert.equal(g.coGuardians.length, 1);
-  assert.equal(t.raw("SELECT medical_condition_status FROM players WHERE id = 'pl-adult'").medical_condition_status, 'fit'); assert.equal(t.facets('guardians', 'gd-primary').coGuardians.length, 1);
-  // Nested: a joined unit that fails inside a caller that swallows the error poisons the whole unit.
-  assert.throws(() => t.unit(() => { t.players.update('pl-adult', { academyPlus: true }); try { t.unit(() => { t.guardians.update('gd-primary', { name: 'Nope' }); throw new Error('inner'); }); } catch { /* swallowed */ } }), /cannot commit/);
-  assert.equal(p.academyPlus, false); assert.equal(g.name, 'Primary Parent'); assert.equal(t.raw("SELECT academy_plus FROM players WHERE id = 'pl-adult'").academy_plus, 0);
-  t.close(); fs.rmSync(dir, { recursive: true, force: true });
-});
-
-test('unit of work: a process killed before COMMIT leaves the pre-operation database — a restart sees no new guardian, child, link, sub-record or organisation change', () => {
-  const dir = tempDir('idrepo-crash');
-  const t = boot(dir, { ...FIXTURE() }); t.close();
-  const r = spawnSync(process.execPath, [path.join(HERE, 'identityCrashChild.mjs'), dir], { encoding: 'utf8', timeout: 30_000 });
-  assert.equal(r.signal, 'SIGKILL', `the child must die by SIGKILL: status ${r.status} signal ${r.signal} ${r.stderr.slice(-400)}`); assert.match(r.stdout, /ABOUT_TO_CRASH/);
-  const again = reopen(dir);
-  assert.equal(again.guardians.byId('gd-crash'), null); assert.equal(again.players.byId('pl-crash'), null); assert.equal(again.raw("SELECT COUNT(*) AS n FROM guardian_children WHERE guardian_id = 'gd-crash'").n, 0);
-  assert.equal(again.players.byId('pl-adult').medical.records.length, 0); assert.equal(again.raw("SELECT suspended FROM orgs WHERE id = 'org-pro'").suspended, 0);
-  assert.equal(again.raw('PRAGMA integrity_check').integrity_check, 'ok'); assert.equal(again.invariantBreaks(), 0);
-  again.close(); fs.rmSync(dir, { recursive: true, force: true });
-});
-
-test('integration: the data layer creates the identity repositories behind the registered migration 0005, players and guardians are table-backed, the test schema helper matches what 0005 leaves behind, and server.mjs reaches the repositories only through the data layer', () => {
-  assert.deepEqual([...TABLE_BACKED], ['orgs', 'players', 'guardians', 'playersRetained', 'users', 'sessions', 'mediaDeletions', 'emailChallenges', 'pairingCodes', 'notifications', 'notificationPrefs', 'dispatches', 'outbox', 'pushLog', 'pushTokens', 'channels', 'blocks', 'reports', 'moderationLog', 'orgNotes', 'ledger', 'opsEvents', 'sourceChanges', 'idvQueue', 'requests', 'trials', 'recruitmentCases', 'roomComments', 'roomSnapshots', 'roomDecisions', 'roomEvidenceState', 'recruitmentContacts', 'recruitmentOffers', 'signingPackages', 'signings', 'followUps', 'outcomeReports', 'evidence', 'coachAffiliations', 'squadInvites', 'assessmentTemplates', 'assessments', 'videoSegments', 'playlists', 'tacticalSetups', 'squadMembers', 'shadowPlayers', 'lookingFor', 'federationChecks', 'vacancies', 'opportunities', 'applications', 'campaigns', 'campaignSubmissions', 'playerPrefs', 'verClaims', 'verEvents', 'verEvidence', 'verTokens', 'verAdmins', 'verRootTransfers', 'verRootRequests', 'verDisputes', 'verReferences', 'verPlayerInvites', 'verConflicts', 'verDomainRequests', 'orgVerifiedDomains', 'passportPrefs', 'passportCareerEntries', 'passportAchievements', 'passportShares', 'passportCorrections', 'transitionCases', 'vouches', 'agentProfiles', 'agencyAffiliations', 'representationAgreements', 'tsReviewers', 'jurisdictionPolicies', 'complianceContexts', 'regulatoryReviews', 'regulatoryConsents', 'agentTransactions', 'transactionRepresentations', 'transactionDocuments', 'devObjectives', 'drillGuidance', 'developmentPlans', 'developmentGoals', 'developmentActions', 'developmentEvidenceLinks', 'developmentReviews', 'boxCamPrefs', 'boxChallenges', 'boxChallengeEntries', 'boxAssignments', 'boxSessions', 'boxCamDisputes', 'combineRequests', 'combineAttempts', 'boxCamCvResults', 'recruitmentBriefs', 'nobodyMissedReviews', 'secondLookItems', 'dynamicWatchlists', 'watchlistHistory', 'exposureEvents', 'reviewLater', 'evidenceSuggestions', 'calibrationSessions', 'fixtures', 'coveragePlans', 'coverageAssignments', 'importBatches', 'prospects', 'identityReviews', 'apiKeys', 'webhookEndpoints', 'webhookDeliveries', 'orgInvites', 'ssoConfigs', 'ssoStates', 'supportTickets', 'supportAccessGrants', 'groups', 'groupGrants', 'openTrials', 'matchdays', 'friendlies', 'uploadSessions', 'savedSearches', 'invoices', 'reputationSeed', 'deliveryCallbacksSeen']);
-  assert.equal(DATA_MIGRATIONS.filter((m) => m.id === CORE_IDENTITY_LIVE_MIGRATION).length, 1);
-  const indexSource = fs.readFileSync(path.join(HERE, '..', 'repositories', 'index.mjs'), 'utf8');
-  assert.ok(indexSource.includes('createIdentityRepositories') && indexSource.includes('0005_core_identity_live'), 'repositories/index.mjs creates them and registers the migration');
-  const serverSource = fs.readFileSync(path.join(HERE, '..', 'server.mjs'), 'utf8');
-  assert.equal(serverSource.includes('createIdentityRepositories') || serverSource.includes('identityLiveTestSchema'), false, 'server.mjs takes the repositories from the data layer and never reaches the test helper');
-  assert.ok(/const \{[^}]*players, guardians, identity[^}]*\} = dataLayer;/.test(serverSource), 'server.mjs destructures players, guardians and identity from the data layer');
-  // The test helper (used by the raw-connection checks above) leaves the same schema as the real migration on a first installation.
-  const real = new DatabaseSync(':memory:'); real.exec('PRAGMA foreign_keys = ON;'); runDataMigrations(real, DATA_MIGRATIONS, { now: NOW });
-  const helper = freshShadowDb(); prepareLiveIdentitySchema(helper, { initState: 'pending', now: NOW });
-  for (const t of ['guardians', 'players', 'guardian_children']) {
-    const cols = (d) => d.prepare(`PRAGMA table_info(${t})`).all().map((c) => `${c.name}:${c.type}:${c.notnull}:${c.pk}:${c.dflt_value ?? ''}`);
-    assert.deepEqual(cols(helper), cols(real), `${t}: the helper's columns are the migration's`);
+test('the seed is typed before anything is written: a minor without a guardian, an unknown field, a planted facet or a trial-report copy refuses the whole first installation and leaves it pending', () => {
+  for (const [label, players, guardians, reason] of [
+    ['a minor without a guardian', [{ ...child('pl-orphan', null, '2015-01-01') }], [], /pl-orphan: a minor without a primary guardian/],
+    ['an unknown field', [{ ...adult(), futureField: 1 }], [], /pl-adult: unknown field futureField/],
+    ['a guardian facet', [], [{ ...gSignup(), coGuardians: [] }], /gd-signup: coGuardians is worked out/],
+    ['a plain e-mail code', [], [{ ...gSignup(), emailCode: 'K7Q2ZP' }], /gd-signup: unknown field emailCode/],
+    ['a trial-report copy', [{ ...adult(), trialReports: [{ id: 'tr-1' }] }], [], /pl-adult: trialReports are the trials' reports/],
+  ]) {
+    const dir = tempDir('idseed');
+    assert.throws(() => boot(dir, { players, guardians }), (e) => e.code === 'CORE_IDENTITY_CUTOVER_BLOCKED' && reason.test(e.message), label);
+    const s = second(dir);
+    assert.equal(s.prepare('SELECT value FROM meta WHERE key = ?').get(CORE_IDENTITY_INIT_META).value, 'pending', `${label}: initialisation stays pending`);
+    assert.equal(s.prepare('SELECT COUNT(*) AS n FROM players').get().n, 0, `${label}: nothing written`);
+    s.close();
   }
-  assert.equal(real.prepare('SELECT value FROM meta WHERE key = ?').get(CORE_IDENTITY_INIT_META).value, 'pending', 'a first installation is pending until the data layer initialises it');
-  assert.equal(helper.prepare('SELECT value FROM meta WHERE key = ?').get(CORE_IDENTITY_INIT_META).value, 'pending');
-  real.close(); helper.close();
-  assert.equal(CORE_IDENTITY_INIT_META, 'coreIdentityInit'); assert.match(MINOR_WITHOUT_LINK_REASON, /Founder's decision/);
 });
 
-// ------------------------------------------------------------------ review corrections (independent review of e4a7c53)
-/** Patch `exec` so the NEXT COMMIT fails once; returns a probe that says whether the failure really happened. */
-function failNextCommit(t) {
-  const exec = t.store.sqlite.exec.bind(t.store.sqlite);
-  const probe = { injected: false, restore: () => { t.store.sqlite.exec = exec; } };
-  t.store.sqlite.exec = (sql) => { if (sql === 'COMMIT' && !probe.injected) { probe.injected = true; throw new Error('injected COMMIT failure'); } return exec(sql); };
-  return probe;
-}
-/** Run a standalone operation whose COMMIT fails; assert the failure occurred and was reported. */
-function standaloneCommitFails(t, fn) {
-  const probe = failNextCommit(t);
-  let err = null;
-  try { fn(); } catch (e) { err = e; } finally { probe.restore(); }
-  assert.ok(probe.injected, 'the COMMIT failure must actually have been injected');
-  assert.match(String(err?.message), /injected COMMIT failure/, 'the operation reports the failure');
-  assert.equal(t.store.sqlite.isTransaction, false);
-}
-
-test('a standalone operation whose COMMIT fails restores repository memory as well as SQL — update, insert with link, remove, link, ageUp, guardians.insert and guardians.update leave held views, nested arrays, childIds, indexes and counts as before; a write committed earlier stays, a later ordinary save persists no fragment, an explicit retry succeeds and a reopen agrees', () => {
-  const dir = tempDir('idrepo-standalone-commit');
-  const t = boot(dir, { ...FIXTURE() });
-  const adultView = t.players.byId('pl-adult'); const seededView = t.players.byId('pl-seeded'); const primary = t.guardians.byId('gd-primary'); const kids = primary.childIds; const co = t.guardians.byId('gd-co'); const coKids = co.childIds;
-  t.players.update('pl-adult', { city: 'Before' }); // an unrelated write, committed before every failed operation
-  const records = seededView.medical.records;
-  const snapshotCounts = () => ({ players: t.players.count(), guardians: t.guardians.count(), rows: t.raw('SELECT COUNT(*) AS n FROM players').n + t.raw('SELECT COUNT(*) AS n FROM guardians').n + t.raw('SELECT COUNT(*) AS n FROM guardian_children').n });
-  const before = snapshotCounts();
-  // update (a scalar and a split composite)
-  standaloneCommitFails(t, () => t.players.update('pl-seeded', { name: 'After', medical: { shared: false } }));
-  assert.equal(seededView.name, 'Seeded Adult'); assert.equal(seededView.medical.shared, true); assert.equal(seededView.medical.records, records); assert.equal(t.raw("SELECT name FROM players WHERE id = 'pl-seeded'").name, 'Seeded Adult');
-  // insert with a primary link
-  standaloneCommitFails(t, () => t.players.insert(child('pl-new', 'gd-primary', '2015-05-05')));
-  assert.equal(t.players.byId('pl-new'), null); assert.equal(t.db.players.some((p) => p.id === 'pl-new'), false); assert.equal(primary.childIds, kids); assert.deepEqual([...kids], ['pl-child1', 'pl-child2']);
-  // remove
-  standaloneCommitFails(t, () => t.players.remove('pl-child1'));
-  assert.ok(t.players.byId('pl-child1')); assert.deepEqual([...kids], ['pl-child1', 'pl-child2']); assert.deepEqual([...coKids], ['pl-child1', 'pl-child2']); assert.equal(t.raw("SELECT COUNT(*) AS n FROM guardian_children WHERE player_id = 'pl-child1'").n, 2);
-  // link (co) and ageUp (primary unlink)
-  standaloneCommitFails(t, () => t.players.link('gd-signup', 'pl-child1', 'co'));
-  assert.deepEqual([...t.guardians.byId('gd-signup').childIds], []); assert.deepEqual(t.guardians.linksOf('pl-child1'), [{ guardianId: 'gd-primary', role: 'primary' }, { guardianId: 'gd-co', role: 'co' }]);
-  standaloneCommitFails(t, () => t.players.ageUp('pl-child2'));
-  assert.equal(t.players.byId('pl-child2').guardianId, 'gd-primary'); assert.deepEqual([...kids], ['pl-child1', 'pl-child2']); assert.equal(t.raw("SELECT guardian_id FROM players WHERE id = 'pl-child2'").guardian_id, 'gd-primary');
-  // guardians.insert (with co links) and guardians.update
-  standaloneCommitFails(t, () => t.guardians.insert({ id: 'gd-new', name: 'New', email: 'new@example.test', idVerified: false, disclaimerAccepted: false, childIds: ['pl-child1'], coGuardianOf: 'gd-primary' }));
-  assert.equal(t.guardians.byId('gd-new'), null); assert.equal(t.guardians.emailTaken('new@example.test'), false); assert.equal(t.db.guardians.length, 3);
-  standaloneCommitFails(t, () => t.guardians.update('gd-primary', { name: 'Renamed', idvReference: 'idv-9' }));
-  assert.equal(primary.name, 'Primary Parent'); assert.equal(primary.idvReference, 'idv-1'); assert.equal(t.raw("SELECT name FROM guardians WHERE id = 'gd-primary'").name, 'Primary Parent');
-  assert.deepEqual(snapshotCounts(), before, 'counts and rows are exactly as before every failed operation');
-  assert.equal(t.invariantBreaks(), 0);
-  // A later ordinary save persists no fragment; the earlier write stays.
-  t.store.save();
-  assert.equal(t.raw("SELECT city FROM players WHERE id = 'pl-adult'").city, 'Before'); assert.equal(t.raw("SELECT name FROM players WHERE id = 'pl-seeded'").name, 'Seeded Adult');
-  // Explicit retries succeed.
-  t.players.update('pl-seeded', { name: 'Retry' }); t.players.insert(child('pl-new', 'gd-primary', '2015-05-05')); t.guardians.update('gd-primary', { name: 'Renamed' });
-  assert.equal(seededView.name, 'Retry'); assert.deepEqual([...kids], ['pl-child1', 'pl-child2', 'pl-new']);
+// ------------------------------------------------------------------ records
+test('records: every key always present (null, false or [] when unset), the lists from their tables, the trial reports from the trials; no password hash, no e-mail code; fresh, deep-frozen copies', () => {
+  const t = boot();
+  const p = t.players.byId('pl-child1');
+  assert.deepEqual(Object.keys(p), PLAYER_RECORD_KEYS);
+  assert.equal(p.city, null, 'an empty city is null');
+  assert.deepEqual(p.medical, { shared: false, conditionStatus: 'unknown', records: [] });
+  assert.equal(p.stats, null); assert.equal(p.programme, null); assert.equal(p.notificationPrefs, null);
+  assert.deepEqual(p.trialReports, []); assert.equal('password' in p, false);
+  assert.ok(Object.isFrozen(p) && Object.isFrozen(p.medical) && Object.isFrozen(p.media));
+  assert.throws(() => { p.name = 'x'; }, TypeError);
+  assert.notEqual(t.players.byId('pl-child1'), p, 'a fresh copy on every read');
+  const s = t.players.byId('pl-seeded');
+  assert.deepEqual(s.stats, { appearances: 31, goals: 22, assists: 6, paceKmh: 34.1, passCompletionPct: 78, duelSuccessPct: 61, cleanSheets: null }, 'stats carry every key');
+  assert.deepEqual(s.programme, { track: 'ST', startedAt: T0, completed: [{ sessionId: 's1', ts: T0 + 86_400_000 }] });
+  assert.deepEqual(s.media, [{ id: 'med-1', title: 'Highlights', kind: 'video', uploadedAt: '2026-05-01T10:00:00.000Z', url: null, views: 3, verifiedClip: null, captions: null, tags: { pace: 2 } }]);
+  const g = t.guardians.byId('gd-primary');
+  assert.deepEqual(Object.keys(g), GUARDIAN_RECORD_KEYS);
+  assert.deepEqual(g.childIds, ['pl-child1', 'pl-child2', 'pl-grown']);
+  assert.deepEqual(g.coGuardians, [{ id: 'gd-co', name: 'Co Parent', email: 'co@example.test' }], 'coGuardians is worked out from co_guardian_of');
+  assert.equal('password' in g || 'emailCodeHash' in g, false);
+  assert.equal(t.guardians.emailCodeHashOf('gd-signup').length, 64);
+  assert.equal(t.players.passwordHashOf('pl-adult'), 'scrypt$aa$bb');
+  assert.deepEqual(t.players.byIds(['pl-seeded', 'pl-none', 'pl-adult']).map((x) => x.id), ['pl-seeded', 'pl-adult'], 'byIds keeps the order given and drops the missing');
+  assert.deepEqual(t.players.byIds(['pl-seeded'])[0], s, 'a batch read decodes exactly what a single read does');
   t.close();
-  const r = reopen(dir);
-  assert.equal(r.players.byId('pl-seeded').name, 'Retry'); assert.equal(r.players.byId('pl-new').guardianId, 'gd-primary'); assert.equal(r.guardians.byId('gd-primary').name, 'Renamed'); assert.equal(r.guardians.byId('gd-new'), null); assert.equal(r.players.byId('pl-adult').city, 'Before'); assert.equal(r.invariantBreaks(), 0);
-  r.close(); fs.rmSync(dir, { recursive: true, force: true });
 });
 
-test('inside a real unit, a repository operation that fails after its first SQL write poisons the unit even when the caller catches the error — the outer unit fails, nothing of it commits, after-commit work never runs, memory is restored, earlier edits survive, a later ordinary save persists no fragment and a retry succeeds; a caught VALIDATION refusal (thrown before any SQL) does not poison the unit', () => {
-  const dir = tempDir('idrepo-unit-caught');
-  const t = boot(dir, { ...FIXTURE() });
-  const refs = prepare(t);
-  const primary = t.guardians.byId('gd-primary'); const kids = primary.childIds;
-  // The player row is written first, then the link row fails: a half-created child, caught by the caller.
-  t.store.sqlite.exec("CREATE TRIGGER review_fail_link BEFORE INSERT ON guardian_children BEGIN SELECT RAISE(ABORT, 'injected link failure'); END;");
-  let inner = null; let outer = null; let published = 0;
-  try {
-    t.unit(() => {
-      try { t.players.insert(child('pl-half', 'gd-primary', '2015-01-01')); } catch (e) { inner = e; }
-      t.store.afterCommit(() => { published += 1; });
-    });
-  } catch (e) { outer = e; }
-  assert.match(String(inner?.message), /injected link failure/, 'the mid-operation failure must actually have occurred');
-  assert.ok(outer, 'the outer unit must fail'); assert.match(outer.message, /cannot commit/); assert.equal(outer.unitOfWork, 'rolled_back'); assert.equal(published, 0);
-  assert.equal(t.raw("SELECT COUNT(*) AS n FROM players WHERE id = 'pl-half'").n, 0); assert.equal(t.raw("SELECT COUNT(*) AS n FROM guardian_children WHERE player_id = 'pl-half'").n, 0);
-  assert.equal(t.players.byId('pl-half'), null); assert.equal(primary.childIds, kids); assert.deepEqual([...kids], ['pl-child1', 'pl-child2']);
-  assertMemoryRestored(t, refs);
-  t.store.save();
-  assert.equal(t.raw("SELECT COUNT(*) AS n FROM players WHERE id = 'pl-half'").n, 0); assert.equal(t.raw("SELECT city FROM players WHERE id = 'pl-adult'").city, 'PreUnit');
-  t.store.sqlite.exec('DROP TRIGGER review_fail_link');
-  t.unit(() => t.players.insert(child('pl-half', 'gd-primary', '2015-01-01')));
-  assert.equal(t.raw("SELECT COUNT(*) AS n FROM guardian_children WHERE player_id = 'pl-half'").n, 1); assert.deepEqual([...kids], ['pl-child1', 'pl-child2', 'pl-half']);
-  // The guardian side: a row update that fails inside the unit, caught.
-  t.store.sqlite.exec("CREATE TRIGGER review_fail_guardian BEFORE UPDATE ON guardians BEGIN SELECT RAISE(ABORT, 'injected guardian failure'); END;");
-  inner = null; outer = null; published = 0;
-  try { t.unit(() => { try { t.guardians.update('gd-primary', { name: 'Caught' }); } catch (e) { inner = e; } t.players.update('pl-adult', { academyPlus: true }); t.store.afterCommit(() => { published += 1; }); }); } catch (e) { outer = e; }
-  assert.match(String(inner?.message), /injected guardian failure/); assert.ok(outer && /cannot commit/.test(outer.message)); assert.equal(published, 0);
-  assert.equal(primary.name, 'Primary Parent'); assert.equal(t.players.byId('pl-adult').academyPlus, false); assert.equal(t.raw("SELECT academy_plus FROM players WHERE id = 'pl-adult'").academy_plus, 0);
-  t.store.sqlite.exec('DROP TRIGGER review_fail_guardian');
-  // After memory mutation: operations that succeeded earlier in the same unit (a child created, a guardian renamed — memory already changed) are undone when a later caught operation fails; and a relationship operation (unlink) is covered.
-  t.store.sqlite.exec("CREATE TRIGGER review_fail_one BEFORE INSERT ON guardian_children WHEN NEW.player_id = 'pl-fail' BEGIN SELECT RAISE(ABORT, 'injected link failure for pl-fail'); END;");
-  const coView = t.guardians.byId('gd-co'); const coKids = coView.childIds;
-  inner = null; outer = null; published = 0;
-  try {
-    t.unit(() => {
-      t.players.insert(child('pl-ok', 'gd-primary', '2016-02-02')); t.guardians.update('gd-co', { name: 'Mid-unit' }); t.players.link('gd-co', 'pl-ok', 'co');
-      assert.ok(t.players.byId('pl-ok')); assert.deepEqual([...kids], ['pl-child1', 'pl-child2', 'pl-half', 'pl-ok']); assert.equal(coView.name, 'Mid-unit');
-      try { t.players.insert(child('pl-fail', 'gd-primary', '2016-03-03')); } catch (e) { inner = e; }
-      t.store.afterCommit(() => { published += 1; });
-    });
-  } catch (e) { outer = e; }
-  assert.match(String(inner?.message), /injected link failure for pl-fail/); assert.ok(outer && /cannot commit/.test(outer.message)); assert.equal(published, 0);
-  assert.equal(t.players.byId('pl-ok'), null); assert.equal(t.players.byId('pl-fail'), null); assert.equal(t.players.count(), 5, 'the four fixture players and pl-half'); assert.equal(primary.childIds, kids); assert.deepEqual([...kids], ['pl-child1', 'pl-child2', 'pl-half']); assert.equal(coView.childIds, coKids); assert.deepEqual([...coKids], ['pl-child1', 'pl-child2']); assert.equal(coView.name, 'Co Parent');
-  assert.equal(t.raw("SELECT COUNT(*) AS n FROM players WHERE id IN ('pl-ok', 'pl-fail')").n, 0); assert.equal(t.raw("SELECT name FROM guardians WHERE id = 'gd-co'").name, 'Co Parent'); assert.equal(t.raw("SELECT COUNT(*) AS n FROM guardian_children WHERE guardian_id = 'gd-co'").n, 2);
-  t.store.sqlite.exec('DROP TRIGGER review_fail_one');
-  t.store.sqlite.exec("CREATE TRIGGER review_fail_unlink BEFORE DELETE ON guardian_children BEGIN SELECT RAISE(ABORT, 'injected unlink failure'); END;");
-  inner = null; outer = null; published = 0;
-  try { t.unit(() => { try { t.players.unlink('gd-co', 'pl-child1'); } catch (e) { inner = e; } t.store.afterCommit(() => { published += 1; }); }); } catch (e) { outer = e; }
-  assert.match(String(inner?.message), /injected unlink failure/); assert.ok(outer && /cannot commit/.test(outer.message)); assert.equal(published, 0);
-  assert.deepEqual([...coKids], ['pl-child1', 'pl-child2']); assert.deepEqual(t.guardians.linksOf('pl-child1'), [{ guardianId: 'gd-primary', role: 'primary' }, { guardianId: 'gd-co', role: 'co' }]); assert.equal(t.raw("SELECT COUNT(*) AS n FROM guardian_children WHERE player_id = 'pl-child1'").n, 2);
-  t.store.sqlite.exec('DROP TRIGGER review_fail_unlink');
-  t.unit(() => { t.players.insert(child('pl-ok', 'gd-primary', '2016-02-02')); t.players.link('gd-co', 'pl-ok', 'co'); });
-  assert.deepEqual([...coKids], ['pl-child1', 'pl-child2', 'pl-ok']); assert.equal(t.raw("SELECT COUNT(*) AS n FROM guardian_children WHERE player_id = 'pl-ok'").n, 2);
-  // A validation refusal is thrown BEFORE the transactional boundary: nothing of the refused operation happened, and a caller that catches it may complete the rest of its unit.
-  published = 0; let refusal = null;
-  t.unit(() => { try { t.players.insert(child('pl-orphan', null, '2015-01-01')); } catch (e) { refusal = e; } t.players.update('pl-adult', { academyPlus: true }); t.store.afterCommit(() => { published += 1; }); });
-  assert.match(String(refusal?.message), /a minor and has no guardianId/); assert.equal(published, 1); assert.equal(t.raw("SELECT academy_plus FROM players WHERE id = 'pl-adult'").academy_plus, 1); assert.equal(t.players.byId('pl-orphan'), null);
-  assert.equal(t.invariantBreaks(), 0);
-  t.close(); fs.rmSync(dir, { recursive: true, force: true });
-});
-
-test('initialisation validates the supplied collections as given — an object, null, a string, a number or a missing collection (either domain) is refused through the preflight contract, writes nothing, leaves the state pending and the input untouched, and a corrected explicit snapshot initialises afterwards; explicitly empty arrays stay valid', () => {
-  const s = freshShadowDb(); prepareLiveIdentitySchema(s, { initState: 'pending', now: NOW });
-  const identity = createIdentityRepositories({ sqlite: s, now: () => NOW });
-  const rows = () => s.prepare('SELECT COUNT(*) AS n FROM players').get().n + s.prepare('SELECT COUNT(*) AS n FROM guardians').get().n + s.prepare('SELECT COUNT(*) AS n FROM guardian_children').get().n;
-  const cases = [
-    [{ players: { id: 'not-an-array' }, guardians: [] }, /players collection is an object, not an array/],
-    [{ players: null, guardians: [] }, /players collection is null, not an array/],
-    [{ players: 'x', guardians: [] }, /players collection is a string, not an array/],
-    [{ players: 7, guardians: [] }, /players collection is a number, not an array/],
-    [{ guardians: [] }, /players collection is absent, not an array/],
-    [{ players: [] }, /guardians collection is absent, not an array/],
-    [{ players: [], guardians: {} }, /guardians collection is an object, not an array/],
-    [{ players: [adult()], guardians: null }, /guardians collection is null, not an array/],
-    [undefined, /snapshot is undefined, not an object/],
-    ['snapshot', /snapshot is string, not an object/],
-  ];
-  for (const [input, re] of cases) {
-    const before = JSON.stringify(input ?? null);
-    let err = null; try { identity.initialize(input, { now: NOW }); } catch (e) { err = e; }
-    assert.ok(err, `refused: ${re}`); assert.equal(err.code, 'CORE_IDENTITY_CUTOVER_BLOCKED', String(err?.message)); assert.match(err.message, re);
-    assert.equal(identity.initState(), 'pending'); assert.equal(rows(), 0); assert.equal(identity.players.count(), 0);
-    assert.equal(JSON.stringify(input ?? null), before, 'the input is untouched');
-  }
-  // The Founder's rule still holds at initialisation; explicitly empty arrays are valid; a corrected snapshot initialises.
-  assert.throws(() => identity.initialize({ players: [child('pl-legacy', null, '2013-04-04')], guardians: [] }, { now: NOW }), /players pl-legacy: a minor on the evaluation date with no guardian link/);
-  assert.equal(identity.initState(), 'pending'); assert.equal(rows(), 0);
-  const r = identity.initialize({ players: [adult()], guardians: [] }, { now: NOW });
-  assert.equal(r.players, 1); assert.equal(identity.initState(), 'done'); assert.equal(identity.players.count(), 1);
+test('no mirror: a row written by another connection is what the next read returns; db.players and db.guardians throw', () => {
+  const t = boot();
+  const s = second(t.dir);
+  s.prepare("UPDATE players SET name = 'Renamed Elsewhere' WHERE id = 'pl-adult'").run();
   s.close();
-  const e = freshShadowDb(); prepareLiveIdentitySchema(e, { initState: 'pending', now: NOW });
-  const empty = createIdentityRepositories({ sqlite: e, now: () => NOW });
-  assert.equal(empty.initialize({ players: [], guardians: [] }, { now: NOW }).players, 0); assert.equal(empty.initState(), 'done');
-  e.close();
+  assert.equal(t.players.byId('pl-adult').name, 'Renamed Elsewhere');
+  assert.throws(() => t.db.players, /db\.players is gone/);
+  assert.throws(() => t.db.guardians, /db\.guardians is gone/);
+  t.close();
 });
 
-console.log(`\n${passed} identity repository checks passed`);
+// ------------------------------------------------------------------ writes
+test('create: defaults fill the optional fields; junk is refused by field before anything is written; a minor needs its guardian, gets the primary link in the same unit; a retained or existing id is refused', () => {
+  const t = boot();
+  const made = t.players.create({ id: 'pl-new', name: 'New Adult', dob: '1999-02-02', country: 'GB', createdAt: NOW, passwordHash: 'scrypt$x$y' });
+  assert.equal(made.availability, 'not_seeking'); assert.deepEqual(made.badges, []); assert.equal(t.players.passwordHashOf('pl-new'), 'scrypt$x$y');
+  for (const [fields, reason] of [
+    [{ name: 'N'.repeat(121) }, /name must be text of 1 to 120/],
+    [{ heightCm: '180' }, /heightCm must be a whole number from 50 to 250/],
+    [{ position: 'WING' }, /position must be one of/],
+    [{ academyPlus: 'yes' }, /academyPlus must be a boolean/],
+    [{ stats: { goals: -1 } }, /stats\.goals must be a non-negative whole number/],
+    [{ stats: { passCompletionPct: 140 } }, /passCompletionPct must be a percentage from 0 to 100/],
+    [{ notificationPrefs: { quietStart: '9pm' } }, /quietStart must be HH:MM/],
+    [{ location: { lat: 95, lng: 0 } }, /location\.lat and location\.lng/],
+    [{ media: [{ id: 'm1' }] }, /media\[0\]\.title is absent/],
+    [{ badges: [1] }, /badges\[0\] is a number, not text/],
+    [{ facetField: true }, /unknown field facetField/],
+  ]) assert.throws(() => t.players.create({ id: 'pl-junk', name: 'Junk', dob: '1999-02-02', country: 'GB', ...fields }), (e) => e.code === 'PLAYER_RECORD_INVALID' && reason.test(e.message), JSON.stringify(fields));
+  assert.equal(t.players.byId('pl-junk'), null, 'nothing was written');
+  assert.throws(() => t.players.create({ id: 'pl-kid', name: 'Kid', dob: '2016-01-01', country: 'GB' }), (e) => e.code === 'MINOR_WITHOUT_GUARDIAN');
+  t.players.create({ id: 'pl-kid', name: 'Kid', dob: '2016-01-01', country: 'GB', guardianId: 'gd-signup' });
+  assert.deepEqual(t.guardians.linksOf('pl-kid'), [{ guardianId: 'gd-signup', role: 'primary' }]);
+  assert.deepEqual(t.guardians.byId('gd-signup').childIds, ['pl-kid']);
+  assert.throws(() => t.players.create({ id: 'pl-kid', name: 'Kid', dob: '2000-01-01', country: 'GB' }), (e) => e.code === 'PLAYER_EXISTS');
+  t.players.erase('pl-new', { at: NOW });
+  assert.throws(() => t.players.create({ id: 'pl-new', name: 'Again', dob: '1999-02-02', country: 'GB' }), (e) => e.code === 'PLAYER_ID_RETAINED');
+  assert.equal(t.invariantBreaks(), 0);
+  t.close();
+});
+
+test('update(id, draft => …): the change is typed whole and written at once; the id, the guardian link, the creation time, the lists and the trial reports never change through it; a composite list set whole keeps its rows; re-entry is refused', () => {
+  const t = boot();
+  const after = t.players.update('pl-seeded', (d) => { d.availability = 'loan_open'; d.medical.shared = false; d.stats = { goals: 30 }; });
+  assert.equal(after.availability, 'loan_open'); assert.equal(after.medical.shared, false); assert.equal(after.medical.records.length, 1, 'the medical records stay');
+  assert.deepEqual(after.stats, { appearances: null, goals: 30, assists: null, paceKmh: null, passCompletionPct: null, duelSuccessPct: null, cleanSheets: null });
+  const s = second(t.dir); assert.equal(s.prepare("SELECT availability FROM players WHERE id = 'pl-seeded'").get().availability, 'loan_open', 'written at once'); s.close();
+  const kept = t.players.update('pl-seeded', (d) => { d.programme = { track: 'CM', startedAt: NOW }; });
+  assert.deepEqual(kept.programme.completed.length, 1, 'a programme set without its list keeps the completed rows');
+  for (const [edit, reason] of [
+    [(d) => { d.guardianId = 'gd-primary'; }, /guardianId does not change through update/],
+    [(d) => { d.badges.push('x'); }, /badges does not change through update/],
+    [(d) => { d.medical.records = []; }, /medical\.records does not change through update/],
+    [(d) => { d.programme = null; }, /programme cannot be set to null while 1 programme\.completed row/],
+    [(d) => { d.trialReports = [{}]; }, /trialReports does not change through update/],
+    [(d) => { d.futureField = 1; }, /unknown field futureField/],
+    [(d) => { d.foot = 'both'; }, /foot must be one of/],
+  ]) assert.throws(() => t.players.update('pl-seeded', edit), (e) => e.code === 'PLAYER_RECORD_INVALID' && reason.test(e.message), String(reason));
+  assert.throws(() => t.players.update('pl-seeded', () => t.players.update('pl-seeded', () => {})), (e) => e.code === 'PLAYER_UPDATE_REENTRANT');
+  assert.throws(() => t.players.update('pl-seeded', { availability: 'x' }), /takes a function/);
+  const g = t.guardians.update('gd-signup', (d) => { d.emailVerified = true; d.name = 'Renamed Parent'; });
+  assert.equal(g.emailVerified, true);
+  assert.throws(() => t.guardians.update('gd-signup', (d) => { d.childIds = ['pl-adult']; }), /childIds does not change through update/);
+  assert.throws(() => t.guardians.update('gd-primary', (d) => { d.coGuardians = []; }), /coGuardians does not change through update/);
+  assert.throws(() => t.guardians.update('gd-signup', (d) => { d.email = 'PRIMARY@example.test'; }), (e) => e.code === 'EMAIL_IN_USE', 'the e-mail is unique case-insensitively');
+  assert.equal(t.guardians.byEmail('Renamed@nowhere') , null);
+  assert.equal(t.guardians.byEmail('SIGNUP@example.test').id, 'gd-signup');
+  t.close();
+});
+
+test('lists: addItem / setItems / patchItem write rows at once and return the stored list; an item the table cannot hold, or a repeated natural key, is refused naming the field and the index; a clip\'s tags are rows', () => {
+  const t = boot();
+  const media = t.players.addItem('pl-adult', 'media', { id: 'med-a', title: 'Clip', url: null, unknownField: 1 });
+  assert.deepEqual(media, [{ id: 'med-a', title: 'Clip', url: null, views: 0, verifiedClip: null, captions: null, tags: {} }], 'an unknown item field is not stored');
+  const tagged = t.players.patchItem('pl-adult', 'media', { id: 'med-a' }, { tags: { pace: 2, vision: 1 } });
+  assert.deepEqual(tagged.tags, { pace: 2, vision: 1 });
+  assert.deepEqual(t.all("SELECT tag, count FROM player_media_tags WHERE media_id = 'med-a' ORDER BY position"), [{ tag: 'pace', count: 2 }, { tag: 'vision', count: 1 }]);
+  assert.equal(t.players.byMediaId('med-a').id, 'pl-adult');
+  assert.throws(() => t.players.addItem('pl-adult', 'media', { id: 'med-a', title: 'Again' }), (e) => e.code === 'PLAYER_SUBRECORD_INVALID' && /media\[1\] repeats id/.test(e.message));
+  assert.throws(() => t.players.addItem('pl-adult', 'attendance', { id: 'att-x', fixture: 'F' }), /attendance\[0\]\.date is absent/);
+  assert.throws(() => t.players.addItem('pl-adult', 'drills', 3), /drills\[0\] is a number, not text/);
+  assert.throws(() => t.players.addItem('pl-adult', 'programme.completed', { sessionId: 's', ts: 1 }), /programme is null/);
+  t.players.setItems('pl-adult', 'badges', ['A', 'A', 'B']);
+  assert.deepEqual(t.players.byId('pl-adult').badges, ['A', 'A', 'B'], 'legal duplicates kept, order kept');
+  assert.throws(() => t.players.patchItem('pl-adult', 'media', { id: 'nope' }, { views: 1 }), /0 item\(s\) of media/);
+  assert.throws(() => t.players.addItem('pl-adult', 'trialReports', {}), /not a player list/);
+  t.close();
+});
+
+test('links: link / unlink keep both sides together (guardian_id and the primary row), refuse a second primary; ageUp clears the primary only; co-guardians keep listing the player', () => {
+  const t = boot();
+  assert.throws(() => t.identity.link('gd-signup', 'pl-child1', 'primary'), (e) => e.code === 'PRIMARY_EXISTS');
+  t.identity.link('gd-signup', 'pl-adult', 'co');
+  assert.deepEqual(t.guardians.linksOf('pl-adult'), [{ guardianId: 'gd-signup', role: 'co' }]);
+  assert.throws(() => t.identity.link('gd-signup', 'pl-adult', 'co'), (e) => e.code === 'LINK_EXISTS');
+  t.identity.unlink('gd-signup', 'pl-adult');
+  assert.deepEqual(t.guardians.linksOf('pl-adult'), []);
+  t.players.ageUp('pl-grown');
+  assert.equal(t.players.byId('pl-grown').guardianId, null);
+  assert.deepEqual(t.guardians.byId('gd-primary').childIds, ['pl-child1', 'pl-child2']);
+  t.players.ageUp('pl-child1');
+  assert.deepEqual(t.guardians.byId('gd-co').childIds, ['pl-child1', 'pl-child2'], 'the co-guardian keeps listing the player');
+  assert.deepEqual(t.guardians.forPlayer('pl-child2').map((g) => g.id), ['gd-primary', 'gd-co'], 'primary first');
+  assert.equal(t.invariantBreaks(), 0);
+  t.close();
+});
+
+test('erase: the row stays as the retained record (id, deletion instant, birth date, country; placeholders elsewhere), its lists and links go; it is read by nothing that serves accounts', () => {
+  const t = boot();
+  t.players.addItem('pl-child2', 'timeline', { year: '2025', event: 'First match' });
+  t.players.erase('pl-child2', { at: NOW });
+  assert.equal(t.players.byId('pl-child2'), null); assert.equal(t.players.exists('pl-child2'), false);
+  assert.deepEqual(t.players.retained('pl-child2'), { id: 'pl-child2', deletedAt: NOW, birthDate: '2016-08-08', country: 'GB' });
+  for (const table of SUBRECORD_TABLES.filter((x) => x !== 'player_media_tags')) assert.equal(t.get(`SELECT COUNT(*) AS n FROM ${table} WHERE player_id = 'pl-child2'`).n, 0, table);
+  assert.deepEqual(t.guardians.linksOf('pl-child2'), []);
+  assert.equal(t.get("SELECT name FROM players WHERE id = 'pl-child2'").name, 'Deleted player');
+  assert.equal(t.players.count(), 4); assert.equal(t.players.retainedCount(), 1);
+  assert.throws(() => t.players.erase('pl-child2'), (e) => e.code === 'PLAYER_ID_RETAINED');
+  t.close();
+});
+
+test('units of work: an operation joins the open unit; a refusal or a throw rolls the whole unit back with nothing to restore in memory; an empty unit touches no identity table', () => {
+  const t = boot();
+  assert.throws(() => t.unit(() => { t.players.update('pl-adult', (d) => { d.availability = 'loan_open'; }); t.players.addItem('pl-adult', 'badges', 'X'); throw new Error('boom'); }), /boom/);
+  const p = t.players.byId('pl-adult');
+  assert.equal(p.availability, 'not_seeking'); assert.deepEqual(p.badges, []);
+  assert.throws(() => t.unit(() => { t.guardians.create({ id: 'gd-x', name: 'X', email: 'x@example.test' }); t.players.create({ id: 'pl-y', name: 'Y', dob: '2015-01-01', country: 'GB' }); }), (e) => e.code === 'MINOR_WITHOUT_GUARDIAN');
+  assert.equal(t.guardians.byId('gd-x'), null, 'the guardian of the refused unit is not there');
+  const statements = [];
+  const prepare = t.store.sqlite.prepare.bind(t.store.sqlite);
+  t.store.sqlite.prepare = (sql) => { statements.push(sql); return prepare(sql); };
+  try { t.unit(() => {}); } finally { t.store.sqlite.prepare = prepare; }
+  assert.equal(statements.filter((sql) => /\b(players|guardians|guardian_children|player_\w+)\b/.test(sql)).length, 0, 'an empty unit runs no identity statement');
+  t.close();
+});
+
+// ------------------------------------------------------------------ reads
+test('scans: visibleCandidates applies the under-18 wall (by the country\'s age of majority) for an organisation that cannot see minors, and the grassroots box; the directory filters are SQL; a batch scan visits every admitted player once', () => {
+  const t = boot();
+  const kr17 = bornByForAge(18, NOW); // 18 today: a minor in KR (19), an adult in GB (18)
+  t.players.create({ id: 'pl-kr', name: 'Seoul Player', dob: kr17, country: 'KR', guardianId: 'gd-signup' });
+  t.players.create({ id: 'pl-gb18', name: 'Leeds Player', dob: kr17, country: 'GB', location: { lat: 53.81, lng: -1.56 }, level: 'semi_pro', position: 'CB' });
+  t.players.create({ id: 'pl-far', name: 'Far Player', dob: '1995-01-01', country: 'GB', location: { lat: 51.5, lng: -0.12 } });
+  const ids = (org, f) => t.players.visibleCandidates(orgOf(t, org), f).map((p) => p.id).sort();
+  const adultsAll = ['pl-adult', 'pl-far', 'pl-gb18', 'pl-grown', 'pl-seeded'].sort();
+  assert.deepEqual(ids('org-agency'), adultsAll, 'an agency sees adults only (the KR 18-year-old is a minor)');
+  assert.deepEqual(ids('org-unverified'), adultsAll, 'an unverified club too');
+  assert.deepEqual(ids('org-pro'), [...adultsAll, 'pl-child1', 'pl-child2', 'pl-kr'].sort(), 'a verified club may see minors');
+  assert.deepEqual(ids('org-grass'), ['pl-adult', 'pl-gb18', 'pl-seeded'], 'a grassroots club: not pro, inside the box around its ground (a prefilter: Manchester is in the box, the exact 50 km test is the caller\'s)');
+  assert.deepEqual(ids('org-pro', { position: 'CB' }), ['pl-gb18']);
+  assert.deepEqual(ids('org-pro', { ageBelow: 18 }), ['pl-child1', 'pl-child2'].sort(), 'ageBelow is exactly ageOn\'s rule');
+  assert.deepEqual(ids('org-pro', { ageAtLeast: 18, ageBelow: 19 }), ['pl-gb18', 'pl-kr'].sort());
+  assert.deepEqual(ids('org-pro', { createdSince: NOW - 1 }), [], 'seed players and new ones without createdAt are not new');
+  const seen = []; t.players.scan({}, (p) => { seen.push(p.id); }); assert.equal(seen.length, t.players.count());
+  const two = []; t.players.scan({}, (p) => { two.push(p.id); return two.length < 2; }); assert.equal(two.length, 2, 'returning false stops the scan');
+  t.close();
+});
+
+test('lookups: byExternalId and byNameAndDob (the import\'s identity match), byGuardian, the admin guardians page by cursor', () => {
+  const t = boot();
+  t.players.addItem('pl-seeded', 'externalIds', { provider: 'fa', externalId: 'X1', source: 'import:b1', at: NOW, reviewId: 'rev-1' });
+  assert.equal(t.players.byExternalId('fa', 'X1').id, 'pl-seeded');
+  assert.deepEqual(t.players.byId('pl-seeded').externalIds, [{ provider: 'fa', externalId: 'X1', source: 'import:b1', at: NOW, reviewId: 'rev-1' }]);
+  assert.equal(t.players.byExternalId('fa', 'X2'), null);
+  assert.equal(t.players.byNameAndDob('SEEDED ADULT', '2004-03-14').id, 'pl-seeded', 'the name compared case-insensitively');
+  assert.deepEqual(t.players.byGuardian('gd-primary').map((p) => p.id), ['pl-child1', 'pl-child2', 'pl-grown']);
+  const first = t.guardians.page({ limit: 2 });
+  assert.deepEqual(first.items.map((g) => g.id), ['gd-primary', 'gd-co']);
+  assert.ok(first.nextCursor);
+  t.close();
+});
+
+test('the snapshot path: a read gives every live record with its hashes and no derived lists; a save types the whole pair first and rewrites the tables, keeping the retained rows and refusing their ids', () => {
+  const t = boot();
+  t.players.erase('pl-child2', { at: NOW });
+  t.store.save();
+  const tool = openStore(t.dir);
+  const snap = tool.load();
+  const p = snap.db.players.find((x) => x.id === 'pl-adult');
+  assert.equal(p.password, 'scrypt$aa$bb'); assert.equal('trialReports' in p, false);
+  const g = snap.db.guardians.find((x) => x.id === 'gd-signup');
+  assert.equal(g.emailCodeHash.length, 64); assert.equal('coGuardians' in g, false);
+  assert.equal(snap.db.players.some((x) => x.id === 'pl-child2'), false, 'a retained record is not a player');
+  tool.save(snap);
+  assert.equal(tool.sqlite.prepare("SELECT deleted_at FROM players WHERE id = 'pl-child2'").get().deleted_at, NOW, 'the retained row survives the rewrite');
+  const resurrect = clone(snap); resurrect.db.players.push(child('pl-child2', 'gd-primary', '2016-08-08'));
+  assert.throws(() => tool.save(resurrect), (e) => e.code === 'IDENTITY_IMPORT_BLOCKED' && /pl-child2: the id is a deleted account/.test(e.message));
+  const junk = clone(snap); junk.db.players.find((x) => x.id === 'pl-adult').heightCm = 'tall';
+  assert.throws(() => tool.save(junk), (e) => e.code === 'IDENTITY_IMPORT_BLOCKED' && /pl-adult: heightCm must be a whole number/.test(e.message));
+  assert.equal(tool.sqlite.prepare("SELECT height_cm FROM players WHERE id = 'pl-adult'").get().height_cm, 182, 'nothing was written');
+  tool.sqlite.close(); t.close();
+});
+
+console.log(`identity repositories: ${passed} checks passed`);

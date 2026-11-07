@@ -144,6 +144,10 @@ export function buildRecruitmentJourney(db, caseId, viewer, opts = {}) {
     historyCursor = 0,
     reads = {},
   } = opts;
+  // S14h: the player through the identity repository (`reads.player`, every route passes it); a pure caller may hand
+  // a `players` list on `db` instead.
+  const handed = db ? Object.getOwnPropertyDescriptor(db, 'players')?.value : undefined; // a plain list only (a retired name's getter is never called)
+  const playerOf = typeof reads.player === 'function' ? reads.player : (id) => (Array.isArray(handed) ? handed.find((x) => x?.id === id) ?? null : null);
 
   // ---- §26 — infrastructure before data.
   //
@@ -382,6 +386,7 @@ export function buildRecruitmentJourney(db, caseId, viewer, opts = {}) {
   // P8.1 (D-P81-15): this case's assessments — never the ended case's (a Trial of another case, or written while another case was open).
   const allAssessments = rec.assessments.filter((a) => !ownedByAnotherCase(rec, kase, { caseId: trialCaseOf(rec, a.context?.trialId), at: a.createdAt }));
   const journeyBlock = journeyFor(db, rec, kase, {
+    playerOf,
     status, role, now,
     // `reads.blocks` (the safety repository's queries) in the server; a fixture may plant `db.blocks`.
     blocked: reads.blocks ? reads.blocks.has(kase.playerId, kase.orgId) : (db.blocks ?? []).some((b) => b && b.playerId === kase.playerId && b.orgId === kase.orgId),
@@ -393,7 +398,7 @@ export function buildRecruitmentJourney(db, caseId, viewer, opts = {}) {
     foreign: foreignReferences(db, rec, kase),
     domainProblems: [
       ...offerRows.flatMap((o) => offerCaseConsistency(o, kase, now).filter((c) => offerCaseCorrupt([c]))),
-      ...soundPackages.flatMap((p) => signingConsistency(p, { offer: offerRows.find((o) => o.id === p.offerId) ?? null, kase, rows: [rec.signingForPackage(p.id)].filter(Boolean), player: (db.players ?? []).find((x) => x?.id === kase.playerId) ?? null }, now).filter((c) => signingCorrupt([c]))),
+      ...soundPackages.flatMap((p) => signingConsistency(p, { offer: offerRows.find((o) => o.id === p.offerId) ?? null, kase, rows: [rec.signingForPackage(p.id)].filter(Boolean), player: playerOf(kase.playerId) }, now).filter((c) => signingCorrupt([c]))),
     ],
   });
 
@@ -594,7 +599,7 @@ function journeyFor(db, rec, kase, f) {
   const signing = currentSigningForCase(f.packages, f.now);
   const facts = { ...f, kase, createdAt: kase.createdAt ?? null, history: Array.isArray(kase.history) ? kase.history : [], historyMalformed: kase.history !== undefined && !Array.isArray(kase.history), signingRowIds: new Set(rec.signings.filter((s) => s && s.orgId === kase.orgId && s.playerId === kase.playerId).map((s) => s.id)) };
   const blocked = f.blocked;
-  const subjectRemoved = !!kase.subjectRemovedAt || !(db.players ?? []).some((p) => p?.id === kase.playerId);
+  const subjectRemoved = !!kase.subjectRemovedAt || !f.playerOf(kase.playerId);
   const verdict = validateRecruitmentJourney(facts);
   const next = nextActionFor({ status: f.status, role: f.role, now: f.now, blocked, subjectRemoved, contact, trial, trialRequest, assessed, decision, offer, signing, signingRow: f.signingRow });
   // M23 P8.1 (§13/§14/§36) — a case whose lifecycle and records disagree fails

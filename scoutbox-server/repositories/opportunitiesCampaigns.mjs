@@ -25,7 +25,7 @@
 import { isPlainObject, ids, describe } from './recruitment.mjs';
 import { transaction, migrationApplied } from './database.mjs';
 import { refusal, isInt, isStr, nonEmpty, orNull, clone, bad, optText, reqText, optInstant, reqInstant, unknownFields, first, txt, deepFreeze, typeHistory, typeList, historyTable, histRow, histOut } from './scoutingEvidence.mjs';
-import { PLAYER_LEVELS } from './identityMapping.mjs';
+import { PLAYER_LEVELS } from './identity.mjs';
 import { ORG_LEVELS } from './orgs.mjs';
 import { parseStrictDateOnly } from '../temporal.mjs';
 

@@ -329,14 +329,15 @@ export function registerSigning(rawCtx) {
     }
     // A signing moves the player's level: grassroots signings make semi-pros, academy/pro signings make pros.
     const levelBefore = player.level ?? 'amateur';
-    players.update(player.id, { level: playerLevelAfterSigning(org.level) });
+    const levelAfter = playerLevelAfterSigning(org.level);
+    players.update(player.id, (d) => { d.level = levelAfter; });
     // S5: the timeline is rows of player_timeline, appended through the repository inside this unit.
     const year = String(new Date(ts).getFullYear());
     const levelLines = [];
-    if (levelBefore === 'amateur' && player.level === 'semi_pro') {
+    if (levelBefore === 'amateur' && levelAfter === 'semi_pro') {
       players.addItem(player.id, 'timeline', { year, event: `Levelled up: amateur → semi-pro with ${org.name}` });
       levelLines.push([`⬆️ You're semi-pro. ${org.name} signed you — one step up the ladder, recorded forever on your pathway.`, `${player.name} levelled up: amateur → semi-pro with ${org.name}.`]);
-    } else if (levelBefore !== 'pro' && player.level === 'pro') {
+    } else if (levelBefore !== 'pro' && levelAfter === 'pro') {
       players.addItem(player.id, 'timeline', { year, event: `Levelled up: ${levelBefore.replace('_', '-')} → pro with ${org.name}` });
       levelLines.push([`⬆️ Academy/pro level reached with ${org.name}. Your grassroots journey got you here.`, `${player.name} reached academy/pro level with ${org.name}.`]);
     }
@@ -345,7 +346,7 @@ export function registerSigning(rawCtx) {
       if (!clubSetup.squad.has(org.id, player.id)) clubSetup.squad.create({ id: nextId('sq'), orgId: org.id, playerId: player.id, name: String(player.name ?? 'Player').slice(0, CLUB_SETUP_LIMITS.name), position: player.position ?? null, source: 'signing', addedAt: ts });
     }
     // `under_contract` means a real contract was executed (M23_P7_CONTRACT_STATUS_SEMANTICS.md): written here and nowhere else for a recruitment signing.
-    players.update(player.id, { contractStatus: 'under_contract', availability: 'not_seeking' });
+    players.update(player.id, (d) => { d.contractStatus = 'under_contract'; d.availability = 'not_seeking'; });
     players.addItem(player.id, 'timeline', { year, event: pkg ? `Signed with ${org.name} — signing completed in ScoutBox` : `Signed by ${org.name} — discovered on ScoutBox` });
     const effects = () => {
       safe('refreshJourneyBadges', () => refreshJourneyBadges?.(player));

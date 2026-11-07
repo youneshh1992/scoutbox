@@ -326,13 +326,13 @@ test('player deletion revokes the pairing code inside the deletion unit: a failu
   const del = (fault) => L.store.unitOfWork(() => {
     L.layer.sessions.revokeFor('player', 'pl-child1');
     L.codes.revokePairingCodesFor('pl-child1');
-    L.layer.players.remove('pl-child1');
+    L.layer.players.erase('pl-child1'); // S14h: the account deletion (the row stays as the retained record)
     if (fault) L.store.failCommitOfOpenTransaction();
   });
   assert.throws(() => del(true), /FOREIGN KEY constraint failed/);
-  assert.equal(rowsOf(dir, 'pairing_codes').length, 1, 'the code survived the failed deletion'); assert.ok(rowsOf(dir, 'players').some((p) => p.id === 'pl-child1'));
+  assert.equal(rowsOf(dir, 'pairing_codes').length, 1, 'the code survived the failed deletion'); assert.ok(rowsOf(dir, 'players').some((p) => p.id === 'pl-child1' && p.deleted_at === null));
   del(false);
-  assert.equal(rowsOf(dir, 'pairing_codes').length, 0); assert.equal(rowsOf(dir, 'players').some((p) => p.id === 'pl-child1'), false);
+  assert.equal(rowsOf(dir, 'pairing_codes').length, 0); assert.equal(rowsOf(dir, 'players').some((p) => p.id === 'pl-child1' && p.deleted_at === null), false);
   L.close(); rm(dir);
 });
 

@@ -9,7 +9,7 @@
 // a position, foot, availability or age group outside the vocabulary, a newDays that is not a whole number of days.
 // An empty or blank string, `false` or null means "no filter", as the apps send it.
 import { SAVED_SEARCH_FILTERS, SEARCH_AGE_GROUPS, OPERATIONS_LIMITS } from '../../repositories/operations.mjs';
-import { PLAYER_POSITIONS, PLAYER_FEET, PLAYER_AVAILABILITY } from '../../repositories/identityMapping.mjs';
+import { PLAYER_POSITIONS, PLAYER_FEET, PLAYER_AVAILABILITY } from '../../repositories/identity.mjs';
 
 const L = OPERATIONS_LIMITS;
 const unset = (v) => v === undefined || v === null || v === false || (typeof v === 'string' && !v.trim()); // an empty or blank box: no filter

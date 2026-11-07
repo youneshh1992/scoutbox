@@ -23,7 +23,7 @@ const REF_FIELDS = Object.freeze(['segmentId', 'trialSessionId', 'boxSessionId',
 const nonEmptyText = (v) => typeof v === 'string' && v.trim().length > 0;
 export function registerScouting(ctx) {
   const {
-    db, byId, scoutingReads, users, nextId, persistNow, notify, ledgerAppend, broadcast, findPlayer,
+    db, byId, players, scoutingReads, users, nextId, persistNow, notify, ledgerAppend, broadcast, findPlayer,
     orgRouter, playerRouter, guardianRouter,
     orgCanSee, paginate, audit, isLead, requireLead, moderateOrRefuse, isAdult,
     playerViewForOrg, revokeOrgUserAccess, guardianOwnsChild,
@@ -876,7 +876,7 @@ export function registerScouting(ctx) {
     // S9c: `onSquad` is the squad only; a player the club already shadows is `shadowed`.
     const onSquad = new Set(scoutingReads.squad.playerIds(req.org.id));
     const shadowed = new Set(scoutingReads.shadow.forOrg(req.org.id).map((s) => s.playerId));
-    const candidates = db.players
+    const candidates = players.visibleCandidates(req.org)
       .map((p) => ({ p, view: playerViewForOrg(p, req.org) }))
       .filter((x) => x.view) // the wall, the radius, the blocks — same as search
       .map(({ p, view }) => {

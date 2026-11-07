@@ -42,7 +42,7 @@ function syntheticSnapshot({ orgUserId = 'usr-9001' } = {}) {
       { id: 'org-bad', name: 'Broken Level', type: 'club', level: 'agent', plan: 'Pro', country: 'GB' },
     ],
     guardians: [
-      { id: 'gd-1', name: 'Guardian One', email: 'one@example.com', password: null, emailVerified: true, emailCode: '123456', idVerified: true, disclaimerAccepted: true, childIds: ['pl-minor', 'pl-gone'], notificationPrefs: { quietStart: '21:00', quietEnd: '07:00', schoolHoursMute: true, timezone: 'Europe/London' } },
+      { id: 'gd-1', name: 'Guardian One', email: 'one@example.com', password: null, emailVerified: true, emailCodeHash: 'a'.repeat(64), idVerified: true, disclaimerAccepted: true, childIds: ['pl-minor', 'pl-gone'], notificationPrefs: { quietStart: '21:00', quietEnd: '07:00', schoolHoursMute: true, timezone: 'Europe/London' } },
       { id: 'gd-2', name: 'Guardian Two', email: 'two@example.com', coGuardianOf: 'gd-1', childIds: ['pl-minor'] },
       { id: 'gd-dup', name: 'Guardian Dup', email: 'ONE@example.com', childIds: [] },
       { id: 'gd-3', name: 'Guardian Three', email: 'three@example.com', coGuardianOf: 'gd-missing', childIds: [] },
@@ -101,6 +101,14 @@ test('constraints: CHECKs refuse values the code never writes', () => {
   assert.throws(() => player({ dob: '2000-1-1' }), /CHECK/);
   assert.throws(() => player({ availability: 'maybe' }), /CHECK/);
   assert.throws(() => s.prepare("INSERT INTO players (id, name, birth_date, country, height_cm) VALUES ('p2', 'P', '2000-01-01', 'GB', 'tall')").run(), /cannot store TEXT value in INTEGER column/, 'STRICT refuses text in an INTEGER column');
+  // S14h: lengths and ranges.
+  assert.throws(() => s.prepare("INSERT INTO players (id, name, birth_date, country) VALUES ('p3', ?, '2000-01-01', 'GB')").run('N'.repeat(121)), /CHECK/, 'a name over 120 characters');
+  assert.throws(() => s.prepare("INSERT INTO players (id, name, birth_date, country, height_cm) VALUES ('p3', 'P', '2000-01-01', 'GB', 400)").run(), /CHECK/, 'a height out of range');
+  assert.throws(() => s.prepare("INSERT INTO players (id, name, birth_date, country, stats_pass_completion_pct) VALUES ('p3', 'P', '2000-01-01', 'GB', 120)").run(), /CHECK/, 'a percentage over 100');
+  assert.throws(() => s.prepare("INSERT INTO players (id, name, birth_date, country, prefs_quiet_start) VALUES ('p3', 'P', '2000-01-01', 'GB', '9pm')").run(), /CHECK/, 'quiet hours not HH:MM');
+  assert.throws(() => s.prepare("INSERT INTO players (id, name, birth_date, country, city) VALUES ('p3', 'P', '2000-01-01', 'GB', '')").run(), /CHECK/, 'an empty city is NULL');
+  assert.equal(s.prepare("SELECT COUNT(*) AS n FROM pragma_table_info('players') WHERE name = 'facets_json'").get().n, 0, 'no facet storage (S14h)');
+  assert.equal(s.prepare("SELECT COUNT(*) AS n FROM pragma_table_info('guardians') WHERE name = 'facets_json'").get().n, 0, 'no facet storage (S14h)');
   const session = (over) => s.prepare("INSERT INTO sessions (token_hash, sid, kind, ref_id, org_user_id, created_at, expires_at) VALUES (@h, @sid, @kind, 'r', @user, 1, 2)").run({ h: 'h', sid: 's', kind: 'player', user: null, ...over });
   assert.throws(() => session({ kind: 'admin' }), /CHECK/);
   assert.throws(() => session({ kind: 'org' }), /CHECK/, 'an org session must name its staff member');
@@ -118,15 +126,17 @@ test('foreign keys are enforced and cascade the way the model owns its rows', ()
   assert.throws(() => s.prepare("INSERT INTO players (id, name, birth_date, country, guardian_id) VALUES ('p', 'P', '2010-01-01', 'GB', 'gd-none')").run(), /FOREIGN KEY/);
   s.prepare("INSERT INTO guardians (id, name, email) VALUES ('g', 'G', 'g@example.com')").run();
   s.prepare("INSERT INTO players (id, name, birth_date, country, guardian_id) VALUES ('p', 'P', '2010-01-01', 'GB', 'g')").run();
-  assert.throws(() => s.prepare("INSERT INTO guardian_children (guardian_id, player_id) VALUES ('g', 'p-none')").run(), /FOREIGN KEY/);
+  assert.throws(() => s.prepare("INSERT INTO guardian_children (guardian_id, player_id, role) VALUES ('g', 'p-none', 'co')").run(), /FOREIGN KEY/);
   s.prepare("INSERT INTO guardian_children (guardian_id, player_id, role) VALUES ('g', 'p', 'primary')").run();
   assert.throws(() => s.prepare("INSERT INTO sessions (token_hash, sid, kind, ref_id, org_user_id, created_at, expires_at) VALUES ('h', 's', 'org', 'org-a', 'usr-none', 1, 2)").run(), /FOREIGN KEY/);
   seedOrgUser(s, 'usr-1');
   s.prepare("INSERT INTO sessions (token_hash, sid, kind, ref_id, org_user_id, created_at, expires_at) VALUES ('h', 's', 'org', 'org-a', 'usr-1', 1, 2)").run();
-  // Deleting the guardian: the child link goes, the player stays and loses its guardian pointer.
-  s.prepare("DELETE FROM guardians WHERE id = 'g'").run();
-  assert.equal(s.prepare('SELECT COUNT(*) AS n FROM guardian_children').get().n, 0);
-  assert.equal(s.prepare("SELECT guardian_id FROM players WHERE id = 'p'").get().guardian_id, null);
+  // S14h: a guardian with a child is never deleted from under it (RESTRICT), nor a player with a link; one primary per player.
+  assert.throws(() => s.prepare("DELETE FROM guardians WHERE id = 'g'").run(), /FOREIGN KEY/);
+  assert.throws(() => s.prepare("DELETE FROM players WHERE id = 'p'").run(), /FOREIGN KEY/);
+  s.prepare("INSERT INTO guardians (id, name, email) VALUES ('g2', 'G2', 'g2@example.com')").run();
+  assert.throws(() => s.prepare("INSERT INTO guardian_children (guardian_id, player_id, role) VALUES ('g2', 'p', 'primary')").run(), /UNIQUE/, 'one primary link per player');
+  s.prepare("INSERT INTO guardian_children (guardian_id, player_id, role) VALUES ('g2', 'p', 'co')").run();
   // Deleting the staff member takes their sessions with them.
   s.prepare("DELETE FROM org_users WHERE id = 'usr-1'").run();
   assert.equal(s.prepare('SELECT COUNT(*) AS n FROM sessions').get().n, 0);
@@ -151,7 +161,7 @@ test('a failing transaction leaves nothing behind', () => {
 // from both collections, so a snapshot carries both or neither.
 const PLAYER_ADULT = () => ({ id: 'pl-adult', name: 'Adult Player', dob: '2000-01-01', country: 'GB', city: 'London', position: 'ST', foot: 'right', heightCm: 180, weightKg: 75, stats: { appearances: 20, goals: 9, assists: 3, paceKmh: 33.4, passCompletionPct: 81, duelSuccessPct: 63 }, academyPlus: true, availability: 'available_now', contractStatus: 'free_agent', identityVerified: true, guardianId: null, level: 'semi_pro', location: { lat: 51.5, lng: -0.1 }, medical: { shared: true, records: [], conditionStatus: 'fully_fit' }, notificationPrefs: { quietStart: '22:00', quietEnd: '07:00', schoolHoursMute: null, timezone: null }, programme: { track: 'ST', startedAt: 1_700_000_000_000, completed: [] }, badges: ['Finisher'], createdAt: 1_690_000_000_000, password: 'scrypt$aa$bb' });
 const PLAYER_MINOR = (guardianId = 'gd-1') => ({ id: 'pl-minor', name: 'Minor Player', dob: '2011-06-15', country: 'GB', city: 'London', position: 'CM', foot: 'left', guardianId, stats: null, medical: { shared: false, records: [{ id: 'md-1', type: 'clearance', title: 'ok', date: '2026-01-01', cleared: true }], conditionStatus: 'unknown' }, location: null, createdAt: 1_695_000_000_000 });
-const GUARDIAN_1 = () => ({ id: 'gd-1', name: 'Guardian One', email: 'one@example.com', password: null, emailVerified: true, emailCode: '123456', idVerified: true, disclaimerAccepted: true, childIds: ['pl-minor'], notificationPrefs: { quietStart: '21:00', quietEnd: '07:00', schoolHoursMute: true, timezone: 'Europe/London' } });
+const GUARDIAN_1 = () => ({ id: 'gd-1', name: 'Guardian One', email: 'one@example.com', password: null, emailVerified: true, emailCodeHash: 'a'.repeat(64), idVerified: true, disclaimerAccepted: true, childIds: ['pl-minor'], notificationPrefs: { quietStart: '21:00', quietEnd: '07:00', schoolHoursMute: true, timezone: 'Europe/London' } });
 const GUARDIAN_2 = () => ({ id: 'gd-2', name: 'Guardian Two', email: 'two@example.com', coGuardianOf: 'gd-1', childIds: ['pl-minor'] });
 /** A consistent synthetic snapshot: two players, a primary and a co-guardian, three organisations, one staff member. */
 function cleanSnapshot() {
@@ -196,8 +206,8 @@ test('identity snapshot (tool mode): a tool reads players and guardians from the
   const db2 = {};
   const layer2 = attachDataLayer({ db: db2, seed: { players: [PLAYER_ADULT()], guardians: [GUARDIAN_1(), GUARDIAN_2()] }, store: again, nextId, sessionTtlMs: TTL, now: () => NOW });
   assert.deepEqual(layer2.boot.identity, { engine: 'sqlite', players: 3, guardians: 2, links: 2, imported: 0 });
-  assert.equal(db2.players.find((p) => p.id === 'pl-adult').name, 'Adult Renamed'); assert.deepEqual([...db2.players.find((p) => p.id === 'pl-adult').badges], ['Finisher', 'Captain']);
-  assert.equal(db2.guardians.find((g) => g.id === 'gd-2'), undefined, 'the stale in-memory guardian was not resurrected');
+  assert.equal(layer2.players.byId('pl-adult').name, 'Adult Renamed'); assert.deepEqual([...layer2.players.byId('pl-adult').badges], ['Finisher', 'Captain']);
+  assert.equal(layer2.guardians.byId('gd-2'), null, 'the stale in-memory guardian was not resurrected');
   again.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
 });
 
@@ -219,12 +229,12 @@ test('identity snapshot (tool mode): a malformed collection, a refused record, a
   refuse('guardians null', (d) => { d.guardians = null; }, /guardians: the snapshot collection must be an array/);
   refuse('players without guardians', (d) => { delete d.guardians; }, /players: a snapshot that carries players must carry guardians too/);
   refuse('guardians without players', (d) => { delete d.players; }, /guardians: a snapshot that carries guardians must carry players too/);
-  refuse('a refused record (foot)', (d) => { d.players[0].foot = 'both'; }, /identity snapshot: 1 record\(s\) or relationship\(s\) were refused \(players pl-adult: foot/);
-  refuse('a refused record (duplicate e-mail)', (d) => { d.guardians.push({ id: 'gd-dup', name: 'Dup', email: 'ONE@example.com', childIds: [] }); }, /guardians gd-1: shares its e-mail/);
-  refuse('a dangling guardianId', (d) => { d.players[1].guardianId = 'gd-missing'; }, /players pl-minor: guardianId names no record \(gd-missing\)/);
-  refuse('a removed guardian still referenced', (d) => { d.guardians = d.guardians.filter((g) => g.id !== 'gd-1'); }, /players pl-minor: guardianId names no record \(gd-1\)/);
-  refuse('a childIds entry naming nobody', (d) => { d.guardians[0].childIds.push('pl-ghost'); }, /guardians gd-1: childIds names no record \(pl-ghost\)/);
-  refuse('a legacy minor without any guardian link (the Founder\'s decision)', (d) => { d.players.push({ id: 'pl-orphan', name: 'Orphan', dob: '2013-04-04', country: 'GB', guardianId: null, medical: { shared: false, records: [], conditionStatus: 'unknown' } }); }, /players pl-orphan: a minor on the evaluation date with no guardian link at all .*Founder's decision/);
+  refuse('a refused record (foot)', (d) => { d.players[0].foot = 'both'; }, /identity snapshot: 1 record\(s\) or relationship\(s\) refused — players pl-adult: foot must be one of/);
+  refuse('a refused record (duplicate e-mail)', (d) => { d.guardians.push({ id: 'gd-dup', name: 'Dup', email: 'ONE@example.com', childIds: [] }); }, /guardians gd-dup: the e-mail is already used by guardian gd-1/);
+  refuse('a dangling guardianId', (d) => { d.players[1].guardianId = 'gd-missing'; }, /players pl-minor: guardianId names guardian gd-missing, which the snapshot does not hold/);
+  refuse('a removed guardian still referenced', (d) => { d.guardians = d.guardians.filter((g) => g.id !== 'gd-1'); }, /players pl-minor: guardianId names guardian gd-1, which the snapshot does not hold/);
+  refuse('a childIds entry naming nobody', (d) => { d.guardians[0].childIds.push('pl-ghost'); }, /guardians gd-1: childIds names player pl-ghost, which the snapshot does not hold/);
+  refuse('a legacy minor without any guardian link (the Founder\'s decision)', (d) => { d.players.push({ id: 'pl-orphan', name: 'Orphan', dob: '2013-04-04', country: 'GB', guardianId: null, medical: { shared: false, records: [], conditionStatus: 'unknown' } }); }, /players pl-orphan: a minor without a primary guardian/);
   // Partial snapshot: neither collection → the identity tables are untouched (rewritten in S14a: the other collection written alongside was a blob).
   { const snap = tool.load(); delete snap.db.players; delete snap.db.guardians; tool.save(snap); }
   assert.equal(identityState(tool.sqlite), before, 'the identity tables are exactly as before');
@@ -259,7 +269,7 @@ test('identity snapshot (tool mode): a VALID full replacement is accepted whatev
     byId(x.players, 'pl-minor').guardianId = 'gd-new';
   });
   assert.deepEqual(d.guardians.map((g) => [g.id, g.email, g.coGuardianOf ?? null, [...g.childIds]]).sort(), [['gd-2', 'two@example.com', 'gd-new', ['pl-minor']], ['gd-new', 'one@example.com', null, ['pl-minor']]]);
-  assert.equal(byId(d.guardians, 'gd-new').emailCode, '123456', 'the replacement keeps the facet of the record it replaced (as given)');
+  assert.equal(byId(d.guardians, 'gd-new').emailCodeHash, 'a'.repeat(64), 'the replacement keeps the e-mail code hash of the record it replaced (as given)');
   assert.equal(byId(d.players, 'pl-minor').guardianId, 'gd-new'); assert.equal(byId(d.players, 'pl-minor').medical.records[0].id, 'md-1', 'the moved player keeps its facets');
   assert.deepEqual([...byId(d.players, 'pl-adult').badges], ['Finisher']);
   assert.deepEqual(links(), [{ guardian_id: 'gd-2', player_id: 'pl-minor', role: 'co' }, { guardian_id: 'gd-new', player_id: 'pl-minor', role: 'primary' }]);
@@ -286,9 +296,9 @@ test('identity snapshot (tool mode): a VALID full replacement is accepted whatev
     assert.equal(identityState(tool.sqlite), before, `${label}: nothing changed`);
     assert.equal(dump(tool.sqlite), all, `${label}: nothing was written anywhere`); // rewritten in S14a: it compared the save sequence
   };
-  refuse('a duplicate final e-mail (case-insensitive) between a retained and a new guardian', (x) => { x.guardians.push({ id: 'gd-dup', name: 'Dup', email: 'ONE@example.com', childIds: [] }); }, /shares its e-mail/);
-  refuse('a removed guardian still referenced by a retained player', (x) => { x.guardians = x.guardians.filter((g) => g.id !== 'gd-new'); x.players.reverse(); }, /guardianId names no record \(gd-new\)/);
-  refuse('a legacy minor without any guardian link (the Founder\'s decision)', (x) => { x.players.push({ id: 'pl-orphan', name: 'Orphan', dob: '2013-04-04', country: 'GB', guardianId: null, medical: { shared: false, records: [], conditionStatus: 'unknown' } }); }, /players pl-orphan: a minor on the evaluation date with no guardian link at all .*Founder's decision/);
+  refuse('a duplicate final e-mail (case-insensitive) between a retained and a new guardian', (x) => { x.guardians.push({ id: 'gd-dup', name: 'Dup', email: 'ONE@example.com', childIds: [] }); }, /the e-mail is already used by guardian/);
+  refuse('a removed guardian still referenced by a retained player', (x) => { x.guardians = x.guardians.filter((g) => g.id !== 'gd-new'); x.players.reverse(); }, /guardianId names guardian gd-new, which the snapshot does not hold/);
+  refuse('a legacy minor without any guardian link (the Founder\'s decision)', (x) => { x.players.push({ id: 'pl-orphan', name: 'Orphan', dob: '2013-04-04', country: 'GB', guardianId: null, medical: { shared: false, records: [], conditionStatus: 'unknown' } }); }, /players pl-orphan: a minor without a primary guardian/);
   // 5. A failure in the middle of the rewrite (the second player row) leaves everything as it was; the same write then succeeds.
   const change = (x) => { byId(x.players, 'pl-adult').name = 'Adult Twice'; const a = byId(x.guardians, 'gd-new'); const b = byId(x.guardians, 'gd-2'); [a.email, b.email] = [b.email, a.email]; };
   { const probe = failRunAt(tool.sqlite, (sql) => /^INSERT INTO players/.test(sql), 2, 'injected failure writing the second player row');
@@ -310,7 +320,7 @@ test('identity snapshot (tool mode): a VALID full replacement is accepted whatev
   const db2 = {};
   const layer = attachDataLayer({ db: db2, store: again, nextId, sessionTtlMs: TTL, now: () => NOW, warn: () => {} });
   assert.deepEqual(layer.boot.identity, { engine: 'sqlite', players: 2, guardians: 3, links: 3, imported: 0 });
-  assert.equal(db2.players.find((p) => p.id === 'pl-minor').guardianId, 'gd-new'); assert.deepEqual([...db2.guardians.find((g) => g.id === 'gd-new').childIds], ['pl-minor']);
+  assert.equal(layer.players.byId('pl-minor').guardianId, 'gd-new'); assert.deepEqual([...layer.guardians.byId('gd-new').childIds], ['pl-minor']);
   again.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
 });
 
@@ -319,7 +329,7 @@ test('identity snapshot: before the cutover record exists the tables are neither
   runDataMigrations(s, DATA_MIGRATIONS.filter((m) => !/^00(0[56789]|1[0-9]|2[0-9]|3[0-9])_/.test(m.id))); // S6a: 0008 needs 0005 too; S7a: 0009 needs 0008; S7b: 0010 needs 0009; S7c: 0011 needs 0010; S7d: 0012 needs 0011; S6b: 0013 needs 0012; S4b-R: 0014 needs 0013; S8a: 0015 needs 0014; S8b: 0016 needs 0015; S8c: 0017 needs 0016; and so on: each later step needs its predecessor
   assert.equal(IDENTITY_SNAPSHOT.read(s), null, 'nothing to read from the tables before the cutover');
   assert.equal(transaction(s, () => IDENTITY_SNAPSHOT.replace(s, { players: [PLAYER_ADULT()], guardians: [] }, { now: NOW })), false, 'nothing is written to the tables before the cutover');
-  assert.equal(s.prepare('SELECT COUNT(*) AS n FROM players').get().n, 0);
+  assert.equal(s.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE name = 'players'").get().n, 0, 'S14h: there is no players table before 0005');
   assert.equal(IDENTITY_SNAPSHOT.replace(s, { players: [], guardians: [] }), false, 'before the cutover the answer is false even outside a transaction (nothing is touched)');
   // After the cutover (here: a first installation, nothing saved) the dispatcher writes only inside the caller's transaction.
   runDataMigrations(s, DATA_MIGRATIONS, { now: NOW });

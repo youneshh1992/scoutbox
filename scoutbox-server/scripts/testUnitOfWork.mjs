@@ -62,7 +62,7 @@ function operation(t, { failLate = false, afterCommit = null } = {}) {
   const result = t.unit(() => {
     t.layer.orgs.create({ id: 'org-new', name: 'New FC', type: 'club', plan: 'Pro' });
     t.layer.orgs.update('org-pro', (d) => { d.suspended = true; });
-    t.layer.players.update('pl-1', { city: 'In the unit' });
+    t.layer.players.update('pl-1', (d) => { d.city = 'In the unit'; });
     token = t.layer.sessions.create('player', 'pl-1').token;
     if (afterCommit) t.store.afterCommit(afterCommit);
     // Rewritten in S14a: the failure used to be an unserialisable blob; now the work fails after every write.
@@ -80,11 +80,11 @@ function assertDatabaseUntouched(t) {
   assert.equal(t.raw("SELECT verified FROM orgs WHERE id = 'org-grass'").verified, 1, 'the unrelated write made before the unit is kept');
   assert.equal(hasBlobTable(t.store.sqlite), false, 'rewritten in S14a: there is no blob table');
 }
-/** Memory after a failure: the staged participant's held record restored in place; the organisations read the table. */
+/** Reads after a failure (S14h: no repository keeps memory; a held record is a frozen copy): every read sees the committed rows. */
 function assertMemoryRestored(t, refs) {
   const { p1 } = refs;
-  assert.equal(t.layer.players.byId('pl-1'), p1, 'the same record object');
-  assert.equal(p1.city, 'Start', 'the player write is undone on the held record');
+  assert.ok(Object.isFrozen(p1), 'a held record is a frozen copy');
+  assert.equal(t.layer.players.byId('pl-1').city, 'Start', 'a read after the rollback sees the committed row');
   assert.equal(t.layer.orgs.byId('org-new'), null); assert.equal(t.layer.orgs.count(), 3);
   assert.equal(t.layer.orgs.byId('org-pro').suspended, false, 'a read after the rollback sees the committed row');
   assert.equal(t.layer.orgs.byId('org-grass').verified, true);
@@ -128,12 +128,12 @@ await test('unit of work: a row insert, a row update, a staged player write and 
   assert.equal(result, 'done'); assert.equal(t.store.sqlite.isTransaction, false);
   assertOperationPersisted(t, token);
   assert.deepEqual(calls, [false], 'the callback ran once, outside the transaction');
-  assert.equal(t.layer.orgs.byId('org-pro').suspended, true); assert.equal(refs.p1.city, 'In the unit');
+  assert.equal(t.layer.orgs.byId('org-pro').suspended, true); assert.equal(t.layer.players.byId('pl-1').city, 'In the unit');
   t.store.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
 });
 
 // ------------------------------------------------------------- failure after the writes
-await test('unit of work: a failure after the writes rolls the database back AND restores memory (held records); an unrelated earlier write survives; an ordinary save persists no fragment; an explicit retry persists everything', () => {
+await test('unit of work: a failure after the writes rolls the database back and every read after it sees the committed rows; an unrelated earlier write survives; an ordinary save persists no fragment; an explicit retry persists everything', () => {
   const dir = tempDir('uow-fail'); const t = boot(dir);
   const refs = prepare(t);
   let err = null;
@@ -211,7 +211,7 @@ await test('unit of work: a nested unit joins the enclosing one (an inner failur
   try {
     t.unit(() => {
       t.layer.orgs.create({ id: 'org-outer', name: 'Outer', type: 'club', plan: 'Pro' });
-      t.unit(() => { t.layer.players.update('pl-1', { city: 'Inner' }); throw new Error('inner failed'); });
+      t.unit(() => { t.layer.players.update('pl-1', (d) => { d.city = 'Inner'; }); throw new Error('inner failed'); });
     });
   } catch (e) { err = e; }
   assert.match(err.message, /inner failed/); assert.equal(err.unitOfWork, 'rolled_back');
@@ -219,7 +219,7 @@ await test('unit of work: a nested unit joins the enclosing one (an inner failur
   assert.equal(t.raw("SELECT COUNT(*) AS n FROM orgs WHERE id = 'org-outer'").n, 0);
   // save() inside a unit does not open a second transaction; what the unit wrote lands with it.
   // (Rewritten in S14a: the save revision and the absorbed blob are gone; the BEGINs are counted instead.)
-  assert.equal(begins(t, () => t.unit(() => { t.layer.players.update('pl-1', { city: 'Absorbed' }); t.store.save(); t.layer.orgs.create({ id: 'org-abs', name: 'Abs', type: 'club', plan: 'Pro' }); })), 1, 'exactly one transaction');
+  assert.equal(begins(t, () => t.unit(() => { t.layer.players.update('pl-1', (d) => { d.city = 'Absorbed'; }); t.store.save(); t.layer.orgs.create({ id: 'org-abs', name: 'Abs', type: 'club', plan: 'Pro' }); })), 1, 'exactly one transaction');
   assert.equal(t.raw("SELECT city FROM players WHERE id = 'pl-1'").city, 'Absorbed'); assert.equal(t.raw("SELECT COUNT(*) AS n FROM orgs WHERE id = 'org-abs'").n, 1);
   // Asynchronous work: a SQLite transaction must never span an await.
   err = null;
@@ -302,7 +302,7 @@ await test('a failure at BEGIN leaves no unit open — the work never runs, no t
   assert.equal(invoked, 0, 'the work must not run when the transaction could not start');
   assert.equal(t.store.inUnitOfWork(), false, 'no fictitious unit remains active');
   assert.equal(t.store.unit.active(), false); assert.equal(t.store.sqlite.isTransaction, false);
-  t.layer.players.update('pl-1', { city: 'Ordinary edit' });
+  t.layer.players.update('pl-1', (d) => { d.city = 'Ordinary edit'; });
   t.store.save();
   assert.equal(t.raw("SELECT city FROM players WHERE id = 'pl-1'").city, 'Ordinary edit', 'a later write is real, not absorbed by a phantom unit');
   t.unit(() => { t.layer.orgs.create({ id: 'org-after-begin', name: 'After', type: 'club', plan: 'Pro' }); });
@@ -312,7 +312,7 @@ await test('a failure at BEGIN leaves no unit open — the work never runs, no t
   let restoreCalls = 0;
   t.store.setSaveHook({ flush() {}, snapshotState: () => 'state', restoreState() { restoreCalls += 1; throw new Error('restore exploded'); } });
   let err = null;
-  try { t.unit(() => { t.layer.orgs.update('org-grass', (d) => { d.suspended = true; }); t.layer.players.update('pl-1', { city: 'Doomed' }); throw new Error('operation failed'); }); } catch (e) { err = e; }
+  try { t.unit(() => { t.layer.orgs.update('org-grass', (d) => { d.suspended = true; }); t.layer.players.update('pl-1', (d) => { d.city = 'Doomed'; }); throw new Error('operation failed'); }); } catch (e) { err = e; }
   assert.match(err.message, /operation failed/, 'the caller sees the operation failure');
   assert.equal(err.unitOfWork, 'rolled_back'); assert.equal(restoreCalls, 1);
   assert.ok(Array.isArray(err.unitOfWorkCleanup) && /restore exploded/.test(err.unitOfWorkCleanup.join(' ')), 'the cleanup failure is attached to the error');
@@ -338,7 +338,7 @@ await test('a nested (joined) unit that fails poisons the whole unit even when i
       try {
         t.unit(() => {
           t.layer.orgs.create({ id: 'org-inner', name: 'Inner', type: 'club', plan: 'Pro' });
-          t.layer.players.update('pl-1', { city: 'Inner' });
+          t.layer.players.update('pl-1', (d) => { d.city = 'Inner'; });
           t.store.afterCommit(() => { events += 1; });
           throw new Error('inner failure');
         });
@@ -410,7 +410,7 @@ await test('an async function is refused BEFORE it is invoked (top-level and nes
     err = null;
     try {
       t.unit(() => {
-        t.layer.players.update('pl-1', { city: 'Sync part' });
+        t.layer.players.update('pl-1', (d) => { d.city = 'Sync part'; });
         return (async () => { await tick(); continuation += 1; throw new Error('continuation rejected'); })();
       });
     } catch (e) { err = e; }
@@ -493,7 +493,7 @@ await test('participant API: store.unit.join runs an operation inside the open u
   t.store.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
 });
 
-test('cost (migration.md §4.3.1): a player write — standalone, inside a unit of work with an organisation update, and the ordinary save after it — runs exactly as many SQL statements with 2,000 players as with 20, and a rolled-back unit still restores the record it touched', () => {
+test('cost (migration.md §4.3.1): a player write — standalone, inside a unit of work with an organisation update, and the ordinary save after it — runs exactly as many SQL statements with 2,000 players as with 20, and a rolled-back unit leaves the row as it was', () => {
   // Every statement the process runs is counted: StatementSync run / get / all / iterate and DatabaseSync exec.
   const counted = { on: false, n: 0 };
   const restore = [];
@@ -507,19 +507,19 @@ test('cost (migration.md §4.3.1): a player write — standalone, inside a unit 
   try {
     const statementsFor = (n) => {
       const dir = tempDir(`cost-${n}`);
-      const seed = { ...fixtureSeed(), players: Array.from({ length: n }, (_, i) => ({ id: `pl-${i}`, name: `Player ${i}`, dob: '2000-01-01', country: 'GB', city: 'Start', trialReports: [] })) }; // the seed's shape: a trialReports list, derived from the trials
+      const seed = { ...fixtureSeed(), players: Array.from({ length: n }, (_, i) => ({ id: `pl-${i}`, name: `Player ${i}`, dob: '2000-01-01', country: 'GB', city: 'Start' })) }; // S14h: the trials own the reports; a seed player carries none
       const t = boot(dir, seed);
       const players = t.layer.players;
       counted.n = 0; counted.on = true;
-      players.update('pl-7', { city: 'Standalone' });
-      t.unit(() => { players.update('pl-7', { city: 'In a unit' }); t.layer.orgs.update('org-pro', (d) => { d.suspended = true; }); }); // (S14a: the blob edit that stood here is gone)
+      players.update('pl-7', (d) => { d.city = 'Standalone'; });
+      t.unit(() => { players.update('pl-7', (d) => { d.city = 'In a unit'; }); t.layer.orgs.update('org-pro', (d) => { d.suspended = true; }); }); // (S14a: the blob edit that stood here is gone)
       t.store.save();
       counted.on = false;
       const statements = counted.n;
-      // A unit that fails after the write: the held record is restored in place, the row is unchanged.
+      // A unit that fails after the write: the row is unchanged (S14h: there is no memory to restore; a held record is a frozen copy).
       const held = players.byId('pl-7');
-      assert.throws(() => t.unit(() => { players.update('pl-7', { city: 'Rolled back' }); throw new Error('late'); }), /late/);
-      assert.equal(held.city, 'In a unit'); assert.equal(players.byId('pl-7'), held); assert.equal(t.raw("SELECT city FROM players WHERE id = 'pl-7'").city, 'In a unit');
+      assert.throws(() => t.unit(() => { players.update('pl-7', (d) => { d.city = 'Rolled back'; }); throw new Error('late'); }), /late/);
+      assert.equal(held.city, 'In a unit'); assert.ok(Object.isFrozen(held)); assert.equal(players.byId('pl-7').city, 'In a unit'); assert.equal(t.raw("SELECT city FROM players WHERE id = 'pl-7'").city, 'In a unit');
       assert.equal(players.byId(`pl-${n - 1}`).city, 'Start', 'an untouched player is unchanged');
       t.store.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
       return statements;
@@ -532,7 +532,7 @@ test('cost (migration.md §4.3.1): a player write — standalone, inside a unit 
   }
 });
 
-test('cost (migration.md §4.3.1, S14g): an empty unit of work runs no statement on the organisations, however many there are', () => {
+test('cost (migration.md §4.3.1, S14g, S14h): an empty unit of work runs no statement on the organisations, the players or the guardians, however many there are', () => {
   const sqlOf = [];
   const restore = [];
   for (const [proto, names] of [[StatementSync.prototype, ['run', 'get', 'all', 'iterate']], [DatabaseSync.prototype, ['exec']]]) {
@@ -545,7 +545,7 @@ test('cost (migration.md §4.3.1, S14g): an empty unit of work runs no statement
   try {
     const emptyUnit = (n) => {
       const dir = tempDir(`empty-${n}`);
-      const seed = { ...fixtureSeed(), orgs: [...ORGS(), ...Array.from({ length: n }, (_, i) => ({ id: `org-c${i}`, name: `Club ${i}`, type: 'club', level: 'grassroots', plan: 'Grassroots' }))] };
+      const seed = { ...fixtureSeed(), orgs: [...ORGS(), ...Array.from({ length: n }, (_, i) => ({ id: `org-c${i}`, name: `Club ${i}`, type: 'club', level: 'grassroots', plan: 'Grassroots' }))], players: [...(fixtureSeed().players ?? []), ...Array.from({ length: n }, (_, i) => ({ id: `pl-c${i}`, name: `Player ${i}`, dob: '2000-01-01', country: 'GB' }))] };
       const t = boot(dir, seed);
       sqlOf.length = 0;
       t.unit(() => {});
@@ -555,6 +555,7 @@ test('cost (migration.md §4.3.1, S14g): an empty unit of work runs no statement
     };
     const few = emptyUnit(3); const many = emptyUnit(500);
     assert.ok(!many.some((q) => /\borgs\b/.test(q)), `no statement names the organisations (${many.filter((q) => /\borgs\b/.test(q)).join(' | ')})`);
+    assert.ok(!many.some((q) => /\b(players|guardians|guardian_children|player_\w+)\b/.test(q)), `no statement names the players or guardians (${many.filter((q) => /\b(players|guardians)\b/.test(q)).join(' | ')})`);
     assert.equal(many.length, few.length, `the empty unit's statements do not grow with the organisations (3: ${few.length}, 500: ${many.length})`);
   } finally {
     for (const undo of restore) undo();

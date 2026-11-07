@@ -160,17 +160,19 @@ section('F — responses are allowlists');
   neg((await j('GET', '/admin/channels')).status === 401, 'the admin audit needs the admin key');
 }
 
-section('G — names have no limit at signup: a thread keeps them shortened, never refused');
+section('G — a sign-up name is at most 120 characters (S14h); a thread keeps the whole name');
 {
-  const longName = `Synthetic ${'L'.repeat(340)}`;
+  const tooLong = await j('POST', '/auth/player/signup', { name: `Synthetic ${'L'.repeat(340)}`, dob: '2000-01-01', country: 'GB', password: 'synthetic-pass-1' });
+  neg(tooLong.status === 400 && tooLong.body?.error === 'FIELD_INVALID' && tooLong.body?.field === 'name', 'a 350-character name is refused at sign-up, naming the field (S14h)');
+  const longName = `Synthetic ${'L'.repeat(110)}`;
   const signup = await j('POST', '/auth/player/signup', { name: longName, dob: '2000-01-01', country: 'GB', password: 'synthetic-pass-1' });
-  ok(signup.status === 201, 'an adult with a 350-character name signs up');
+  ok(signup.status === 201, 'an adult with a 120-character name signs up');
   const req = await j('POST', `/org/players/${signup.body.playerId}/request`, { type: 'contact', message: 'Synthetic contact request.' }, maria);
   ok(req.status === 201, 'the club sends a contact request');
   const ans = await j('POST', `/player/requests/${req.body.requestId}/respond`, { accept: true }, signup.body.token);
   ok(ans.status === 200, 'the player can accept it (the thread opens)');
   const t = (await j('GET', '/player/channels', undefined, signup.body.token)).body[0];
-  ok(t?.playerName === longName.slice(0, 200), 'the thread keeps the name shortened to 200 characters');
+  ok(t?.playerName === longName, 'the thread keeps the whole name (a thread holds up to 200 characters)');
   ok((await j('POST', `/player/channels/${t.id}/messages`, { text: 'Synthetic reply.' }, signup.body.token)).status === 201, 'and the player can write in it');
 }
 

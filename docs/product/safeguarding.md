@@ -9,7 +9,7 @@ Rules for under-18s and guardians, blocks and reports, privacy of player data, s
 These are the product's first principles for under-18s. Everything below refines them. (Old README.md, "Deck rules enforced in code")
 
 - **Parents own every under-18 account.**
-  - Guardian ID verification and a safeguarding disclaimer are hard gates before a child profile can exist.
+  - Guardian ID verification and a safeguarding disclaimer are hard gates before a child profile can exist. The time the disclaimer was accepted is recorded with it (`disclaimerAcceptedAt`, since S14h).
   - A minor can't sign themselves up (`403 GUARDIAN_REQUIRED`).
 - **No child receives direct messages, ever.**
   - It is scout → parent, not scout → child. Contact and trial requests to a minor go to the guardian.

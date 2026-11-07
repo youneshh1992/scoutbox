@@ -1,203 +1,466 @@
 /**
- * Players and guardians — the live repositories for the core identity tables
- * (migration plan step S4a; readiness review §1, §4, §5).
+ * Players and guardians: typed tables with explicit writes (S4a, migration `0005_core_identity_live`; explicit since
+ * S14h, docs/architecture/migration.md §4.6; sql/01_identity.sql).
  *
- * LIVE since the S4a integration: `repositories/index.mjs` creates these
- * repositories at boot behind the registered migration 0005, `TABLE_BACKED`
- * lists both collections, and the blobs are never written again. The
- * registration is development work on this branch; a real-data cutover is
- * the operator's decision (OPERATIONS.md).
+ * Player record (every key always present):
+ *   { id, name, dob, country, city, position, foot, heightCm, weightKg, squadNumber, contractUntil, marketValueRange,
+ *     agentName, academyPlus, firstTeamSeeker, availability, contractStatus, level, footballCategory, identityVerified,
+ *     guardianId, createdAt,
+ *     location: null | { lat, lng },
+ *     stats: null | { appearances, goals, assists, paceKmh, passCompletionPct, duelSuccessPct, cleanSheets },
+ *     medical: { shared, conditionStatus, records: [...] },
+ *     notificationPrefs: null | { quietStart, quietEnd, schoolHoursMute, timezone },
+ *     programme: null | { track, startedAt, completed: [...] },
+ *     media, attendance, timeline, badges, drills, drillResults, activityLog, externalIds, seasonHistory,
+ *     trialReports }
+ * The lists are rows of the `player_*` tables (playerSubrecords.mjs), written only through `addItem`, `setItems` and
+ * `patchItem`; `trialReports` is the trials' reports (the recruitment tables), written nowhere here.
  *
- * Authority. A repository attaches only when the cutover record
- * `0005_core_identity_live` is in `data_migrations` — never because the
- * tables exist (the S1 shadow created tables of the same name) or hold rows —
- * and it refuses the shadow definitions outright (no `facets_json` column).
- * Initialisation is explicit state in `meta.coreIdentityInit`: `pending` only
- * for a database nothing was ever saved to, `done` otherwise; `initialize()`
- * imports the first installation's records once, atomically with the state
- * change and only when the preflight is `complete` (a refused snapshot —
- * including a legacy minor without any guardian link, by the Founder's
- * decision — writes nothing and the next boot retries); `attach()` never
- * imports: an empty authoritative domain stays empty whatever array or blob
- * the caller holds.
+ * Guardian record: { id, name, email, emailVerified, idVerified, idvReference, disclaimerAccepted, disclaimerAcceptedAt,
+ *   coGuardianOf, notificationPrefs, createdAt, childIds, coGuardians }
+ * `childIds` is the guardian's link rows (in their order); `coGuardians` is the guardians whose `co_guardian_of` names
+ * this one, as `{ id, name, email }`.
  *
- * Storage follows the S3 organisation pattern through the ONE mapping of
- * `identityMapping.mjs`: column-backed fields change only through
- * `insert`/`update`/`restore` and the link operations; since S5 the player
- * arrays (`media`, `attendance`, …, `medical.records`, `programme.completed`)
- * are rows of the `player_*` tables written only through `addItem` /
- * `setItems` / `patchItem` (and `insert` / `restore`), served read-only on the
- * record; `trialReports` is derived from the trials collection and written
- * nowhere; the guardian's `coGuardians` list is kept in `facets_json` and
- * written by `guardians.update`. Every write is explicit (S4a-E, migration.md
- * §4.3.1): the record views refuse every write — a field, a facet, a nested
- * value, `childIds`, an array or its items — and a save has nothing to find.
+ * Password and e-mail-code hashes are never on a record (`passwordHashOf`, `setPasswordHash`, `emailCodeHashOf`,
+ * `setEmailCodeHash`). Responses are allowlists.
  *
- * Relationships. `players.guardian_id` and the `primary` row of
- * `guardian_children` are written together by every link change and can no
- * longer disagree: `link(..., 'primary')` refuses a second primary,
- * `unlink`/`ageUp` clear both sides, a dangling or duplicate link is refused,
- * a new minor is created with its primary link in the same transaction (an
- * unlinked child cannot be created), and a guardian's e-mail is unique
- * case-insensitively. `childIds` on the guardian record is derived from the
- * link rows (in their order) and served read-only. Today's domain behaviour
- * is preserved where the writers survey it: `ageUp` clears the primary link
- * only (co-guardians keep listing the child, as today), `remove` is today's
- * hard delete and `restore` is the signing rollback's whole-record write.
- * None of this is a deletion or retention policy (O1 stays open).
+ * WRITES are explicit operations, each joining the open unit of work, the caller's transaction or its own: `create`,
+ * `update(id, draft => …)`, the list operations, the link operations (`link`, `unlink`, `ageUp`) and the account
+ * deletion (`erase`). READS are SQL: no mirror, no db.* view (`db.players` and `db.guardians` throw); fresh,
+ * deep-frozen records; a list decodes its players' rows in one query per table. Refusals carry a code and name the
+ * id and the field, never a value.
  *
- * Transactions. Every write operation is validated first (a refusal throws
- * before any statement and changes nothing, in or out of a unit), then runs
- * its statements and, only once they are committed, its memory bookkeeping
- * (`atomically`). Outside the store's unit of work the statements get a
- * transaction of their own (refused inside anyone else's: the bookkeeping
- * could not follow a foreign rollback) and a failure anywhere up to and
- * including COMMIT leaves SQL and memory — records, held references, link
- * arrays, indexes, views — exactly as they were; the operation is simply
- * retried. Inside a unit the operation joins it through the store's
- * `unit.join`, so a failure after a statement poisons the whole unit even when
- * the caller catches the error (the unit cannot commit the fragment), and the
- * participant's `snapshotState` / `restoreState` put back the records the unit
- * touched when it rolls back (the undo log below).
+ * Relationships. `players.guardian_id` and the `primary` row of `guardian_children` are written together and cannot
+ * disagree; a minor is created with its primary link in the same transaction (an unlinked child cannot be created);
+ * a guardian's e-mail is unique case-insensitively. `ageUp` clears the primary link only (co-guardians keep listing
+ * the player, as before).
+ *
+ * The retained record (S4b-R; the Founder's decisions: the full birth date, 12 October 2026, and the country code
+ * kept, 21 October 2026): an account deletion keeps the player's row reduced to its id, the deletion instant, the
+ * birth date and the country, with fixed placeholders in the other required columns; its lists and links are deleted
+ * in the same unit. A retained row is served by nothing that serves accounts, only by the `retained*` accessors, and
+ * its id is never created again. Not a retention policy.
+ *
+ * A first installation's players and guardians (the seed) are imported once by `initialize`, while
+ * `meta.coreIdentityInit` is `pending` (set by the migration); a snapshot save settles it.
  */
-import { readonlyView, markView } from './readonly.mjs';
-import { captureGraph, restoreGraph } from './memento.mjs';
-import { migrationApplied, transaction } from './database.mjs';
+import { transaction, migrationApplied } from './database.mjs';
 import { parseStrictDateOnly } from '../temporal.mjs';
-import { requireRuntime } from '../runtime.mjs';
-import { isAdult } from '../domain.mjs';
+import { isAdult, ADULT_AGE, GRASSROOTS_RADIUS_KM } from '../domain.mjs';
+import { pageOf } from '../domains/platform/paging.mjs';
+import { boxAround } from './grassroots.mjs';
 import {
-  playerToRow, playerFromRow, guardianToRow, guardianFromRow, validateGuardianRecord,
-  PLAYER_COLUMNS, GUARDIAN_COLUMNS, PLAYER_MIGRATED_KEYS, GUARDIAN_MIGRATED_KEYS, PLAYER_COMPOSITES,
-  PLAYER_SUBRECORD_KEYS, PLAYER_COMPOSITE_SUBRECORDS, PLAYER_DERIVED_KEYS,
-} from './identityMapping.mjs';
-import { validateCoreIdentity, writeCandidate, publicReport, playerRowFor, CORE_IDENTITY_LIVE_MIGRATION } from './identityPreflight.mjs';
-import { readTrials } from './recruitment.mjs';
-import {
-  PLAYER_SUBRECORDS_MIGRATION, subrecordsLive, SUBRECORD_KEYS, SUBRECORD_SPECS, SUBRECORD_TABLES, getSubrecords, validateSubrecordArray,
-  validatePlayerRecordWithItems as validatePlayerRecord, prepareSubrecordStatements, writeChildRows, writeArrayRows, deleteChildRows,
-  readAllChildren, countChildRows, itemRows, trialReportsFor, readPlayersWithChildren, emptyChildren, reconcileTrialReportCopy, placeSubrecords, storedItem,
+  SUBRECORD_KEYS, SUBRECORD_SPECS, PLAYER_SUBRECORD_KEYS, PLAYER_COMPOSITE_SUBRECORDS, subrecordsLive, getSubrecords,
+  validateSubrecordArray, prepareSubrecordStatements, writeChildRows, writeArrayRows, deleteChildRows, readChildren,
+  readChildrenFor, countChildRows, itemRows, storedItem, PLAYER_SUBRECORDS_MIGRATION,
 } from './playerSubrecords.mjs';
 
+export const CORE_IDENTITY_LIVE_MIGRATION = '0005_core_identity_live';
+export const PLAYER_ERASURE_MIGRATION = '0014_player_erasure';
 /** `meta` key holding the initialisation state (`pending` | `done`); absent reads as `done`. */
 export const CORE_IDENTITY_INIT_META = 'coreIdentityInit';
-/** The two collections the identity repositories own; coupled through the link rows. */
+/** The two snapshot collections the identity repositories own; coupled through the link rows. */
 export const IDENTITY_COLLECTIONS = Object.freeze(['players', 'guardians']);
-/** Composites merged sub-key by sub-key by players.update (their sub-record arrays are rows, written through addItem / setItems / patchItem). */
-export const PLAYER_SPLIT_COMPOSITES = Object.freeze(['medical', 'programme']);
-/**
- * The fields every player record has from its creation (players.insert and the first installation), so every reader
- * sees one shape. A field the record already carries, null included, is kept.
- */
-export const PLAYER_CREATION_DEFAULTS = Object.freeze({ firstTeamSeeker: false, notificationPrefs: null, programme: null });
-const withCreationDefaults = (rec) => { for (const [k, v] of Object.entries(PLAYER_CREATION_DEFAULTS)) if (!Object.hasOwn(rec, k)) Object.defineProperty(rec, k, { value: v, writable: true, enumerable: true, configurable: true }); return rec; };
-/** The guardian fields kept in `facets_json` that guardians.update writes (the primary's list of co-guardians). */
-export const GUARDIAN_FACET_KEYS = Object.freeze(['coGuardians']);
-
-const isPlainObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
-const hasOwn = (o, k) => Object.hasOwn(o, k);
-const setOwn = (o, k, v) => { Object.defineProperty(o, k, { value: v, writable: true, enumerable: true, configurable: true }); return o; };
-/** A JSON clone that keeps own keys named like Object.prototype members as data. */
-const clone = (v) => (v === null || typeof v !== 'object' ? v : JSON.parse(JSON.stringify(v)));
-const present = (v) => v !== null && v !== undefined;
-const describeValue = (v) => (v === null ? 'null' : v === undefined ? 'absent' : Array.isArray(v) ? 'an array' : typeof v === 'object' ? 'an object' : `a ${typeof v}`);
-const sqlReason = (err) => String(err?.message ?? err).replace(/^SQLITE_\w+:\s*/, '');
-
-const insertSql = (table, columns) => `INSERT INTO ${table} (${columns.join(', ')}) VALUES (${columns.map((c) => `@${c}`).join(', ')})`;
-const updateSql = (table, columns) => `UPDATE ${table} SET ${columns.filter((c) => c !== 'id').map((c) => `${c} = @${c}`).join(', ')} WHERE id = @id`;
-
-/**
- * Whole-snapshot access for the tools that read or write the database file as
- * one unit (backups, restores, the persistence suites): the two collections as
- * the server sees them, and the inverse — make the three tables equal to the
- * snapshot's `players` and `guardians`, inside the caller's transaction.
- *
- * The collections are COUPLED: the link rows derive from both, so a snapshot
- * must carry both or neither (`repositories/index.mjs` refuses one without the
- * other). The whole pair is validated first with the reviewed preflight —
- * shapes, every record, duplicate ids and e-mails, every reference, both sides
- * of every link, the Founder's legacy-minor rule, age at `now` — and any
- * refusal throws before a statement runs, so the caller's transaction rolls
- * back with nothing changed. An explicitly empty pair is intentional: it
- * empties the tables. The write is a REWRITE: the three tables are emptied
- * (links, players, guardians) and the validated candidate is inserted in the
- * snapshot's order (guardians in two passes for `co_guardian_of`, then
- * players, then the links derived from the guardians' `childIds` in their
- * order), so the outcome never depends on obsolete rows or on input order —
- * a replacement guardian may reuse the e-mail of the one it replaces, two
- * retained guardians may swap e-mails, a co-guardian may be listed before its
- * primary (review of 9656a4b). Unknown JSON keys, null/absent shape and the
- * outstanding `emailCode` ride in the rows through the one mapping. Before
- * the cutover record exists both methods decline (`null` / `false`) and the
- * caller keeps the blobs.
- *
- * S5 (review of 132eda2, finding 1): once 0007 is recorded a `trialReports`
- * ARRAY on a snapshot player is a claim about the trials collection — the FINAL
- * one: `trials` supplied with the snapshot (written as a blob in the same
- * transaction) when the snapshot carries it, the retained blob when it omits
- * it. A claim that disagrees (an entry with no trial report of that id, a
- * different content or order, a duplicate), or a claim no trials list can
- * judge, refuses the whole save before a statement runs. An absent key or a
- * null is no claim: the trials stand and the record reads back with whatever
- * reports name it. A trials-only snapshot (no players) changes the derived view
- * and needs no player at all. The copy is never stored, so the only honest
- * outcomes are "equal" or "refused" — never a silent drop.
- */
-// ---------------------------------------------------------------- S4b-R: the retained player record
-/**
- * S4b-R (migration plan §D.6/§D.6.1; the Founder's decisions: the full birth date,
- * 12 October 2026, and the country code KEPT, 21 October 2026). An account deletion
- * no longer deletes the player row: `players.erase` keeps EXACTLY the agreed record
- * in the same table — the id, the deletion instant (`deleted_at`), the full birth
- * date and the two-letter country — with a fixed storage placeholder in every other
- * NOT NULL column (the column's declared default, never the person's previous value)
- * and NULL everywhere else, no facets; the twelve child tables and the links are
- * emptied explicitly in the same transaction. A retained row is served by NOTHING
- * that serves accounts (the view, byId, byGuardian, count, linksOf, the snapshot read,
- * the pairing-code and media-queue checks) and only by the narrow accessors below; it
- * survives every snapshot save (the identity replace captures the rows before its
- * DELETE and reinserts them byte-identical); a retained id is never re-created as a
- * live account (insert, the snapshot replace, the backup import refuse it, ids only);
- * the backup carries the records under `playersRetained`, never inside `players`.
- * Nothing of this is a retention period, a foreign key or a new age rule.
- */
-export const PLAYER_ERASURE_MIGRATION = '0014_player_erasure';
 /** The backup / snapshot collection the retained records travel in (never inside `players`). */
 export const PLAYERS_RETAINED_COLLECTION = 'playersRetained';
 export const RETAINED_PLAYER_NAME = 'Deleted player';
-/** The fixed storage placeholders of a retained row: the columns' declared defaults — constants the table's constraints need, never read back as facts about the person. */
+
+export const PLAYER_POSITIONS = Object.freeze(['GK', 'CB', 'RB', 'LB', 'RWB', 'LWB', 'CDM', 'CM', 'CAM', 'RW', 'LW', 'ST', 'CF']);
+export const PLAYER_FEET = Object.freeze(['left', 'right']);
+export const PLAYER_AVAILABILITY = Object.freeze(['available_now', 'end_of_season', 'loan_open', 'overseas_open', 'not_seeking']);
+export const PLAYER_CONTRACT_STATUS = Object.freeze(['under_contract', 'expiring_summer', 'scholarship_ending', 'release_approaching', 'free_agent', 'unknown']);
+export const PLAYER_LEVELS = Object.freeze(['amateur', 'semi_pro', 'pro']);
+/** Text lengths and number ranges, one definition for the typing, the DDL and the routes. */
+export const IDENTITY_LIMITS = Object.freeze({
+  id: 80, name: 120, country: 40, city: 80, marketValueRange: 60, agentName: 120, footballCategory: 40, conditionStatus: 40,
+  programmeTrack: 60, timezone: 64, passwordHash: 512, email: 254, idvReference: 120,
+  heightCm: [50, 250], weightKg: [15, 200], squadNumber: [0, 999], pct: [0, 100],
+});
+const L = IDENTITY_LIMITS;
+const inList = (col, xs) => `CHECK (${col} IN (${xs.map((x) => `'${x}'`).join(', ')}))`;
+const optList = (col, xs) => `CHECK (${col} IS NULL OR ${col} IN (${xs.map((x) => `'${x}'`).join(', ')}))`;
+const optText = (col, max, min = 1) => `CHECK (${col} IS NULL OR length(${col}) BETWEEN ${min} AND ${max})`;
+const flag = (col) => `INTEGER NOT NULL DEFAULT 0 CHECK (${col} IN (0,1))`;
+const optFlag = (col) => `INTEGER CHECK (${col} IS NULL OR ${col} IN (0,1))`;
+const range = (col, [lo, hi]) => `CHECK (${col} IS NULL OR ${col} BETWEEN ${lo} AND ${hi})`;
+const HHMM = (col) => `CHECK (${col} IS NULL OR (length(${col}) = 5 AND ${col} GLOB '[0-2][0-9]:[0-5][0-9]'))`;
+
+export const IDENTITY_DDL = `
+CREATE TABLE guardians (
+  id                      TEXT PRIMARY KEY CHECK (length(id) BETWEEN 1 AND ${L.id}),
+  name                    TEXT NOT NULL CHECK (length(name) BETWEEN 1 AND ${L.name}),
+  email                   TEXT NOT NULL CHECK (length(email) BETWEEN 3 AND ${L.email}),
+  password_hash           TEXT ${optText('password_hash', L.passwordHash)},
+  email_verified          ${flag('email_verified')},
+  email_code_hash         TEXT CHECK (email_code_hash IS NULL OR length(email_code_hash) = 64),
+  id_verified             ${flag('id_verified')},
+  idv_reference           TEXT ${optText('idv_reference', L.idvReference)},
+  disclaimer_accepted     ${flag('disclaimer_accepted')},
+  disclaimer_accepted_at  INTEGER,
+  co_guardian_of          TEXT REFERENCES guardians(id) ON DELETE RESTRICT,
+  prefs_quiet_start       TEXT ${HHMM('prefs_quiet_start')},
+  prefs_quiet_end         TEXT ${HHMM('prefs_quiet_end')},
+  prefs_school_hours_mute ${optFlag('prefs_school_hours_mute')},
+  prefs_timezone          TEXT ${optText('prefs_timezone', L.timezone)},
+  created_at              INTEGER,
+  CHECK (co_guardian_of IS NULL OR co_guardian_of <> id)
+) STRICT;
+CREATE UNIQUE INDEX guardians_email ON guardians (lower(email));
+CREATE INDEX guardians_co_guardian_of ON guardians (co_guardian_of);
+
+CREATE TABLE players (
+  id                        TEXT PRIMARY KEY CHECK (length(id) BETWEEN 1 AND ${L.id}),
+  name                      TEXT NOT NULL CHECK (length(name) BETWEEN 1 AND ${L.name}),
+  birth_date                TEXT NOT NULL CHECK (length(birth_date) = 10),
+  country                   TEXT NOT NULL CHECK (length(country) BETWEEN 1 AND ${L.country}),
+  city                      TEXT ${optText('city', L.city)},
+  position                  TEXT ${optList('position', PLAYER_POSITIONS)},
+  foot                      TEXT ${optList('foot', PLAYER_FEET)},
+  height_cm                 INTEGER ${range('height_cm', L.heightCm)},
+  weight_kg                 INTEGER ${range('weight_kg', L.weightKg)},
+  squad_number              INTEGER ${range('squad_number', L.squadNumber)},
+  contract_until_date       TEXT CHECK (contract_until_date IS NULL OR length(contract_until_date) = 10),
+  market_value_range        TEXT ${optText('market_value_range', L.marketValueRange)},
+  agent_name                TEXT ${optText('agent_name', L.agentName)},
+  academy_plus              ${flag('academy_plus')},
+  first_team_seeker         ${flag('first_team_seeker')},
+  availability              TEXT NOT NULL DEFAULT 'not_seeking' ${inList('availability', PLAYER_AVAILABILITY)},
+  contract_status           TEXT NOT NULL DEFAULT 'unknown' ${inList('contract_status', PLAYER_CONTRACT_STATUS)},
+  level                     TEXT NOT NULL DEFAULT 'amateur' ${inList('level', PLAYER_LEVELS)},
+  football_category         TEXT ${optText('football_category', L.footballCategory)},
+  identity_verified         ${flag('identity_verified')},
+  guardian_id               TEXT REFERENCES guardians(id) ON DELETE RESTRICT,
+  lat                       REAL CHECK (lat IS NULL OR lat BETWEEN -90 AND 90),
+  lng                       REAL CHECK (lng IS NULL OR lng BETWEEN -180 AND 180),
+  stats_appearances         INTEGER CHECK (stats_appearances IS NULL OR stats_appearances >= 0),
+  stats_goals               INTEGER CHECK (stats_goals IS NULL OR stats_goals >= 0),
+  stats_assists             INTEGER CHECK (stats_assists IS NULL OR stats_assists >= 0),
+  stats_pace_kmh            REAL CHECK (stats_pace_kmh IS NULL OR stats_pace_kmh >= 0),
+  stats_pass_completion_pct REAL ${range('stats_pass_completion_pct', L.pct)},
+  stats_duel_success_pct    REAL ${range('stats_duel_success_pct', L.pct)},
+  stats_clean_sheets        INTEGER CHECK (stats_clean_sheets IS NULL OR stats_clean_sheets >= 0),
+  medical_shared            ${flag('medical_shared')},
+  medical_condition_status  TEXT NOT NULL DEFAULT 'unknown' CHECK (length(medical_condition_status) BETWEEN 1 AND ${L.conditionStatus}),
+  prefs_quiet_start         TEXT ${HHMM('prefs_quiet_start')},
+  prefs_quiet_end           TEXT ${HHMM('prefs_quiet_end')},
+  prefs_school_hours_mute   ${optFlag('prefs_school_hours_mute')},
+  prefs_timezone            TEXT ${optText('prefs_timezone', L.timezone)},
+  programme_track           TEXT ${optText('programme_track', L.programmeTrack)},
+  programme_started_at      INTEGER,
+  password_hash             TEXT ${optText('password_hash', L.passwordHash)},
+  created_at                INTEGER,
+  deleted_at                INTEGER,
+  CHECK ((lat IS NULL) = (lng IS NULL)),
+  CHECK (deleted_at IS NULL OR guardian_id IS NULL)
+) STRICT;
+CREATE INDEX players_guardian ON players (guardian_id);
+CREATE INDEX players_created_at ON players (created_at);
+CREATE INDEX players_birth_date ON players (birth_date);
+CREATE INDEX players_search ON players (country, position, availability);
+CREATE INDEX players_level ON players (level);
+CREATE INDEX players_located ON players (lat, lng) WHERE lat IS NOT NULL;
+
+CREATE TABLE guardian_children (
+  guardian_id TEXT NOT NULL REFERENCES guardians(id) ON DELETE RESTRICT,
+  player_id   TEXT NOT NULL REFERENCES players(id) ON DELETE RESTRICT,
+  role        TEXT NOT NULL ${inList('role', ['primary', 'co'])},
+  PRIMARY KEY (guardian_id, player_id)
+) STRICT;
+CREATE INDEX guardian_children_player ON guardian_children (player_id);
+CREATE UNIQUE INDEX guardian_children_one_primary ON guardian_children (player_id) WHERE role = 'primary';
+`;
+
+// ------------------------------------------------------------------ small helpers
+const deepFreeze = (v) => { if (v !== null && typeof v === 'object' && !Object.isFrozen(v)) { Object.freeze(v); for (const k of Object.keys(v)) deepFreeze(v[k]); } return v; };
+const refusal = (code, message, extra = {}) => Object.assign(new Error(`${code}: ${message}`), { code, ...extra });
+const isPlainObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
+const isClock = (v) => Number.isSafeInteger(v) && v >= 0;
+const describe = (v) => (v === null ? 'null' : v === undefined ? 'absent' : Array.isArray(v) ? 'an array' : typeof v === 'object' ? 'an object' : `a ${typeof v}`);
+const textOk = (v, max, min = 1) => typeof v === 'string' && v.length >= min && v.length <= max;
+const optTextOk = (v, max) => v === null || textOk(v, max);
+const intIn = (v, [lo, hi]) => Number.isSafeInteger(v) && v >= lo && v <= hi;
+const clone = (v) => (v === null || typeof v !== 'object' ? v : JSON.parse(JSON.stringify(v)));
+const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+const sqlReason = (err) => String(err?.message ?? err).replace(/^SQLITE_\w+:\s*/, '');
+const HHMM_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
+const pick = (o, keys) => Object.fromEntries(keys.map((k) => [k, o?.[k] === undefined ? null : o[k]]));
+const given = (raw) => Object.fromEntries(Object.entries(raw).filter(([, v]) => v !== undefined)); // an undefined field is an absent one
+
+// ------------------------------------------------------------------ the player record
+export const PLAYER_SCALAR_KEYS = Object.freeze(['id', 'name', 'dob', 'country', 'city', 'position', 'foot', 'heightCm', 'weightKg', 'squadNumber',
+  'contractUntil', 'marketValueRange', 'agentName', 'academyPlus', 'firstTeamSeeker', 'availability', 'contractStatus', 'level',
+  'footballCategory', 'identityVerified', 'guardianId', 'createdAt']);
+const STATS_KEYS = Object.freeze(['appearances', 'goals', 'assists', 'paceKmh', 'passCompletionPct', 'duelSuccessPct', 'cleanSheets']);
+const STATS_COUNTS = Object.freeze(['appearances', 'goals', 'assists', 'cleanSheets']);
+const PREFS_KEYS = Object.freeze(['quietStart', 'quietEnd', 'schoolHoursMute', 'timezone']);
+export const PLAYER_RECORD_KEYS = Object.freeze([...PLAYER_SCALAR_KEYS, 'location', 'stats', 'medical', 'notificationPrefs', 'programme', ...PLAYER_SUBRECORD_KEYS, 'trialReports']);
+const PLAYER_BOOLEANS = Object.freeze(['academyPlus', 'firstTeamSeeker', 'identityVerified']);
+/** The fields `update` may change (the lists have their own operations, the guardian link its link operations). */
+const PLAYER_EDITABLE = Object.freeze(['name', 'dob', 'country', 'city', 'position', 'foot', 'heightCm', 'weightKg', 'squadNumber', 'contractUntil',
+  'marketValueRange', 'agentName', 'academyPlus', 'firstTeamSeeker', 'availability', 'contractStatus', 'level', 'footballCategory',
+  'identityVerified', 'location', 'stats', 'medical', 'notificationPrefs', 'programme']);
+const PLAYER_DEFAULTS = Object.freeze({ city: null, position: null, foot: null, heightCm: null, weightKg: null, squadNumber: null, contractUntil: null,
+  marketValueRange: null, agentName: null, academyPlus: false, firstTeamSeeker: false, availability: 'not_seeking', contractStatus: 'unknown',
+  level: 'amateur', footballCategory: null, identityVerified: false, guardianId: null, createdAt: null, location: null, stats: null,
+  notificationPrefs: null, programme: null });
+
+/** An incoming player (create, a snapshot, the seed) with its defaults: every field present, the lists as given (or empty). */
+function playerWithDefaults(raw) {
+  const g = given(raw);
+  const r = { ...PLAYER_DEFAULTS, ...g };
+  if (r.city === '') r.city = null;
+  r.medical = isPlainObject(g.medical) ? { shared: false, conditionStatus: 'unknown', records: [], ...given(g.medical) } : g.medical === undefined || g.medical === null ? { shared: false, conditionStatus: 'unknown', records: [] } : g.medical;
+  if (isPlainObject(r.programme)) r.programme = { track: null, startedAt: null, completed: [], ...given(r.programme) };
+  if (isPlainObject(r.stats)) r.stats = { ...pick(r.stats, STATS_KEYS), ...Object.fromEntries(Object.entries(r.stats).filter(([k]) => !STATS_KEYS.includes(k))) };
+  if (isPlainObject(r.notificationPrefs)) r.notificationPrefs = { ...pick(r.notificationPrefs, PREFS_KEYS), ...Object.fromEntries(Object.entries(r.notificationPrefs).filter(([k]) => !PREFS_KEYS.includes(k))) };
+  for (const k of PLAYER_SUBRECORD_KEYS) if (r[k] === undefined || r[k] === null) r[k] = [];
+  // The trials own the reports: an incoming record may carry none (null or an empty list is no claim and is not kept).
+  if (r.trialReports === null || (Array.isArray(r.trialReports) && r.trialReports.length === 0)) delete r.trialReports;
+  return Object.fromEntries([...PLAYER_RECORD_KEYS.filter((k) => k !== 'trialReports').map((k) => [k, r[k]]), ...Object.entries(r).filter(([k]) => !PLAYER_RECORD_KEYS.includes(k) || k === 'trialReports')]);
+}
+
+/** The problems with a player record (an incoming one after its defaults, or a draft), by field; never a value. */
+export function playerRecordProblems(r) {
+  const out = [];
+  for (const k of Object.keys(r)) {
+    if (k === 'trialReports') out.push('trialReports are the trials\' reports and are not written with a player');
+    else if (!PLAYER_RECORD_KEYS.includes(k)) out.push(`unknown field ${k}`);
+  }
+  if (!textOk(r.id, L.id)) out.push(`id must be text of 1 to ${L.id} characters`);
+  if (!textOk(r.name, L.name)) out.push(`name must be text of 1 to ${L.name} characters`);
+  if (typeof r.dob !== 'string' || !parseStrictDateOnly(r.dob).ok) out.push('dob must be a YYYY-MM-DD date');
+  if (!textOk(r.country, L.country)) out.push(`country must be text of 1 to ${L.country} characters`);
+  if (!optTextOk(r.city, L.city)) out.push(`city must be text of 1 to ${L.city} characters or null`);
+  if (r.position !== null && !PLAYER_POSITIONS.includes(r.position)) out.push(`position must be one of ${PLAYER_POSITIONS.join(', ')} or null`);
+  if (r.foot !== null && !PLAYER_FEET.includes(r.foot)) out.push(`foot must be one of ${PLAYER_FEET.join(', ')} or null`);
+  for (const k of ['heightCm', 'weightKg', 'squadNumber']) if (r[k] !== null && !intIn(r[k], L[k])) out.push(`${k} must be a whole number from ${L[k][0]} to ${L[k][1]} or null`);
+  if (r.contractUntil !== null && (typeof r.contractUntil !== 'string' || !parseStrictDateOnly(r.contractUntil).ok)) out.push('contractUntil must be a YYYY-MM-DD date or null');
+  for (const k of ['marketValueRange', 'agentName', 'footballCategory']) if (!optTextOk(r[k], L[k])) out.push(`${k} must be text of 1 to ${L[k]} characters or null`);
+  for (const k of PLAYER_BOOLEANS) if (typeof r[k] !== 'boolean') out.push(`${k} must be a boolean`);
+  if (!PLAYER_AVAILABILITY.includes(r.availability)) out.push(`availability must be one of ${PLAYER_AVAILABILITY.join(', ')}`);
+  if (!PLAYER_CONTRACT_STATUS.includes(r.contractStatus)) out.push(`contractStatus must be one of ${PLAYER_CONTRACT_STATUS.join(', ')}`);
+  if (!PLAYER_LEVELS.includes(r.level)) out.push(`level must be one of ${PLAYER_LEVELS.join(', ')}`);
+  if (r.guardianId !== null && !textOk(r.guardianId, L.id)) out.push('guardianId must be a guardian id or null');
+  if (r.createdAt !== null && !isClock(r.createdAt)) out.push('createdAt must be an integer timestamp or null');
+  if (r.location !== null) {
+    const loc = r.location;
+    if (!isPlainObject(loc) || Object.keys(loc).some((k) => k !== 'lat' && k !== 'lng')) out.push(`location must be { lat, lng } or null (got ${describe(loc)})`);
+    else if (!(Number.isFinite(loc.lat) && Math.abs(loc.lat) <= 90 && Number.isFinite(loc.lng) && Math.abs(loc.lng) <= 180)) out.push('location.lat and location.lng must be a latitude (-90 to 90) and a longitude (-180 to 180)');
+  }
+  if (r.stats !== null) {
+    const s = r.stats;
+    if (!isPlainObject(s)) out.push(`stats must be an object or null (got ${describe(s)})`);
+    else {
+      for (const k of Object.keys(s)) if (!STATS_KEYS.includes(k)) out.push(`stats.${k} is not a stat`);
+      for (const k of STATS_KEYS) {
+        const v = s[k];
+        if (v === null) continue;
+        if (STATS_COUNTS.includes(k) ? !(Number.isSafeInteger(v) && v >= 0) : !(Number.isFinite(v) && v >= 0)) out.push(`stats.${k} must be a non-negative ${STATS_COUNTS.includes(k) ? 'whole number' : 'number'} or null`);
+        else if ((k === 'passCompletionPct' || k === 'duelSuccessPct') && v > 100) out.push(`stats.${k} must be a percentage from 0 to 100`);
+      }
+    }
+  }
+  const m = r.medical;
+  if (!isPlainObject(m) || Object.keys(m).some((k) => !['shared', 'conditionStatus', 'records'].includes(k))) out.push(`medical must be { shared, conditionStatus, records } (got ${describe(m)})`);
+  else {
+    if (typeof m.shared !== 'boolean') out.push('medical.shared must be a boolean');
+    if (!textOk(m.conditionStatus, L.conditionStatus)) out.push(`medical.conditionStatus must be text of 1 to ${L.conditionStatus} characters`);
+    out.push(...validateSubrecordArray('medical.records', m.records));
+    if (!Array.isArray(m.records)) out.push('medical.records must be a list');
+  }
+  if (r.notificationPrefs !== null) {
+    const n = r.notificationPrefs;
+    if (!isPlainObject(n) || Object.keys(n).some((k) => !PREFS_KEYS.includes(k))) out.push(`notificationPrefs must be { ${PREFS_KEYS.join(', ')} } or null (got ${describe(n)})`);
+    else out.push(...prefsProblems(n));
+  }
+  if (r.programme !== null) {
+    const p = r.programme;
+    if (!isPlainObject(p) || Object.keys(p).some((k) => !['track', 'startedAt', 'completed'].includes(k))) out.push(`programme must be { track, startedAt, completed } or null (got ${describe(p)})`);
+    else {
+      if (!optTextOk(p.track, L.programmeTrack)) out.push(`programme.track must be text of 1 to ${L.programmeTrack} characters or null`);
+      if (p.startedAt !== null && !isClock(p.startedAt)) out.push('programme.startedAt must be an integer timestamp or null');
+      if (!Array.isArray(p.completed)) out.push('programme.completed must be a list');
+      else out.push(...validateSubrecordArray('programme.completed', p.completed));
+    }
+  }
+  for (const k of PLAYER_SUBRECORD_KEYS) {
+    if (!Array.isArray(r[k])) out.push(`${k} must be a list`);
+    else out.push(...validateSubrecordArray(k, r[k]));
+  }
+  return out;
+}
+function prefsProblems(n) {
+  const out = [];
+  for (const k of ['quietStart', 'quietEnd']) if (n[k] !== null && !(typeof n[k] === 'string' && HHMM_RE.test(n[k]))) out.push(`notificationPrefs.${k} must be HH:MM or null`);
+  if (n.schoolHoursMute !== null && typeof n.schoolHoursMute !== 'boolean') out.push('notificationPrefs.schoolHoursMute must be a boolean or null');
+  if (!optTextOk(n.timezone, L.timezone)) out.push(`notificationPrefs.timezone must be text of 1 to ${L.timezone} characters or null`);
+  return out;
+}
+const passwordProblem = (h) => (h === null || textOk(h, L.passwordHash) ? null : `the password hash must be text of 1 to ${L.passwordHash} characters or null`);
+
+const P_COLS = ['id', 'name', 'birth_date', 'country', 'city', 'position', 'foot', 'height_cm', 'weight_kg', 'squad_number', 'contract_until_date',
+  'market_value_range', 'agent_name', 'academy_plus', 'first_team_seeker', 'availability', 'contract_status', 'level', 'football_category',
+  'identity_verified', 'guardian_id', 'lat', 'lng', 'stats_appearances', 'stats_goals', 'stats_assists', 'stats_pace_kmh',
+  'stats_pass_completion_pct', 'stats_duel_success_pct', 'stats_clean_sheets', 'medical_shared', 'medical_condition_status',
+  'prefs_quiet_start', 'prefs_quiet_end', 'prefs_school_hours_mute', 'prefs_timezone', 'programme_track', 'programme_started_at',
+  'password_hash', 'created_at', 'deleted_at'];
+export const PLAYER_COLUMNS = Object.freeze(P_COLS);
+const P_SELECT = `SELECT ${P_COLS.join(', ')} FROM players`;
+const P_INSERT = `INSERT INTO players (${P_COLS.join(', ')}) VALUES (${P_COLS.map((c) => `@${c}`).join(', ')})`;
+const P_UPDATE_COLS = P_COLS.filter((c) => !['id', 'guardian_id', 'password_hash', 'created_at', 'deleted_at'].includes(c));
+const P_UPDATE = `UPDATE players SET ${P_UPDATE_COLS.map((c) => `${c} = @${c}`).join(', ')} WHERE id = @id AND deleted_at IS NULL`;
+const b = (v) => (v ? 1 : 0);
+const nb = (v) => (v === null || v === undefined ? null : v ? 1 : 0);
+function playerParams(r, passwordHash = null) {
+  const s = r.stats ?? {}; const n = r.notificationPrefs ?? {};
+  return {
+    id: r.id, name: r.name, birth_date: r.dob, country: r.country, city: r.city, position: r.position, foot: r.foot,
+    height_cm: r.heightCm, weight_kg: r.weightKg, squad_number: r.squadNumber, contract_until_date: r.contractUntil,
+    market_value_range: r.marketValueRange, agent_name: r.agentName, academy_plus: b(r.academyPlus), first_team_seeker: b(r.firstTeamSeeker),
+    availability: r.availability, contract_status: r.contractStatus, level: r.level, football_category: r.footballCategory,
+    identity_verified: b(r.identityVerified), guardian_id: r.guardianId, lat: r.location?.lat ?? null, lng: r.location?.lng ?? null,
+    stats_appearances: s.appearances ?? null, stats_goals: s.goals ?? null, stats_assists: s.assists ?? null, stats_pace_kmh: s.paceKmh ?? null,
+    stats_pass_completion_pct: s.passCompletionPct ?? null, stats_duel_success_pct: s.duelSuccessPct ?? null, stats_clean_sheets: s.cleanSheets ?? null,
+    medical_shared: b(r.medical.shared), medical_condition_status: r.medical.conditionStatus,
+    prefs_quiet_start: n.quietStart ?? null, prefs_quiet_end: n.quietEnd ?? null, prefs_school_hours_mute: nb(n.schoolHoursMute), prefs_timezone: n.timezone ?? null,
+    programme_track: r.programme?.track ?? null, programme_started_at: r.programme?.startedAt ?? null,
+    password_hash: passwordHash, created_at: r.createdAt, deleted_at: null,
+  };
+}
+const allNull = (...vs) => vs.every((v) => v === null || v === undefined);
+/** The record for a live row, its lists and its trial reports (plain; the repository freezes what it hands out). A stats, prefs or programme block whose columns are all NULL is null. */
+function playerFromDb(d, children, trialReports) {
+  const stats = allNull(d.stats_appearances, d.stats_goals, d.stats_assists, d.stats_pace_kmh, d.stats_pass_completion_pct, d.stats_duel_success_pct, d.stats_clean_sheets)
+    ? null : { appearances: d.stats_appearances, goals: d.stats_goals, assists: d.stats_assists, paceKmh: d.stats_pace_kmh, passCompletionPct: d.stats_pass_completion_pct, duelSuccessPct: d.stats_duel_success_pct, cleanSheets: d.stats_clean_sheets };
+  const prefs = allNull(d.prefs_quiet_start, d.prefs_quiet_end, d.prefs_school_hours_mute, d.prefs_timezone)
+    ? null : { quietStart: d.prefs_quiet_start, quietEnd: d.prefs_quiet_end, schoolHoursMute: d.prefs_school_hours_mute === null ? null : d.prefs_school_hours_mute === 1, timezone: d.prefs_timezone };
+  const programmed = !allNull(d.programme_track, d.programme_started_at) || children.programme.completed.length > 0;
+  const rec = {
+    id: d.id, name: d.name, dob: d.birth_date, country: d.country, city: d.city, position: d.position, foot: d.foot,
+    heightCm: d.height_cm, weightKg: d.weight_kg, squadNumber: d.squad_number, contractUntil: d.contract_until_date,
+    marketValueRange: d.market_value_range, agentName: d.agent_name, academyPlus: d.academy_plus === 1, firstTeamSeeker: d.first_team_seeker === 1,
+    availability: d.availability, contractStatus: d.contract_status, level: d.level, footballCategory: d.football_category,
+    identityVerified: d.identity_verified === 1, guardianId: d.guardian_id, createdAt: d.created_at,
+    location: d.lat === null ? null : { lat: d.lat, lng: d.lng },
+    stats,
+    medical: { shared: d.medical_shared === 1, conditionStatus: d.medical_condition_status, records: children.medical.records },
+    notificationPrefs: prefs,
+    programme: programmed ? { track: d.programme_track, startedAt: d.programme_started_at, completed: children.programme.completed } : null,
+  };
+  for (const k of PLAYER_SUBRECORD_KEYS) rec[k] = children[k];
+  rec.trialReports = trialReports;
+  return rec;
+}
+
+// ------------------------------------------------------------------ the guardian record
+export const GUARDIAN_RECORD_KEYS = Object.freeze(['id', 'name', 'email', 'emailVerified', 'idVerified', 'idvReference', 'disclaimerAccepted',
+  'disclaimerAcceptedAt', 'coGuardianOf', 'notificationPrefs', 'createdAt', 'childIds', 'coGuardians']);
+const GUARDIAN_BOOLEANS = Object.freeze(['emailVerified', 'idVerified', 'disclaimerAccepted']);
+const GUARDIAN_EDITABLE = Object.freeze(['name', 'email', 'emailVerified', 'idVerified', 'idvReference', 'disclaimerAccepted', 'disclaimerAcceptedAt', 'notificationPrefs']);
+const GUARDIAN_INPUT_KEYS = Object.freeze(GUARDIAN_RECORD_KEYS.filter((k) => k !== 'coGuardians'));
+function guardianWithDefaults(raw) {
+  const g = given(raw);
+  const r = { emailVerified: false, idVerified: false, idvReference: null, disclaimerAccepted: false, disclaimerAcceptedAt: null, coGuardianOf: null, notificationPrefs: null, createdAt: null, childIds: [], ...g };
+  if (isPlainObject(r.notificationPrefs)) r.notificationPrefs = { ...pick(r.notificationPrefs, PREFS_KEYS), ...Object.fromEntries(Object.entries(r.notificationPrefs).filter(([k]) => !PREFS_KEYS.includes(k))) };
+  return r;
+}
+export function guardianRecordProblems(r, { input = true } = {}) {
+  const out = [];
+  const keys = input ? GUARDIAN_INPUT_KEYS : GUARDIAN_RECORD_KEYS;
+  for (const k of Object.keys(r)) {
+    if (keys.includes(k)) continue;
+    if (k === 'coGuardians') out.push('coGuardians is worked out from the co-guardians\' coGuardianOf and is not written');
+    else out.push(`unknown field ${k}`);
+  }
+  if (!textOk(r.id, L.id)) out.push(`id must be text of 1 to ${L.id} characters`);
+  if (!textOk(r.name, L.name)) out.push(`name must be text of 1 to ${L.name} characters`);
+  if (!(textOk(r.email, L.email, 3) && r.email.includes('@'))) out.push(`email must be an address of 3 to ${L.email} characters`);
+  for (const k of GUARDIAN_BOOLEANS) if (typeof r[k] !== 'boolean') out.push(`${k} must be a boolean`);
+  if (!optTextOk(r.idvReference, L.idvReference)) out.push(`idvReference must be text of 1 to ${L.idvReference} characters or null`);
+  if (r.disclaimerAcceptedAt !== null && !isClock(r.disclaimerAcceptedAt)) out.push('disclaimerAcceptedAt must be an integer timestamp or null');
+  if (r.coGuardianOf !== null && !textOk(r.coGuardianOf, L.id)) out.push('coGuardianOf must be a guardian id or null');
+  if (r.coGuardianOf !== null && r.coGuardianOf === r.id) out.push('coGuardianOf cannot name the guardian itself');
+  if (r.createdAt !== null && !isClock(r.createdAt)) out.push('createdAt must be an integer timestamp or null');
+  if (!Array.isArray(r.childIds) || r.childIds.some((c) => !textOk(c, L.id))) out.push('childIds must be a list of player ids');
+  else if (new Set(r.childIds).size !== r.childIds.length) out.push('childIds lists a player more than once');
+  if (r.notificationPrefs !== null) {
+    const n = r.notificationPrefs;
+    if (!isPlainObject(n) || Object.keys(n).some((k) => !PREFS_KEYS.includes(k))) out.push(`notificationPrefs must be { ${PREFS_KEYS.join(', ')} } or null (got ${describe(n)})`);
+    else out.push(...prefsProblems(n));
+  }
+  return out;
+}
+const codeHashProblem = (h) => (h === null || (typeof h === 'string' && /^[0-9a-f]{64}$/.test(h)) ? null : 'the e-mail code hash must be a sha256 hex digest or null');
+const G_COLS = ['id', 'name', 'email', 'password_hash', 'email_verified', 'email_code_hash', 'id_verified', 'idv_reference', 'disclaimer_accepted',
+  'disclaimer_accepted_at', 'co_guardian_of', 'prefs_quiet_start', 'prefs_quiet_end', 'prefs_school_hours_mute', 'prefs_timezone', 'created_at'];
+export const GUARDIAN_COLUMNS = Object.freeze(G_COLS);
+const G_SELECT = `SELECT ${G_COLS.join(', ')} FROM guardians`;
+const G_INSERT = `INSERT INTO guardians (${G_COLS.join(', ')}) VALUES (${G_COLS.map((c) => `@${c}`).join(', ')})`;
+const G_UPDATE_COLS = ['name', 'email', 'email_verified', 'id_verified', 'idv_reference', 'disclaimer_accepted', 'disclaimer_accepted_at', 'prefs_quiet_start', 'prefs_quiet_end', 'prefs_school_hours_mute', 'prefs_timezone'];
+const G_UPDATE = `UPDATE guardians SET ${G_UPDATE_COLS.map((c) => `${c} = @${c}`).join(', ')} WHERE id = @id`;
+function guardianParams(r, { passwordHash = null, emailCodeHash = null } = {}) {
+  const n = r.notificationPrefs ?? {};
+  return {
+    id: r.id, name: r.name, email: r.email, password_hash: passwordHash, email_verified: b(r.emailVerified), email_code_hash: emailCodeHash,
+    id_verified: b(r.idVerified), idv_reference: r.idvReference, disclaimer_accepted: b(r.disclaimerAccepted), disclaimer_accepted_at: r.disclaimerAcceptedAt,
+    co_guardian_of: r.coGuardianOf, prefs_quiet_start: n.quietStart ?? null, prefs_quiet_end: n.quietEnd ?? null,
+    prefs_school_hours_mute: nb(n.schoolHoursMute), prefs_timezone: n.timezone ?? null, created_at: r.createdAt,
+  };
+}
+function guardianFromDb(d, childIds, coGuardians) {
+  return {
+    id: d.id, name: d.name, email: d.email, emailVerified: d.email_verified === 1, idVerified: d.id_verified === 1, idvReference: d.idv_reference,
+    disclaimerAccepted: d.disclaimer_accepted === 1, disclaimerAcceptedAt: d.disclaimer_accepted_at, coGuardianOf: d.co_guardian_of,
+    notificationPrefs: allNull(d.prefs_quiet_start, d.prefs_quiet_end, d.prefs_school_hours_mute, d.prefs_timezone) ? null
+      : { quietStart: d.prefs_quiet_start, quietEnd: d.prefs_quiet_end, schoolHoursMute: d.prefs_school_hours_mute === null ? null : d.prefs_school_hours_mute === 1, timezone: d.prefs_timezone },
+    createdAt: d.created_at, childIds, coGuardians,
+  };
+}
+
+// ------------------------------------------------------------------ visibility in SQL (a prefilter; the exact rule is domain.mjs visibleToOrg)
+/** The latest birth date of someone at least `years` old on `nowMs` (YYYY-MM-DD; compared as text, exactly ageOn's rule). */
+export function bornByForAge(years, nowMs = Date.now()) {
+  const d = new Date(nowMs);
+  return `${String(d.getUTCFullYear() - years).padStart(4, '0')}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
+}
+/** `birth_date <= <the adult cutoff of the player's country>`: the adults on `nowMs`, by the per-country age of majority. */
+function adultsSql(nowMs) {
+  const special = Object.entries(ADULT_AGE).filter(([k]) => k !== 'DEFAULT');
+  const sql = `p.birth_date <= CASE p.country ${special.map(() => 'WHEN ? THEN ?').join(' ')} ELSE ? END`;
+  const args = [...special.flatMap(([c, age]) => [c, bornByForAge(age, nowMs)]), bornByForAge(ADULT_AGE.DEFAULT, nowMs)];
+  return { sql, args };
+}
+/** Can this organisation ever see a minor (domain.mjs visibleToOrg: a verified club only)? */
+const seesMinors = (org) => org?.type === 'club' && org.verified === true;
+
+// ------------------------------------------------------------------ the retained record (S4b-R)
+/** The fixed storage placeholders of a retained row: constants the table's constraints need, never read back as facts about the person. */
 export const RETAINED_PLACEHOLDERS = Object.freeze({ name: RETAINED_PLAYER_NAME, academy_plus: 0, first_team_seeker: 0, availability: 'not_seeking', contract_status: 'unknown', level: 'amateur', identity_verified: 0, medical_shared: 0, medical_condition_status: 'unknown' });
 const RETAINED_KEYS = Object.freeze(['id', 'deletedAt', 'birthDate', 'country']);
-/** A retained record `{ id, deletedAt, birthDate, country }` → the full row of the players table (every column; the kept facts, the placeholders, NULL elsewhere). */
+/** A retained record `{ id, deletedAt, birthDate, country }` → the full row (the kept facts, the placeholders, NULL elsewhere). */
 export function retainedRowFor(rec) {
-  const p = {}; for (const c of PLAYER_COLUMNS) p[c] = null;
+  const p = {}; for (const c of P_COLS) p[c] = null;
   p.id = rec.id; p.birth_date = rec.birthDate; p.country = rec.country; p.deleted_at = rec.deletedAt;
   return Object.assign(p, RETAINED_PLACEHOLDERS);
 }
-/** A retained row → the record (the four facts; nothing else of the row is a fact). */
 export const retainedRecordFromRow = (r) => ({ id: r.id, deletedAt: r.deleted_at, birthDate: r.birth_date, country: r.country });
-const retainedRefusal = (message) => Object.assign(new Error(`PLAYER_ERASURE_IMPORT_BLOCKED: ${message}`), { code: 'PLAYER_ERASURE_IMPORT_BLOCKED' });
+const retainedRefusal = (message) => refusal('PLAYER_ERASURE_IMPORT_BLOCKED', message);
 /** Problems of one retained record (field and reason; never a value): the shape is exactly the four keys. */
 export function validateRetainedRecord(rec, index = null) {
   const at = `playersRetained ${typeof rec?.id === 'string' && rec.id ? rec.id : `#${index}`}`;
-  if (rec === null || typeof rec !== 'object' || Array.isArray(rec)) return [`${at}: a retained record is an object (got ${describeValue(rec)})`];
+  if (!isPlainObject(rec)) return [`${at}: a retained record is an object (got ${describe(rec)})`];
   const problems = [];
   if (typeof rec.id !== 'string' || !rec.id) problems.push('id is not a non-empty string');
-  if (!Number.isSafeInteger(rec.deletedAt) || rec.deletedAt < 0) problems.push('deletedAt is not a non-negative integer (ms)');
+  if (!isClock(rec.deletedAt)) problems.push('deletedAt is not a non-negative integer (ms)');
   if (typeof rec.birthDate !== 'string' || !parseStrictDateOnly(rec.birthDate).ok) problems.push('birthDate is not a YYYY-MM-DD date');
   if (typeof rec.country !== 'string' || !rec.country) problems.push('country is not a non-empty string');
   const unknown = Object.keys(rec).filter((k) => !RETAINED_KEYS.includes(k));
   if (unknown.length) problems.push(`unknown field(s) ${unknown.join(', ')} (a retained record carries exactly id, deletedAt, birthDate, country)`);
   return problems.map((m) => `${at}: ${m}`);
 }
-/**
- * Validate a `playersRetained` collection against the live player ids: an array of
- * well-formed records, no duplicate id, no id that is a live account. Throws
- * PLAYER_ERASURE_IMPORT_BLOCKED (ids, fields and reasons only — never a date) so the
- * caller's transaction rolls back with nothing written; returns the frozen records.
- */
+/** Validate a `playersRetained` collection against the live player ids; throws PLAYER_ERASURE_IMPORT_BLOCKED (ids and reasons only). */
 export function checkRetainedCollection(list, { liveIds = new Set(), label = 'playersRetained' } = {}) {
-  if (!Array.isArray(list)) throw retainedRefusal(`${label}: the playersRetained collection must be an array of retained records (got ${describeValue(list)}); nothing was written`);
+  if (!Array.isArray(list)) throw retainedRefusal(`${label}: the playersRetained collection must be an array of retained records (got ${describe(list)}); nothing was written`);
   const problems = []; const seen = new Set(); const records = [];
   list.forEach((rec, i) => {
     const p = validateRetainedRecord(rec, i); if (p.length) { problems.push(...p); return; }
@@ -210,26 +473,16 @@ export function checkRetainedCollection(list, { liveIds = new Set(), label = 'pl
   return records;
 }
 /**
- * The retained records as a snapshot collection: read for backups and the persistence
- * tools (null before migration 0014). `replace` is the PROTECTED contract (review of
- * 6d66655, F1): a supplied collection may only ADD retained records. Every record the
- * file already holds must be listed with the same four facts — a stored record that is
- * not listed, or listed with a changed birth date, country or deletion instant, refuses
- * the WHOLE save (ids only; the caller's transaction rolls back, accompanying changes
- * included). New records are validated as before (shape, no duplicate, no live id) and
- * inserted; the stored rows are never deleted or updated by a save. An omitted collection
- * keeps the rows as they are. The generic "a supplied collection replaces the table"
- * convention of the other collections does not apply here: a retained deletion record
- * is a fact that survives and an id that is never re-created, and no save may erase or
- * amend it. (A fresh restore and a re-upgraded rollback copy import through migration
- * 0014, where no stored record exists yet.)
+ * The retained records as a snapshot collection (null before migration 0014). `replace` may only ADD records: a stored
+ * record that is not listed, or listed with a changed birth date, country or deletion instant, refuses the whole save
+ * (RETAINED_RECORD_PROTECTED, ids only). An omitted collection keeps the rows as they are.
  */
 export const PLAYERS_RETAINED = {
   name: PLAYERS_RETAINED_COLLECTION,
   cutOver: (sqlite) => migrationApplied(sqlite, PLAYER_ERASURE_MIGRATION),
   read(sqlite) {
     if (!this.cutOver(sqlite)) return null;
-    return sqlite.prepare('SELECT id, deleted_at, birth_date, country FROM players WHERE deleted_at IS NOT NULL ORDER BY deleted_at, id').all().map(retainedRecordFromRow); // listed by deletion instant, then id (rowids are the accounts' creation order, not a fact of the record)
+    return sqlite.prepare('SELECT id, deleted_at, birth_date, country FROM players WHERE deleted_at IS NOT NULL ORDER BY deleted_at, id').all().map(retainedRecordFromRow);
   },
   replace(sqlite, list) {
     if (!this.cutOver(sqlite)) return false;
@@ -240,9 +493,9 @@ export const PLAYERS_RETAINED = {
     const supplied = new Map(records.map((r) => [r.id, r]));
     const missing = []; const amended = [];
     for (const [id, rec] of stored) {
-      const given = supplied.get(id);
-      if (!given) { missing.push(id); continue; }
-      if (given.deletedAt !== rec.deletedAt || given.birthDate !== rec.birthDate || given.country !== rec.country) amended.push(id);
+      const g = supplied.get(id);
+      if (!g) { missing.push(id); continue; }
+      if (g.deletedAt !== rec.deletedAt || g.birthDate !== rec.birthDate || g.country !== rec.country) amended.push(id);
     }
     if (missing.length || amended.length) {
       const parts = [];
@@ -250,886 +503,539 @@ export const PLAYERS_RETAINED = {
       if (amended.length) parts.push(`${amended.length} would be amended — the stored birth date, country or deletion instant differs from the listed one (${amended.slice(0, 20).join(', ')}${amended.length > 20 ? ', …' : ''})`);
       throw Object.assign(new Error(`RETAINED_RECORD_PROTECTED: the snapshot's playersRetained collection — ${parts.join('; ')}; a retained deletion record is never removed or amended by a save (a supplied collection may only add records); the save was rolled back and nothing was written`), { code: 'RETAINED_RECORD_PROTECTED', missing, amended });
     }
-    const ins = sqlite.prepare(insertSql('players', PLAYER_COLUMNS));
+    const ins = sqlite.prepare(P_INSERT);
     for (const rec of records) if (!stored.has(rec.id)) ins.run(retainedRowFor(rec));
     return true;
   },
 };
-/** The UPDATE of an erase: every column but the id and the two kept facts; the parameters come from `retainedRowFor` minus those two. */
-const ERASE_COLUMNS = Object.freeze(PLAYER_COLUMNS.filter((c) => !['id', 'birth_date', 'country'].includes(c)));
+const ERASE_COLUMNS = Object.freeze(P_COLS.filter((c) => !['id', 'birth_date', 'country'].includes(c)));
 const ERASE_SQL = `UPDATE players SET ${ERASE_COLUMNS.map((c) => `${c} = @${c}`).join(', ')} WHERE id = @id AND deleted_at IS NULL`;
 const eraseParamsFor = (rec) => { const full = retainedRowFor(rec); const p = { id: rec.id }; for (const c of ERASE_COLUMNS) p[c] = full[c]; return p; };
 
+// ------------------------------------------------------------------ typing a whole identity (the seed, a snapshot)
+const blocked = (detail, extra = {}) => refusal('IDENTITY_IMPORT_BLOCKED', `${detail}; nothing was written`, extra);
+/**
+ * Type a snapshot pair `{ players, guardians }` (the records plus `password`, and a guardian's `emailCodeHash`): every
+ * record typed, ids and e-mails unique, every reference and both sides of every link consistent, no minor on `now`
+ * without a primary guardian. Returns the rows to write, or throws IDENTITY_IMPORT_BLOCKED naming the ids and fields.
+ */
+export function typeIdentitySnapshot({ players, guardians }, { now = Date.now(), retainedIds = new Set() } = {}) {
+  for (const [name, value] of [['players', players], ['guardians', guardians]]) if (!Array.isArray(value)) throw blocked(`${name}: the snapshot collection must be an array of records (got ${describe(value)})`);
+  const problems = [];
+  const gRows = []; const gIds = new Set(); const emails = new Map();
+  guardians.forEach((raw, i) => {
+    if (!isPlainObject(raw)) { problems.push(`guardians #${i}: not an object (${describe(raw)})`); return; }
+    const { password = null, emailCodeHash = null, ...rest } = raw;
+    const r = guardianWithDefaults(rest);
+    const at = `guardians ${typeof r.id === 'string' ? r.id : `#${i}`}`;
+    const ps = guardianRecordProblems(r);
+    const pw = passwordProblem(password); if (pw) ps.push(pw);
+    const ch = codeHashProblem(emailCodeHash); if (ch) ps.push(ch);
+    if (ps.length) { problems.push(`${at}: ${ps.join('; ')}`); return; }
+    if (gIds.has(r.id)) { problems.push(`${at}: duplicate id`); return; }
+    const key = r.email.toLowerCase();
+    if (emails.has(key)) { problems.push(`${at}: the e-mail is already used by guardian ${emails.get(key)} (compared case-insensitively)`); return; }
+    gIds.add(r.id); emails.set(key, r.id); gRows.push({ r, passwordHash: password, emailCodeHash });
+  });
+  const pRows = []; const pIds = new Set(); const byId = new Map();
+  players.forEach((raw, i) => {
+    if (!isPlainObject(raw)) { problems.push(`players #${i}: not an object (${describe(raw)})`); return; }
+    const { password = null, ...rest } = raw;
+    const r = playerWithDefaults(rest);
+    const at = `players ${typeof r.id === 'string' ? r.id : `#${i}`}`;
+    const ps = playerRecordProblems(r);
+    const pw = passwordProblem(password); if (pw) ps.push(pw);
+    if (ps.length) { problems.push(`${at}: ${ps.join('; ')}`); return; }
+    if (pIds.has(r.id)) { problems.push(`${at}: duplicate id`); return; }
+    if (retainedIds.has(r.id)) { problems.push(`${at}: the id is a deleted account whose record is retained; a deleted account is not created again`); return; }
+    if (r.guardianId !== null && !gIds.has(r.guardianId)) { problems.push(`${at}: guardianId names guardian ${r.guardianId}, which the snapshot does not hold`); return; }
+    if (r.guardianId === null && !isAdult(r, new Date(now))) { problems.push(`${at}: a minor without a primary guardian (guardianId)`); return; }
+    pIds.add(r.id); byId.set(r.id, r); pRows.push({ r, passwordHash: password });
+  });
+  const links = [];
+  for (const { r } of gRows) {
+    if (r.coGuardianOf !== null && !gIds.has(r.coGuardianOf)) problems.push(`guardians ${r.id}: coGuardianOf names guardian ${r.coGuardianOf}, which the snapshot does not hold`);
+    for (const childId of r.childIds) {
+      const p = byId.get(childId);
+      if (!p) { problems.push(`guardians ${r.id}: childIds names player ${childId}, which the snapshot does not hold`); continue; }
+      links.push({ guardian_id: r.id, player_id: childId, role: p.guardianId === r.id ? 'primary' : 'co' });
+    }
+  }
+  const listed = new Set(links.filter((l) => l.role === 'primary').map((l) => l.player_id));
+  for (const { r } of pRows) if (r.guardianId !== null && !listed.has(r.id)) problems.push(`players ${r.id}: its guardian ${r.guardianId} does not list it in childIds`);
+  if (problems.length) throw blocked(`identity snapshot: ${problems.length} record(s) or relationship(s) refused — ${problems.slice(0, 20).join('; ')}${problems.length > 20 ? '; …' : ''}`, { problems });
+  return { guardians: gRows, players: pRows, links };
+}
+/** Write a typed identity (inside the caller's transaction): guardians (co-guardian keys in a second pass), players and their lists, then the links. */
+function writeIdentity(sqlite, typed) {
+  const insG = sqlite.prepare(G_INSERT);
+  const coG = sqlite.prepare('UPDATE guardians SET co_guardian_of = ? WHERE id = ?');
+  for (const { r, passwordHash, emailCodeHash } of typed.guardians) insG.run({ ...guardianParams(r, { passwordHash, emailCodeHash }), co_guardian_of: null });
+  for (const { r } of typed.guardians) if (r.coGuardianOf !== null) coG.run(r.coGuardianOf, r.id);
+  const insP = sqlite.prepare(P_INSERT);
+  const st = prepareSubrecordStatements(sqlite);
+  for (const { r, passwordHash } of typed.players) { insP.run(playerParams(r, passwordHash)); writeChildRows(st, r); }
+  const insL = sqlite.prepare('INSERT INTO guardian_children (guardian_id, player_id, role) VALUES (@guardian_id, @player_id, @role)');
+  for (const l of typed.links) insL.run(l);
+  return { players: typed.players.length, guardians: typed.guardians.length, links: typed.links.length };
+}
+
+const cutOver = (sqlite) => migrationApplied(sqlite, CORE_IDENTITY_LIVE_MIGRATION);
+
+/** Read every live player and guardian in snapshot form (the records plus their hashes; no trial reports, no coGuardians). */
+function readIdentitySnapshot(sqlite) {
+  const live = sqlite.prepare(`${P_SELECT} WHERE deleted_at IS NULL ORDER BY rowid`).all();
+  const children = readChildrenFor(sqlite, live.map((d) => d.id));
+  const players = live.map((d) => { const { trialReports: _derived, ...rec } = playerFromDb(d, children.get(d.id), []); return { ...rec, password: d.password_hash }; });
+  const links = new Map();
+  for (const l of sqlite.prepare('SELECT guardian_id, player_id FROM guardian_children ORDER BY rowid').all()) { if (!links.has(l.guardian_id)) links.set(l.guardian_id, []); links.get(l.guardian_id).push(l.player_id); }
+  const guardians = sqlite.prepare(`${G_SELECT} ORDER BY rowid`).all().map((d) => { const { coGuardians: _derived, ...rec } = guardianFromDb(d, links.get(d.id) ?? [], []); return { ...rec, password: d.password_hash, emailCodeHash: d.email_code_hash }; });
+  return { players, guardians };
+}
+
+/**
+ * Whole-snapshot access for snapshot mode (tools, fixtures, the persistence suites). The two collections are coupled:
+ * a snapshot carries both or neither. `replace` types the whole pair first (IDENTITY_IMPORT_BLOCKED, naming ids and
+ * fields) and then rewrites the three tables; the retained rows stay as they are and their ids are refused as live
+ * players.
+ */
 export const IDENTITY_SNAPSHOT = {
   names: IDENTITY_COLLECTIONS,
-  cutOver: (sqlite) => migrationApplied(sqlite, CORE_IDENTITY_LIVE_MIGRATION),
-  read(sqlite) {
-    if (!this.cutOver(sqlite)) return null;
-    const childIds = new Map();
-    for (const l of sqlite.prepare('SELECT guardian_id, player_id FROM guardian_children ORDER BY rowid').all()) {
-      if (!childIds.has(l.guardian_id)) childIds.set(l.guardian_id, []);
-      childIds.get(l.guardian_id).push(l.player_id);
-    }
-    // S5 (migration 0007 recorded): the arrays come from the child tables and
-    // `trialReports` from the trials of the same file (the S8a tables).
-    const players = subrecordsLive(sqlite)
-      ? readPlayersWithChildren(sqlite, prepareSubrecordStatements(sqlite), { trials: readTrials(sqlite) }).map((x) => x.record)
-      : sqlite.prepare(`SELECT ${PLAYER_COLUMNS.join(', ')} FROM players WHERE deleted_at IS NULL ORDER BY rowid`).all().map((r) => playerFromRow(r)); // S4b-R: a retained row is not a player record
-    return {
-      guardians: sqlite.prepare(`SELECT ${GUARDIAN_COLUMNS.join(', ')} FROM guardians ORDER BY rowid`).all().map((r) => guardianFromRow(r, childIds.get(r.id) ?? [])),
-      players,
-    };
-  },
-  replace(sqlite, { players, guardians }, { now = Date.now(), trials = undefined } = {}) {
-    if (!this.cutOver(sqlite)) return false;
+  cutOver,
+  read(sqlite) { return cutOver(sqlite) ? readIdentitySnapshot(sqlite) : null; },
+  replace(sqlite, { players, guardians }, { now = Date.now() } = {}) {
+    if (!cutOver(sqlite)) return false;
     if (!sqlite.isTransaction) throw new Error('identity snapshot: replace() runs inside the caller\'s transaction');
-    for (const [name, value] of [['players', players], ['guardians', guardians]]) {
-      if (!Array.isArray(value)) throw new TypeError(`${name}: the snapshot collection must be an array of records (got ${describeValue(value)}); the save was rolled back and nothing was written`);
-    }
-    const report = validateCoreIdentity({ players, guardians }, { now });
-    if (report.status !== 'complete') {
-      const listed = report.refusals.slice(0, 20).map((r) => `${r.collection} ${r.id ?? '(collection)'}: ${r.reason}`).join('; ');
-      throw new Error(`identity snapshot: ${report.refusals.length} record(s) or relationship(s) were refused (${listed}${report.refusals.length > 20 ? '; …' : ''}); the save was rolled back and no player, guardian or link was changed`);
-    }
-    const { candidate } = report;
-    // The trialReports claims, judged against the FINAL trials (see above) before any statement runs.
-    if (subrecordsLive(sqlite)) {
-      const finalTrials = trials === undefined ? readTrials(sqlite) : trials; // the S8a tables when the snapshot omits the trials
-      const list = Array.isArray(finalTrials) ? finalTrials : null;
-      const problems = [];
-      for (const row of candidate.players) {
-        const copy = playerFromRow(row).trialReports; // the candidate row carries the record's value in its facets (the S4a layout)
-        if (copy === null || copy === undefined) continue;
-        if (!list) { problems.push(`players ${row.id}: the trials collection ${trials === undefined ? 'retained in the file' : 'supplied with the snapshot'} is ${describeValue(finalTrials)}, not an array, so its trialReports copy cannot be reconciled`); continue; }
-        problems.push(...reconcileTrialReportCopy(row.id, copy, trialReportsFor(list, row.id), { hint: 'resolve the snapshot before saving it' }));
-      }
-      if (problems.length) {
-        const ids = new Set(problems.map((p) => p.slice(0, p.indexOf(':'))));
-        throw Object.assign(new Error(`identity snapshot: the trialReports of ${ids.size} player(s) cannot be reconciled with the trials collection (${problems.slice(0, 20).join('; ')}${problems.length > 20 ? '; …' : ''}); the save was rolled back and nothing was written`), { code: 'TRIAL_REPORTS_UNRECONCILED', problems });
-      }
-    }
-    // The three tables are REWRITTEN from the validated candidate (review of
-    // 9656a4b, finding 3): every existing row goes first — links, then players,
-    // then guardians, children before parents so no foreign key is ever left
-    // dangling — and the candidate is inserted in the snapshot's order
-    // (guardians in two passes for `co_guardian_of`, then players, then the
-    // links derived from the guardians' `childIds`). Nothing about the outcome
-    // depends on what the tables held before or on the order the collections
-    // list their records: a replacement guardian may carry the e-mail of the
-    // one it replaces, two retained guardians may swap e-mails, a co-guardian
-    // may be listed before its primary — the unique e-mail index and the
-    // foreign keys judge the FINAL state only, which the preflight already
-    // accepted. The caller's transaction makes the rewrite all-or-nothing.
-    // S5: the child rows CASCADE with the player rows here and are written again
-    // below from the snapshot's records, so the FINAL state holds exactly the
-    // arrays the snapshot carries, typed (an unknown item field is not stored;
-    // a record without an array, or with a null or an empty one, has no rows and
-    // reads back with it empty).
-    // S4b-R: the retained records are not part of any snapshot's players — they are
-    // captured here, before the DELETE, and reinserted byte-identical after the
-    // candidate; a candidate that lists a retained id as a live player is refused
-    // before any statement (ids only), so a save never re-creates a deleted account.
-    const retainedRows = sqlite.prepare(`SELECT ${PLAYER_COLUMNS.join(', ')} FROM players WHERE deleted_at IS NOT NULL ORDER BY rowid`).all();
-    const retainedIds = new Set(retainedRows.map((r) => r.id));
-    const resurrected = candidate.players.filter((r) => retainedIds.has(r.id)).map((r) => r.id);
-    if (resurrected.length) throw Object.assign(new Error(`identity snapshot: ${resurrected.length} player record(s) carry the id of a deleted account whose record is retained (${resurrected.slice(0, 20).join(', ')}${resurrected.length > 20 ? ', …' : ''}); a deleted account is not re-created by a save; the save was rolled back and nothing was written`), { code: 'PLAYER_ID_RETAINED' });
+    const retainedIds = new Set(sqlite.prepare('SELECT id FROM players WHERE deleted_at IS NOT NULL').all().map((r) => r.id));
+    const typed = typeIdentitySnapshot({ players, guardians }, { now, retainedIds });
     sqlite.exec('DELETE FROM guardian_children');
-    sqlite.exec('DELETE FROM players');
+    sqlite.exec('DELETE FROM players WHERE deleted_at IS NULL'); // the lists cascade
+    sqlite.exec('UPDATE guardians SET co_guardian_of = NULL'); // RESTRICT is checked row by row
     sqlite.exec('DELETE FROM guardians');
-    const insG = sqlite.prepare(insertSql('guardians', GUARDIAN_COLUMNS));
-    const linkG = sqlite.prepare('UPDATE guardians SET co_guardian_of = ? WHERE id = ?');
-    const insP = sqlite.prepare(insertSql('players', PLAYER_COLUMNS));
-    const insL = sqlite.prepare('INSERT INTO guardian_children (guardian_id, player_id, role) VALUES (@guardian_id, @player_id, @role)');
-    const pending = [];
-    for (const row of candidate.guardians) {
-      const { co_guardian_of, ...rest } = row;
-      insG.run({ ...rest, co_guardian_of: null });
-      if (co_guardian_of !== null && co_guardian_of !== undefined) pending.push([co_guardian_of, row.id]);
-    }
-    for (const [target, id] of pending) linkG.run(target, id);
-    for (const row of candidate.players) insP.run(playerRowFor(sqlite, row));
-    if (subrecordsLive(sqlite)) {
-      const st = prepareSubrecordStatements(sqlite);
-      for (const row of candidate.players) writeChildRows(st, playerFromRow(row));
-    }
-    for (const row of candidate.links) insL.run(row);
-    for (const r of retainedRows) insP.run(r); // S4b-R: the retained rows, exactly as they were
+    try { writeIdentity(sqlite, typed); } catch (err) { throw blocked(`the identity snapshot could not be stored (${sqlReason(err)})`); }
     const broken = sqlite.prepare('PRAGMA foreign_key_check').all();
     if (broken.length) throw new Error(`identity snapshot: foreign_key_check found ${broken.length} broken reference(s) after the write; the save was rolled back`);
     return true;
   },
 };
 
+// ------------------------------------------------------------------ the repositories
+const WRITES = new Set(['create', 'update', 'setPasswordHash', 'setEmailCodeHash', 'addItem', 'setItems', 'patchItem', 'link', 'unlink', 'ageUp', 'erase']);
+const SCAN_BATCH = 500;
+
 /**
- * `trialReports(playerId)` (optional) resolves the derived `trialReports` of a
- * player from the authoritative trials collection (S5 decision 5); without it
- * every player's list is empty. It is read live on every access.
+ * `createIdentityRepositories({ sqlite, unit, now, log, trialReportsOf })`. `trialReportsOf(ids)` answers a Map player id
+ * → the trial reports naming the player (the recruitment repository); without it every list is empty.
  */
-export function createIdentityRepositories({ sqlite, log = () => {}, warn = () => {}, unit = null, now = Date.now, trialReports = null }) {
-  if (!sqlite) throw new TypeError('the identity repositories need a SQLite connection (node:sqlite); the data layer has no in-memory fallback');
-  requireRuntime();
-  if (typeof sqlite.isTransaction !== 'boolean') throw new Error('NODE_UNSUPPORTED: this SQLite connection has no transaction state (isTransaction); the identity repositories cannot tell a save transaction from autocommit');
-  // Authority is the cutover record, never the tables. Checked before any statement is prepared.
-  if (!migrationApplied(sqlite, CORE_IDENTITY_LIVE_MIGRATION)) throw new Error(`core identity: the cutover record ${CORE_IDENTITY_LIVE_MIGRATION} is missing from data_migrations; the players, guardians and guardian_children tables cannot be trusted as the source of truth`);
-  // The S1 shadow created tables of the same names without facets_json; attaching to them would lose every facet.
-  for (const table of ['players', 'guardians']) {
-    const cols = sqlite.prepare(`PRAGMA table_info(${table})`).all().map((c) => c.name);
-    if (!cols.length) throw new Error(`core identity: the ${table} table does not exist although the cutover record is present`);
-    if (!cols.includes('facets_json')) throw new Error(`core identity: the ${table} table is the S1 shadow definition (no facets_json column), not the live table; refusing to attach`);
-  }
-  if (!sqlite.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'guardian_children'").get()) throw new Error('core identity: the guardian_children table does not exist although the cutover record is present');
-  // S5: the sub-record tables are the only place the arrays live once 0007 is recorded; the repository never attaches to a database between 0005 and 0007 (the same boot applies both).
-  if (!subrecordsLive(sqlite)) throw new Error(`core identity: the sub-record record ${PLAYER_SUBRECORDS_MIGRATION} is missing from data_migrations; the player arrays have no authoritative storage on this connection`);
-  for (const table of SUBRECORD_TABLES) if (!sqlite.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(table)) throw new Error(`core identity: the ${table} table does not exist although ${PLAYER_SUBRECORDS_MIGRATION} is recorded`);
-  if (trialReports !== null && typeof trialReports !== 'function') throw new TypeError('the identity repositories take trialReports as a function (playerId → the trial reports naming the player) or null');
-  const derivedTrialReports = (playerId) => (trialReports ? trialReports(playerId) : []);
+export function createIdentityRepositories({ sqlite, log = () => {}, unit = null, now = Date.now, trialReportsOf = null }) {
+  if (!sqlite) throw new TypeError('the identity repositories need a SQLite connection (node:sqlite); players and guardians have no in-memory fallback');
+  if (!cutOver(sqlite)) throw new Error(`core identity: the cutover record ${CORE_IDENTITY_LIVE_MIGRATION} is missing from data_migrations; the players, guardians and guardian_children tables cannot be trusted as the source of truth`);
+  if (!subrecordsLive(sqlite)) throw new Error(`core identity: the sub-record record ${PLAYER_SUBRECORDS_MIGRATION} is missing from data_migrations; the player lists have no storage on this connection`);
+  if (unit !== null && (typeof unit?.active !== 'function' || typeof unit?.join !== 'function')) throw new TypeError('the identity repositories need the store\'s participant API `unit` ({ active(), join(work) }) or null');
+  const operation = (fn) => (unit?.active?.() ? unit.join(fn) : sqlite.isTransaction ? fn() : transaction(sqlite, fn));
+  const cache = new Map();
+  const q = (sql) => { let s = cache.get(sql); if (!s) cache.set(sql, (s = sqlite.prepare(sql))); return s; };
+  const st = prepareSubrecordStatements(sqlite);
+  const reportsFor = (ids) => (trialReportsOf && ids.length ? trialReportsOf(ids) : new Map());
 
-  // The store's participant API: `active()` says whether a unit is open, `join(work)` runs an operation inside it through the poisoning boundary.
-  if (unit !== null && (typeof unit?.active !== 'function' || typeof unit?.join !== 'function')) throw new TypeError('the identity repositories need the store\'s participant API `unit` ({ active(), join(work) }) or null; a unit without join() could not report an operation\'s failure to the unit of work');
-  const inUnit = () => !!unit?.active?.();
-  const stmt = {
-    allPlayers: sqlite.prepare(`SELECT ${PLAYER_COLUMNS.join(', ')} FROM players WHERE deleted_at IS NULL ORDER BY rowid`), // S4b-R: live rows only
-    allRetained: sqlite.prepare('SELECT id, deleted_at, birth_date, country FROM players WHERE deleted_at IS NOT NULL ORDER BY deleted_at, id'),
-    allGuardians: sqlite.prepare(`SELECT ${GUARDIAN_COLUMNS.join(', ')} FROM guardians ORDER BY rowid`),
-    allLinks: sqlite.prepare('SELECT guardian_id, player_id, role FROM guardian_children ORDER BY rowid'),
-    insertPlayer: sqlite.prepare(insertSql('players', PLAYER_COLUMNS)),
-    updatePlayer: sqlite.prepare(updateSql('players', PLAYER_COLUMNS)),
-    // The column and the row's shape metadata (facets_json.__meta: is guardianId present, is it null) change together.
-    setPlayerGuardian: sqlite.prepare('UPDATE players SET guardian_id = @guardian_id, facets_json = @facets_json WHERE id = @id'),
-    deletePlayer: sqlite.prepare('DELETE FROM players WHERE id = ?'),
-    erasePlayer: sqlite.prepare(ERASE_SQL),
-    deleteLinksOf: sqlite.prepare('DELETE FROM guardian_children WHERE player_id = ?'),
-    insertGuardian: sqlite.prepare(insertSql('guardians', GUARDIAN_COLUMNS)),
-    updateGuardian: sqlite.prepare(updateSql('guardians', GUARDIAN_COLUMNS)),
-    insertLink: sqlite.prepare('INSERT INTO guardian_children (guardian_id, player_id, role) VALUES (?, ?, ?)'),
-    deleteLink: sqlite.prepare('DELETE FROM guardian_children WHERE guardian_id = ? AND player_id = ?'),
-    countPlayers: sqlite.prepare('SELECT COUNT(*) AS n FROM players'),
-    countGuardians: sqlite.prepare('SELECT COUNT(*) AS n FROM guardians'),
-    countLinks: sqlite.prepare('SELECT COUNT(*) AS n FROM guardian_children'),
-    mediaOwner: sqlite.prepare('SELECT player_id FROM player_media WHERE id = ?'),
-    meta: sqlite.prepare('SELECT value FROM meta WHERE key = ?'),
-    setMeta: sqlite.prepare('INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value'),
-    sub: prepareSubrecordStatements(sqlite),
+  // ---------------------------------------------------------- decoding
+  const decodePlayers = (rows) => {
+    if (!rows.length) return [];
+    const ids = rows.map((d) => d.id);
+    const children = rows.length === 1 ? new Map([[ids[0], readChildren(st, ids[0])]]) : readChildrenFor(sqlite, ids);
+    const reports = reportsFor(ids);
+    return rows.map((d) => deepFreeze(playerFromDb(d, children.get(d.id), clone(reports.get(d.id) ?? []))));
   };
-
-  // ------------------------------------------------------------ in-memory state
-  // One domain each: plain records (the view targets), their views in the same
-  // order, the id index and the record → view index (so a lookup never scans).
-  // Memory follows the tables: an operation changes it only after its statements ran.
-  const makeDomain = (name) => ({ name, records: [], proxies: [], byId: new Map(), views: new Map() });
-  const P = makeDomain('players');
-  const G = makeDomain('guardians');
-  const R = new Map(); // S4b-R: id → the retained record (frozen); never a view, never in P
-
-  const refuse = (what) => { throw new TypeError(`${what} is written through the identity repositories (players.insert / players.update / players.restore / players.addItem / players.setItems / players.patchItem / guardians.insert / guardians.update / link / unlink / ageUp), never directly on the in-memory view.`); };
-  const refuseNested = (domain, key) => refuse(`a ${domain} record (field "${String(key)}", including its nested values)`);
-  const SUB_LABEL = (key) => `a player's ${key} (S5: rows of ${SUBRECORD_SPECS[key]?.table ?? 'their table'}; use players.addItem / setItems / patchItem)`;
-  const isSubKey = (key) => typeof key === 'string' && PLAYER_SUBRECORD_KEYS.includes(key);
-  const isDerivedKey = (key) => typeof key === 'string' && PLAYER_DERIVED_KEYS.includes(key);
-
-  // Nested values (composites, facets, the arrays' items): every write refused, at any depth. Stable identity per object.
-  const guards = new WeakMap();
-  const guard = (value, domain, key) => {
-    if (value === null || typeof value !== 'object') return value;
-    let g = guards.get(value);
-    if (!g) {
-      g = markView(new Proxy(value, {
-        get(t, prop, receiver) { return guard(Reflect.get(t, prop, receiver), domain, key); },
-        set() { return refuseNested(domain, key); },
-        deleteProperty() { return refuseNested(domain, key); },
-        defineProperty() { return refuseNested(domain, key); },
-        setPrototypeOf() { return refuseNested(domain, key); },
-      }));
-      guards.set(value, g);
-    }
-    return g;
+  const playerById = (id) => (typeof id === 'string' && id ? decodePlayers(q(`${P_SELECT} WHERE id = ? AND deleted_at IS NULL`).all(id))[0] ?? null : null);
+  const playerRow = (id) => (typeof id === 'string' && id ? q(`${P_SELECT} WHERE id = ? AND deleted_at IS NULL`).get(id) ?? null : null);
+  const decodeGuardians = (rows) => {
+    if (!rows.length) return [];
+    const ids = JSON.stringify(rows.map((d) => d.id));
+    const kids = new Map(); const cos = new Map();
+    for (const l of q('SELECT guardian_id, player_id FROM guardian_children WHERE guardian_id IN (SELECT value FROM json_each(?)) ORDER BY rowid').all(ids)) { if (!kids.has(l.guardian_id)) kids.set(l.guardian_id, []); kids.get(l.guardian_id).push(l.player_id); }
+    for (const c of q('SELECT id, name, email, co_guardian_of FROM guardians WHERE co_guardian_of IN (SELECT value FROM json_each(?)) ORDER BY rowid').all(ids)) { if (!cos.has(c.co_guardian_of)) cos.set(c.co_guardian_of, []); cos.get(c.co_guardian_of).push({ id: c.id, name: c.name, email: c.email }); }
+    return rows.map((d) => deepFreeze(guardianFromDb(d, kids.get(d.id) ?? [], cos.get(d.id) ?? [])));
   };
-  /**
-   * The view of one record: reads are the plain record, every nested object served through a guard; every write —
-   * a field, a facet, a nested value, an array or its items — is refused. Records change only through the
-   * repository's operations, which write their rows at once (S4a-E, migration.md §4.3.1): nothing is left for a save
-   * to find.
-   */
-  const recordView = (target, domain) => {
-    const refuseField = (key) => refuse(`a ${domain} record (field "${String(key)}")`);
-    const hidden = (t, key) => domain === 'players' && hiddenDerived(t, key);
-    return markView(new Proxy(target, {
-      // The derived key of a record that never had it: hidden while no report names the player (the record's shape), shown — enumerable — once one does. The target property is configurable, so the view may report both.
-      has(t, key) { return !hidden(t, key) && Reflect.has(t, key); },
-      ownKeys(t) { const keys = Reflect.ownKeys(t); return domain === 'players' ? keys.filter((k) => !hidden(t, k)) : keys; },
-      getOwnPropertyDescriptor(t, key) {
-        const d = Reflect.getOwnPropertyDescriptor(t, key);
-        if (!d || domain !== 'players' || !isDerivedKey(key)) return d;
-        if (hidden(t, key)) return undefined;
-        return d.enumerable ? d : { ...d, enumerable: true };
-      },
-      get(t, key, receiver) {
-        const value = Reflect.get(t, key, receiver);
-        if (domain === 'guardians' && key === 'childIds') return Array.isArray(value) ? readonlyView(value, 'a guardian\'s childIds (use link / unlink / ageUp)') : value;
-        // S5: the arrays (rows of the child tables) and the derived trial reports are served read-only, items included.
-        if (domain === 'players' && isSubKey(key)) return readonlyView(value, SUB_LABEL(key));
-        if (domain === 'players' && isDerivedKey(key)) return readonlyView(value, `a player's ${key} (derived from the trials collection; written nowhere)`);
-        return guard(value, domain, key);
-      },
-      set(_t, key) { return refuseField(key); },
-      deleteProperty(_t, key) { return refuseField(key); },
-      defineProperty(_t, key) { return refuseField(key); },
-      setPrototypeOf() { return refuse(`a ${domain} record`); },
-    }));
-  };
-  const collectionView = (domain) => markView(new Proxy(domain.proxies, {
-    set(_t, key) { return refuse(`the ${domain.name} collection (index "${String(key)}")`); },
-    deleteProperty(_t, key) { return refuse(`the ${domain.name} collection (index "${String(key)}")`); },
-    defineProperty(_t, key) { return refuse(`the ${domain.name} collection (index "${String(key)}")`); },
-  }));
-  const playersView = collectionView(P);
-  const guardiansView = collectionView(G);
-
-  /** The empty-state shape of `trialReports` on a plain record (data, not the accessor): `absent`, `null` or `array`. */
-  const shapeOf = (rec) => (!hasOwn(rec, 'trialReports') ? 'absent' : rec.trialReports === null ? 'null' : 'array');
-  const trialShape = new Map(); // player id → the shape the record keeps while no report names it (repository state: captured and restored with the unit of work)
-  // Players render in the S5 layout: the arrays are rows (the facets keep nothing
-  // of them), the facets keep the player's unknown fields and shape metadata. `trialReports` renders as its SHAPE (absent /
-  // null / []), never as content: the row records where the key was and whether
-  // it was null; the reports live on the trials. `shape` overrides the record's
-  // (a restore adopting the restored record's shape).
-  const toRowOf = (domain, rec, { shape = null } = {}) => {
-    if (domain !== P) return guardianToRow(rec);
-    const s = shape ?? trialShape.get(rec.id) ?? shapeOf(rec);
-    const forRow = { ...rec }; // a non-enumerable accessor (the absent shape) is not copied; an enumerable one is replaced below
-    if (s === 'absent') delete forRow.trialReports; else forRow.trialReports = s === 'null' ? null : [];
-    return playerToRow(forRow, { subrecords: 'tables' });
-  };
-  /**
-   * `trialReports` on an in-memory player record is an ACCESSOR over the trials
-   * collection (S5 decision 5; review of 132eda2, finding 2), installed on EVERY
-   * record so a report filed later is visible at once on every held view, spread
-   * and serialisation — whatever shape the record had. The empty-state shape is
-   * kept: an array stays an enumerable array (empty or not); a null reads null
-   * until a report names the player, then the list; an absent key stays hidden
-   * — a non-enumerable accessor the record view hides entirely — until a report
-   * exists, then shows the list. The row written for the record carries the
-   * shape (toRowOf), so a reopen restores it; the same decoder rule puts the
-   * reports back where the record had the key or appends them.
-   */
-  const deriveTrialReports = (rec, shape = shapeOf(rec)) => {
-    trialShape.set(rec.id, shape);
-    const id = rec.id;
-    Object.defineProperty(rec, 'trialReports', {
-      get() { const d = derivedTrialReports(id); return shape === 'array' || d.length ? d : shape === 'null' ? null : undefined; },
-      enumerable: shape !== 'absent', configurable: true,
-    });
-    return rec;
-  };
-  /** A derived key the record never had while no report names the player: hidden from the view (not `in`, not enumerable, no descriptor). */
-  const hiddenDerived = (t, key) => isDerivedKey(key) && trialShape.get(t.id) === 'absent' && Reflect.get(t, key) === undefined;
-  const remember = (domain, rec) => {
-    domain.records.push(rec); domain.byId.set(rec.id, rec);
-    const view = recordView(rec, domain.name); domain.proxies.push(view); domain.views.set(rec, view); return view;
-  };
-  const forget = (domain, rec) => {
-    const i = domain.records.indexOf(rec);
-    if (i >= 0) { domain.records.splice(i, 1); domain.proxies.splice(i, 1); }
-    domain.byId.delete(rec.id); domain.views.delete(rec);
-    if (domain === P) trialShape.delete(rec.id);
-  };
-  const viewOf = (domain, rec) => domain.views.get(rec) ?? null;
-  const clear = (domain) => { domain.records.length = 0; domain.proxies.length = 0; domain.byId.clear(); domain.views.clear(); if (domain === P) trialShape.clear(); };
-
-  /** Read everything from the tables: guardians with their childIds from the link rows (rowid order), then players with their arrays from the child tables (position order). */
-  const load = () => {
-    clear(P); clear(G);
-    const links = new Map();
-    for (const l of stmt.allLinks.all()) { if (!links.has(l.guardian_id)) links.set(l.guardian_id, []); links.get(l.guardian_id).push(l.player_id); }
-    for (const r of stmt.allGuardians.all()) remember(G, guardianFromRow(r, links.get(r.id) ?? []));
-    const children = readAllChildren(stmt.sub);
-    // Decoded with an EMPTY derived list so the data value is exactly the record's empty-state shape (absent / null / []); the accessor then serves the live reports. A row whose shape hides existing child rows is refused by the decoder (INCONSISTENT_ROWS): the boot does not attach to it.
-    for (const r of stmt.allPlayers.all()) remember(P, deriveTrialReports(playerFromRow(r, { children: children.get(r.id) ?? emptyChildren(), trialReports: [] })));
-    R.clear(); for (const r of stmt.allRetained.all()) R.set(r.id, Object.freeze(retainedRecordFromRow(r)));
-  };
+  const guardianById = (id) => (typeof id === 'string' && id ? decodeGuardians(q(`${G_SELECT} WHERE id = ?`).all(id))[0] ?? null : null);
+  const playerInvalid = (id, problems) => refusal('PLAYER_RECORD_INVALID', `a player record was refused (player ${id}): ${problems.join('; ')}`, { problems });
+  const guardianInvalid = (id, problems) => refusal('GUARDIAN_RECORD_INVALID', `a guardian record was refused (guardian ${id}): ${problems.join('; ')}`, { problems });
+  const noPlayer = (id) => refusal('PLAYER_NOT_FOUND', `player ${id} does not exist`);
+  const noGuardian = (id) => refusal('GUARDIAN_NOT_FOUND', `guardian ${id} does not exist`);
+  const emailOwner = (email, exceptId = null) => (typeof email === 'string' ? q('SELECT id FROM guardians WHERE lower(email) = lower(?) AND id IS NOT ?').get(email, exceptId)?.id ?? null : null);
+  const isRetainedId = (id) => !!q('SELECT 1 FROM players WHERE id = ? AND deleted_at IS NOT NULL').get(id);
   const readInitState = () => {
-    const row = stmt.meta.get(CORE_IDENTITY_INIT_META);
+    const row = q('SELECT value FROM meta WHERE key = ?').get(CORE_IDENTITY_INIT_META);
     if (!row) return 'done';
     if (row.value !== 'pending' && row.value !== 'done') throw new Error(`core identity: meta.${CORE_IDENTITY_INIT_META} holds ${JSON.stringify(row.value)}, which is neither "pending" nor "done"`);
     return row.value;
   };
 
-  // ------------------------------------------------------------ write discipline
-  const requireAutocommit = (what) => {
-    if (sqlite.isTransaction && !inUnit()) throw new Error(`${what} writes in a transaction of its own and cannot run inside an open transaction (use the store's unit of work)`);
-  };
+  // ---------------------------------------------------------- filters for the scans (SQL prefilters; callers keep the exact rules)
   /**
-   * The ONE transactional boundary of every write operation (review of e4a7c53,
-   * findings 1 and 2). An operation is two halves: `sql`, the statements, and
-   * `apply`, the memory bookkeeping (records, link arrays, indexes, views,
-   * facet tracking), which never throws. Outside a unit of work the statements
-   * run in a transaction of their own and `apply` runs only once COMMIT has
-   * returned: a failure anywhere — a statement, a trigger, COMMIT itself —
-   * leaves memory exactly as it was, held references included. Inside a unit
-   * both halves run through `unit.join`, so a failure after the first statement
-   * poisons the unit even when the operation's caller catches the error (the
-   * unit cannot commit the fragment; its rollback restores memory through the
-   * save hook's `restoreState`). No nested BEGIN, no savepoint.
+   * `{ visibleTo: org, adultsOnly, position, availability, country, academyPlus, notLevel, createdSince, ageAtLeast, ageBelow, exceptId }`.
+   * `visibleTo` applies what SQL can of the visibility rule: the under-18 wall (by the country's age of majority) for an
+   * organisation that cannot see minors, and for a grassroots club "not pro, inside the box around the ground" (a club
+   * without a ground sees nobody). The caller still applies visibleToOrg and the blocks.
    */
-  const atomically = (sql, apply) => {
-    if (inUnit()) return unit.join(() => { sql(); return apply(); });
-    transaction(sqlite, sql);
-    return apply();
+  const scanWhere = (f = {}, at = now()) => {
+    const sql = ['p.deleted_at IS NULL']; const args = [];
+    const adults = () => { const a = adultsSql(at); sql.push(a.sql); args.push(...a.args); };
+    if (f.visibleTo) {
+      const org = f.visibleTo;
+      if (!seesMinors(org)) adults();
+      if ((org.level ?? null) === 'grassroots') {
+        if (!org.location) return null;
+        const box = boxAround(org.location, GRASSROOTS_RADIUS_KM);
+        sql.push("p.level <> 'pro'", 'p.lat IS NOT NULL AND p.lat BETWEEN ? AND ? AND p.lng BETWEEN ? AND ?'); args.push(box.minLat, box.maxLat, box.minLng, box.maxLng);
+      }
+    }
+    if (f.adultsOnly) adults();
+    for (const [k, col] of [['position', 'position'], ['availability', 'availability'], ['country', 'country']]) if (f[k] !== undefined && f[k] !== null) { sql.push(`p.${col} = ?`); args.push(f[k]); }
+    if (f.academyPlus === true) sql.push('p.academy_plus = 1');
+    if (typeof f.notLevel === 'string') { sql.push('p.level <> ?'); args.push(f.notLevel); }
+    if (Number.isFinite(f.createdSince)) { sql.push('p.created_at >= ?'); args.push(f.createdSince); }
+    if (Number.isSafeInteger(f.ageAtLeast)) { sql.push('p.birth_date <= ?'); args.push(bornByForAge(f.ageAtLeast, at)); }
+    if (Number.isSafeInteger(f.ageBelow)) { sql.push('p.birth_date > ?'); args.push(bornByForAge(f.ageBelow, at)); }
+    if (typeof f.exceptId === 'string') { sql.push('p.id <> ?'); args.push(f.exceptId); }
+    return { sql: sql.join(' AND '), args };
   };
-  const childIdsOf = (g) => (Array.isArray(g.childIds) ? g.childIds : null);
-  const ensureChildIds = (g) => { if (!Array.isArray(g.childIds)) setOwn(g, 'childIds', []); return g.childIds; };
-  const emailKey = (email) => String(email).toLowerCase();
-  const emailTakenBy = (email, exceptId = null) => { const k = emailKey(email); for (const g of G.records) if (g.id !== exceptId && emailKey(g.email) === k) return g.id; return null; };
-
-  /** Merge a patch into a record IN PLACE (held references to the record and to split composites stay valid). */
-  const applyPatch = (rec, patch, { split = [] } = {}) => {
-    for (const key of Object.keys(patch)) {
-      const v = patch[key];
-      if (v === undefined) continue;
-      if (split.includes(key) && isPlainObject(v) && isPlainObject(rec[key])) { for (const sub of Object.keys(v)) setOwn(rec[key], sub, clone(v[sub])); continue; }
-      setOwn(rec, key, clone(v));
+  /** Visit the players a filter admits, in creation order, decoding a batch at a time; `visit` returning false stops the scan. */
+  const scan = (filter, visit) => {
+    const w = scanWhere(filter);
+    if (!w) return;
+    let after = 0;
+    for (;;) {
+      const rows = q(`SELECT p.rowid AS rid, ${P_COLS.map((c) => `p.${c}`).join(', ')} FROM players p WHERE ${w.sql} AND p.rowid > ? ORDER BY p.rowid LIMIT ?`).all(...w.args, after, SCAN_BATCH);
+      if (!rows.length) return;
+      after = rows[rows.length - 1].rid;
+      for (const rec of decodePlayers(rows)) if (visit(rec) === false) return;
+      if (rows.length < SCAN_BATCH) return;
     }
   };
-  /** Replace a record's content IN PLACE (the signing rollback's Object.assign, made whole: removed keys go away). The derived accessor is re-installed with the restored record's shape, never overwritten with data. */
-  const replaceContent = (rec, next) => {
-    const shape = shapeOf(next);
-    for (const key of Object.keys(rec)) if (!hasOwn(next, key)) delete rec[key];
-    if (shape === 'absent') delete rec.trialReports; // a non-enumerable accessor is not listed above
-    for (const key of Object.keys(next)) setOwn(rec, key, isDerivedKey(key) ? (shape === 'null' ? null : []) : clone(next[key]));
-    deriveTrialReports(rec, shape);
-  };
-  const nextRecord = (rec, patch, { split = [] } = {}) => {
-    const next = clone(rec);
-    for (const key of Object.keys(patch)) {
-      const v = patch[key];
-      if (v === undefined) continue;
-      if (split.includes(key) && isPlainObject(v) && isPlainObject(next[key])) { for (const sub of Object.keys(v)) setOwn(next[key], sub, clone(v[sub])); continue; }
-      setOwn(next, key, clone(v));
-    }
-    return next;
-  };
 
-  // ------------------------------------------------------------ sub-record helpers (S5)
-  const checkSubKey = (key) => { if (!SUBRECORD_KEYS.includes(key)) throw new TypeError(`"${key}" is not a player sub-record; the keys are ${SUBRECORD_KEYS.join(', ')}`); };
-  /** The record and its current array for `key` (undefined when absent, null when null); refuses a missing player, an unknown key or a split composite that is not an object. */
+  // ---------------------------------------------------------- list operations (the rows of the player_* tables)
+  const checkSubKey = (key) => { if (!SUBRECORD_KEYS.includes(key)) throw new TypeError(`"${key}" is not a player list; the lists are ${SUBRECORD_KEYS.join(', ')}`); };
+  const subRefusal = (message) => refusal('PLAYER_SUBRECORD_INVALID', message);
   const subTarget = (id, key) => {
     checkSubKey(key);
-    const rec = P.byId.get(id);
-    if (!rec) throw new Error(`player ${id} does not exist`);
-    if (key.includes('.')) {
-      const [k] = key.split('.');
-      if (!isPlainObject(rec[k])) throw new Error(`player ${id}: ${k} is ${rec[k] === null ? 'null' : rec[k] === undefined ? 'absent' : typeof rec[k]}, so ${key} cannot be written (set ${k} first with players.update)`);
-    }
-    const current = getSubrecords(rec, key);
-    if (current !== undefined && current !== null && !Array.isArray(current)) throw new Error(`player ${id}: ${key} is not an array in memory`);
-    return { rec, current };
+    const rec = playerById(id);
+    if (!rec) throw noPlayer(id);
+    if (key === 'programme.completed' && rec.programme === null) throw subRefusal(`player ${id}: programme is null, so programme.completed cannot be written (start a programme first with players.update)`);
+    return { rec, current: getSubrecords(rec, key) ?? [] };
   };
-  /** The array object for `key` on the record (every array is on every record; a split composite set by players.update gains its sub-array there). */
-  const ensureSubArray = (rec, key) => {
-    if (!key.includes('.')) { if (!Array.isArray(rec[key])) setOwn(rec, key, []); return rec[key]; }
-    const [k, sub] = key.split('.');
-    if (!Array.isArray(rec[k][sub])) setOwn(rec[k], sub, []);
-    return rec[k][sub];
-  };
-  /** A refused sub-record write: the field and the reason, never a value. */
-  const subRefusal = (message) => Object.assign(new TypeError(message), { code: 'PLAYER_SUBRECORD_INVALID' });
+  const listOf = (id, key) => getSubrecords(playerById(id), key);
 
-  // ------------------------------------------------------------ unit-of-work rollback (S4a-E)
-  /**
-   * Inside a unit of work every operation records what it is about to change in memory before changing it: each
-   * record it touches (captured in place, by identity: held references see the old values after a rollback), the
-   * record's derived-key shape, and the collections' membership when it adds or removes a record. A rolled-back unit
-   * restores exactly that, so the cost of a unit follows what it touched, never the number of players
-   * (migration.md §4.3.1). `undo` exists only while a unit is open (`snapshotState` opens it).
-   */
-  let undo = null;
-  const recording = () => undo !== null && inUnit();
-  const touchShape = (id) => { if (recording() && !undo.shapes.has(id)) undo.shapes.set(id, trialShape.get(id)); };
-  const touch = (...recs) => {
-    if (!recording()) return;
-    for (const rec of recs) {
-      if (!rec || undo.records.has(rec)) continue;
-      undo.records.set(rec, captureGraph([rec]));
-      if (P.byId.get(rec.id) === rec) touchShape(rec.id);
-    }
-  };
-  const touchMembership = () => {
-    if (!recording() || undo.membership) return;
-    undo.membership = { P: [P.records.slice(), P.proxies.slice()], G: [G.records.slice(), G.proxies.slice()], retained: new Map(R) };
-  };
-  /** The guardians whose childIds list the player (an operation that removes the player changes their lists). */
-  const listingGuardians = (playerId) => G.records.filter((g) => (childIdsOf(g) ?? []).includes(playerId));
-  const rollBack = (state) => {
-    if (state.membership) {
-      for (const [d, [records, proxies]] of [[P, state.membership.P], [G, state.membership.G]]) {
-        d.records.length = 0; d.proxies.length = 0; d.byId.clear(); d.views.clear();
-        records.forEach((rec, i) => { d.records.push(rec); d.proxies.push(proxies[i]); d.byId.set(rec.id, rec); d.views.set(rec, proxies[i]); });
-      }
-      R.clear(); for (const [id, rec] of state.membership.retained) R.set(id, rec);
-    }
-    for (const memento of state.records.values()) restoreGraph(memento); // data properties only: the derived accessors are re-installed below
-    for (const [id, shape] of state.shapes) {
-      if (shape === undefined) { trialShape.delete(id); continue; }
-      const rec = P.byId.get(id);
-      if (rec) deriveTrialReports(rec, shape); else trialShape.set(id, shape);
-    }
-  };
+  let updatingPlayer = null; let updatingGuardian = null;
 
-  // ------------------------------------------------------------ link operations (both sides, one transaction)
-  function link(guardianId, playerId, role = 'co') {
-    requireAutocommit('link');
+  // ---------------------------------------------------------- link operations (both sides, one unit)
+  const link = (guardianId, playerId, role = 'co') => operation(() => {
     if (role !== 'primary' && role !== 'co') throw new TypeError(`a link role is "primary" or "co", not ${JSON.stringify(role)}`);
-    const g = G.byId.get(guardianId); const p = P.byId.get(playerId);
-    if (!g) throw new Error(`guardian ${guardianId} does not exist`);
-    if (!p) throw new Error(`player ${playerId} does not exist`);
-    if ((childIdsOf(g) ?? []).includes(playerId)) throw new Error(`guardian ${guardianId} already lists player ${playerId}`);
-    if (role === 'primary' && present(p.guardianId)) throw new Error(`player ${playerId} already has a primary guardian (${p.guardianId}); a second primary is refused — unlink or ageUp first`);
-    const row = role === 'primary' ? toRowOf(P, nextRecord(p, { guardianId })) : null;
-    atomically(() => {
-      stmt.insertLink.run(guardianId, playerId, role);
-      if (row) stmt.setPlayerGuardian.run({ id: playerId, guardian_id: guardianId, facets_json: row.facets_json });
-    }, () => {
-      touch(g, p);
-      ensureChildIds(g).push(playerId);
-      if (row) setOwn(p, 'guardianId', guardianId);
-    });
+    const g = guardianById(guardianId); const p = playerRow(playerId);
+    if (!g) throw noGuardian(guardianId);
+    if (!p) throw noPlayer(playerId);
+    if (g.childIds.includes(playerId)) throw refusal('LINK_EXISTS', `guardian ${guardianId} already lists player ${playerId}`);
+    if (role === 'primary' && p.guardian_id !== null) throw refusal('PRIMARY_EXISTS', `player ${playerId} already has a primary guardian (${p.guardian_id}); a second primary is refused — unlink or ageUp first`);
+    q('INSERT INTO guardian_children (guardian_id, player_id, role) VALUES (?, ?, ?)').run(guardianId, playerId, role);
+    if (role === 'primary') q('UPDATE players SET guardian_id = ? WHERE id = ?').run(guardianId, playerId);
     return { guardianId, playerId, role };
-  }
-  function unlink(guardianId, playerId) {
-    requireAutocommit('unlink');
-    const g = G.byId.get(guardianId); const p = P.byId.get(playerId);
-    if (!g) throw new Error(`guardian ${guardianId} does not exist`);
-    if (!p) throw new Error(`player ${playerId} does not exist`);
-    const ids = childIdsOf(g) ?? [];
-    if (!ids.includes(playerId)) throw new Error(`guardian ${guardianId} does not list player ${playerId}`);
-    const wasPrimary = p.guardianId === guardianId;
-    const row = wasPrimary ? toRowOf(P, nextRecord(p, { guardianId: null })) : null;
-    atomically(() => {
-      if (stmt.deleteLink.run(guardianId, playerId).changes !== 1) throw new Error(`the link ${guardianId}/${playerId} is not in the table although the view lists it`);
-      if (row) stmt.setPlayerGuardian.run({ id: playerId, guardian_id: null, facets_json: row.facets_json });
-    }, () => {
-      touch(g, p);
-      ids.splice(ids.indexOf(playerId), 1);
-      if (row) setOwn(p, 'guardianId', null);
-    });
-    return { guardianId, playerId, role: wasPrimary ? 'primary' : 'co' };
-  }
+  });
+  const unlink = (guardianId, playerId) => operation(() => {
+    const p = playerRow(playerId);
+    if (!q('SELECT 1 FROM guardians WHERE id = ?').get(guardianId)) throw noGuardian(guardianId);
+    if (!p) throw noPlayer(playerId);
+    const row = q('SELECT role FROM guardian_children WHERE guardian_id = ? AND player_id = ?').get(guardianId, playerId);
+    if (!row) throw refusal('LINK_NOT_FOUND', `guardian ${guardianId} does not list player ${playerId}`);
+    if (row.role === 'primary') q('UPDATE players SET guardian_id = NULL WHERE id = ?').run(playerId);
+    q('DELETE FROM guardian_children WHERE guardian_id = ? AND player_id = ?').run(guardianId, playerId);
+    return { guardianId, playerId, role: row.role };
+  });
 
-  // ------------------------------------------------------------ players
+  // ---------------------------------------------------------- players
   const players = {
-    view: playersView,
-    byId: (id) => (id && P.byId.has(id) ? viewOf(P, P.byId.get(id)) : null),
-    /** The player whose media list holds this clip id (clip ids are unique across players), or null. */
-    byMediaId: (mediaId) => { if (typeof mediaId !== 'string' || !mediaId) return null; const r = stmt.mediaOwner.get(mediaId); return r ? players.byId(r.player_id) : null; },
-    /** Players whose PRIMARY guardian is this guardian (players.guardian_id). */
-    byGuardian: (guardianId) => P.records.filter((p) => p.guardianId === guardianId).map((p) => viewOf(P, p)),
-    count: () => P.records.length,
-
     /**
-     * Create a player. A record with `guardianId` is created together with its
-     * primary link in the same transaction; a MINOR (not adult on `now`) without
-     * `guardianId` is refused: a child cannot exist without its primary guardian.
-     * (The migration's rule for LEGACY minors is a different, settled question.)
+     * Create a player (`passwordHash` stored, never on the record). Absent optional fields take their defaults; junk is
+     * refused by field. A record with `guardianId` is created with its primary link in the same unit; a minor (on
+     * `now`) without one is refused. A retained id is never created again. Returns the stored record.
      */
-    insert(fields) {
-      requireAutocommit('players.insert');
-      const rec = isPlainObject(fields) ? withCreationDefaults(clone(fields)) : fields;
-      const v = validatePlayerRecord(rec);
-      if (!v.ok) throw new TypeError(`a player record was refused: ${v.problems.join('; ')}`);
-      if (R.has(rec.id)) throw new Error(`player ${rec.id} was deleted and its id is retained; a deleted account is not created again under its id`);
-      if (P.byId.has(rec.id)) throw new Error(`player ${rec.id} already exists`);
-      // A trialReports array given with the record is a claim about the trials (review of 132eda2, finding 1): equal or refused, never dropped.
-      const claim = reconcileTrialReportCopy(rec.id, rec.trialReports, derivedTrialReports(rec.id), { hint: 'the record is not created' });
-      if (claim.length) throw new TypeError(`a player record was refused: ${claim.join('; ')}`);
-      const guardian = present(rec.guardianId) ? G.byId.get(rec.guardianId) : null;
-      if (present(rec.guardianId) && !guardian) throw new Error(`player ${rec.id} names guardian ${rec.guardianId}, which does not exist`);
-      if (!present(rec.guardianId) && !isAdult(rec, new Date(now()))) throw new Error(`player ${rec.id} is a minor and has no guardianId: a child is created with its primary guardian and the link in the same transaction, never without`);
-      if (guardian && (childIdsOf(guardian) ?? []).includes(rec.id)) throw new Error(`guardian ${guardian.id} already lists player ${rec.id}`);
-      placeSubrecords(rec); // the arrays as the tables hold them: unknown item fields are not stored, and memory matches a reopen
-      const row = toRowOf(P, rec);
-      return atomically(() => {
-        stmt.insertPlayer.run(row);
-        writeChildRows(stmt.sub, rec); // S5: the record's arrays, as rows, in the same transaction
-        if (guardian) stmt.insertLink.run(guardian.id, rec.id, 'primary');
-      }, () => {
-        touch(guardian); touchMembership(); touchShape(rec.id);
-        if (guardian) ensureChildIds(guardian).push(rec.id);
-        return remember(P, deriveTrialReports(rec));
-      });
-    },
-
+    create: ({ passwordHash = null, ...fields } = {}) => operation(() => {
+      const r = playerWithDefaults(fields);
+      const problems = playerRecordProblems(r);
+      const pw = passwordProblem(passwordHash); if (pw) problems.push(pw);
+      if (problems.length) throw playerInvalid(r.id, problems);
+      if (isRetainedId(r.id)) throw refusal('PLAYER_ID_RETAINED', `player ${r.id} was deleted and its id is retained; a deleted account is not created again under its id`);
+      if (q('SELECT 1 FROM players WHERE id = ?').get(r.id)) throw refusal('PLAYER_EXISTS', `player ${r.id} already exists`);
+      if (r.guardianId !== null && !q('SELECT 1 FROM guardians WHERE id = ?').get(r.guardianId)) throw refusal('GUARDIAN_NOT_FOUND', `player ${r.id} names guardian ${r.guardianId}, which does not exist`);
+      if (r.guardianId === null && !isAdult(r, new Date(now()))) throw refusal('MINOR_WITHOUT_GUARDIAN', `player ${r.id} is a minor and has no guardianId: a child is created with its primary guardian and the link in the same transaction, never without`);
+      q(P_INSERT).run(playerParams(r, passwordHash));
+      writeChildRows(st, r);
+      if (r.guardianId !== null) q("INSERT INTO guardian_children (guardian_id, player_id, role) VALUES (?, ?, 'primary')").run(r.guardianId, r.id);
+      return playerById(r.id);
+    }),
     /**
-     * Change column-backed fields. Composites `location`, `stats` and
-     * `notificationPrefs` are replaced whole (as today's writers do); the split
-     * composites `medical` and `programme` are merged sub-key by sub-key and only
-     * their column-backed sub-keys may appear (`records`/`completed` are rows,
-     * written through addItem / setItems / patchItem); a whole-null `medical` or
-     * `programme` is refused while its rows exist (review of 132eda2, finding 3).
-     * `guardianId` changes only through link/unlink/ageUp.
+     * `update(id, (draft) => …)`: the draft is a plain copy of the record; the change is typed whole and written at
+     * once. The id, the guardian link, the creation time, the lists (`addItem` / `setItems` / `patchItem`) and the trial
+     * reports never change here; an unknown field is refused. Returns the stored record.
      */
-    update(id, patch) {
-      requireAutocommit('players.update');
-      const rec = P.byId.get(id);
-      if (!rec) throw new Error(`player ${id} does not exist`);
-      if (!isPlainObject(patch)) throw new TypeError('players.update needs a patch object');
-      if (hasOwn(patch, 'id') && patch.id !== id) throw new TypeError('a player id never changes');
-      if (hasOwn(patch, 'guardianId')) throw new TypeError('guardianId changes only through link / unlink / ageUp (both sides of the relationship are written together)');
-      for (const key of Object.keys(patch)) {
-        if (key === 'id' || patch[key] === undefined) continue;
-        if (isSubKey(key)) throw new TypeError(`"${key}" is a player sub-record (rows of ${SUBRECORD_SPECS[key].table}); players.update does not change it — use players.addItem / setItems / patchItem`);
-        if (isDerivedKey(key)) throw new TypeError(`"${key}" is derived from the trials collection and is written nowhere`);
-        if (!PLAYER_MIGRATED_KEYS.has(key)) throw new TypeError(`"${key}" is not a player field; players.update changes the column-backed fields only (a record is never written in place)`);
-        if (PLAYER_SPLIT_COMPOSITES.includes(key) && isPlainObject(patch[key])) {
-          for (const sub of Object.keys(patch[key])) {
-            if ((PLAYER_COMPOSITE_SUBRECORDS[key] ?? []).includes(sub)) throw new TypeError(`"${key}.${sub}" is a player sub-record (rows of ${SUBRECORD_SPECS[`${key}.${sub}`].table}); players.update does not change it — use players.addItem / setItems / patchItem`);
-            if (!hasOwn(PLAYER_COMPOSITES[key], sub)) throw new TypeError(`"${key}.${sub}" is not a player field; players.update changes only ${Object.keys(PLAYER_COMPOSITES[key]).join('/')}`);
-          }
-        }
-        // A whole-null split composite while its child rows exist would hide them from every view, export and rollback (review of 132eda2, finding 3): refused; clearing the rows is an explicit, separate operation.
-        if (PLAYER_SPLIT_COMPOSITES.includes(key) && patch[key] === null) {
-          for (const sub of PLAYER_COMPOSITE_SUBRECORDS[key] ?? []) {
-            const rows = getSubrecords(rec, `${key}.${sub}`);
-            if (Array.isArray(rows) && rows.length) throw new TypeError(`players.update: ${key} of player ${id} cannot be set to null while ${rows.length} ${key}.${sub} row(s) exist in ${SUBRECORD_SPECS[`${key}.${sub}`].table}; a whole-null ${key} would hide them — clear them first with players.setItems(id, '${key}.${sub}', []) (an explicit operation; no deletion policy is implied), then set ${key} to null`);
-          }
-        }
-      }
-      const next = nextRecord(rec, patch, { split: PLAYER_SPLIT_COMPOSITES });
-      const v = validatePlayerRecord(next);
-      if (!v.ok) throw new TypeError(`a player update was refused: ${v.problems.join('; ')}`);
-      const row = toRowOf(P, next);
-      atomically(() => stmt.updatePlayer.run(row), () => {
-        touch(rec);
-        applyPatch(rec, patch, { split: PLAYER_SPLIT_COMPOSITES });
-        for (const [k, subs] of Object.entries(PLAYER_COMPOSITE_SUBRECORDS)) if (isPlainObject(rec[k])) for (const sub of subs) ensureSubArray(rec, `${k}.${sub}`); // a composite set whole reads back with its (empty) sub-array
-      });
-      return viewOf(P, rec);
-    },
+    update: (id, edit) => operation(() => {
+      if (typeof edit !== 'function') throw new TypeError('players.update(id, (draft) => …) takes a function');
+      if (updatingPlayer === id) throw refusal('PLAYER_UPDATE_REENTRANT', `player ${id} is already being updated`);
+      const before = playerById(id);
+      if (!before) throw noPlayer(id);
+      const draft = clone(before);
+      updatingPlayer = id;
+      try { edit(draft); } finally { updatingPlayer = null; }
+      const problems = [];
+      for (const k of ['id', 'guardianId', 'createdAt', ...PLAYER_SUBRECORD_KEYS, 'trialReports']) if (!same(draft[k], before[k])) problems.push(`${k} does not change through update${PLAYER_SUBRECORD_KEYS.includes(k) ? ` (use players.addItem / setItems / patchItem)` : k === 'guardianId' ? ' (use link / unlink / ageUp)' : ''}`);
+      // A composite's list is its rows: set whole or left out, it keeps the rows; a different list is refused.
+      if (isPlainObject(draft.medical)) { if (draft.medical.records === undefined) draft.medical.records = before.medical.records; else if (!same(draft.medical.records, before.medical.records)) problems.push('medical.records does not change through update (use players.addItem / setItems)'); }
+      if (isPlainObject(draft.programme)) {
+        const was = before.programme?.completed ?? [];
+        draft.programme = { track: null, startedAt: null, ...draft.programme };
+        if (draft.programme.completed === undefined) draft.programme.completed = was; else if (!same(draft.programme.completed, was)) problems.push('programme.completed does not change through update (use players.addItem / setItems)');
+      } else if (draft.programme === null && (before.programme?.completed ?? []).length) problems.push(`programme cannot be set to null while ${before.programme.completed.length} programme.completed row(s) exist; clear them first with players.setItems(id, 'programme.completed', [])`);
+      if (isPlainObject(draft.stats)) draft.stats = { ...pick(draft.stats, STATS_KEYS), ...Object.fromEntries(Object.entries(draft.stats).filter(([k]) => !STATS_KEYS.includes(k))) };
+      if (isPlainObject(draft.notificationPrefs)) draft.notificationPrefs = { ...pick(draft.notificationPrefs, PREFS_KEYS), ...Object.fromEntries(Object.entries(draft.notificationPrefs).filter(([k]) => !PREFS_KEYS.includes(k))) };
+      if (draft.city === '') draft.city = null;
+      const { trialReports: _derived, ...typed } = draft;
+      if (!problems.length) problems.push(...playerRecordProblems(typed));
+      if (problems.length) throw playerInvalid(id, problems);
+      const params = playerParams(typed);
+      q(P_UPDATE).run(Object.fromEntries(['id', ...P_UPDATE_COLS].map((c) => [c, params[c]])));
+      return playerById(id);
+    }),
+    /** Store a new password hash (or null). Returns the stored record. */
+    setPasswordHash: (id, hash) => operation(() => {
+      const pw = passwordProblem(hash); if (pw) throw playerInvalid(id, [pw]);
+      if (q('UPDATE players SET password_hash = ? WHERE id = ? AND deleted_at IS NULL').run(hash, id).changes !== 1) throw noPlayer(id);
+      return playerById(id);
+    }),
 
-    /** The signing rollback's whole-record write: the record's content is replaced in place, its arrays rewritten as rows (S5); the guardian link cannot change here. */
-    restore(id, record) {
-      requireAutocommit('players.restore');
-      const rec = P.byId.get(id);
-      if (!rec) throw new Error(`player ${id} does not exist`);
-      const next = clone(record);
-      if (!isPlainObject(next) || next.id !== id) throw new TypeError('players.restore needs the record of the same player');
-      if ((next.guardianId ?? null) !== (rec.guardianId ?? null)) throw new TypeError('players.restore cannot change the guardian link; use link / unlink / ageUp');
-      const v = validatePlayerRecord(next);
-      if (!v.ok) throw new TypeError(`a player restore was refused: ${v.problems.join('; ')}`);
-      // A trialReports array on the restored record is a claim about the trials (review of 132eda2, finding 1): equal or refused; an absent key or a null adopts that shape and the trials stand.
-      const claim = reconcileTrialReportCopy(id, next.trialReports, derivedTrialReports(id), { hint: 'the restore is refused' });
-      if (claim.length) throw new TypeError(`a player restore was refused: ${claim.join('; ')}`);
-      const shape = shapeOf(next);
-      placeSubrecords(next);
-      const row = toRowOf(P, next, { shape });
-      atomically(() => { stmt.updatePlayer.run(row); deleteChildRows(stmt.sub, id); writeChildRows(stmt.sub, next); }, () => { touch(rec); replaceContent(rec, next); });
-      return viewOf(P, rec);
-    },
-
-    // ------------------------------------------------------------ sub-records (S5): the one write path of the arrays
-    /**
-     * Append one item to a player's `key` array (`media`, `attendance`, …,
-     * `medical.records`, `programme.completed`): validated as part of the whole
-     * array (types, required fields, the natural key the code enforces), one row
-     * inserted at the next position (and the clip's tag rows) in one
-     * transaction, memory updated in place once it committed with the item as
-     * the table holds it (unknown fields are not stored). Returns the read-only
-     * array.
-     */
-    addItem(id, key, item) {
-      requireAutocommit('players.addItem');
-      const { rec, current } = subTarget(id, key);
-      const items = [...(current ?? []), clone(item)];
+    /** Append one item to a player's `key` list (validated with the whole list); returns the stored list. */
+    addItem: (id, key, item) => operation(() => {
+      const { current } = subTarget(id, key);
+      const items = [...current, clone(item)];
       const problems = validateSubrecordArray(key, items);
       if (problems.length) throw subRefusal(`adding to ${key} of player ${id} was refused: ${problems.join('; ')}`);
-      const position = items.length - 1;
-      const { row, tags } = itemRows(key, items[position], position, id);
-      const stored = storedItem(key, items[position]);
-      atomically(() => {
-        stmt.sub[key].insert.run(row);
-        if (tags) for (const t of tags) stmt.sub.tags.insert.run(t);
-      }, () => {
-        touch(rec);
-        ensureSubArray(rec, key).push(stored);
-      });
-      return readonlyView(getSubrecords(rec, key), SUB_LABEL(key));
-    },
-
-    /** Replace a player's whole `key` array (the client-set badge list, the sorted season history, the programme reset): every row of it rewritten. */
-    setItems(id, key, items) {
-      requireAutocommit('players.setItems');
-      const { rec } = subTarget(id, key);
-      if (!Array.isArray(items)) throw new TypeError(`players.setItems needs an array for ${key} (got ${items === null ? 'null' : typeof items})`);
+      const { row, tags } = itemRows(key, items[items.length - 1], items.length - 1, id);
+      st[key].insert.run(row);
+      if (tags) for (const t of tags) st.tags.insert.run(t);
+      return listOf(id, key);
+    }),
+    /** Replace a player's whole `key` list; returns the stored list. */
+    setItems: (id, key, items) => operation(() => {
+      subTarget(id, key);
+      if (!Array.isArray(items)) throw new TypeError(`players.setItems needs an array for ${key} (got ${describe(items)})`);
       const next = clone(items);
       const problems = validateSubrecordArray(key, next);
       if (problems.length) throw subRefusal(`replacing ${key} of player ${id} was refused: ${problems.join('; ')}`);
-      atomically(() => {
-        stmt.sub[key].deleteAll.run(id); // the clips' tag rows cascade with the clips
-        writeArrayRows(stmt.sub, key, id, next);
-      }, () => {
-        touch(rec);
-        const arr = ensureSubArray(rec, key);
-        arr.length = 0; for (const it of next) arr.push(storedItem(key, it));
-      });
-      return readonlyView(getSubrecords(rec, key), SUB_LABEL(key));
-    },
-
-    /**
-     * Change fields of ONE item of a player's `key` array, found by `where` (an
-     * object of equality tests: `{ id }` for a clip, `{ season }` for a season
-     * row); exactly one item must match. `patch` merges key by key (undefined
-     * leaves a key alone; nested values are replaced whole). The row is updated
-     * in place (a clip's tags rewritten when they change) and the held item
-     * object takes the stored item's content (an unknown patch field is not
-     * stored). Returns the item.
-     */
-    patchItem(id, key, where, patch) {
-      requireAutocommit('players.patchItem');
-      const { rec, current } = subTarget(id, key);
-      if (SUBRECORD_SPECS[key].primitive) throw new TypeError(`${key} holds plain values; replace the array with players.setItems`);
+      st[key].deleteAll.run(id); // a clip's tags cascade with the clip
+      writeArrayRows(st, key, id, next);
+      return listOf(id, key);
+    }),
+    /** Change fields of the ONE item of `key` that `where` matches (`{ id }`, `{ season }`); returns the stored item. */
+    patchItem: (id, key, where, patch) => operation(() => {
+      const { current } = subTarget(id, key);
+      if (SUBRECORD_SPECS[key].primitive) throw new TypeError(`${key} holds plain values; replace the list with players.setItems`);
       if (!isPlainObject(where) || !Object.keys(where).length) throw new TypeError('players.patchItem needs a where object ({ id } or another equality test)');
       if (!isPlainObject(patch)) throw new TypeError('players.patchItem needs a patch object');
-      const list = Array.isArray(current) ? current : [];
-      const matches = list.map((it, i) => i).filter((i) => isPlainObject(list[i]) && Object.keys(where).every((k) => list[i][k] === where[k]));
-      if (matches.length !== 1) throw new Error(`players.patchItem: ${matches.length} item(s) of ${key} of player ${id} match ${JSON.stringify(where)}; exactly one must`);
+      const matches = current.map((_, i) => i).filter((i) => Object.keys(where).every((k) => current[i][k] === where[k]));
+      if (matches.length !== 1) throw subRefusal(`players.patchItem: ${matches.length} item(s) of ${key} of player ${id} match ${JSON.stringify(where)}; exactly one must`);
       const index = matches[0];
-      const merged = clone(list[index]);
-      for (const k of Object.keys(patch)) if (patch[k] !== undefined) setOwn(merged, k, clone(patch[k]));
-      const items = list.map((it, i) => (i === index ? merged : it));
+      const merged = clone(current[index]);
+      for (const k of Object.keys(patch)) if (patch[k] !== undefined) merged[k] = clone(patch[k]);
+      const items = current.map((it, i) => (i === index ? merged : it));
       const problems = validateSubrecordArray(key, items);
       if (problems.length) throw subRefusal(`changing ${key} of player ${id} was refused: ${problems.join('; ')}`);
       const { row, tags } = itemRows(key, merged, index, id);
-      const stored = storedItem(key, merged);
-      const tagsChanged = SUBRECORD_SPECS[key].children === 'tags' && hasOwn(patch, 'tags');
-      atomically(() => {
-        if (stmt.sub[key].update.run(row).changes !== 1) throw new Error(`players.patchItem: the ${key} row of player ${id} at position ${index} is not in the table although the view lists it`);
-        if (tagsChanged) { stmt.sub.tags.deleteMedia.run(merged.id); for (const t of tags ?? []) stmt.sub.tags.insert.run(t); }
-      }, () => {
-        touch(rec);
-        const target = list[index]; // the same object (held references stay valid), its content the stored item's
-        for (const k of Object.keys(target)) delete target[k];
-        for (const k of Object.keys(stored)) setOwn(target, k, stored[k]);
-      });
-      return readonlyView(list[index], SUB_LABEL(key));
-    },
+      if (st[key].update.run(row).changes !== 1) throw new Error(`players.patchItem: the ${key} row of player ${id} at position ${index} is not in the table`);
+      if (SUBRECORD_SPECS[key].children === 'tags' && Object.hasOwn(patch, 'tags')) { st.tags.deleteMedia.run(merged.id); for (const t of tags ?? []) st.tags.insert.run(t); }
+      return deepFreeze(storedItem(key, merged));
+    }),
 
-    /** Rows per child table (counts only), for reports. */
-    subrecordRows: () => countChildRows(stmt.sub),
-
-    /** Aging-up as today: the PRIMARY link goes and `guardianId` becomes null, in one transaction; co-guardians keep listing the player (today's behaviour, recorded as a gap). */
-    ageUp(id) {
-      requireAutocommit('players.ageUp');
-      const p = P.byId.get(id);
-      if (!p) throw new Error(`player ${id} does not exist`);
-      if (!present(p.guardianId)) throw new Error(`player ${id} has no primary guardian; nothing to age up`);
-      const guardianId = p.guardianId;
-      unlink(guardianId, id);
-      return { playerId: id, guardianId };
-    },
-
-    /** Today's hard delete of a player row (links cascade; every guardian stops listing the id). Not an erasure or retention policy: O1 is open. */
-    remove(id) {
-      requireAutocommit('players.remove');
-      const p = P.byId.get(id);
-      if (!p) throw new Error(`player ${id} does not exist`);
-      return atomically(() => {
-        if (stmt.deletePlayer.run(id).changes !== 1) throw new Error(`player ${id} is not in the table although the view lists it`);
-      }, () => {
-        const listing = listingGuardians(id);
-        touch(p, ...listing); touchMembership();
-        for (const g of listing) { const ids = childIdsOf(g); ids.splice(ids.indexOf(id), 1); }
-        forget(P, p);
-        return true;
-      });
-    },
-
+    /** Aging-up: the PRIMARY link goes and `guardianId` becomes null, in one unit; co-guardians keep listing the player. */
+    ageUp: (id) => operation(() => {
+      const p = playerRow(id);
+      if (!p) throw noPlayer(id);
+      if (p.guardian_id === null) throw refusal('NO_PRIMARY_GUARDIAN', `player ${id} has no primary guardian; nothing to age up`);
+      unlink(p.guardian_id, id);
+      return { playerId: id, guardianId: p.guardian_id };
+    }),
     /**
-     * S4b-R: the account deletion. The row STAYS, reduced to the retained record (the
-     * id, `deleted_at` = `at`, the birth date and the country kept; placeholders;
-     * NULL elsewhere; no facets); the twelve child tables and the link rows are
-     * emptied explicitly; every guardian stops listing the id (the held childIds
-     * arrays spliced in place); the record leaves the view and joins the retained
-     * map. One transaction (or the caller's unit); a failure anywhere leaves memory
-     * and the file as they were. A retained id is refused (never erased twice);
-     * sessions, codes and the media queue are the caller's explicit acts in the same
-     * unit, as before. Not a retention policy: the retained set is the Founder's.
+     * The account deletion (S4b-R): the row stays, reduced to the retained record; the lists and links are deleted.
+     * A retained id is refused. Sessions, codes and the media queue are the caller's acts in the same unit.
      */
-    erase(id, { at = now() } = {}) {
-      requireAutocommit('players.erase');
-      if (R.has(id)) throw new Error(`player ${id} was deleted and its id is retained; it cannot be erased again`);
-      const p = P.byId.get(id);
-      if (!p) throw new Error(`player ${id} does not exist`);
-      if (!Number.isSafeInteger(at) || at < 0) throw new TypeError('players.erase: `at` must be a non-negative integer timestamp (ms)');
-      const record = Object.freeze({ id, deletedAt: at, birthDate: p.dob, country: p.country });
-      const params = eraseParamsFor(record);
-      return atomically(() => {
-        deleteChildRows(stmt.sub, id);
-        stmt.deleteLinksOf.run(id);
-        if (stmt.erasePlayer.run(params).changes !== 1) throw new Error(`player ${id} is not in the table as a live row although the view lists it`);
-      }, () => {
-        const listing = listingGuardians(id);
-        touch(p, ...listing); touchMembership();
-        for (const g of listing) { const ids = childIdsOf(g); ids.splice(ids.indexOf(id), 1); }
-        forget(P, p);
-        R.set(id, record);
-        return { id, deletedAt: at };
-      });
-    },
-    /** The narrow accessors (S4b-R): the deletion unit, the backup, the snapshot writer, the report and the rollback tool. No route serves a retained record. */
-    retained: (id) => (id && R.has(id) ? { ...R.get(id) } : null),
-    isRetained: (id) => R.has(id),
-    retainedRecords: () => [...R.values()].sort((a, b) => a.deletedAt - b.deletedAt || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)).map((r) => ({ ...r })), // by deletion instant, then id — the order the backup and the rollback blob use
-    retainedCount: () => R.size,
-
+    erase: (id, { at = now() } = {}) => operation(() => {
+      if (isRetainedId(id)) throw refusal('PLAYER_ID_RETAINED', `player ${id} was deleted and its id is retained; it cannot be erased again`);
+      const p = playerRow(id);
+      if (!p) throw noPlayer(id);
+      if (!isClock(at)) throw new TypeError('players.erase: `at` must be a non-negative integer timestamp (ms)');
+      deleteChildRows(st, id);
+      q('DELETE FROM guardian_children WHERE player_id = ?').run(id);
+      if (q(ERASE_SQL).run(eraseParamsFor({ id, deletedAt: at, birthDate: p.birth_date, country: p.country })).changes !== 1) throw noPlayer(id);
+      return { id, deletedAt: at };
+    }),
     link: (guardianId, playerId, role) => link(guardianId, playerId, role),
     unlink,
+
+    // ---------------------------------------------------------- reads
+    byId: playerById,
+    /** Many players by id, in the order given (missing ids are left out); their lists in one query per table. */
+    byIds: (ids) => {
+      const list = [...new Set((ids ?? []).filter((x) => typeof x === 'string' && x))];
+      if (!list.length) return [];
+      const rows = q(`${P_SELECT} WHERE deleted_at IS NULL AND id IN (SELECT value FROM json_each(?))`).all(JSON.stringify(list));
+      const byKey = new Map(decodePlayers(rows).map((r) => [r.id, r]));
+      return list.map((x) => byKey.get(x)).filter(Boolean);
+    },
+    exists: (id) => !!playerRow(id),
+    /** The player whose media list holds this clip id (clip ids are unique across players), or null. */
+    byMediaId: (mediaId) => (typeof mediaId === 'string' && mediaId ? playerById(q('SELECT player_id FROM player_media WHERE id = ?').get(mediaId)?.player_id ?? null) : null),
+    /** Players whose PRIMARY guardian is this guardian. */
+    byGuardian: (guardianId) => decodePlayers(q(`${P_SELECT} WHERE guardian_id = ? AND deleted_at IS NULL ORDER BY rowid`).all(guardianId)),
+    /** The first player (creation order) holding this provider's external id, or null (the import's identity match). */
+    byExternalId: (provider, externalId) => playerById(q('SELECT e.player_id FROM player_external_ids e JOIN players p ON p.id = e.player_id WHERE e.provider = ? AND e.external_id = ? ORDER BY p.rowid LIMIT 1').get(provider, externalId)?.player_id ?? null),
+    /** The first player (creation order) with this name (case-insensitive) and date of birth, or null. */
+    byNameAndDob: (name, dob) => {
+      if (typeof name !== 'string' || typeof dob !== 'string') return null;
+      const key = name.toLowerCase();
+      const hit = q('SELECT id, name FROM players WHERE birth_date = ? AND deleted_at IS NULL ORDER BY rowid').all(dob).find((r) => r.name.toLowerCase() === key);
+      return hit ? playerById(hit.id) : null;
+    },
+    /** Visit the players a filter admits (see scanWhere), in creation order; `visit` returning false stops. */
+    scan,
+    /** The players a filter admits, in creation order (`limit` caps the count). */
+    list: (filter = {}, { limit = Infinity } = {}) => { const out = []; scan(filter, (r) => { out.push(r); return out.length < limit; }); return out; },
+    /** The live players the organisation may see by the SQL part of the rule (see scanWhere), with the further filters. */
+    visibleCandidates: (org, filter = {}, opts = {}) => players.list({ ...filter, visibleTo: org }, opts),
+    count: () => q('SELECT COUNT(*) AS n FROM players WHERE deleted_at IS NULL').get().n,
+    /** The stored password hash for the sign-in check (never on a record), or null. */
+    passwordHashOf: (id) => q('SELECT password_hash FROM players WHERE id = ? AND deleted_at IS NULL').get(id)?.password_hash ?? null,
+    /** Rows per list table (counts only), for reports. */
+    subrecordRows: () => countChildRows(st),
+    /** The narrow accessors of the retained records (S4b-R). No route serves one. */
+    retained: (id) => { const r = typeof id === 'string' ? q('SELECT id, deleted_at, birth_date, country FROM players WHERE id = ? AND deleted_at IS NOT NULL').get(id) : null; return r ? retainedRecordFromRow(r) : null; },
+    isRetained: (id) => isRetainedId(id),
+    retainedRecords: () => q('SELECT id, deleted_at, birth_date, country FROM players WHERE deleted_at IS NOT NULL ORDER BY deleted_at, id').all().map(retainedRecordFromRow),
+    retainedCount: () => q('SELECT COUNT(*) AS n FROM players WHERE deleted_at IS NOT NULL').get().n,
   };
 
-  // ------------------------------------------------------------ guardians
+  // ---------------------------------------------------------- guardians
   const guardians = {
-    view: guardiansView,
-    byId: (id) => (id && G.byId.has(id) ? viewOf(G, G.byId.get(id)) : null),
-    /** Case-insensitive, like the signup's uniqueness check (login compares case-sensitively today; the repository is the one rule). */
-    byEmail: (email) => { const id = typeof email === 'string' ? emailTakenBy(email) : null; return id ? viewOf(G, G.byId.get(id)) : null; },
-    emailTaken: (email, exceptId = null) => emailTakenBy(email, exceptId) !== null,
-    /** The guardians listing this player, with their role. */
-    linksOf: (playerId) => G.records.filter((g) => (childIdsOf(g) ?? []).includes(playerId)).map((g) => ({ guardianId: g.id, role: P.byId.get(playerId)?.guardianId === g.id ? 'primary' : 'co' })),
-    childIds: (id) => (childIdsOf(G.byId.get(id) ?? {}) ?? []).slice(),
-    count: () => G.records.length,
-
     /**
-     * Create a guardian. `childIds` given here become link rows in the same
-     * transaction (`co` links: a guardian created now cannot already be a child's
-     * primary — the co-guardian route copies the primary's list); the e-mail must
-     * be unique case-insensitively and `coGuardianOf` must name an existing guardian.
+     * Create a guardian (`passwordHash` and `emailCodeHash` stored, never on the record). `childIds` given here become
+     * link rows in the same unit (`primary` where the child's guardianId names this guardian, `co` otherwise); the
+     * e-mail must be unique case-insensitively and `coGuardianOf` must name an existing guardian. Returns the record.
      */
-    insert(fields) {
-      requireAutocommit('guardians.insert');
-      const rec = clone(fields);
-      const v = validateGuardianRecord(rec);
-      if (!v.ok) throw new TypeError(`a guardian record was refused: ${v.problems.join('; ')}`);
-      if (G.byId.has(rec.id)) throw new Error(`guardian ${rec.id} already exists`);
-      const taken = emailTakenBy(rec.email);
-      if (taken) throw new Error(`EMAIL_IN_USE: another guardian (${taken}) already uses this e-mail (compared case-insensitively)`);
-      if (present(rec.coGuardianOf)) { if (rec.coGuardianOf === rec.id) throw new Error('coGuardianOf cannot name the guardian itself'); if (!G.byId.has(rec.coGuardianOf)) throw new Error(`coGuardianOf names guardian ${rec.coGuardianOf}, which does not exist`); }
-      const kids = childIdsOf(rec) ?? [];
-      const seen = new Set();
-      for (const childId of kids) {
-        if (seen.has(childId)) throw new Error(`childIds lists ${childId} more than once`);
-        seen.add(childId);
-        if (!P.byId.has(childId)) throw new Error(`childIds names player ${childId}, which does not exist`);
-      }
-      const row = guardianToRow(rec);
-      return atomically(() => {
-        stmt.insertGuardian.run(row);
-        for (const childId of kids) stmt.insertLink.run(rec.id, childId, P.byId.get(childId).guardianId === rec.id ? 'primary' : 'co');
-      }, () => { touchMembership(); return remember(G, rec); });
-    },
-
-    /** Change column-backed fields and the `coGuardians` list (`childIds` only through link/unlink/ageUp; `notificationPrefs` and `coGuardians` replaced whole). */
-    update(id, patch) {
-      requireAutocommit('guardians.update');
-      const rec = G.byId.get(id);
-      if (!rec) throw new Error(`guardian ${id} does not exist`);
-      if (!isPlainObject(patch)) throw new TypeError('guardians.update needs a patch object');
-      if (hasOwn(patch, 'id') && patch.id !== id) throw new TypeError('a guardian id never changes');
-      if (hasOwn(patch, 'childIds')) throw new TypeError('childIds changes only through link / unlink / ageUp');
-      for (const key of Object.keys(patch)) {
-        if (key === 'id' || patch[key] === undefined) continue;
-        if (!GUARDIAN_MIGRATED_KEYS.has(key) && !GUARDIAN_FACET_KEYS.includes(key)) throw new TypeError(`"${key}" is not a guardian field; guardians.update changes the column-backed fields and ${GUARDIAN_FACET_KEYS.join(', ')} (a record is never written in place)`);
-      }
-      const next = nextRecord(rec, patch);
-      const v = validateGuardianRecord(next);
-      if (!v.ok) throw new TypeError(`a guardian update was refused: ${v.problems.join('; ')}`);
-      if (hasOwn(patch, 'email')) { const taken = emailTakenBy(next.email, id); if (taken) throw new Error(`EMAIL_IN_USE: another guardian (${taken}) already uses this e-mail (compared case-insensitively)`); }
-      if (hasOwn(patch, 'coGuardianOf') && present(next.coGuardianOf)) { if (next.coGuardianOf === id) throw new Error('coGuardianOf cannot name the guardian itself'); if (!G.byId.has(next.coGuardianOf)) throw new Error(`coGuardianOf names guardian ${next.coGuardianOf}, which does not exist`); }
-      const row = guardianToRow(next);
-      atomically(() => stmt.updateGuardian.run(row), () => { touch(rec); applyPatch(rec, patch); });
-      return viewOf(G, rec);
-    },
-
-    link,
+    create: ({ passwordHash = null, emailCodeHash = null, ...fields } = {}) => operation(() => {
+      const r = guardianWithDefaults(fields);
+      const problems = guardianRecordProblems(r);
+      const pw = passwordProblem(passwordHash); if (pw) problems.push(pw);
+      const ch = codeHashProblem(emailCodeHash); if (ch) problems.push(ch);
+      if (problems.length) throw guardianInvalid(r.id, problems);
+      if (q('SELECT 1 FROM guardians WHERE id = ?').get(r.id)) throw refusal('GUARDIAN_EXISTS', `guardian ${r.id} already exists`);
+      const taken = emailOwner(r.email);
+      if (taken) throw refusal('EMAIL_IN_USE', `another guardian (${taken}) already uses this e-mail (compared case-insensitively)`);
+      if (r.coGuardianOf !== null && !q('SELECT 1 FROM guardians WHERE id = ?').get(r.coGuardianOf)) throw refusal('GUARDIAN_NOT_FOUND', `coGuardianOf names guardian ${r.coGuardianOf}, which does not exist`);
+      const kids = r.childIds.map((childId) => { const p = playerRow(childId); if (!p) throw refusal('PLAYER_NOT_FOUND', `childIds names player ${childId}, which does not exist`); return p; });
+      q(G_INSERT).run(guardianParams(r, { passwordHash, emailCodeHash }));
+      for (const p of kids) q('INSERT INTO guardian_children (guardian_id, player_id, role) VALUES (?, ?, ?)').run(r.id, p.id, p.guardian_id === r.id ? 'primary' : 'co');
+      return guardianById(r.id);
+    }),
+    /** `update(id, (draft) => …)`: the id, the links (`childIds`), `coGuardians`, `coGuardianOf` and the creation time never change here. */
+    update: (id, edit) => operation(() => {
+      if (typeof edit !== 'function') throw new TypeError('guardians.update(id, (draft) => …) takes a function');
+      if (updatingGuardian === id) throw refusal('GUARDIAN_UPDATE_REENTRANT', `guardian ${id} is already being updated`);
+      const before = guardianById(id);
+      if (!before) throw noGuardian(id);
+      const draft = clone(before);
+      updatingGuardian = id;
+      try { edit(draft); } finally { updatingGuardian = null; }
+      const problems = [];
+      for (const k of GUARDIAN_RECORD_KEYS) if (!GUARDIAN_EDITABLE.includes(k) && !same(draft[k], before[k])) problems.push(`${k} does not change through update${k === 'childIds' ? ' (use link / unlink / ageUp)' : ''}`);
+      if (isPlainObject(draft.notificationPrefs)) draft.notificationPrefs = { ...pick(draft.notificationPrefs, PREFS_KEYS), ...Object.fromEntries(Object.entries(draft.notificationPrefs).filter(([k]) => !PREFS_KEYS.includes(k))) };
+      if (!problems.length) problems.push(...guardianRecordProblems(draft, { input: false }));
+      if (problems.length) throw guardianInvalid(id, problems);
+      const taken = emailOwner(draft.email, id);
+      if (taken) throw refusal('EMAIL_IN_USE', `another guardian (${taken}) already uses this e-mail (compared case-insensitively)`);
+      const params = guardianParams(draft);
+      q(G_UPDATE).run(Object.fromEntries(['id', ...G_UPDATE_COLS].map((c) => [c, params[c]])));
+      return guardianById(id);
+    }),
+    setPasswordHash: (id, hash) => operation(() => {
+      const pw = passwordProblem(hash); if (pw) throw guardianInvalid(id, [pw]);
+      if (q('UPDATE guardians SET password_hash = ? WHERE id = ?').run(hash, id).changes !== 1) throw noGuardian(id);
+      return guardianById(id);
+    }),
+    setEmailCodeHash: (id, hash) => operation(() => {
+      const ch = codeHashProblem(hash); if (ch) throw guardianInvalid(id, [ch]);
+      if (q('UPDATE guardians SET email_code_hash = ? WHERE id = ?').run(hash, id).changes !== 1) throw noGuardian(id);
+      return guardianById(id);
+    }),
+    link: (guardianId, playerId, role) => link(guardianId, playerId, role),
     unlink,
+
+    byId: guardianById,
+    byIds: (ids) => {
+      const list = [...new Set((ids ?? []).filter((x) => typeof x === 'string' && x))];
+      if (!list.length) return [];
+      const byKey = new Map(decodeGuardians(q(`${G_SELECT} WHERE id IN (SELECT value FROM json_each(?))`).all(JSON.stringify(list))).map((g) => [g.id, g]));
+      return list.map((x) => byKey.get(x)).filter(Boolean);
+    },
+    /** The guardian with this e-mail (case-insensitive), or null. */
+    byEmail: (email) => { const id = emailOwner(email); return id ? guardianById(id) : null; },
+    emailTaken: (email, exceptId = null) => emailOwner(email, exceptId) !== null,
+    /** The guardians listing this player, with their role. */
+    linksOf: (playerId) => q('SELECT guardian_id, role FROM guardian_children WHERE player_id = ? ORDER BY rowid').all(playerId).map((l) => ({ guardianId: l.guardian_id, role: l.role })),
+    /** The guardians listing this player (records), primary first. */
+    forPlayer: (playerId) => guardians.byIds(q("SELECT guardian_id FROM guardian_children WHERE player_id = ? ORDER BY role = 'primary' DESC, rowid").all(playerId).map((l) => l.guardian_id)),
+    childIds: (id) => q('SELECT player_id FROM guardian_children WHERE guardian_id = ? ORDER BY rowid').all(id).map((l) => l.player_id),
+    /** One page of every guardian, oldest first; `page` is the route's `readPage(query, ['number'])`: `{ items, nextCursor }`. */
+    page: ({ limit, after = null }) => {
+      const rows = q(`SELECT rowid AS rid, ${G_COLS.join(', ')} FROM guardians WHERE rowid > ? ORDER BY rowid LIMIT ?`).all(after ? after[0] : 0, limit + 1);
+      const page = pageOf(rows, limit, (r) => [r.rid]);
+      return { items: decodeGuardians(page.items), nextCursor: page.nextCursor };
+    },
+    count: () => q('SELECT COUNT(*) AS n FROM guardians').get().n,
+    passwordHashOf: (id) => q('SELECT password_hash FROM guardians WHERE id = ?').get(id)?.password_hash ?? null,
+    emailCodeHashOf: (id) => q('SELECT email_code_hash FROM guardians WHERE id = ?').get(id)?.email_code_hash ?? null,
   };
 
-  // ------------------------------------------------------------ unit-of-work participant (both domains)
-  // Nothing to flush: every operation wrote its rows at once. The participant only opens the undo log of a unit and
-  // restores what the unit touched when it rolls back.
-  const hook = {
-    snapshotState() { undo = { records: new Map(), shapes: new Map(), membership: null }; return undo; },
-    restoreState(state) { try { if (state) rollBack(state); } finally { undo = null; } },
-    commit() { undo = null; },
-    rollback() { undo = null; },
-  };
-
-  // ------------------------------------------------------------ boot
   const identity = {
     players,
     guardians,
     link,
     unlink,
     initState: () => readInitState(),
-    cutOver: () => migrationApplied(sqlite, CORE_IDENTITY_LIVE_MIGRATION),
-
-    /**
-     * Boot on a database that is past initialisation: load the tables and nothing
-     * else. Whatever arrays the caller holds (the seed, a superseded blob copy)
-     * are never imported.
-     */
-    attach(givenPlayers = null, givenGuardians = null) {
+    cutOver: () => cutOver(sqlite),
+    attach() {
       if (readInitState() === 'pending') throw new Error(`core identity: initialisation is pending (meta.${CORE_IDENTITY_INIT_META}); call initialize() with the first installation's records instead of attach()`);
-      load();
-      return { engine: 'sqlite', players: P.records.length, guardians: G.records.length, links: stmt.countLinks.get().n, imported: 0 };
+      const counts = identity.report();
+      log(`core identity: ${counts.players} player(s), ${counts.guardians} guardian(s) in the tables`);
+      return { engine: 'sqlite', players: counts.players, guardians: counts.guardians, links: counts.links, imported: 0 };
     },
-
     /**
-     * First-installation initialisation: validate the given records with the
-     * preflight (the Founder's legacy-minor rule included) and, only when it is
-     * `complete`, write every row and link and record `done` in ONE transaction.
-     * Refused when the state is not `pending` or the tables already hold rows.
-     * A refused snapshot writes nothing (the error lists ids and reasons, never a
-     * record) and the state stays `pending`, so the next boot retries.
-     *
-     * The given snapshot is validated AS GIVEN, by the preflight's own shape
-     * contract (review of e4a7c53, finding 3): a collection that is absent,
-     * null, an object, a string or a number is a refusal like any other — never
-     * read as an empty import — while an explicitly empty array is a valid,
-     * empty collection. The caller's object is never modified.
+     * First-installation initialisation: type the given records (the seed, in snapshot form) and write them with the
+     * state `done` in one transaction. Allowed only while the state is `pending` and the tables are empty; a refused
+     * seed writes nothing and the state stays `pending`.
      */
-    initialize(given, { now: at = now() } = {}) {
+    initialize(seed, { now: at = now() } = {}) {
       if (readInitState() !== 'pending') throw new Error(`core identity: already initialised (meta.${CORE_IDENTITY_INIT_META} is "done"); the tables are authoritative and nothing is imported`);
-      const stored = stmt.countPlayers.get().n + stmt.countGuardians.get().n + stmt.countLinks.get().n;
+      const stored = q('SELECT (SELECT COUNT(*) FROM players) + (SELECT COUNT(*) FROM guardians) AS n').get().n;
       if (stored) throw new Error(`core identity: initialisation is pending but the tables already hold ${stored} row(s) written outside the repositories; refusing to initialise over them`);
       if (sqlite.isTransaction) throw new Error('core identity: initialize() runs in a transaction of its own and cannot start inside an open transaction');
-      // The first installation's players get the creation defaults, like every player created later (the caller's records are not modified).
-      const withDefaults = isPlainObject(given) && Array.isArray(given.players) ? { ...given, players: given.players.map((p) => (isPlainObject(p) ? withCreationDefaults(clone(p)) : p)) } : given;
-      const report = validateCoreIdentity(withDefaults, { now: at });
-      if (report.status !== 'complete') {
-        const err = new Error(`CORE_IDENTITY_CUTOVER_BLOCKED: ${report.refusals.length} refusal(s); nothing was written and initialisation stays pending — ${report.refusals.slice(0, 20).map((r) => `${r.collection} ${r.id ?? '(collection)'}: ${r.reason}`).join('; ')}${report.legacyMinorsWithoutLink.length ? `; legacy minors without any guardian link (resolve by hand before the cutover): ${report.legacyMinorsWithoutLink.join(', ')}` : ''}`);
-        err.code = 'CORE_IDENTITY_CUTOVER_BLOCKED';
-        err.report = publicReport(report);
-        throw err;
+      if (!isPlainObject(seed)) throw new TypeError(`core identity: initialize() needs { players, guardians } (got ${describe(seed)}); nothing was written and initialisation stays pending`);
+      let typed;
+      try { typed = typeIdentitySnapshot(seed, { now: at }); } catch (err) {
+        throw Object.assign(new Error(`CORE_IDENTITY_CUTOVER_BLOCKED: ${err.message}; initialisation stays pending`), { code: 'CORE_IDENTITY_CUTOVER_BLOCKED', problems: err.problems ?? [] });
       }
-      // The trialReports claims of the first installation's records, judged against the trials the data layer holds (review of 132eda2, finding 1): equal or refused, never dropped.
-      const claims = report.candidate.players.flatMap((row) => reconcileTrialReportCopy(row.id, playerFromRow(row).trialReports, derivedTrialReports(row.id), { hint: 'resolve the record before the first installation' }));
-      if (claims.length) {
-        const err = new Error(`CORE_IDENTITY_CUTOVER_BLOCKED: ${claims.length} trialReports claim(s) disagree with the trials collection; nothing was written and initialisation stays pending — ${claims.slice(0, 20).join('; ')}${claims.length > 20 ? '; …' : ''}`);
-        err.code = 'CORE_IDENTITY_CUTOVER_BLOCKED';
-        err.report = publicReport(report);
-        throw err;
-      }
-      let counts;
-      try {
-        counts = transaction(sqlite, () => { const c = writeCandidate(sqlite, report.candidate); stmt.setMeta.run(CORE_IDENTITY_INIT_META, 'done'); return c; });
-      } catch (err) {
-        throw new Error(`core identity: initialisation failed and was rolled back (${sqlReason(err)}); the state stays pending and the next boot retries`, { cause: err });
-      }
-      log(`core identity: initialised ${counts.players} player(s), ${counts.guardians} guardian(s) and ${counts.links} link(s) from the in-memory records (first installation)`);
-      load();
+      const counts = transaction(sqlite, () => { const c = writeIdentity(sqlite, typed); q('INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').run(CORE_IDENTITY_INIT_META, 'done'); return c; });
+      log(`core identity: initialised ${counts.players} player(s), ${counts.guardians} guardian(s) and ${counts.links} link(s) from the first installation's records`);
       return { engine: 'sqlite', ...counts, imported: counts.players + counts.guardians };
     },
-
-    saveHook: () => ({ commit: () => hook.commit(), rollback: () => hook.rollback(), snapshotState: () => hook.snapshotState(), restoreState: (s) => hook.restoreState(s) }),
-    report: () => ({ players: P.records.length, retained: R.size, guardians: G.records.length, links: stmt.countLinks.get().n, initState: readInitState() }),
+    report: () => ({ players: players.count(), retained: players.retainedCount(), guardians: guardians.count(), links: q('SELECT COUNT(*) AS n FROM guardian_children').get().n, initState: readInitState() }),
   };
+  const readsOf = (repo) => Object.freeze(Object.fromEntries(Object.entries(repo).filter(([k, v]) => typeof v === 'function' && !WRITES.has(k))));
+  players.reads = readsOf(players);
+  guardians.reads = readsOf(guardians);
   return identity;
 }

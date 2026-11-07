@@ -191,7 +191,8 @@ export default function App() {
       setReports((await call<{ items: Report[]; nextCursor: string | null }>(key, '/admin/reports')).items);
       // The clubs page by cursor too (S14g): the first page is read; "load more" (nextCursor) is still needed.
       setClubs((await call<{ items: Club[]; nextCursor: string | null }>(key, '/admin/clubs')).items);
-      const g = await call<{ guardians: GuardianRow[]; idvQueue: IdvRow[] }>(key, '/admin/guardians');
+      // The guardians page by cursor too (S14h): the first page is read; "load more" (nextCursor) is still needed.
+      const g = await call<{ guardians: GuardianRow[]; nextCursor: string | null; idvQueue: IdvRow[] }>(key, '/admin/guardians');
       setGuardians(g.guardians); setIdvQueue(g.idvQueue);
       setBlocks((await call<{ items: BlockRow[]; nextCursor: string | null }>(key, '/admin/blocks')).items);
       setModeration((await call<{ items: ModRow[]; nextCursor: string | null }>(key, '/admin/moderation')).items);

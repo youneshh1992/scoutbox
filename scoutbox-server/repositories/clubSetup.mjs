@@ -32,7 +32,7 @@
 import { isPlainObject, ids, describe } from './recruitment.mjs';
 import { transaction, migrationApplied } from './database.mjs';
 import { refusal, isInt, isStr, nonEmpty, orNull, clone, bad, optText, reqText, optInstant, reqInstant, unknownFields, first, txt, deepFreeze } from './scoutingEvidence.mjs';
-import { PLAYER_POSITIONS, PLAYER_FEET, PLAYER_AVAILABILITY, PLAYER_LEVELS } from './identityMapping.mjs';
+import { PLAYER_POSITIONS, PLAYER_FEET, PLAYER_AVAILABILITY, PLAYER_LEVELS } from './identity.mjs';
 import { parseStrictDateOnly } from '../temporal.mjs';
 
 export const CLUB_SETUP_MIGRATION = '0021_club_setup';

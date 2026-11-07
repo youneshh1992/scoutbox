@@ -391,9 +391,10 @@ section('§8 — the source itself carries no score, no ranking and no player su
     // Exactly one read of the player collection, inside the guarded scan.
     // Anything else would be a path around playerViewForOrg.
     const src = read('scoutbox-server/domains/discovery/matching/index.mjs').split('\n').filter((l) => !/^\s*(\*|\/\/)/.test(l)).join('\n');
-    const reads = [...src.matchAll(/db\.players\b/g)].length;
-    abuse(54, reads === 1 && /for \(const player of db\.players\)/.test(src),
-      `the only read of db.players is the single guarded scan (${reads} occurrence)`);
+    // S14h: the players come from the identity repository's query (no db.players); still exactly one read.
+    const reads = [...src.matchAll(/\bplayers\.(list|scan|visibleCandidates|byId|byIds)\(|db\.players\b/g)].length;
+    abuse(54, reads === 1 && /for \(const player of players\.list\(\{ visibleTo: org \}/.test(src),
+      `the only read of the players is the single guarded scan (${reads} occurrence)`);
   }
   abuse(55, /orgCanSee\(org, player\)/.test(read('scoutbox-server/domains/discovery/matching/index.mjs')) && /ctx\.m18MatchFacts\?\.\(player, org\)/.test(read('scoutbox-server/domains/discovery/matching/index.mjs')),
     'authorization and the visibility projection both run BEFORE any criterion is evaluated');

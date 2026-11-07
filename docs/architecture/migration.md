@@ -81,11 +81,13 @@ takes the next free id; the placeholder ids in `sqlite-schema.md` mean nothing.
 | S14e | notifications and their preferences become explicit writes and SQL reads; the tables re-typed (the audience kind's vocabulary, a staff audience a key, length and category CHECKs, the delivery marker; the group key and acknowledger worked out) | `0009` (amended in place) | `notifications` | done |
 | S14f | staff and sessions become explicit writes and SQL reads; the staff table re-typed (a name unique in its organisation, removed accounts included; an e-mail unique among current staff; MFA and delivery preferences as columns, recovery codes as child rows; the remover a key) and an org session's staff and organisation one key | `0001`, `0002` (amended in place; `0004` no longer rebuilds `org_users`) | `users`, `sessions` | done |
 | S14g | organisations become explicit writes and SQL reads; the table re-typed (no `facets_json`, length and range CHECKs, a ground as both coordinates or neither, a federation registration as both parts or neither, `created_at` required; the password hash off the record) | `0004` (amended in place; `0021`, `0023`, `0026` no longer edit facets) | `orgs` | done |
-| S14h… | the remaining staged repositories (players and guardians) become explicit (§4.6) | | | **next** |
+| S14h | players and guardians become explicit writes and SQL reads; the tables re-typed (no `facets_json`, lengths, ranges and vocabularies CHECKed, keys inside the domain RESTRICT, one primary link per player; `coGuardians` worked out, the external id's copied claim a review key) | `0005`, `0007` (amended in place; `0002` no longer creates identity shadows) | `identity` | done |
+| S14i | the player directory and discovery reads page in SQL, with profile completeness projected into a column (§4.6) | | | **next** |
 | S14 last | the save path, `db` and snapshot mode go (§4.6) | | | |
 
-Steps before S8 were staged (written at save) rather than explicit; S4a's identity writes are explicit since §4.3.1, and
-S6b's since S14b, S7d's since S14c, S7b's and S7c's since S14d, S7a's since S14e, S0's and S2's since S14f, S3's since S14g.
+Steps before S8 were staged (written at save) rather than explicit; S4a's identity writes are explicit since §4.3.1 (and
+its mirror gone since S14h), S6b's since S14b, S7d's since S14c, S7b's and S7c's since S14d, S7a's since S14e, S0's and
+S2's since S14f, S3's since S14g. No repository keeps a mirror any more.
 
 ## 4. The order of work
 
@@ -110,7 +112,7 @@ and the DDL, so these cannot drift, and include a `date` type for football dates
   lines and `Array.isArray` guards quietly see an empty collection. The repository answers indexed queries (`byId`,
   `forOrg`, `forPlayer`, counts…) with fresh deep-frozen records; a read inside a unit sees the unit's writes. Modules
   receive a per-domain reads object on their context (`recruitmentReads`, `scoutingReads`, `verificationReads`,
-  `agentReads`, `complianceReads`, `transactionReads`, `developmentReads`, `boxCamReads`, `discoveryReads`, `insightReads`, `integrationReads`, `enterpriseReads`, `groupReads`, `grassrootsReads`, `safetyReads`; S13e's few readers take the `operations` repository itself, the threads' the `channels` repository, the delivery centre the `dispatches` and `outboxPush` repositories, the feed and preferences the `notifications` repository, staff readers the `users` repository or `byId.user`, and organisation readers the `orgs` repository or `byId.org`); pure projectors take `reads`. Sweeps are indexed predicates, admin figures are
+  `agentReads`, `complianceReads`, `transactionReads`, `developmentReads`, `boxCamReads`, `discoveryReads`, `insightReads`, `integrationReads`, `enterpriseReads`, `groupReads`, `grassrootsReads`, `safetyReads`; S13e's few readers take the `operations` repository itself, the threads' the `channels` repository, the delivery centre the `dispatches` and `outboxPush` repositories, the feed and preferences the `notifications` repository, staff readers the `users` repository or `byId.user`, organisation readers the `orgs` repository or `byId.org`, and player and guardian readers the `players` and `guardians` repositories or `byId.player` / `byId.guardian`); pure projectors take `reads`. Sweeps are indexed predicates, admin figures are
   `GROUP BY`s. Lists decode their records' child rows in one batch (`childRowsOf` in `repositories/database.mjs`),
   never a query per record.
 - **Reads that write become sweeps or upserts.** A notice a read used to create comes from a sweep, its marker
@@ -177,8 +179,9 @@ separate risk; the script moves the fixtures' instants to today to measure the s
   projected into a table. Second Look projects one club's ended Rooms. Opening a watchlist writes its reconciliation
   clock every time (the screen shows "as of"), the membership only when it changed.
 - Insight and coverage (S12d): the exposure funnel, review queue and player bands are `GROUP BY`s over the 90-day
-  window, but the queue then checks each player's live visibility in code, and the discovery rotation still scans
-  `db.players` (identity's view). Bounded by one club's exposure, not the player base, except the rotation. The
+  window, but the queue then checks each player's live visibility in code, and the discovery rotation still reads every
+  visible player (`players.visibleCandidates`, S14h). Bounded by one club's exposure, not the player base, except the
+  rotation. The
   coverage fixture list is one SQL union of the club's fixtures, the friendlies and the open days, paged by cursor
   (S13d); suggested visits still filter every upcoming located fixture in code.
 - Grassroots operations (S13d): the friendlies board and a guardian's local open days prefilter by a latitude/longitude
@@ -199,19 +202,24 @@ separate risk; the script moves the fixtures' instants to today to measure the s
   grows with their history; it needs paging (and the apps a "load more") if feeds get long. The preference gate reads
   the person's preferences once per notice. The delivery sweep's two scans are indexed SQL (the undispatched marker,
   and a join from the unopened in-app dispatches to the read notifications).
+- Players (S14h): the org directory, similar players and "more like this", the clip deck, the feed, the fixtures
+  list, the benchmark cohort, a role's candidates, the insight rotation, matching and Nobody Missed read every
+  visible player (`players.visibleCandidates`: the under-18 wall, the grassroots box and the directory filters in SQL,
+  the lists decoded a batch at a time) and sort in code. That is S14i: paging in SQL with profile completeness
+  projected into a column.
 
 ### 4.3.1 Costs that grow with the whole player base
 
 Lookups by id go through the repositories' indexes (`byId` on every module context, `domains/platform/lookups.mjs`),
 and player and guardian writes are explicit repository operations, so a write or a unit of work never touches every
 player. `scripts/testUnitOfWork.mjs` holds that line: a player write costs the same number of SQL statements with 20
-and 2,000 players. Players get their defaults at creation (`PLAYER_CREATION_DEFAULTS`), not by a boot backfill.
+and 2,000 players. Players get their defaults at creation (`players.create`), not by a boot backfill.
 
 **Left:** an empty unit of work cost about 23 ms at 30k players, mostly the organisations (captured and flushed
 whole per unit, because their facets were edited in place) and the blob collections' memento. The memento went with
 the blob (S14a), the notifications' whole-mirror copy per unit with S14e, the organisations' part with S14g
-(`scripts/testUnitOfWork.mjs` asserts an empty unit runs no organisation statement). What is left is the players'
-and guardians' participant (S14h).
+(`scripts/testUnitOfWork.mjs` asserts an empty unit runs no organisation statement), and the players' and guardians'
+participant with S14h (the same test asserts an empty unit runs no identity statement). Nothing is left.
 
 ### 4.4 Code and test layout
 
@@ -307,9 +315,25 @@ Split in parts, like S12 and S13.
   `mfaRequiredForLeads` (`400 FIELD_INVALID`) instead of coercing them. Removed: the never-set `closedAt` checks
   in verification. Founder decisions (7 Nov): the sign-in list stays unpaged, and the T&S-created grassroots
   club's placeholder ground stays, both in `known-issues.md`.
-- **S14h onwards: the remaining staged repositories become explicit**, the S8 way: players and guardians. Each loses
-  its mirror, its `db.<name>` view and its save hook, and its reads become queries. This also closes what is left of
-  §4.3.1's cost of an empty unit of work.
+- **S14h (done): players and guardians**, the last staged repositories, are explicit the S8 way. No route wrote a facet
+  any more (probed across every suite, 7 Nov), so `0005` is amended in place to create the final tables without
+  `facets_json` (and `0002` no longer creates identity shadow tables): lengths, ranges and vocabularies CHECKed, a
+  location as both coordinates or neither, keys inside the domain immediate `RESTRICT`. A record has every field,
+  always; a player's lists come from their tables and `trialReports` from the trials; a guardian's `childIds` from the
+  link rows and `coGuardians` from the guardians whose `co_guardian_of` names it; password and e-mail-code hashes are
+  never on a record. `0007`'s `player_external_ids.claim_json` becomes `review_id` (the identity review keeps the
+  row). Writes are `create`, `update(id, draft => …)`, the list operations (`addItem`, `setItems`, `patchItem`) and
+  the link operations; `restore` and `remove` go (nothing called them). No mirror, no `db.players` / `db.guardians`
+  (the names throw), no save hook or undo log, which closes §4.3.1. Reads: `byId`, `byIds`, `byEmail`, `byGuardian`,
+  `byMediaId`, `linksOf`, `count`, indexed lookups for the imports and the agent search, the admin guardians list paged
+  by cursor, and `visibleCandidates(org, filters)` for the directory-style reads (the under-18 wall, the grassroots
+  box and the directory filters in SQL, the rest in code, output and order unchanged). The preflight and the
+  shape-preserving mapping are deleted; the seed is imported with `create`. Junk refused: non-boolean switches,
+  stats given as text, over-long names, non-numeric height and weight.
+- **S14i: the hot player reads.** The org directory, similar players, the clip deck, the feed, the fixtures list, the
+  benchmark cohort, a role's candidates, the insight rotation, matching and Nobody Missed still read every visible
+  player after S14h. They page in SQL, with profile completeness (which counts the trials' reports) projected into a
+  column kept by the writers.
 - **S14 last: the save path goes.** `persist()`, `persistNow()`, the debounced save, the save hooks,
   `repositories/memento.mjs`, `repositories/readonly.mjs` and `db` itself; then snapshot mode (`openStore(dir)`
   with whole-file `load`/`save`) and every domain's `*_SNAPSHOT`, with the suites setting up their data through the
@@ -343,8 +367,8 @@ of a design note's content, though longer than necessary.
   `foreign_key_check` must be empty before commit. A domain is authoritative because its migration is recorded, never
   because a table exists.
 - **Boot.** `server.mjs` opens the store and runs `attachDataLayer({ db, seed: buildSeed(), … })`: the table
-  migrations, then every repository; a first installation imports the seed once. `db` receives the staged
-  repositories' read-only views and a throwing name for every retired collection.
+  migrations, then every repository; a first installation imports the seed once. `db` receives a throwing name for
+  every retired collection (since S14h, every collection).
 - **Seed data.** `seed.mjs` fills only orgs, guardians and players. Other domains start empty and get rows through
   routes. Tests write their setup through the repositories, SQL, or a snapshot-mode save (`openStore(dir).save(…)`),
   using fixtures in the writers' shapes (e.g. `scripts/signingsFollowUpsTestFixtures.mjs`). They don't plant blob rows.

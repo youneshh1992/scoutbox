@@ -28,37 +28,37 @@ export const clone = (v) => JSON.parse(JSON.stringify(v));
 export const adult = () => ({
   id: 'pl-adult', name: 'Adult Signup', dob: '2001-05-20', country: 'GB', city: 'Leeds', position: 'ST', foot: 'right', heightCm: 182, weightKg: 77,
   stats: null, academyPlus: false, badges: [], availability: 'not_seeking', contractStatus: 'unknown', identityVerified: false,
-  attendance: [], timeline: [], media: [], trialReports: [], drills: [], guardianId: null, squadNumber: null, contractUntil: null,
+  attendance: [], timeline: [], media: [], drills: [], guardianId: null, squadNumber: null, contractUntil: null,
   marketValueRange: null, agentName: null, createdAt: T0, password: 'scrypt$aa$bb', level: 'amateur', location: { lat: 53.8, lng: -1.5 },
   medical: { shared: false, records: [], conditionStatus: 'unknown' }, notificationPrefs: null, seasonHistory: [], firstTeamSeeker: false, programme: null,
 });
 export const child = (id, guardianId, dob) => ({
   id, name: `Child ${id}`, dob, country: 'GB', city: '', guardianId, position: null, foot: null, heightCm: null, weightKg: null,
   stats: null, academyPlus: false, badges: [], availability: 'not_seeking', contractStatus: 'unknown', identityVerified: false,
-  attendance: [], timeline: [], media: [], trialReports: [], drills: [], squadNumber: null, contractUntil: null, marketValueRange: null,
+  attendance: [], timeline: [], media: [], drills: [], squadNumber: null, contractUntil: null, marketValueRange: null,
   agentName: null, createdAt: T0 + DAY, password: null, level: 'amateur', location: null, medical: { shared: false, records: [], conditionStatus: 'unknown' },
   notificationPrefs: null, seasonHistory: [], firstTeamSeeker: false, programme: null,
 });
-/** A seeded adult with every S5 array, split composites with remainders and prototype-named own keys (built from JSON, as a snapshot arrives). */
+/** A seeded adult with every S5 list and every composite (built from JSON, as a snapshot arrives). */
 export const seeded = () => JSON.parse(JSON.stringify({
   id: 'pl-seeded', name: 'Seeded Adult', dob: '2004-03-14', country: 'GB', city: 'Manchester', position: 'ST', foot: 'right', heightCm: 184, weightKg: 79,
   badges: ['Finisher'], attendance: [{ id: 'att-1', fixture: 'Cup Final', venue: 'Hough End', date: '2026-06-01', gps: { lat: 53.43, lng: -2.26 }, verified: true }],
   timeline: [{ year: '2019', event: 'Joined academy' }], media: [{ id: 'med-1', title: 'Highlights', kind: 'video', uploadedAt: '2026-05-01T10:00:00.000Z', url: null, views: 3, tags: { pace: 2 }, verifiedClip: null }],
-  trialReports: [], medical: { shared: true, records: [{ id: 'md-1', type: 'injury', title: 'Hamstring', date: '2025-11-02', layoffWeeks: 3, cleared: true }], conditionStatus: 'fully_fit' },
+  medical: { shared: true, records: [{ id: 'md-1', type: 'injury', title: 'Hamstring', date: '2025-11-02', layoffWeeks: 3, cleared: true }], conditionStatus: 'fully_fit' },
   identityVerified: true, academyPlus: true, guardianId: null, squadNumber: 22, contractUntil: '2026-06-30', marketValueRange: '€250K – €450K', agentName: 'Team Elevate',
   availability: 'available_now', contractStatus: 'expiring_summer', drills: ['drill-sprint'], drillResults: [{ id: 'dr-1', drillId: 'drill-sprint', metric: 'time', unit: 's', value: 4.2, verified: false, ts: T0 }],
   activityLog: [T0], createdAt: null, password: null, level: 'semi_pro', location: { lat: 53.483, lng: -2.244 }, seasonHistory: [{ season: '2024/25', appearances: 27, goals: 14, assists: 4 }],
   stats: { appearances: 31, goals: 22, assists: 6, paceKmh: 34.1, passCompletionPct: 78, duelSuccessPct: 61 }, notificationPrefs: { quietStart: '21:00', quietEnd: '07:00', schoolHoursMute: null, timezone: 'Europe/London' },
-  programme: { track: 'ST', startedAt: T0, completed: [{ sessionId: 's1', ts: T0 + DAY }] }, firstTeamSeeker: true, futureField: { nested: [1, 2] },
-}).replace('"futureField"', '"constructor":"own-constructor","toString":"own-toString","__proto__":{"polluted":true},"futureField"'));
+  programme: { track: 'ST', startedAt: T0, completed: [{ sessionId: 's1', ts: T0 + DAY }] }, firstTeamSeeker: true,
+}));
 export const gPrimary = () => ({
-  id: 'gd-primary', name: 'Primary Parent', email: 'primary@example.test', password: null, emailVerified: true, emailCode: null, idVerified: true, idvReference: 'idv-1',
-  disclaimerAccepted: true, childIds: ['pl-child1', 'pl-child2'], coGuardians: [{ id: 'gd-co', name: 'Co Parent', email: 'co@example.test' }],
+  id: 'gd-primary', name: 'Primary Parent', email: 'primary@example.test', password: null, emailVerified: true, idVerified: true, idvReference: 'idv-1',
+  disclaimerAccepted: true, childIds: ['pl-child1', 'pl-child2'],
   notificationPrefs: { quietStart: '20:00', quietEnd: '06:30', schoolHoursMute: true, timezone: 'Europe/London' }, createdAt: T0,
 });
 export const gCo = () => ({ id: 'gd-co', name: 'Co Parent', email: 'co@example.test', idVerified: false, disclaimerAccepted: false, childIds: ['pl-child1', 'pl-child2'], coGuardianOf: 'gd-primary' });
-/** A guardian who signed up and has not verified yet: the outstanding e-mail code is plain, as the server stores it today. */
-export const gSignup = () => ({ id: 'gd-signup', name: 'Signup Parent', email: 'signup@example.test', password: 'scrypt$cc$dd', emailVerified: false, emailCode: 'K7Q2ZP', idVerified: false, disclaimerAccepted: false, childIds: [] });
+/** A guardian who signed up and has not verified yet: the outstanding e-mail code is stored as its hash. */
+export const gSignup = () => ({ id: 'gd-signup', name: 'Signup Parent', email: 'signup@example.test', password: 'scrypt$cc$dd', emailVerified: false, emailCodeHash: sha256('K7Q2ZP'), idVerified: false, disclaimerAccepted: false, childIds: [] });
 /** An adult who is still linked to a guardian (a counted finding, imported unchanged). */
 export const linkedAdult = () => ({ ...child('pl-grown', 'gd-primary', '2007-01-01'), name: 'Grown Up' });
 export const FIXTURE = () => ({

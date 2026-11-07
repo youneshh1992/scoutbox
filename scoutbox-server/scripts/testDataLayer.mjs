@@ -99,7 +99,7 @@ test('views: reads work as before; every write throws and names the repository',
 
 // The staff repository's own checks are in scripts/testStaff.mjs (S14f).
 
-test('attachDataLayer: db.users and db.sessions are gone (S14f) and name their repository; the staff are written through it', () => {
+test('attachDataLayer: db.users, db.sessions (S14f), db.players and db.guardians (S14h) are gone and name their repository; the staff are written through it', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sb-layer-'));
   const store = openStore(dir, { tableBacked: TABLE_BACKED });
   const db = {};
@@ -117,9 +117,10 @@ test('attachDataLayer: db.users and db.sessions are gone (S14f) and name their r
   assert.equal('shadow' in layer.report(), false, 'the projection is retired');
   assert.deepEqual(layer.report().identity, { initState: 'done' });
   assert.deepEqual(layer.report().mediaDeletions, { queued: 0, conflicts: 0 });
+  // S14h: players and guardians have no view either; their old names throw and name the repository.
   for (const name of ['players', 'guardians']) {
     assert.throws(() => { db[name] = []; }, TypeError, `${name} cannot be replaced`);
-    assert.throws(() => { db[name].push({ id: 'x' }); }, /repositories/, `${name} is a read-only view`);
+    assert.throws(() => db[name], new RegExp(`db\\.${name} is gone: read it through the ${name} \\(identity\\) repository`), `db.${name} throws`);
   }
   store.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
 });
@@ -155,7 +156,7 @@ test('store (snapshot mode): load merges table-backed collections in from their 
   const tool = openStore(dir);
   const snap = tool.load();
   assert.deepEqual(snap.db.users, [{ id: usr1.id, orgId: 'o', name: 'A', role: 'Scout', email: null, ssoSubject: null, createdAt: usr1.createdAt, removedAt: null, removedById: null, provenance: null, mfa: null, deliveryPrefs: { quietStart: null, quietEnd: null, channels: { email: true } } }]);
-  assert.deepEqual(snap.db.players, [{ ...PLAYER, firstTeamSeeker: false, notificationPrefs: null, programme: null, media: [], attendance: [], timeline: [], badges: [], drills: [], drillResults: [], activityLog: [], externalIds: [], seasonHistory: [] }]); // the creation defaults (§4.3.1: set when a player is created, not by a boot pass); every sub-record array is on every record (S5 typed tables)
+  assert.deepEqual(snap.db.players, [{ ...PLAYER, city: null, position: null, foot: null, heightCm: null, weightKg: null, squadNumber: null, contractUntil: null, marketValueRange: null, agentName: null, academyPlus: false, firstTeamSeeker: false, availability: 'not_seeking', contractStatus: 'unknown', level: 'amateur', footballCategory: null, identityVerified: false, guardianId: null, createdAt: null, location: null, stats: null, notificationPrefs: null, programme: null, media: [], attendance: [], timeline: [], badges: [], drills: [], drillResults: [], activityLog: [], externalIds: [], seasonHistory: [], password: null }]); // S14h: every field on every record (null or false when unset), the password hash beside it in snapshot form; every list on every record (S5 typed tables)
   assert.deepEqual(snap.db.guardians, []);
   // Writing a changed snapshot lands in the table, not in a blob.
   snap.db.users.push({ id: 'usr-2', orgId: 'o', name: 'B', role: 'Manager', createdAt: 2, mfa: { secretB32: 'SECRETSECRETSECRET', enabledAt: 3, recoveryHashes: ['a'.repeat(64)] } });
@@ -175,7 +176,7 @@ test('store (snapshot mode): load merges table-backed collections in from their 
   assert.deepEqual(layer.users.byId('usr-2').mfa, { enabledAt: 3 }, 'the record carries the MFA state, never the secret');
   assert.equal(layer.users.mfaSecretOf('usr-2'), 'SECRETSECRETSECRET');
   assert.deepEqual(layer.boot.identity, { engine: 'sqlite', players: 1, guardians: 0, links: 0, imported: 0 }, 'the player row attached from the table');
-  assert.equal(db2.players[0].name, 'P');
+  assert.equal(layer.players.byId('p').name, 'P');
   again.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
 });
 test('store (snapshot mode): a fixture saved into a new directory is written into the tables, and the first boot attaches to them', () => {

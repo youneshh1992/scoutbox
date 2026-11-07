@@ -5,7 +5,7 @@
  * tables when the data layer initialises the players (repositories/identity.mjs).
  * REGISTERED in DATA_MIGRATIONS.
  */
-import { CORE_IDENTITY_LIVE_MIGRATION } from '../identityPreflight.mjs';
+import { CORE_IDENTITY_LIVE_MIGRATION } from '../identity.mjs';
 import { PLAYER_SUBRECORDS_MIGRATION, SUBRECORDS_DDL, SUBRECORD_TABLES } from '../playerSubrecords.mjs';
 import { migrationApplied } from '../database.mjs';
 

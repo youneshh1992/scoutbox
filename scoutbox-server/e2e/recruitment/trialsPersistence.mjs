@@ -174,11 +174,8 @@ section('2 — a snapshot with P4B trial rows restores byte-faithfully through a
   const RESTORE_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-m23t-restore-'));
   const db = baseDb();
   db.trials.push(soundTrial(), legacyTrial());
-  // The legacy trial carries a filed report; before S5 the report route wrote the player's
-  // `trialReports` copy together with `trial.report`, so a sound snapshot carries both. Since S5
-  // (migration 0007) the copy is reconciled with the trials at the cut-over and a player who would
-  // GAIN a report is refused by design — the fixture is the consistent pre-S5 state.
-  db.players[0].trialReports = [legacyTrial().report];
+  // The legacy trial carries a filed report; the player's trialReports are read from the trials (S5), so a snapshot
+  // player carries no copy (S14h: a copy is refused).
   // S8a-core: a trial names its request by a real key (trials.request_id → recruitment_requests), so the legacy trial
   // gets the accepted invitation it came from (req-0, the legacy direct-request literal) beside the P4B pair; a trial
   // naming an absent request is refused at the cutover with its id (PAIR_MISMATCH), never repaired. The legacy trial

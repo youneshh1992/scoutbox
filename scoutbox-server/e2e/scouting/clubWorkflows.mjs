@@ -149,17 +149,19 @@ ok(r.status === 200 && r.body.evidence.verification.method === 'downgraded after
   const badNote = await post('/org/squad/invite', { playerId: 'pl-adeyemi', note: 7 }, bearer(MARIA));
   ok(badNote.status === 400 && badNote.body.field === 'note', 'S9a a squad invitation note that is not text is refused');
 }
-// S9a: names from other domains are longer than the evidence tables' 200 characters; the action still succeeds
+// S9a: names from other domains fit the evidence tables' 200 characters (a player's name is at most 120 since S14h)
 {
-  const longName = 'A'.repeat(230);
+  const refused = await post('/auth/player/signup', { name: 'A'.repeat(230), dob: '1999-01-01', country: 'GB', password: 'longenough1', position: 'CM' });
+  ok(refused.status === 400 && refused.body.field === 'name', 'S14h a 230-character player name is refused at sign-up');
+  const longName = 'A'.repeat(120);
   const su = await post('/auth/player/signup', { name: longName, dob: '1999-01-01', country: 'GB', password: 'longenough1', position: 'CM' });
   const LONG = su.body.token;
   const filed = await post('/player/evidence', { claimType: 'statistic', label: 'Goals', value: 3 }, bearer(LONG));
-  ok(filed.status === 201 && filed.body.evidence.source.name === longName.slice(0, 200), 'S9a a player with a 230-character name files evidence (name shortened to 200)');
+  ok(filed.status === 201 && filed.body.evidence.source.name === longName, 'S9a a player with a 120-character name files evidence (the whole name)');
   const corrected = await post(`/player/evidence/${filed.body.evidence.id}/correct`, { value: 4, reason: 'miscounted' }, bearer(LONG));
   ok(corrected.status === 201, 'S9a and corrects it');
   const disputed = await post(`/player/evidence/${corrected.body.evidence.id}/dispute`, { reason: 'the club entry is wrong' }, bearer(LONG));
-  ok(disputed.status === 201 && disputed.body.dispute.by.name.length === 200, 'S9a and disputes it');
+  ok(disputed.status === 201 && disputed.body.dispute.by.name.length === 120, 'S9a and disputes it');
   const reg = await post('/auth/org/register-grassroots', { name: 'C'.repeat(120), city: 'London', lat: 51.5, lng: -0.12, federation: 'FA', registrationId: 'S9A-LONG', scoutName: 'S'.repeat(120) });
   const oseiClaim = await post('/player/evidence', { claimType: 'statistic', label: 'Assists', value: 5 }, bearer(OSEI));
   const orgDispute = await post(`/org/evidence/${oseiClaim.body.evidence.id}/dispute`, { reason: 'our records differ' }, bearer(reg.body.token));

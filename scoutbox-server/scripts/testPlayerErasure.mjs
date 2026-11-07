@@ -18,11 +18,12 @@ import path from 'node:path';
 import { openStore } from '../store.mjs';
 import { attachDataLayer, TABLE_BACKED, DATA_MIGRATIONS, readTableBacked } from '../repositories/index.mjs';
 import { runDataMigrations } from '../repositories/database.mjs';
-import { MINOR_WITHOUT_LINK_REASON } from '../repositories/identityPreflight.mjs';
 import { SUBRECORD_TABLES } from '../repositories/playerSubrecords.mjs';
 import { NOW, TTL, DAY, tempDir, clone, adult, child, seeded, gPrimary, gCo, gSignup, freshFile, openRaw, applied, dump } from './coreIdentityTestFixtures.mjs';
 
 let passed = 0;
+/** A fixture record as `create` takes it: the password hash beside the record, not on it (S14h). */
+const asCreate = ({ password = null, ...r }) => ({ ...r, passwordHash: password });
 const only = process.env.TEST_ONLY || '';
 function test(name, fn) { if (only && !name.includes(only)) return; fn(); passed++; console.log(`  ✓ ${name}`); }
 let counter = 9000;
@@ -38,7 +39,7 @@ const RETAINED_ROW = (id, deletedAt, birthDate, country) => ({
   football_category: null, identity_verified: 0, guardian_id: null, lat: null, lng: null, stats_appearances: null, stats_goals: null, stats_assists: null, stats_pace_kmh: null,
   stats_pass_completion_pct: null, stats_duel_success_pct: null, stats_clean_sheets: null, medical_shared: 0, medical_condition_status: 'unknown', prefs_quiet_start: null,
   prefs_quiet_end: null, prefs_school_hours_mute: null, prefs_timezone: null, programme_track: null, programme_started_at: null, password_hash: null, created_at: null,
-  deleted_at: deletedAt, facets_json: null,
+  deleted_at: deletedAt,
 });
 const RECORD = (id, deletedAt, birthDate, country) => ({ id, deletedAt, birthDate, country });
 
@@ -76,15 +77,15 @@ test('erase: a deleted player keeps EXACTLY the agreed row — id, the deletion 
   assert.equal(typeof t.players.erase, 'function', 'players.erase exists (S4b-R)');
   const before = t.row('pl-seeded');
   assert.deepEqual([before.identity_verified, before.academy_plus, before.level, before.availability, before.contract_status, before.medical_shared, before.medical_condition_status], [1, 1, 'semi_pro', 'available_now', 'expiring_summer', 1, 'fully_fit'], 'the fixture carries non-default values in every placeholder column');
-  assert.ok(t.childRows('pl-seeded') > 5, 'the fixture has child rows'); assert.ok(before.facets_json, 'and facets');
-  const kids = t.guardians.byId('gd-primary').childIds; const coKids = t.guardians.byId('gd-co').childIds;
+  assert.ok(t.childRows('pl-seeded') > 5, 'the fixture has child rows');
+  const kids = () => t.guardians.byId('gd-primary').childIds; const coKids = () => t.guardians.byId('gd-co').childIds;
   const countBefore = t.players.count();
   // An adult, outside a unit (the repository's own transaction).
   const result = t.players.erase('pl-seeded', { at: NOW });
   assert.deepEqual(result, { id: 'pl-seeded', deletedAt: NOW });
   assert.deepEqual(t.row('pl-seeded'), RETAINED_ROW('pl-seeded', NOW, '2004-03-14', 'GB'), 'the retained row, column by column');
   assert.equal(t.childRows('pl-seeded'), 0, 'every child row is gone'); assert.deepEqual(t.links('pl-seeded'), []);
-  assert.equal(t.players.byId('pl-seeded'), null); assert.equal(t.db.players.some((p) => p.id === 'pl-seeded'), false); assert.equal(t.players.count(), countBefore - 1);
+  assert.equal(t.players.byId('pl-seeded'), null); assert.equal(t.players.exists('pl-seeded'), false); assert.equal(t.players.count(), countBefore - 1);
   assert.deepEqual(t.guardians.linksOf('pl-seeded'), []);
   assert.deepEqual(t.players.retained('pl-seeded'), RECORD('pl-seeded', NOW, '2004-03-14', 'GB')); assert.equal(t.players.isRetained('pl-seeded'), true); assert.equal(t.players.isRetained('pl-adult'), false);
   assert.deepEqual(t.players.retainedRecords(), [RECORD('pl-seeded', NOW, '2004-03-14', 'GB')]); assert.equal(t.players.retainedCount(), 1);
@@ -92,29 +93,28 @@ test('erase: a deleted player keeps EXACTLY the agreed row — id, the deletion 
   const read = readTableBacked(t.store.sqlite);
   assert.equal(read.players.some((p) => p.id === 'pl-seeded'), false, 'the snapshot read serves no retained row as a player'); assert.deepEqual(read.playersRetained, [RECORD('pl-seeded', NOW, '2004-03-14', 'GB')], 'and serves the retained records under their own name');
   // A guardian-managed child, inside a unit (as the deletion route runs it): links and childIds.
-  assert.deepEqual([...kids], ['pl-child1', 'pl-child2']); assert.deepEqual([...coKids], ['pl-child1', 'pl-child2']);
+  assert.deepEqual([...kids()], ['pl-child1', 'pl-child2']); assert.deepEqual([...coKids()], ['pl-child1', 'pl-child2']);
   t.unit(() => { t.codes.revokePairingCodesFor('pl-child1'); t.players.erase('pl-child1', { at: NOW + DAY }); });
   assert.deepEqual(t.row('pl-child1'), RETAINED_ROW('pl-child1', NOW + DAY, '2014-03-03', 'GB'));
-  assert.deepEqual([...kids], ['pl-child2'], 'the held primary childIds array was spliced in place'); assert.deepEqual([...coKids], ['pl-child2'], 'and the co-guardian\'s');
+  assert.deepEqual([...kids()], ['pl-child2'], 'the primary no longer lists the player'); assert.deepEqual([...coKids()], ['pl-child2'], 'nor does the co-guardian');
   assert.deepEqual(t.links('pl-child1'), []); assert.deepEqual(t.players.byGuardian('gd-primary').map((p) => p.id), ['pl-child2']); assert.equal(t.players.retainedCount(), 2);
   assert.equal(t.raw('SELECT COUNT(*) AS n FROM players').n, countBefore + 0, 'the table keeps every row (two of them retained)');
   // Refusals, before any statement: the table and the counters are untouched afterwards.
   const snapshotOfTable = () => JSON.stringify(t.all('SELECT * FROM players ORDER BY rowid'));
   const tableBefore = snapshotOfTable();
   assert.throws(() => t.players.erase('pl-seeded'), /pl-seeded .*retained/);
-  assert.throws(() => t.players.remove('pl-seeded'), /does not exist|retained/);
-  assert.throws(() => t.players.update('pl-seeded', { city: 'X' }), /does not exist/);
+  assert.throws(() => t.players.update('pl-seeded', (d) => { d.city = 'X'; }), /does not exist/);
   assert.throws(() => t.players.link('gd-co', 'pl-child1', 'co'), /does not exist/);
-  assert.throws(() => t.players.insert({ ...adult(), id: 'pl-seeded' }), /pl-seeded .*retained/, 'a deleted account is not re-created under its id');
+  assert.throws(() => t.players.create(asCreate({ ...adult(), id: 'pl-seeded' })), /pl-seeded .*retained/, 'a deleted account is not re-created under its id');
   assert.throws(() => t.players.erase('pl-nobody'), /does not exist/);
   assert.equal(snapshotOfTable(), tableBefore); assert.equal(t.players.count(), countBefore - 2); assert.equal(t.players.retainedCount(), 2);
-  assert.equal(t.players.insert({ ...adult(), id: 'pl-new' }).id, 'pl-new', 'a new id is created as before');
+  assert.equal(t.players.create(asCreate({ ...adult(), id: 'pl-new' })).id, 'pl-new', 'a new id is created as before');
   // A reopen agrees.
   t.close();
   const r = reopen(dir);
-  assert.deepEqual(r.row('pl-seeded'), RETAINED_ROW('pl-seeded', NOW, '2004-03-14', 'GB')); assert.equal(r.players.byId('pl-seeded'), null); assert.equal(r.db.players.some((p) => p.id === 'pl-child1'), false);
+  assert.deepEqual(r.row('pl-seeded'), RETAINED_ROW('pl-seeded', NOW, '2004-03-14', 'GB')); assert.equal(r.players.byId('pl-seeded'), null); assert.equal(r.players.exists('pl-child1'), false);
   assert.deepEqual(r.players.retainedRecords(), [RECORD('pl-seeded', NOW, '2004-03-14', 'GB'), RECORD('pl-child1', NOW + DAY, '2014-03-03', 'GB')]); assert.deepEqual([...r.guardians.byId('gd-primary').childIds], ['pl-child2']);
-  assert.throws(() => r.players.insert({ ...adult(), id: 'pl-child1' }), /retained/);
+  assert.throws(() => r.players.create(asCreate({ ...adult(), id: 'pl-child1' })), /retained/);
   r.close(); fs.rmSync(dir, { recursive: true, force: true });
 });
 
@@ -163,7 +163,7 @@ test('snapshots: an unchanged save keeps the retained rows byte-identical — an
   refused({ playersRetained: [RECORD('pl-x', NOW, '2004-03-14', 'GB'), RECORD('pl-x', NOW, '2004-03-14', 'GB')] }, /pl-x.*duplicate/, 'a duplicate id');
   refused({ playersRetained: [RECORD('pl-adult', NOW, '2001-05-20', 'GB')] }, /pl-adult/, 'a retained record whose id is a live player');
   // The Founder's rule for live records is unchanged: a minor with no guardian link refuses the whole save.
-  refused({ players: [...clone(S.db.players), child('pl-orphan', null, '2015-05-05')], guardians: clone(S.db.guardians) }, new RegExp(MINOR_WITHOUT_LINK_REASON.slice(0, 30)), 'a live minor without a guardian link');
+  refused({ players: [...clone(S.db.players), child('pl-orphan', null, '2015-05-05')], guardians: clone(S.db.guardians) }, /pl-orphan: a minor without a primary guardian/, 'a live minor without a guardian link');
   // Review of 6d66655, F1: the earlier expectation here — that a supplied collection REPLACES the retained set, so
   // listing a subset prunes the rest — conflicted with the promise the retained record exists for (a deletion fact
   // that survives and an id that is never re-created). A supplied collection may only ADD records: a stored record
@@ -212,7 +212,7 @@ test('snapshot contract: stored retained records are PROTECTED — a supplied pl
   S.close();
   const r = reopen(dir);
   assert.deepEqual(r.players.retainedRecords(), [seeded, kid, RECORD('pl-imported', NOW + 2, '2003-01-01', 'FR')]);
-  assert.throws(() => r.players.insert({ ...adult(), id: 'pl-seeded' }), /retained/, 'the id stays retained after every attempt');
+  assert.throws(() => r.players.create(asCreate({ ...adult(), id: 'pl-seeded' })), /retained/, 'the id stays retained after every attempt');
   r.close(); fs.rmSync(dir, { recursive: true, force: true });
 });
 
@@ -229,7 +229,7 @@ test('unit of work: an erase inside a unit that fails after every write — and 
   const stateOf = () => JSON.stringify({ row: t.row('pl-child1'), children: t.childRows('pl-child1'), links: t.links('pl-child1'), sessions: t.raw("SELECT COUNT(*) AS n FROM sessions WHERE kind = 'player' AND ref_id = 'pl-child1'").n, queue: t.raw('SELECT COUNT(*) AS n FROM media_deletions').n, codes: t.raw("SELECT COUNT(*) AS n FROM pairing_codes WHERE player_id = 'pl-child1'").n, ledger: t.all('SELECT * FROM ledger ORDER BY seq') });
   const before = stateOf();
   // An unrelated write committed before the unit (S4a-E: every write is explicit; there is no pending edit to carry).
-  t.players.update('pl-seeded', { city: 'Northgate' });
+  t.players.update('pl-seeded', (d) => { d.city = 'Northgate'; });
   const fileBefore = t.fileDump();
   const attempt = (label, failHow) => {
     assert.throws(() => t.unit(() => {
@@ -241,9 +241,9 @@ test('unit of work: an erase inside a unit that fails after every write — and 
       failHow();
     }), /synthetic|constraint failed|FOREIGN KEY/i, `${label}: the unit fails`);
     assert.equal(stateOf(), before, `${label}: the file is exactly as before`); assert.equal(t.fileDump(), fileBefore, `${label}: nothing written anywhere`);
-    assert.equal(t.players.byId('pl-child1'), view, `${label}: the same held view object`); assert.equal(view.name, 'Child pl-child1');
-    assert.equal(t.guardians.byId('gd-primary').childIds, kids, `${label}: the held childIds array`); assert.deepEqual([...kids], ['pl-child1', 'pl-child2']);
-    assert.equal(t.players.isRetained('pl-child1'), false); assert.equal(t.players.retainedCount(), 0); assert.equal(t.db.players.some((p) => p.id === 'pl-child1'), true);
+    assert.deepEqual(t.players.byId('pl-child1'), view, `${label}: the account reads as before`); assert.equal(view.name, 'Child pl-child1');
+    assert.deepEqual([...t.guardians.byId('gd-primary').childIds], [...kids], `${label}: the guardian lists the child as before`); assert.deepEqual([...kids], ['pl-child1', 'pl-child2']);
+    assert.equal(t.players.isRetained('pl-child1'), false); assert.equal(t.players.retainedCount(), 0); assert.equal(t.players.exists('pl-child1'), true);
     assert.deepEqual(t.players.byGuardian('gd-primary').map((p) => p.id), ['pl-child1', 'pl-child2']); assert.deepEqual(t.guardians.linksOf('pl-child1'), [{ guardianId: 'gd-primary', role: 'primary' }, { guardianId: 'gd-co', role: 'co' }]);
     assert.equal(t.players.byId('pl-seeded').city, 'Northgate', `${label}: the unrelated earlier write survives`);
   };
@@ -253,7 +253,7 @@ test('unit of work: an erase inside a unit that fails after every write — and 
   t.unit(() => { t.mediaDeletions.enqueue(['med-x'], { playerId: 'pl-child1', at: NOW }); t.sessions.revokeFor('player', 'pl-child1'); t.codes.revokePairingCodesFor('pl-child1'); t.players.erase('pl-child1', { at: NOW }); });
   assert.deepEqual(t.row('pl-child1'), RETAINED_ROW('pl-child1', NOW, '2014-03-03', 'GB')); assert.equal(t.childRows('pl-child1'), 0); assert.deepEqual(t.links('pl-child1'), []);
   assert.equal(t.raw("SELECT COUNT(*) AS n FROM sessions WHERE kind = 'player' AND ref_id = 'pl-child1'").n, 0); assert.equal(t.raw("SELECT COUNT(*) AS n FROM pairing_codes WHERE player_id = 'pl-child1'").n, 0); assert.equal(t.raw('SELECT COUNT(*) AS n FROM media_deletions').n, 1);
-  assert.equal(t.players.byId('pl-child1'), null); assert.deepEqual([...kids], ['pl-child2']); assert.equal(t.players.retainedCount(), 1);
+  assert.equal(t.players.byId('pl-child1'), null); assert.deepEqual([...t.guardians.byId('gd-primary').childIds], ['pl-child2']); assert.equal(t.players.retainedCount(), 1);
   assert.throws(() => t.unit(() => t.players.erase('pl-child1', { at: NOW })), /retained/);
   t.save(); assert.equal(JSON.stringify(t.all('SELECT * FROM ledger ORDER BY seq')), ledgerBefore, 'the ledger row naming the deleted child is exactly as it was');
   assert.equal(t.raw("SELECT city FROM players WHERE id = 'pl-seeded'").city, 'Northgate', 'the unrelated earlier write is in the row');
