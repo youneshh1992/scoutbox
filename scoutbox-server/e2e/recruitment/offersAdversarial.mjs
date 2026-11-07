@@ -150,7 +150,7 @@ await stop(server);
   const store = openStore(DATA_DIR);
   const snap = store.load();
   const agency = snap.db.orgs.find((o) => o.type === 'agency');
-  snap.db.orgs.push({ ...structuredClone(agency), id: 'org-southgate', name: 'Southgate Sports Management', slug: 'southgate' });
+  snap.db.orgs.push({ ...structuredClone(agency), id: 'org-southgate', name: 'Southgate Sports Management' });
   store.save(snap);
   ok(snap.db.orgs.filter((o) => o.type === 'agency').length === 2, 'fixture: two agencies exist');
 }

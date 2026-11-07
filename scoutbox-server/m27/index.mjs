@@ -268,7 +268,7 @@ export function registerIntegration(ctx) {
     if (decision.allowed !== true) return null;
     const profile = agent?.profileOf ? agent.profileOf(agreement.agentUserId) : null;
     const user = byId.user(agreement.agentUserId);
-    const org = (db.orgs ?? []).find((o) => o && o.id === agreement.agencyOrgId) ?? null;
+    const org = byId.org(agreement.agencyOrgId);
     return clubAgentPresence({
       decision,
       agent: { displayName: profile?.displayName ?? user?.name ?? null },
@@ -307,7 +307,7 @@ export function registerIntegration(ctx) {
       if (c.playerId !== a.clientId) continue;
       const snap = c.routingSnapshot ?? null;
       if (snap?.agent?.agentUserId !== req.orgUser.id) continue;
-      const org = (db.orgs ?? []).find((o) => o && o.id === c.orgId) ?? null;
+      const org = byId.org(c.orgId);
       items.push({
         id: c.id,
         club: { id: c.orgId, name: org?.name ?? null },
@@ -365,7 +365,7 @@ export function registerIntegration(ctx) {
     const items = [];
     for (const t of recruitmentReads.trials.forPlayer(a.clientId)) {
       if (t.subjectRemovedAt) continue;
-      const org = (db.orgs ?? []).find((o) => o && o.id === t.orgId) ?? null;
+      const org = byId.org(t.orgId);
       const state = deriveWorkflowState(t);
       items.push({
         id: t.id,
@@ -777,7 +777,7 @@ export function registerIntegration(ctx) {
       // not an entitlement after it ends.
       const basis = basisFor({ agentUserId: req.orgUser.id, clientId: h.playerId });
       if (!basis.ok) continue;
-      const club = (db.orgs ?? []).find((o) => o && o.id === h.orgId) ?? null;
+      const club = byId.org(h.orgId);
       items.push({
         handoffId: h.id,
         recruitmentCaseId: kase.id,

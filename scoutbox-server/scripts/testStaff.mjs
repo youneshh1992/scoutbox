@@ -22,7 +22,7 @@ function fresh() {
   const s = new DatabaseSync(':memory:');
   s.exec('PRAGMA foreign_keys = ON;');
   runDataMigrations(s, DATA_MIGRATIONS, { now: NOW, context: { sessionTtlMs: 30 * 86_400_000 } });
-  for (const id of ['org-a', 'org-b']) s.prepare("INSERT INTO orgs (id, name, type, level, plan) VALUES (?, 'Org', 'club', 'pro', 'Pro')").run(id);
+  for (const id of ['org-a', 'org-b']) s.prepare("INSERT INTO orgs (id, name, type, level, plan, created_at) VALUES (?, 'Org', 'club', 'pro', 'Pro', 0)").run(id);
   return s;
 }
 const repoOn = (s) => createUsersRepository({ sqlite: s, nextId, now: () => NOW });

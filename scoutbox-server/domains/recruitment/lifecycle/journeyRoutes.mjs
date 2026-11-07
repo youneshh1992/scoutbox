@@ -26,7 +26,7 @@ export function registerJourneyRoutes(ctx) {
   const { db, recruitmentReads, scoutingReads, safetyReads, playerRouter, guardianRouter, orgRouter, agent = null, integration = null, findPlayer, guardianOwnsChild } = ctx;
   if (!recruitmentReads?.contacts || !recruitmentReads?.offers || !recruitmentReads?.signings || !recruitmentReads?.signingPackages) throw new TypeError('registerJourneyRoutes needs recruitmentReads (contacts, offers, signings, signingPackages) from the data layer');
   const evidence = () => ctx.recruitmentEvidenceProvider ?? undefined;
-  const orgOf = (orgId) => (ctx.byId ? ctx.byId.org(orgId) : (db.orgs ?? []).find((o) => o && o.id === orgId) ?? null);
+  const orgOf = (orgId) => ctx.byId.org(orgId);
   // The same per-request test clock the Offer and signing routes honour (development only).
   const TEST_CLOCK = process.env.SCOUTBOX_TEST_CLOCK === '1' && process.env.NODE_ENV !== 'production';
   const now = (req = null) => { if (TEST_CLOCK && req?.get) { const n = Number(req.get('x-scoutbox-test-clock')); if (Number.isFinite(n) && n > 0) return n; } return Date.now(); };

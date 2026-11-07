@@ -1,8 +1,7 @@
-// Behavioural tests for migration plan step S3: organisations become
-// table-backed (scalars in columns, every other field in facets_json), org_users
-// is rebuilt STRICT with the organisation foreign key. Everything runs on
-// throwaway databases under the OS temp directory with synthetic fixtures;
-// nothing touches DATA_DIR. Run with: npm test
+// Behavioural tests for the organisations: a typed table since S3, explicit writes
+// and SQL reads since S14g (no mirror, no facets, `db.orgs` throws). Everything
+// runs on throwaway databases under the OS temp directory with synthetic
+// fixtures; nothing touches DATA_DIR. Run with: npm test
 import assert from 'node:assert/strict';
 import { spawnChild } from './testChildren.mjs';
 import crypto from 'node:crypto';
@@ -12,7 +11,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import { runDataMigrations, transaction } from '../repositories/database.mjs';
-import { createOrgsRepository, validateOrgRecord, toRow, fromRow, ORGS_TABLE, ORGS_CUTOVER_MIGRATION, MIGRATED_KEYS } from '../repositories/orgs.mjs';
+import { createOrgsRepository, orgRecordProblems, typeOrgSnapshotRow, ORGS_TABLE, ORGS_CUTOVER_MIGRATION, ORG_RECORD_KEYS } from '../repositories/orgs.mjs';
 import { attachDataLayer, DATA_MIGRATIONS, TABLE_BACKED } from '../repositories/index.mjs';
 import { hasBlobTable } from './coreIdentityTestFixtures.mjs';
 import * as m0001 from '../repositories/migrations/0001_org_users.mjs';
@@ -46,15 +45,34 @@ const openRaw = (dir) => { const s = new DatabaseSync(path.join(dir, 'scoutbox.d
 const dump = (sqlite) => Object.fromEntries(sqlite.prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").all().map(({ name }) => [name, sqlite.prepare(`SELECT * FROM "${name}" ORDER BY rowid`).all().map((r) => ({ ...r }))]));
 const fileDigest = (dir) => { const s = new DatabaseSync(path.join(dir, 'scoutbox.db')); s.exec('PRAGMA wal_checkpoint(TRUNCATE)'); s.close(); return sha256(fs.readFileSync(path.join(dir, 'scoutbox.db'))); };
 
-/** Organisation records in every shape the application writes. */
+/** Organisation records in every shape the application writes (the snapshot form: a record plus its password hash). */
 const ORGS = () => [
-  // The seed's shape: a pro club with location, explicit nulls and a verified domain.
-  { id: 'org-pro', name: 'Eastport FC', type: 'club', level: 'pro', location: { lat: 51.889, lng: 1.02, city: 'Eastport' }, plan: 'Pro', trustedPartner: true, country: 'GB', verified: true, verifiedDomain: 'eastportfc.example', safeguardingContractSigned: true, password: 'scrypt$00$11', agencyNotes: null, memos: [] },
-  // Registration's shape (server.mjs): a grassroots club with a federation reference and a key order of its own.
-  { id: 'org-grass', name: 'Riverside Juniors', type: 'club', level: 'grassroots', location: { lat: 51.5, lng: -0.1, city: 'London' }, federationRef: { federation: 'London FA', registrationId: 'LFA-1' }, plan: 'Grassroots', trustedPartner: false, country: 'GB', verified: false, verifiedDomain: null, safeguardingContractSigned: false, memos: [{ id: 'sq-1', name: 'Kid', position: 'ST', playerId: null, source: 'manual', addedAt: 5 }], tags: ['ST', 'CB'] },
-  // The verification review's shape (m14): level null, location null, the verification revocation column, unknown fields.
-  { id: 'org-agency', name: 'Northstar Agency', type: 'agency', level: null, plan: 'Pro', trustedPartner: false, country: 'FR', verified: false, verifiedDomain: null, safeguardingContractSigned: false, location: null, federationRef: null, verificationRevokedAt: null, agencyNotes: { licence: 'FIFA-1' }, somethingNewer: { kept: true }, mfaRequiredForLeads: true, emailDomain: 'northstar.example', emailDomainVerified: true, createdAt: 1700000000000 },
+  // The seed's shape: a pro club with location and a verified domain, password-protected.
+  { id: 'org-pro', name: 'Eastport FC', type: 'club', level: 'pro', location: { lat: 51.889, lng: 1.02, city: 'Eastport' }, plan: 'Pro', trustedPartner: true, country: 'GB', verified: true, verifiedDomain: 'eastportfc.example', safeguardingContractSigned: true, password: 'scrypt$00$11' },
+  // Registration's shape (server.mjs): a grassroots club with a federation reference.
+  { id: 'org-grass', name: 'Riverside Juniors', type: 'club', level: 'grassroots', location: { lat: 51.5, lng: -0.1, city: 'London' }, federationRef: { federation: 'London FA', registrationId: 'LFA-1' }, plan: 'Grassroots', trustedPartner: false, country: 'GB', verified: false, verifiedDomain: null, safeguardingContractSigned: false },
+  // The verification review's shape (m14): level null, location null, the revocation column, the enterprise switches.
+  { id: 'org-agency', name: 'Northstar Agency', type: 'agency', level: null, plan: 'Pro', trustedPartner: false, country: 'FR', verified: false, verifiedDomain: null, safeguardingContractSigned: false, location: null, federationRef: null, verificationRevokedAt: null, mfaRequiredForLeads: true, emailDomain: 'northstar.example', emailDomainVerified: true, createdAt: 1700000000000 },
 ];
+const AT = 1_750_000_000_000;
+/** The record a fixture becomes: every field present, defaults filled, no password. */
+const recordOf = ({ password: _pw, ...r }, createdAt = AT) => ({
+  id: r.id, name: r.name, type: r.type, level: r.level ?? null, plan: r.plan, country: r.country ?? null,
+  location: r.location ? { lat: r.location.lat, lng: r.location.lng, city: r.location.city ?? null } : null,
+  federationRef: r.federationRef ?? null,
+  trustedPartner: r.trustedPartner ?? false, verified: r.verified ?? false, verifiedDomain: r.verifiedDomain ?? null,
+  safeguardingContractSigned: r.safeguardingContractSigned ?? false, suspended: r.suspended ?? false,
+  emailDomain: r.emailDomain ?? null, emailDomainVerified: r.emailDomainVerified ?? false, mfaRequiredForLeads: r.mfaRequiredForLeads ?? false,
+  verificationRevokedAt: r.verificationRevokedAt ?? null, createdAt: r.createdAt ?? createdAt,
+});
+/** A migrated in-memory database with the fixture's organisations, and its repository. */
+function fresh({ orgs = ORGS(), now = () => AT } = {}) {
+  const s = new DatabaseSync(':memory:'); s.exec('PRAGMA foreign_keys = ON;');
+  runDataMigrations(s, S3_MIGRATIONS, { context: { sessionTtlMs: TTL } });
+  const repo = createOrgsRepository({ sqlite: s, nextId, now });
+  if (orgs) repo.initialize(orgs);
+  return { s, repo };
+}
 /** A minimal player record migration 0005 accepts (dob and country are required; everything else is optional). */
 const PLAYER_1 = (name = 'P') => ({ id: 'pl-1', name, dob: '2001-01-01', country: 'GB', media: [] });
 const fixtureUsers = () => [
@@ -68,58 +86,46 @@ const fixtureSessions = (now = Date.now()) => [
   { token: 'legacy-player-token', sid: 'sid-pl', kind: 'player', refId: 'pl-1', createdAt: now - DAY },
 ];
 
-// ------------------------------------------------------------- record ↔ row
-test('mapping: every record shape the application writes round-trips byte for byte — key order, explicit nulls, absent fields, composites, unknown fields', () => {
+// ------------------------------------------------------------- typing
+test('typing: a record takes its defaults (null, false, the creation time), every field is always present, and junk is refused by field with nothing coerced', () => {
   for (const rec of ORGS()) {
-    const back = fromRow({ ...toRow(rec) });
-    assert.equal(JSON.stringify(back), JSON.stringify(rec), `round trip of ${rec.id}`);
-    assert.deepEqual(Object.keys(back), Object.keys(rec), `key order of ${rec.id}`);
+    const v = typeOrgSnapshotRow(rec, { now: AT });
+    assert.equal(v.ok, true, rec.id);
+    assert.deepEqual(v.row, recordOf(rec), `${rec.id} with its defaults`);
+    assert.deepEqual(Object.keys(v.row), ORG_RECORD_KEYS, `${rec.id}: every field, in one order`);
   }
-  // Absent versus null versus false, per field.
-  const a = fromRow(toRow({ id: 'x', name: 'X', type: 'club', plan: 'Pro' }));
-  assert.deepEqual(a, { id: 'x', name: 'X', type: 'club', plan: 'Pro' }, 'absent fields stay absent (no level, no booleans, no country)');
-  const b = fromRow(toRow({ id: 'x', name: 'X', type: 'club', plan: 'Pro', level: null, country: null, verified: false, location: null, federationRef: { federation: null, registrationId: 'R' } }));
-  assert.deepEqual(b, { id: 'x', name: 'X', type: 'club', plan: 'Pro', level: null, country: null, verified: false, location: null, federationRef: { federation: null, registrationId: 'R' } }, 'explicit nulls and false survive');
-  // A composite with a sub-key the columns do not know keeps it.
-  const c = fromRow(toRow({ id: 'x', name: 'X', type: 'club', plan: 'Pro', location: { lat: 1, lng: 2, city: 'C', postcode: 'E1' } }));
-  assert.deepEqual(c.location, { lat: 1, lng: 2, city: 'C', postcode: 'E1' });
-  // The row carries the scalars as columns and never the facets' keys as columns.
-  const row = toRow(ORGS()[2]);
-  assert.equal(row.level, null); assert.equal(row.mfa_required_for_leads, 1); assert.equal(row.email_domain, 'northstar.example'); assert.equal(row.created_at, 1700000000000);
-  assert.equal(row.verification_revoked_at, null);
-  const facets = JSON.parse(row.facets_json);
-  assert.deepEqual(Object.keys(facets).filter((k) => !k.startsWith('__')).sort(), ['agencyNotes', 'somethingNewer']);
-  assert.ok(!('verification' in facets), 'the retired S10a facet is never stored on an organisation');
-  assert.ok(!('tactical' in facets), 'the retired S9c facets are never stored on an organisation');
-  for (const key of MIGRATED_KEYS) assert.ok(!(key in facets), `${key} is a column, never a facet`);
-});
-test('validation: unsupported records are refused with a reason and nothing is coerced', () => {
+  assert.equal(typeOrgSnapshotRow(ORGS()[0]).passwordHash, 'scrypt$00$11', 'the hash travels beside the record');
+  assert.deepEqual(typeOrgSnapshotRow({ id: 'x', name: 'X', type: 'club', plan: 'Pro', location: { lat: 1, lng: 2, city: '' } }, { now: AT }).row.location, { lat: 1, lng: 2, city: null }, 'an empty city is no city');
   const base = { id: 'x', name: 'X', type: 'club', level: 'pro', plan: 'Pro' };
-  const refuse = (rec, pattern) => { const v = validateOrgRecord(rec); assert.equal(v.ok, false, JSON.stringify(rec)); assert.match(v.reason, pattern); };
+  const refuse = (rec, pattern) => { const v = typeOrgSnapshotRow(rec, { now: AT }); assert.equal(v.ok, false, JSON.stringify(rec)); assert.match(v.reason, pattern); };
   refuse(null, /not an object/); refuse([], /not an object/);
-  refuse({ ...base, id: '' }, /no id/); refuse({ ...base, name: 7 }, /no name/);
-  refuse({ ...base, type: 'school' }, /type .* is not one of club\/agency/);
-  refuse({ ...base, level: 'agent' }, /level .* is not one of/); refuse({ ...base, plan: 'Free' }, /plan .* is not one of/);
-  refuse({ ...base, verified: 'yes' }, /verified is a string .*, not a boolean/);
-  refuse({ ...base, suspended: 1 }, /suspended is a number/);
-  refuse({ ...base, country: 44 }, /country is a number/);
-  refuse({ ...base, createdAt: '2024-01-01' }, /createdAt is a string/); refuse({ ...base, createdAt: 1.5 }, /createdAt/);
-  refuse({ ...base, location: 'London' }, /location is a string/);
-  refuse({ ...base, location: { lat: 1 } }, /one of lat\/lng without the other/);
-  refuse({ ...base, location: { lat: 'a', lng: 'b' } }, /not finite numbers/);
-  refuse({ ...base, federationRef: 'FA' }, /federationRef is a string/);
-  refuse({ ...base, federationRef: { federation: 1 } }, /federationRef.federation is a number/);
-  refuse({ ...base, verification: { domains: [] } }, /no longer an organisation field/);
-  refuse({ ...base, verificationRevokedAt: 'yes' }, /verificationRevokedAt is a string/);
-  refuse({ ...base, __meta: {} }, /reserved field/);
-  assert.equal(validateOrgRecord({ ...base, level: null }).ok, true, 'level null is a supported shape (the verification review writes it)');
-  for (const rec of ORGS()) assert.equal(validateOrgRecord(rec).ok, true, rec.id);
+  refuse({ ...base, id: '' }, /id must be text/); refuse({ ...base, name: 7 }, /name must be text/); refuse({ ...base, name: ' X' }, /without surrounding spaces/);
+  refuse({ ...base, name: 'x'.repeat(121) }, /name must be text of 1 to 120/);
+  refuse({ ...base, type: 'school' }, /type must be one of club, agency/);
+  refuse({ ...base, level: 'agent' }, /level must be one of/); refuse({ ...base, plan: 'Free' }, /plan must be one of/);
+  refuse({ ...base, verified: 'yes' }, /verified must be a boolean/); refuse({ ...base, suspended: 1 }, /suspended must be a boolean/);
+  refuse({ ...base, country: 44 }, /country must be text/);
+  refuse({ ...base, createdAt: '2024-01-01' }, /createdAt must be an integer/); refuse({ ...base, createdAt: 1.5 }, /createdAt/);
+  refuse({ ...base, location: 'London' }, /location must be \{ lat, lng, city \}/);
+  refuse({ ...base, location: { lat: 1 } }, /latitude .* and a longitude/);
+  refuse({ ...base, location: { lat: 91, lng: 0 } }, /latitude \(-90 to 90\)/);
+  refuse({ ...base, location: { lat: 1, lng: 2, postcode: 'E1' } }, /location must be/);
+  refuse({ ...base, federationRef: 'FA' }, /federationRef must be/);
+  refuse({ ...base, federationRef: { federation: 'FA' } }, /registrationId must be text/);
+  refuse({ ...base, verificationRevokedAt: 'yes' }, /verificationRevokedAt must be an integer/);
+  refuse({ ...base, password: 7 }, /password hash must be text/);
+  refuse({ ...base, memos: [] }, /unknown field memos/);
+  refuse({ ...base, verification: { domains: [] } }, /verification is no longer an organisation field: write it through the verification repository/);
+  refuse({ ...base, squad: [] }, /clubSetup repository/); refuse({ ...base, agencySettings: {} }, /agentCore repository/);
+  assert.deepEqual(orgRecordProblems(recordOf({ ...base, level: null })), [], 'level null is a supported shape (the verification review writes it)');
 });
 
 // ------------------------------------------------------------- the migration
-test('migration 0004 on a new database: orgs is rebuilt while org_users (0001\'s final form since S14f) and sessions keep referencing it, the first installation is pending, and a failure before commit leaves no trace', () => {
+test('migration 0004 on a new database: orgs is the typed table (no facet column) while org_users (0001\'s final form since S14f) and sessions keep referencing it, the first installation is pending, and a failure before commit leaves no trace', () => {
   const s = new DatabaseSync(':memory:'); s.exec('PRAGMA foreign_keys = ON;');
   assert.ok(runDataMigrations(s, S3_MIGRATIONS, { context: { sessionTtlMs: TTL } }).ran.includes(ORGS_CUTOVER_MIGRATION));
+  const orgsSql = s.prepare("SELECT sql FROM sqlite_master WHERE name = 'orgs'").get().sql;
+  assert.match(orgsSql, /STRICT/); assert.ok(!/facets_json/.test(orgsSql), 'no facet storage');
   const after = s.prepare("SELECT sql FROM sqlite_master WHERE name = 'org_users'").get().sql;
   assert.match(after, /STRICT/); assert.match(after, /REFERENCES orgs\(id\)/);
   assert.deepEqual(s.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'org_users' AND name NOT LIKE 'sqlite_%' ORDER BY name").all().map((x) => x.name), ['org_users_org', 'org_users_org_email', 'org_users_org_name', 'org_users_removed_by', 'org_users_sso']);
@@ -127,10 +133,17 @@ test('migration 0004 on a new database: orgs is rebuilt while org_users (0001\'s
   assert.equal(s.prepare("SELECT value FROM meta WHERE key = 'orgsInit'").get().value, 'pending', 'a new database is a first installation');
   assert.equal(s.prepare('PRAGMA foreign_keys').get().foreign_keys, 1, 'foreign keys are back on after the rebuild');
   // The keys and checks are enforced.
-  ORGS_TABLE.replace(s, ORGS());
-  assert.equal(JSON.stringify(ORGS_TABLE.read(s)), JSON.stringify(ORGS()), 'records read back exactly as written');
+  transaction(s, () => ORGS_TABLE.replace(s, ORGS(), { now: AT }));
+  assert.deepEqual(ORGS_TABLE.read(s), ORGS().map((o) => ({ ...recordOf(o), password: o.password ?? null })), 'records read back typed, with their hash');
   assert.equal(s.prepare("SELECT level FROM orgs WHERE id = 'org-agency'").get().level, null, 'the nullable level is stored as NULL');
   assert.equal(s.prepare("SELECT password_hash FROM orgs WHERE id = 'org-pro'").get().password_hash, 'scrypt$00$11');
+  for (const [sql, what] of [
+    ["UPDATE orgs SET lat = 95 WHERE id = 'org-pro'", 'a latitude out of range'],
+    ["UPDATE orgs SET lat = NULL WHERE id = 'org-pro'", 'a longitude without a latitude'],
+    ["UPDATE orgs SET federation_registration_id = NULL WHERE id = 'org-grass'", 'half a federation registration'],
+    ["UPDATE orgs SET name = '' WHERE id = 'org-pro'", 'an empty name'],
+    ["UPDATE orgs SET created_at = NULL WHERE id = 'org-pro'", 'no creation time'],
+  ]) assert.throws(() => s.prepare(sql).run(), /CHECK|NOT NULL/, what);
   assert.throws(() => s.prepare("INSERT INTO org_users (id, org_id, name, name_key, role, created_at) VALUES ('usr-x', 'org-none', 'X', 'x', 'Scout', 1)").run(), /FOREIGN KEY/);
   s.prepare("INSERT INTO org_users (id, org_id, name, name_key, role, created_at) VALUES ('usr-new', 'org-pro', 'New', 'new', 'Scout', 1)").run();
   s.prepare("INSERT INTO sessions (token_hash, sid, kind, ref_id, org_user_id, created_at, expires_at) VALUES ('h-new', 'sid-new', 'org', 'org-pro', 'usr-new', 1, 2)").run();
@@ -147,7 +160,7 @@ test('migration 0004 on a new database: orgs is rebuilt while org_users (0001\'s
   f = openRaw(dir);
   const exploding = { id: m0004.id, note: m0004.note, foreignKeysOff: true, up(sqlite, ctx) { m0004.up(sqlite, ctx); throw new Error('process died before commit'); } };
   assert.throws(() => runDataMigrations(f, [m0001, m0002, m0003, exploding], { context: { sessionTtlMs: TTL } }), /process died before commit/);
-  assert.ok(!/facets_json/.test(f.prepare("SELECT sql FROM sqlite_master WHERE name = 'orgs'").get().sql), 'the orgs rebuild was rolled back');
+  assert.match(f.prepare("SELECT sql FROM sqlite_master WHERE name = 'orgs'").get().sql, /verification_org_type/, 'the rebuild was rolled back: the S1 shadow definition is still there');
   assert.equal(f.prepare('PRAGMA foreign_keys').get().foreign_keys, 1);
   f.close();
   assert.equal(fileDigest(dir), before, 'nothing of the failed attempt reached the file');
@@ -157,225 +170,106 @@ test('migration 0004 on a new database: orgs is rebuilt while org_users (0001\'s
 });
 
 // ------------------------------------------------------------- the repository
-test('repository: insert and update write migrated fields immediately; a migrated field on the view throws; facet fields are mutable in place and persisted by flush, atomically with a save', () => {
-  const dir = tempDir('s3-repo');
-  let store = openStore(dir, { tableBacked: TABLE_BACKED });
-  const db = {};
-  let layer = attachDataLayer({ db, seed: { orgs: ORGS(), guardians: [], players: [PLAYER_1()] }, store, nextId, persist: () => {}, sessionTtlMs: TTL });
-  assert.deepEqual(layer.boot.orgs, { engine: 'sqlite', loaded: 3, imported: 3 }, 'a first boot imports the seed');
-  assert.equal(db.orgs.length, 3);
-  assert.equal(JSON.stringify(db.orgs), JSON.stringify(ORGS()), 'the view renders the records exactly');
-  // Migrated fields: refused on the view, written through update.
-  const pro = db.orgs.find((o) => o.id === 'org-pro');
-  assert.throws(() => { pro.suspended = true; }, /organisations repository/);
-  assert.throws(() => { pro.name = 'X'; }, /organisations repository/);
-  assert.throws(() => { pro.location = { lat: 0, lng: 0 }; }, /organisations repository/);
-  assert.throws(() => { delete pro.country; }, /organisations repository/);
-  assert.throws(() => { db.orgs.push({ id: 'org-x' }); }, /organisations repository/);
-  assert.throws(() => { db.orgs[0] = {}; }, /organisations repository/);
-  assert.throws(() => { db.orgs = []; }, TypeError);
-  layer.orgs.update('org-pro', { suspended: true, verifiedDomain: null, password: 'scrypt$new' });
-  assert.equal(pro.suspended, true, 'the same record object the route holds is current'); assert.equal(pro.verifiedDomain, null); assert.equal(pro.password, 'scrypt$new');
-  assert.equal(store.sqlite.prepare("SELECT suspended, verified_domain, password_hash FROM orgs WHERE id = 'org-pro'").get().suspended, 1, 'written immediately');
-  assert.throws(() => layer.orgs.update('org-pro', { level: 'agent' }), /refused: level/);
-  assert.throws(() => layer.orgs.update('org-pro', { memos: [] }), /not a migrated organisation field/);
-  assert.throws(() => layer.orgs.update('org-none', { suspended: true }), /does not exist/);
-  // insert/update commit on their own: inside someone else's transaction their bookkeeping could not follow a rollback.
-  assert.throws(() => transaction(store.sqlite, () => layer.orgs.update('org-pro', { suspended: false })), /cannot run inside an open transaction/);
-  assert.throws(() => transaction(store.sqlite, () => layer.orgs.insert({ id: 'org-tx', name: 'T', type: 'club', plan: 'Pro' })), /cannot run inside an open transaction/);
-  assert.equal(pro.suspended, true, 'the refused update changed nothing');
-  // Facets: mutated in place (as the modules do), persisted by the next save.
-  pro.memos.push({ id: 'sq-9', name: 'New', position: 'GK', playerId: null, source: 'manual', addedAt: 9 });
-  pro.agencyNotes = { formation: '4-3-3' };
-  assert.throws(() => { pro.verification = { domains: [] }; }, /verification repository/, 'the retired facet cannot be written on the record');
-  const grass = db.orgs.find((o) => o.id === 'org-grass');
-  grass.tags = ['GK'];
-  delete grass.memos;
-  assert.equal(JSON.parse(store.sqlite.prepare("SELECT facets_json FROM orgs WHERE id = 'org-pro'").get().facets_json).memos.length, 0, 'not yet persisted');
-  store.save();
-  layer.orgs.update('org-pro', { verificationRevokedAt: 123 }); // a scalar column since S10a
-  const facets = JSON.parse(store.sqlite.prepare("SELECT facets_json FROM orgs WHERE id = 'org-pro'").get().facets_json);
-  assert.equal(facets.memos.length, 1); assert.deepEqual(facets.agencyNotes, { formation: '4-3-3' });
-  assert.equal(store.sqlite.prepare("SELECT verification_revoked_at FROM orgs WHERE id = 'org-pro'").get().verification_revoked_at, 123, 'the revocation is the column');
-  assert.equal(hasBlobTable(store.sqlite), false, 'no blob (rewritten in S14a: there is no blob table)');
-  // Insert: a new organisation is a row from the first byte.
-  const created = layer.orgs.insert({ id: 'org-new', name: 'New FC', type: 'club', level: 'grassroots', location: { lat: 1, lng: 2, city: '' }, federationRef: { federation: 'FA', registrationId: 'R' }, plan: 'Grassroots', trustedPartner: false, country: 'GB', verified: false, verifiedDomain: null, safeguardingContractSigned: false });
-  assert.equal(db.orgs.length, 4); assert.equal(db.orgs[3], created); assert.equal(layer.orgs.byId('org-new'), created);
-  assert.equal(store.sqlite.prepare("SELECT COUNT(*) AS n FROM orgs WHERE id = 'org-new'").get().n, 1);
-  assert.throws(() => layer.orgs.insert({ id: 'org-new', name: 'Dup', type: 'club', plan: 'Pro' }), /already exists/);
-  assert.throws(() => layer.orgs.insert({ id: 'org-bad', name: 'B', type: 'club', level: 'agent', plan: 'Pro' }), /refused/);
-  store.sqlite.close();
-  // Restart: scalar changes and facet changes come back together.
-  store = openStore(dir, { tableBacked: TABLE_BACKED });
-  const db2 = {};
-  layer = attachDataLayer({ db: db2, store, nextId, persist: () => {}, sessionTtlMs: TTL });
-  assert.deepEqual(layer.boot.orgs, { engine: 'sqlite', loaded: 4, imported: 0 });
-  const pro2 = db2.orgs.find((o) => o.id === 'org-pro');
-  assert.equal(pro2.suspended, true); assert.equal(pro2.password, 'scrypt$new'); assert.equal(pro2.memos.length, 1); assert.deepEqual(pro2.agencyNotes, { formation: '4-3-3' }); assert.equal(pro2.verificationRevokedAt, 123);
-  const grass2 = db2.orgs.find((o) => o.id === 'org-grass');
-  assert.deepEqual(grass2.tags, ['GK']); assert.ok(!('memos' in grass2), 'a deleted facet stays deleted');
-  assert.equal(JSON.stringify(db2.orgs.find((o) => o.id === 'org-agency')), JSON.stringify(ORGS()[2]), 'an untouched record is byte-identical after the restart');
-  store.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
-});
-test('repository: authority is the cutover record — attach refuses without it; a stale in-memory array never overwrites the table; a first-installation import refuses invalid records and imports nothing from a refused batch', () => {
-  const s = new DatabaseSync(':memory:'); s.exec('PRAGMA foreign_keys = ON;');
-  runDataMigrations(s, [m0001, m0002, m0003]);
-  assert.throws(() => createOrgsRepository({ sqlite: s }), /cutover record 0004_orgs_live is missing/);
-  runDataMigrations(s, S3_MIGRATIONS);
-  const warnings = [];
-  const repo = createOrgsRepository({ sqlite: s, warn: (m) => warnings.push(m) });
-  assert.equal(repo.initState(), 'pending', 'a database nothing was ever saved to is a first installation');
-  assert.throws(() => repo.initialize([{ id: 'org-bad', name: 'B', type: 'club', level: 'agent', plan: 'Pro' }]), /cannot be imported — id org-bad: level/);
-  assert.equal(s.prepare('SELECT COUNT(*) AS n FROM orgs').get().n, 0, 'nothing imported from a refused batch');
-  assert.equal(repo.initState(), 'pending', 'and the initialisation is still owed');
-  repo.initialize(ORGS());
-  assert.equal(repo.count(), 3); assert.equal(repo.initState(), 'done');
-  const again = createOrgsRepository({ sqlite: s, warn: (m) => warnings.push(m) });
-  again.attach([ORGS()[0], { id: 'org-stale', name: 'S', type: 'club', plan: 'Pro' }]);
-  assert.equal(again.count(), 3, 'the table wins; the stale array row is not imported');
-  assert.match(warnings[0], /1 organisation\(s\) the table does not hold was ignored/);
+test('repository: create and update(id, draft => …) write at once and return the stored record; records are fresh and frozen; the password hash is never on a record; junk, unknown fields, a changed id or creation time and a re-entrant update are refused, changing nothing', () => {
+  const { s, repo } = fresh();
+  const pro = repo.byId('org-pro');
+  assert.deepEqual(pro, recordOf(ORGS()[0]));
+  assert.ok(Object.isFrozen(pro) && Object.isFrozen(pro.location), 'deep-frozen');
+  assert.throws(() => { pro.suspended = true; }, TypeError, 'a record cannot be edited in place');
+  assert.notEqual(repo.byId('org-pro'), pro, 'every read is a fresh record');
+  assert.ok(!('password' in pro) && !JSON.stringify(repo.list()).includes('scrypt'), 'no hash on any record');
+  assert.equal(repo.passwordHashOf('org-pro'), 'scrypt$00$11'); assert.equal(repo.passwordHashOf('org-grass'), null);
+  // update
+  const updated = repo.update('org-pro', (d) => { d.suspended = true; d.verifiedDomain = null; d.location = { ...d.location, lat: 9 }; });
+  assert.equal(updated.suspended, true); assert.equal(updated.location.lat, 9); assert.equal(pro.suspended, false, 'a record read before is a snapshot');
+  assert.deepEqual({ ...s.prepare("SELECT suspended, verified_domain, lat, password_hash, created_at FROM orgs WHERE id = 'org-pro'").get() }, { suspended: 1, verified_domain: null, lat: 9, password_hash: 'scrypt$00$11', created_at: AT }, 'written at once; the hash and the creation time are kept');
+  const quiet = dump(s);
+  const refused = (fn, pattern) => { assert.throws(fn, pattern); assert.deepEqual(dump(s), quiet, 'nothing was written'); };
+  refused(() => repo.update('org-pro', (d) => { d.level = 'agent'; }), /ORG_RECORD_INVALID: organisation org-pro: level must be one of/);
+  refused(() => repo.update('org-pro', (d) => { d.memos = []; }), /unknown field memos/);
+  refused(() => repo.update('org-pro', (d) => { d.verified = 'yes'; }), /verified must be a boolean/);
+  refused(() => repo.update('org-pro', (d) => { d.id = 'org-other'; }), /id does not change through update/);
+  refused(() => repo.update('org-pro', (d) => { d.createdAt = 1; }), /createdAt does not change through update/);
+  refused(() => repo.update('org-none', (d) => { d.suspended = true; }), /ORG_NOT_FOUND/);
+  refused(() => repo.update('org-pro', { suspended: true }), /takes a function/);
+  refused(() => repo.update('org-pro', () => { repo.update('org-pro', (d) => { d.suspended = false; }); }), /ORG_UPDATE_REENTRANT/);
+  // create
+  const created = repo.create({ name: 'New FC', type: 'club', level: 'grassroots', location: { lat: 1, lng: 2, city: '' }, federationRef: { federation: 'FA', registrationId: 'R' }, plan: 'Grassroots', country: 'GB', passwordHash: 'scrypt$aa$bb' });
+  assert.match(created.id, /^org-\d+$/, 'the id is minted'); assert.equal(created.createdAt, AT, 'stamped at creation'); assert.equal(created.location.city, null);
+  assert.equal(repo.passwordHashOf(created.id), 'scrypt$aa$bb'); assert.equal(repo.count(), 4);
+  assert.throws(() => repo.create({ id: 'org-pro', name: 'Dup', type: 'club', plan: 'Pro' }), /ORG_EXISTS/);
+  assert.throws(() => repo.create({ name: 'B', type: 'club', level: 'agent', plan: 'Pro' }), /level must be one of/);
+  assert.throws(() => repo.create({ name: 'B', type: 'club', plan: 'Pro', password: 'plain' }), /unknown field password/, 'a hash is passed as passwordHash, never as a field');
+  assert.equal(repo.count(), 4);
+  // the password
+  repo.setPasswordHash('org-grass', 'scrypt$cc$dd'); assert.equal(repo.passwordHashOf('org-grass'), 'scrypt$cc$dd');
+  assert.throws(() => repo.setPasswordHash('org-grass', 7), /password hash must be text/); assert.throws(() => repo.setPasswordHash('org-none', 'x'), /ORG_NOT_FOUND/);
+  // an explicit write inside a caller's transaction joins it (and is rolled back with it)
+  assert.throws(() => transaction(s, () => { repo.update('org-agency', (d) => { d.suspended = true; }); throw new Error('caller failed'); }), /caller failed/);
+  assert.equal(repo.byId('org-agency').suspended, false);
+  assert.throws(() => createOrgsRepository({ sqlite: new DatabaseSync(':memory:') }), /cutover record 0004_orgs_live is missing/);
   s.close();
 });
 
-// ------------------------------------------------------------- review corrections after 0851d38
-test('facet change tracking reflects committed state only — a save that fails after the flush, inside the flush or at commit leaves every pending change eligible for retry; the retry persists them and a restart reads them', () => {
-  const dir = tempDir('s3-c1');
-  let store = openStore(dir, { tableBacked: TABLE_BACKED });
-  const db = {};
-  attachDataLayer({ db, seed: { orgs: ORGS(), guardians: [], players: [PLAYER_1()] }, store, nextId, persist: () => {}, sessionTtlMs: TTL });
-  // A later write of the same save that fails once on request (rewritten in S14a: this was an unserialisable blob).
-  let failLater = false;
-  store.setSaveHook({ flush() { if (failLater) { failLater = false; throw new Error('a later write of the save failed'); } } });
-  store.save();
-  const facetsOf = (id) => JSON.parse(store.sqlite.prepare('SELECT facets_json FROM orgs WHERE id = ?').get(id).facets_json);
-  const pro = db.orgs.find((o) => o.id === 'org-pro');
-  const grass = db.orgs.find((o) => o.id === 'org-grass');
-  assert.deepEqual(facetsOf('org-pro').memos, []); assert.deepEqual(facetsOf('org-grass').tags, ['ST', 'CB']);
-  // (a) The failure is in a LATER write of the same save.
-  pro.memos.push({ id: 'sq-1', name: 'A', position: 'ST', playerId: null, source: 'manual', addedAt: 1 });
-  grass.tags = ['GK'];
-  failLater = true;
-  assert.throws(() => store.save(), /a later write of the save failed/);
-  assert.equal(store.sqlite.isTransaction, false, 'the transaction was rolled back');
-  assert.deepEqual(facetsOf('org-pro').memos, [], 'the flushed memos change was rolled back with the rest of the save');
-  assert.deepEqual(facetsOf('org-grass').tags, ['ST', 'CB'], 'so was the second organisation');
-  store.save();
-  assert.equal(facetsOf('org-pro').memos.length, 1, 'the retry persists the change the failed save had already flushed');
-  assert.deepEqual(facetsOf('org-grass').tags, ['GK'], 'for every organisation that had a pending change');
-  // (b) The failure is at COMMIT.
-  pro.agencyNotes = { formation: '4-4-2' };
-  const exec = store.sqlite.exec.bind(store.sqlite);
-  let explodeAtCommit = true;
-  store.sqlite.exec = (sql) => { if (explodeAtCommit && sql === 'COMMIT') { explodeAtCommit = false; throw new Error('disk full at commit'); } return exec(sql); };
-  assert.throws(() => store.save(), /disk full at commit/);
-  assert.equal(store.sqlite.isTransaction, false);
-  assert.equal(facetsOf('org-pro').agencyNotes, null, 'nothing committed');
-  store.save();
-  assert.deepEqual(facetsOf('org-pro').agencyNotes, { formation: '4-4-2' }, 'the retry persists the change');
-  // (c) The failure is INSIDE the flush, after the first organisation's row was already written in the transaction.
-  pro.memos.push({ id: 'sq-2', name: 'B', position: 'GK', playerId: null, source: 'manual', addedAt: 2 });
-  grass.agencyNotes = { n: 1n };
-  assert.throws(() => store.save(), /BigInt/);
-  assert.equal(facetsOf('org-pro').memos.length, 1, 'the first organisation\'s UPDATE was rolled back');
-  grass.agencyNotes = { n: 1 };
-  store.save();
-  assert.equal(facetsOf('org-pro').memos.length, 2); assert.deepEqual(facetsOf('org-grass').agencyNotes, { n: 1 });
-  // A save with nothing pending writes no organisation row; a successful save is not re-flushed.
-  // (Rewritten in S14a: this counted the save revision, which is gone; the dump is compared instead.)
-  store.sqlite.exec = exec;
-  const quiet = dump(store.sqlite);
-  store.save();
-  assert.deepEqual(dump(store.sqlite), quiet, 'nothing was written');
-  store.sqlite.close();
-  // Restart: everything the retries persisted is there.
-  store = openStore(dir, { tableBacked: TABLE_BACKED });
-  const db2 = {};
-  attachDataLayer({ db: db2, store, nextId, persist: () => {}, sessionTtlMs: TTL });
-  const pro2 = db2.orgs.find((o) => o.id === 'org-pro'); const grass2 = db2.orgs.find((o) => o.id === 'org-grass');
-  assert.deepEqual(pro2.memos.map((m) => m.id), ['sq-1', 'sq-2']); assert.deepEqual(pro2.agencyNotes, { formation: '4-4-2' });
-  assert.deepEqual(grass2.tags, ['GK']); assert.deepEqual(grass2.agencyNotes, { n: 1 });
-  store.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
-});
-test('nested migrated fields are protected — assigning, deleting or defining a property inside location or federationRef throws, the view never diverges from the table, and a repository update of a composite persists across a restart', () => {
-  const dir = tempDir('s3-c2');
-  let store = openStore(dir, { tableBacked: TABLE_BACKED });
-  const db = {};
-  let layer = attachDataLayer({ db, seed: { orgs: ORGS(), guardians: [], players: [PLAYER_1()] }, store, nextId, persist: () => {}, sessionTtlMs: TTL });
-  const pro = db.orgs.find((o) => o.id === 'org-pro');
-  const grass = db.orgs.find((o) => o.id === 'org-grass');
-  assert.throws(() => { pro.location.lat = 9; }, /organisations repository/);
-  assert.throws(() => { grass.federationRef.registrationId = 'NEW'; }, /organisations repository/);
-  assert.throws(() => { delete pro.location.city; }, /organisations repository/);
-  assert.throws(() => { Object.defineProperty(pro.location, 'lat', { value: 9 }); }, /organisations repository/);
-  assert.throws(() => { Object.assign(grass.federationRef, { federation: 'X' }); }, /organisations repository/);
-  assert.equal(pro.location.lat, 51.889); assert.equal(pro.location.city, 'Eastport'); assert.equal(grass.federationRef.registrationId, 'LFA-1');
-  store.save();
-  assert.equal(store.sqlite.prepare("SELECT lat FROM orgs WHERE id = 'org-pro'").get().lat, 51.889);
-  assert.equal(store.sqlite.prepare("SELECT federation_registration_id FROM orgs WHERE id = 'org-grass'").get().federation_registration_id, 'LFA-1');
-  assert.equal(JSON.stringify(ORGS_TABLE.read(store.sqlite)), JSON.stringify(db.orgs), 'the view and the table agree record for record');
-  // Reading is unchanged: spread, JSON, stable identity, sub-key order.
-  assert.deepEqual({ ...pro.location }, { lat: 51.889, lng: 1.02, city: 'Eastport' });
-  assert.equal(pro.location, pro.location, 'the same guarded object every time');
-  assert.equal(JSON.stringify(pro.location), '{"lat":51.889,"lng":1.02,"city":"Eastport"}');
-  assert.equal(db.orgs.find((o) => o.id === 'org-agency').location, null, 'a null composite reads as null');
-  // Column-backed changes go through the repository, built from the guarded view if the caller likes.
-  layer.orgs.update('org-pro', { location: { ...pro.location, lat: 9 } });
-  layer.orgs.update('org-grass', { federationRef: { ...grass.federationRef, registrationId: 'NEW' } });
-  assert.equal(pro.location.lat, 9); assert.equal(grass.federationRef.registrationId, 'NEW');
-  assert.equal(store.sqlite.prepare("SELECT lat FROM orgs WHERE id = 'org-pro'").get().lat, 9, 'written immediately');
-  assert.throws(() => { pro.location.lat = 10; }, /organisations repository/, 'the replaced composite is guarded too');
-  store.sqlite.close();
-  store = openStore(dir, { tableBacked: TABLE_BACKED });
-  const db2 = {};
-  layer = attachDataLayer({ db: db2, store, nextId, persist: () => {}, sessionTtlMs: TTL });
-  assert.equal(JSON.stringify(db2.orgs.find((o) => o.id === 'org-pro').location), '{"lat":9,"lng":1.02,"city":"Eastport"}', 'the update survived the restart with the sub-key order kept');
-  assert.deepEqual(db2.orgs.find((o) => o.id === 'org-grass').federationRef, { federation: 'London FA', registrationId: 'NEW' });
-  assert.equal(JSON.stringify(ORGS_TABLE.read(store.sqlite)), JSON.stringify(db2.orgs));
-  store.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
-});
-test('initialisation is explicit state, never a row count — an empty initialised table stays authoritative against stale arrays; a genuine first installation initialises once, atomically, and retries after an interruption; an intentionally empty table stays empty', () => {
-  // (a) An initialised database whose table was emptied: a stale array is ignored, nothing is imported.
-  const dirA = tempDir('s3-c3a');
-  let s = openRaw(dirA);
-  runDataMigrations(s, S3_MIGRATIONS, { context: { sessionTtlMs: TTL } });
-  createOrgsRepository({ sqlite: s }).initialize(ORGS());
-  s.exec('DELETE FROM orgs;');
-  let warnings = [];
-  const repo = createOrgsRepository({ sqlite: s, warn: (m) => warnings.push(m) });
-  const stale = [{ id: 'org-stale', name: 'Stale', type: 'club', plan: 'Pro' }];
-  assert.deepEqual(repo.attach(stale), { engine: 'sqlite', loaded: 0, imported: 0 }, 'an empty authoritative table imports nothing');
-  assert.equal(s.prepare('SELECT COUNT(*) AS n FROM orgs').get().n, 0);
-  assert.match(warnings[0], /ignored/);
-  assert.equal(repo.initState(), 'done', 'the initialisation was recorded');
+test('reads are SQL: the sign-in filters, a page by cursor, a name lookup, the grassroots grounds inside a box, counts', () => {
+  const extra = Array.from({ length: 5 }, (_, i) => ({ id: `org-c${i}`, name: `Club ${i}`, type: 'club', level: 'grassroots', plan: 'Grassroots', location: { lat: 51 + i, lng: 0 } }));
+  const { s, repo } = fresh({ orgs: [...ORGS(), ...extra] });
+  assert.deepEqual(repo.list({ level: 'grassroots' }).map((o) => o.id), ['org-grass', 'org-c0', 'org-c1', 'org-c2', 'org-c3', 'org-c4']);
+  assert.deepEqual(repo.list({ notLevel: 'grassroots' }).map((o) => o.id), ['org-pro', 'org-agency'], 'an organisation without a level is on the main platform');
+  assert.deepEqual(repo.list({ type: 'agency' }).map((o) => o.id), ['org-agency']);
+  assert.deepEqual(repo.list({ level: null }).map((o) => o.id), ['org-agency']);
+  assert.equal(repo.count(), 8); assert.equal(repo.count({ type: 'club' }), 7);
+  const first = repo.page({ type: 'club' }, { limit: 3, after: null });
+  assert.deepEqual(first.items.map((o) => o.id), ['org-pro', 'org-grass', 'org-c0']); assert.ok(first.nextCursor);
+  const [after] = [JSON.parse(Buffer.from(first.nextCursor, 'base64url').toString('utf8'))];
+  const second = repo.page({ type: 'club' }, { limit: 3, after });
+  assert.deepEqual(second.items.map((o) => o.id), ['org-c1', 'org-c2', 'org-c3']);
+  const last = repo.page({ type: 'club' }, { limit: 3, after: JSON.parse(Buffer.from(second.nextCursor, 'base64url').toString('utf8')) });
+  assert.deepEqual(last.items.map((o) => o.id), ['org-c4']); assert.equal(last.nextCursor, null);
+  assert.equal(repo.byName('  riverside JUNIORS ')?.id, 'org-grass', 'case and surrounding spaces ignored'); assert.equal(repo.byName('Nobody'), null); assert.equal(repo.byName(''), null);
+  assert.deepEqual(repo.locatedInBox({ minLat: 51.4, maxLat: 53.5, minLng: -1, maxLng: 1 }, { level: 'grassroots' }).map((o) => o.id), ['org-grass', 'org-c1', 'org-c2']);
+  assert.deepEqual(Object.keys(repo.reads).sort(), ['byId', 'byName', 'count', 'initState', 'list', 'locatedInBox', 'page', 'passwordHashOf'].sort(), 'the reads object has no write');
   s.close();
-  // The same through the data layer with the seed, as a server booting from the seed would pass.
-  // (S14a: on an initialised file the data layer ignores the seed outright, so there is no stale-array warning.)
-  let store = openStore(dirA, { tableBacked: TABLE_BACKED });
-  let db = {};
-  let layer = attachDataLayer({ db, seed: { orgs: ORGS(), guardians: [], players: [] }, store, nextId, persist: () => {}, sessionTtlMs: TTL });
-  assert.deepEqual(layer.boot.orgs, { engine: 'sqlite', loaded: 0, imported: 0 }); assert.equal(db.orgs.length, 0);
-  assert.equal(store.sqlite.prepare('SELECT COUNT(*) AS n FROM orgs').get().n, 0);
-  store.sqlite.close(); fs.rmSync(dirA, { recursive: true, force: true });
-  // (b) A genuine first installation: nothing was ever saved, so the migration leaves initialisation pending and the seed is imported once.
+});
+
+test('units of work: an organisation write joins the open unit — a failure later in it leaves no organisation row, a read inside it sees its write, and db.orgs throws naming the repository', () => {
+  const dir = tempDir('s14g-unit');
+  const store = openStore(dir, { tableBacked: TABLE_BACKED });
+  const db = {};
+  const layer = attachDataLayer({ db, seed: { orgs: ORGS(), guardians: [], players: [] }, store, nextId, persist: () => {}, sessionTtlMs: TTL });
+  assert.throws(() => db.orgs, /db\.orgs is gone: read it through the orgs repository/); assert.throws(() => { db.orgs = []; }, /write it through the orgs repository/);
+  assert.ok(!Object.keys(db).includes('orgs'), 'not enumerable');
+  assert.throws(() => store.unitOfWork(() => {
+    const o = layer.orgs.create({ name: 'Unit FC', type: 'club', plan: 'Pro' });
+    layer.users.create({ orgId: o.id, name: 'Pat', role: 'Manager' });
+    layer.orgs.update('org-pro', (d) => { d.suspended = true; });
+    assert.equal(layer.orgs.byId('org-pro').suspended, true, 'a read inside the unit sees its write');
+    throw new Error('late failure');
+  }), /late failure/);
+  assert.equal(layer.orgs.byName('Unit FC'), null); assert.equal(layer.orgs.byId('org-pro').suspended, false); assert.equal(store.sqlite.prepare('SELECT COUNT(*) AS n FROM org_users').get().n, 0);
+  const kept = store.unitOfWork(() => { const o = layer.orgs.create({ name: 'Unit FC', type: 'club', plan: 'Pro' }); layer.users.create({ orgId: o.id, name: 'Pat', role: 'Manager' }); return o; });
+  assert.equal(layer.orgs.byId(kept.id).name, 'Unit FC'); assert.equal(layer.users.forOrg(kept.id).length, 1);
+  store.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
+});
+
+// ------------------------------------------------------------- initialisation
+test('initialisation is explicit state, never a row count — a genuine first installation initialises once, atomically, and retries after an interruption; an intentionally empty table stays empty; a later seed is ignored', () => {
+  // (a) Through the data layer: a first installation imports the seed once; afterwards the table is authoritative.
   const dirB = tempDir('s3-c3b');
-  store = openStore(dirB, { tableBacked: TABLE_BACKED });
-  db = {};
-  layer = attachDataLayer({ db, seed: { orgs: ORGS(), guardians: [], players: [] }, store, nextId, persist: () => {}, sessionTtlMs: TTL });
-  assert.deepEqual(layer.boot.orgs, { engine: 'sqlite', loaded: 3, imported: 3 });
+  let store = openStore(dirB, { tableBacked: TABLE_BACKED });
+  let layer = attachDataLayer({ db: {}, seed: { orgs: ORGS(), guardians: [], players: [] }, store, nextId, persist: () => {}, sessionTtlMs: TTL });
+  assert.deepEqual(layer.boot.orgs, { engine: 'sqlite', rows: 3, imported: 3 });
   assert.equal(layer.orgs.initState(), 'done');
-  assert.equal(store.sqlite.prepare("SELECT value FROM meta WHERE key = 'orgsInit'").get().value, 'done');
+  assert.ok(Number.isSafeInteger(layer.orgs.byId('org-pro').createdAt), 'the seed is stamped at its import');
   store.sqlite.close();
   store = openStore(dirB, { tableBacked: TABLE_BACKED });
-  db = {};
-  layer = attachDataLayer({ db, seed: { orgs: ORGS(), guardians: [], players: [] }, store, nextId, persist: () => {}, sessionTtlMs: TTL });
-  assert.deepEqual(layer.boot.orgs, { engine: 'sqlite', loaded: 3, imported: 0 }, 'initialised once, then the table');
+  layer = attachDataLayer({ db: {}, seed: { orgs: [...ORGS(), { id: 'org-late', name: 'Late', type: 'club', plan: 'Pro' }], guardians: [], players: [] }, store, nextId, persist: () => {}, sessionTtlMs: TTL });
+  assert.deepEqual(layer.boot.orgs, { engine: 'sqlite', rows: 3, imported: 0 }, 'initialised once, then the table');
+  assert.equal(layer.orgs.byId('org-late'), null);
   store.sqlite.close(); fs.rmSync(dirB, { recursive: true, force: true });
-  // (c) Interrupted initialisation: the rows and the state change are one transaction, so the next boot retries.
-  s = new DatabaseSync(':memory:'); s.exec('PRAGMA foreign_keys = ON;');
-  runDataMigrations(s, S3_MIGRATIONS, { context: { sessionTtlMs: TTL } });
-  let r = createOrgsRepository({ sqlite: s });
+  // (b) Interrupted initialisation: the rows and the state change are one transaction, so the next boot retries.
+  const { s, repo: r } = fresh({ orgs: null });
   assert.equal(r.initState(), 'pending');
-  assert.deepEqual(r.attach(ORGS()), { engine: 'sqlite', loaded: 0, imported: 0 }, 'attach never initialises; the state says pending and the records are reported, not imported');
   const exec = s.exec.bind(s);
   let explode = true;
   s.exec = (sql) => { if (explode && sql === 'COMMIT') { explode = false; throw new Error('process died during initialisation'); } return exec(sql); };
@@ -383,94 +277,82 @@ test('initialisation is explicit state, never a row count — an empty initialis
   assert.equal(s.isTransaction, false);
   assert.equal(s.prepare('SELECT COUNT(*) AS n FROM orgs').get().n, 0, 'nothing of the failed attempt remains');
   assert.equal(r.initState(), 'pending', 'still pending: the next boot retries');
-  assert.throws(() => r.initialize([{ id: 'org-bad', name: 'B', type: 'club', level: 'agent', plan: 'Pro' }]), /cannot be imported — id org-bad: level/);
+  assert.throws(() => r.initialize([{ id: 'org-bad', name: 'B', type: 'club', level: 'agent', plan: 'Pro' }]), /entry #0 cannot be imported — organisation org-bad: level/);
   assert.equal(r.initState(), 'pending');
-  assert.deepEqual(r.initialize(ORGS()), { engine: 'sqlite', loaded: 3, imported: 3 });
+  assert.deepEqual(r.initialize(ORGS()), { engine: 'sqlite', rows: 3, imported: 3 });
   assert.equal(r.initState(), 'done');
   assert.throws(() => r.initialize(ORGS()), /already initialised/);
-  r = createOrgsRepository({ sqlite: s });
-  assert.deepEqual(r.attach(ORGS()), { engine: 'sqlite', loaded: 3, imported: 0 });
   s.close();
-  // (d) An intentionally empty installation: initialising with no records records the decision; a later seed array is ignored.
-  s = new DatabaseSync(':memory:'); s.exec('PRAGMA foreign_keys = ON;');
-  runDataMigrations(s, S3_MIGRATIONS, { context: { sessionTtlMs: TTL } });
-  r = createOrgsRepository({ sqlite: s });
-  assert.deepEqual(r.initialize([]), { engine: 'sqlite', loaded: 0, imported: 0 });
-  assert.equal(r.initState(), 'done');
-  warnings = [];
-  r = createOrgsRepository({ sqlite: s, warn: (m) => warnings.push(m) });
-  assert.deepEqual(r.attach(ORGS()), { engine: 'sqlite', loaded: 0, imported: 0 });
-  assert.equal(s.prepare('SELECT COUNT(*) AS n FROM orgs').get().n, 0, 'empty on purpose stays empty');
-  assert.match(warnings[0], /ignored/);
-  s.close();
+  // (c) An intentionally empty installation stays empty.
+  const e = fresh({ orgs: [] });
+  assert.equal(e.repo.initState(), 'done'); assert.equal(e.repo.count(), 0);
+  assert.throws(() => e.repo.initialize(ORGS()), /already initialised/);
+  e.s.close();
+  // (d) Rows written outside the repository while pending are not initialised over.
+  const w = fresh({ orgs: null });
+  w.s.prepare("INSERT INTO orgs (id, name, type, plan, created_at) VALUES ('org-raw', 'Raw', 'club', 'Pro', 1)").run();
+  assert.throws(() => w.repo.initialize(ORGS()), /already holds 1 row\(s\) written outside the repository/);
+  w.s.close();
 });
 
-test('initialise refuses a collection that is not an array — an object, null, a string, a number or nothing — writing no row, keeping the state pending and the input untouched; an explicitly empty array stays a valid, empty installation and a later valid retry initialises', () => {
-  const s = new DatabaseSync(':memory:'); s.exec('PRAGMA foreign_keys = ON;');
-  runDataMigrations(s, S3_MIGRATIONS, { context: { sessionTtlMs: TTL } });
-  const r = createOrgsRepository({ sqlite: s });
-  assert.equal(r.initState(), 'pending');
+test('initialise refuses a collection that is not an array — an object, null, a string, a number or nothing — writing no row and keeping the state pending; an explicitly empty array is a valid, empty installation', () => {
+  const { s, repo: r } = fresh({ orgs: null });
   const cases = [[{ id: 'synthetic-not-an-array' }, /an object/], [null, /null/], ['orgs', /a string/], [7, /a number/], [undefined, /absent/]];
   for (const [input, re] of cases) {
     const before = JSON.stringify(input ?? null);
     assert.throws(() => r.initialize(input), (err) => err instanceof TypeError && /initialize\(\) needs the first installation's organisations as an array/.test(err.message) && re.test(err.message) && /nothing was written/.test(err.message), `refused: ${re}`);
-    assert.equal(r.initState(), 'pending', 'still pending: the next boot retries'); assert.equal(s.prepare('SELECT COUNT(*) AS n FROM orgs').get().n, 0); assert.equal(r.count(), 0);
+    assert.equal(r.initState(), 'pending'); assert.equal(r.count(), 0);
     assert.equal(JSON.stringify(input ?? null), before, 'the input is untouched'); assert.equal(s.isTransaction, false);
   }
-  // The data layer refuses the same way at boot (a malformed seed is a fatal error, not an empty installation).
   const dir = tempDir('s3-init-shape'); const store = openStore(dir, { tableBacked: TABLE_BACKED });
   assert.throws(() => attachDataLayer({ db: {}, seed: { orgs: { id: 'not-an-array' }, guardians: [], players: [] }, store, nextId, persist: () => {}, sessionTtlMs: TTL }), /organisations as an array/);
   assert.equal(store.sqlite.prepare("SELECT value FROM meta WHERE key = 'orgsInit'").get().value, 'pending');
   store.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
-  // A valid retry, and an explicitly empty installation, still work.
-  assert.deepEqual(r.initialize(ORGS()), { engine: 'sqlite', loaded: 3, imported: 3 }); assert.equal(r.initState(), 'done');
+  assert.deepEqual(r.initialize(ORGS()), { engine: 'sqlite', rows: 3, imported: 3 }); assert.equal(r.initState(), 'done');
   s.close();
-  const e = new DatabaseSync(':memory:'); e.exec('PRAGMA foreign_keys = ON;'); runDataMigrations(e, S3_MIGRATIONS, { context: { sessionTtlMs: TTL } });
-  const re2 = createOrgsRepository({ sqlite: e });
-  assert.deepEqual(re2.initialize([]), { engine: 'sqlite', loaded: 0, imported: 0 }); assert.equal(re2.initState(), 'done');
-  e.close();
 });
 
 // ------------------------------------------------------------- snapshot tools
-test('snapshot mode: a fixture saved into a new directory goes into the tables and reads back as the same records; shape and row validation reject the whole save', () => {
+test('snapshot mode: a fixture saved into a new directory goes into the table and reads back typed (with its hash); junk, unknown fields and a removed organisation still referenced reject the whole save', () => {
   const dir = tempDir('s3-snap');
   let tool = openStore(dir);
   tool.save({ idCounter: 1000, db: { orgs: ORGS(), users: fixtureUsers(), sessions: fixtureSessions(), players: [PLAYER_1()], guardians: [] } });
   assert.equal(hasBlobTable(tool.sqlite), false, 'no blob');
   assert.equal(tool.sqlite.prepare('SELECT COUNT(*) AS n FROM orgs').get().n, 3);
   tool.sqlite.close();
-  let store, layer;
   tool = openStore(dir); let snap = tool.load();
-  assert.equal(JSON.stringify(snap.db.orgs), JSON.stringify(ORGS()), 'the table, rendered as the same records');
+  const createdAt = snap.db.orgs[0].createdAt;
+  assert.ok(Number.isSafeInteger(createdAt), 'an absent creation time is the save\'s');
+  assert.deepEqual(snap.db.orgs, ORGS().map((o) => ({ ...recordOf(o, o.createdAt ?? createdAt), password: o.password ?? null })), 'the table, rendered as typed records');
   const before = tool.load();
   const beforeDump = dump(tool.sqlite);
   const untouched = () => {
     const now = tool.load();
-    assert.equal(JSON.stringify(now.db.orgs), JSON.stringify(before.db.orgs), 'organisations unchanged');
+    assert.deepEqual(now.db.orgs, before.db.orgs, 'organisations unchanged');
     assert.equal(JSON.stringify(now.db.users), JSON.stringify(before.db.users), 'staff unchanged');
     assert.equal(JSON.stringify(now.db.sessions), JSON.stringify(before.db.sessions), 'sessions unchanged');
     assert.equal(now.db.players[0].name, 'P', 'the unrelated change was rolled back');
-    // Rewritten in S14a: these compared the save revision and looked for a blob row.
     assert.deepEqual(dump(tool.sqlite), beforeDump, 'nothing was written');
   };
   const attempt = (mutate, pattern) => { const x = tool.load(); x.db.players[0].name = 'Changed'; mutate(x); assert.throws(() => tool.save(x), pattern); untouched(); };
   attempt((x) => { x.db.orgs = { id: 'obj' }; }, /orgs: the snapshot collection must be an array/);
   attempt((x) => { x.db.orgs = null; }, /orgs: the snapshot collection must be an array/);
-  attempt((x) => { x.db.orgs[0].level = 'agent'; }, /orgs: snapshot row id org-pro was refused \(level/);
-  attempt((x) => { x.db.orgs.push({ ...x.db.orgs[0] }); }, /duplicate id/);
-  attempt((x) => { x.db.orgs.push({ id: 'org-x', name: 7, type: 'club', plan: 'Pro' }); }, /no name/);
+  attempt((x) => { x.db.orgs[0].level = 'agent'; }, /ORGS_IMPORT_BLOCKED: .*organisation org-pro: level must be one of/);
+  attempt((x) => { x.db.orgs.push({ ...x.db.orgs[0] }); }, /duplicates organisation org-pro/);
+  attempt((x) => { x.db.orgs.push({ id: 'org-x', name: 7, type: 'club', plan: 'Pro' }); }, /organisation org-x: name must be text/);
+  attempt((x) => { x.db.orgs[1].tags = ['ST']; }, /organisation org-grass: unknown field tags/);
   attempt((x) => { x.db.orgs = x.db.orgs.filter((o) => o.id !== 'org-grass'); }, /orgs: the snapshot no longer lists organisation org-grass but other records still reference it/);
   attempt((x) => { x.db.users.push({ id: 'usr-x', orgId: 'org-none', name: 'X', role: 'Scout', createdAt: 1 }); }, /FOREIGN KEY/);
-  // A valid write: scalar and facet changes together, a new organisation, an organisation removed together with its staff and their sessions.
+  // A valid write: a change, a new organisation, an organisation removed together with its staff and their sessions.
   const ok = tool.load();
-  ok.db.orgs[0].suspended = true; ok.db.orgs[0].memos.push({ id: 'sq-t', name: 'T' }); ok.db.orgs[0].brandNew = { from: 'tool' };
+  ok.db.orgs[0].suspended = true;
   ok.db.orgs.push({ id: 'org-tool', name: 'Tool FC', type: 'club', level: 'academy', plan: 'Academy' });
   ok.db.orgs = ok.db.orgs.filter((o) => o.id !== 'org-agency'); ok.db.users = ok.db.users.filter((u) => u.orgId !== 'org-agency');
   ok.db.players[0].name = 'Renamed';
   tool.save(ok);
   const after = tool.load();
   assert.deepEqual(after.db.orgs.map((o) => o.id), ['org-pro', 'org-grass', 'org-tool']);
-  assert.equal(after.db.orgs[0].suspended, true); assert.equal(after.db.orgs[0].memos.length, 1); assert.deepEqual(after.db.orgs[0].brandNew, { from: 'tool' });
+  assert.equal(after.db.orgs[0].suspended, true); assert.equal(after.db.orgs[0].password, 'scrypt$00$11');
   assert.equal(after.db.players[0].name, 'Renamed');
   assert.ok(!after.db.users.some((u) => u.orgId === 'org-agency'));
   // An omitted orgs collection is a partial snapshot.
@@ -478,21 +360,19 @@ test('snapshot mode: a fixture saved into a new directory goes into the tables a
   assert.deepEqual(tool.load().db.orgs.map((o) => o.id), ['org-pro', 'org-grass', 'org-tool']); assert.equal(tool.load().db.players[0].name, 'Again');
   tool.sqlite.close();
   // The server reads the tool's result.
-  store = openStore(dir, { tableBacked: TABLE_BACKED });
-  const db2 = {};
-  layer = attachDataLayer({ db: db2, store, nextId, persist: () => {}, sessionTtlMs: TTL });
-  assert.deepEqual(db2.orgs.map((o) => o.id), ['org-pro', 'org-grass', 'org-tool']); assert.equal(db2.orgs[0].suspended, true);
+  const store = openStore(dir, { tableBacked: TABLE_BACKED });
+  const layer = attachDataLayer({ db: {}, store, nextId, persist: () => {}, sessionTtlMs: TTL });
+  assert.deepEqual(layer.orgs.list().map((o) => o.id), ['org-pro', 'org-grass', 'org-tool']); assert.equal(layer.orgs.byId('org-pro').suspended, true);
   assert.ok(layer.sessions.byToken('legacy-maria-token') && layer.sessions.byToken('legacy-sam-token'), 'staff sessions survived every refused and accepted save');
   store.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
 });
 
 // ------------------------------------------------------------- through the real server
-await atest('server: a fixture database boots; registration, settings, suspension, verification, credentials and staff sessions work; facet and scalar changes survive a restart; backup and restore keep every organisation', async () => {
+await atest('server: a fixture database boots; registration, settings, suspension, verification, credentials and staff sessions work; junk is refused; changes survive a restart; backup and restore keep every organisation', async () => {
   const dir = tempDir('s3-server');
   const seed = buildSeed();
   seed.users = [{ id: 'usr-legacy', orgId: 'org-eastport', name: 'Maria Keane', role: 'Head of Recruitment', createdAt: 1 }];
   seed.sessions = [{ token: 'legacy-maria-token-00000000000000000000000000', sid: 'sid-maria', kind: 'org', refId: 'org-eastport', userId: 'usr-legacy', createdAt: Date.now() - DAY }];
-  seed.orgs.find((o) => o.id === 'org-eastport').memos = [{ id: 'sq-seed', name: 'Seeded', position: 'ST', playerId: null, source: 'manual', addedAt: 1 }];
   // A Room owned by a live organisation: the boot integrity report must still
   // see the organisation on every boot (regression: it ran
   // before the data layer attached and called every Room an orphan).
@@ -528,11 +408,35 @@ await atest('server: a fixture database boots; registration, settings, suspensio
     // Directory and admin views keep their shapes (no password hash in either).
     const dirListing = await j('GET', '/orgs/directory');
     assert.equal(dirListing.status, 200); assert.ok(!JSON.stringify(dirListing.body).includes('scrypt'));
+    assert.deepEqual(dirListing.body.items.map((o) => o.id), ['org-eastport', 'org-harbour', 'org-hackneymarsh', 'org-mossside'], 'the directory lists the clubs, oldest first'); assert.equal(dirListing.body.nextCursor, null);
+    const dirPage = await j('GET', '/orgs/directory?limit=2');
+    assert.equal(dirPage.body.items.length, 2); assert.ok(dirPage.body.nextCursor);
+    const dirNext = await j('GET', `/orgs/directory?limit=2&cursor=${dirPage.body.nextCursor}`);
+    assert.deepEqual(dirNext.body.items.map((o) => o.id), ['org-hackneymarsh', 'org-mossside']);
+    assert.equal((await j('GET', '/orgs/directory?limit=0')).status, 400, 'a junk limit is refused'); assert.equal((await j('GET', '/orgs/directory?cursor=junk')).status, 400, 'a junk cursor is refused');
     const clubs = await j('GET', '/admin/clubs', undefined, null, A);
-    assert.equal(clubs.status, 200); assert.ok(clubs.body.find((o) => o.id === 'org-eastport').memos.length === 1, 'the facet is served'); assert.ok(!JSON.stringify(clubs.body).includes('password'));
+    assert.equal(clubs.status, 200); assert.equal(clubs.body.items.length, 5); assert.ok(!JSON.stringify(clubs.body).includes('password') && !JSON.stringify(clubs.body).includes('scrypt'));
+    const east = clubs.body.items.find((o) => o.id === 'org-eastport');
+    assert.deepEqual(Object.keys(east).sort(), ['country', 'createdAt', 'emailDomain', 'emailDomainVerified', 'federationCheck', 'federationRef', 'id', 'level', 'location', 'lookingFor', 'mfaRequiredForLeads', 'name', 'plan', 'safeguardingCertified', 'safeguardingContractSigned', 'suspended', 'trustedPartner', 'type', 'verificationRevokedAt', 'verified', 'verifiedDomain'].sort(), 'the admin view is an allowlist');
+    assert.equal((await j('GET', '/admin/clubs?limit=abc', undefined, null, A)).status, 400);
+    const picker = await j('GET', '/orgs?platform=grassroots');
+    assert.deepEqual(picker.body.map((o) => o.id), ['org-hackneymarsh', 'org-mossside'], 'the sign-in picker is the whole filtered list (unpaged: known issue)');
+    assert.deepEqual((await j('GET', '/orgs?platform=main')).body.map((o) => o.id), ['org-eastport', 'org-harbour', 'org-northstar']);
+    assert.deepEqual((await j('GET', '/orgs?platform=agent')).body.map((o) => o.id), ['org-northstar']);
     // Registration: a new grassroots organisation is a table row at once.
+    // A registration whose administrator cannot be created leaves no organisation behind (one unit since S14g).
+    const before = (await j('GET', '/admin/clubs', undefined, null, A)).body.items.length;
+    const badReg = await j('POST', '/auth/org/register-grassroots', { name: 'Half Rovers', scoutName: 'x'.repeat(121), country: 'GB', lat: 53.8, lng: -1.5, federation: 'West Riding FA', registrationId: 'WR-8' });
+    assert.equal(badReg.status, 400);
+    const regBase = { name: 'Junk Rovers', scoutName: 'Pat', country: 'GB', lat: 53.8, lng: -1.5, federation: 'West Riding FA', registrationId: 'WR-7' };
+    for (const [over, error] of [[{ country: '' }, 'FIELD_INVALID'], [{ country: ' G' }, 'FIELD_INVALID'], [{ federation: '   ' }, 'FEDERATION_REQUIRED'], [{ registrationId: ' ' }, 'FEDERATION_REQUIRED']]) {
+      const r = await j('POST', '/auth/org/register-grassroots', { ...regBase, ...over });
+      assert.deepEqual([r.status, r.body?.error], [400, error], `junk ${JSON.stringify(over)} is a 400, not a 500`);
+    }
     const reg = await j('POST', '/auth/org/register-grassroots', { name: 'Test Rovers', scoutName: 'Pat', role: 'Manager', country: 'GB', city: 'Leeds', lat: 53.8, lng: -1.5, federation: 'West Riding FA', registrationId: 'WR-9', password: 'rovers-pass-123' });
     assert.equal(reg.status, 201, JSON.stringify(reg.body)); newOrgId = reg.body.org.id;
+    assert.equal(reg.body.org.password, undefined); assert.ok(Number.isSafeInteger(reg.body.org.createdAt), 'stamped at creation'); assert.deepEqual(reg.body.org.location, { lat: 53.8, lng: -1.5, city: 'Leeds' });
+    assert.equal((await j('GET', '/admin/clubs', undefined, null, A)).body.items.length, before + 1, 'only the complete registration created an organisation');
     { const raw = openRaw(dir); assert.equal(raw.prepare('SELECT level FROM orgs WHERE id = ?').get(newOrgId).level, 'grassroots'); assert.equal(hasBlobTable(raw), false); raw.close(); }
     const login = await j('POST', '/auth/org/login', { orgId: newOrgId, scoutName: 'Pat', platform: 'grassroots', password: 'rovers-pass-123' });
     assert.equal(login.status, 200, JSON.stringify(login.body)); regToken = login.body.token;
@@ -542,9 +446,19 @@ await atest('server: a fixture database boots; registration, settings, suspensio
     assert.ok([200, 404].includes(lf.status));
     const sec = await j('PUT', '/org/security', { mfaRequiredForLeads: true }, regToken);
     assert.ok([200, 403].includes(sec.status), `security route answered ${sec.status}`);
+    if (sec.status === 200) {
+      assert.equal(sec.body.mfaRequiredForLeads, true, 'the response is the stored value');
+      assert.equal((await j('PUT', '/org/security', { mfaRequiredForLeads: 'yes' }, regToken)).body.error, 'FIELD_INVALID', 'a switch that is not a boolean is refused, not read as false');
+    }
     // Admin: verification toggles and credentials rotation write columns; suspension locks the organisation out.
+    for (const [body, field] of [[{ verified: 'yes' }, 'verified'], [{ suspended: 1 }, 'suspended'], [{ safeguardingContractSigned: 'true' }, 'safeguardingContractSigned'], [{ verifiedDomain: 7 }, 'verifiedDomain']]) {
+      const r = await j('POST', `/admin/clubs/${newOrgId}/verification`, body, null, A);
+      assert.deepEqual([r.status, r.body.error, r.body.field], [400, 'FIELD_INVALID', field], `${field} junk is refused, not coerced`);
+    }
+    { const raw = openRaw(dir); assert.equal(raw.prepare('SELECT verified, suspended FROM orgs WHERE id = ?').get(newOrgId).verified, 0); raw.close(); }
     const ver = await j('POST', `/admin/clubs/${newOrgId}/verification`, { verified: true, safeguardingContractSigned: true, verifiedDomain: 'rovers.example' }, null, A);
     assert.equal(ver.status, 200, JSON.stringify(ver.body));
+    assert.equal(ver.body.verified, true); assert.equal(ver.body.verifiedDomain, 'rovers.example', 'the response is the updated organisation');
     { const raw = openRaw(dir); const row = raw.prepare('SELECT verified, safeguarding_contract_signed, verified_domain FROM orgs WHERE id = ?').get(newOrgId); assert.deepEqual({ ...row }, { verified: 1, safeguarding_contract_signed: 1, verified_domain: 'rovers.example' }); raw.close(); }
     assert.equal((await j('POST', `/admin/clubs/${newOrgId}/credentials`, { password: 'rotated-pass-123' }, null, A)).status, 200);
     assert.equal((await j('POST', '/auth/org/login', { orgId: newOrgId, scoutName: 'Pat', platform: 'grassroots', password: 'rovers-pass-123' })).status, 401, 'the old password is gone');
@@ -557,20 +471,19 @@ await atest('server: a fixture database boots; registration, settings, suspensio
     assert.equal((await j('GET', '/org/notifications', undefined, login2.body.token)).status, 200);
     regToken = login2.body.token;
   } finally { await stop(S); }
-  // Restart: columns and facets came back together.
+  // Restart: the changes came back.
   S = await boot();
   let backupDir;
   try {
     const clubs = await j('GET', '/admin/clubs', undefined, null, A);
-    const rovers = clubs.body.find((o) => o.id === newOrgId);
+    const rovers = clubs.body.items.find((o) => o.id === newOrgId);
     assert.equal(rovers.verified, true); assert.equal(rovers.verifiedDomain, 'rovers.example'); assert.equal(rovers.suspended, false);
     if (Array.isArray(rovers.lookingFor)) assert.deepEqual(rovers.lookingFor, ['ST', 'GK']);
-    assert.equal(clubs.body.find((o) => o.id === 'org-eastport').memos[0].name, 'Seeded', 'the seeded facet survived a restart');
     assert.equal((await j('GET', '/org/notifications', undefined, regToken)).status, 200, 'the session minted before the restart is still valid');
     const cap2 = await j('GET', '/capabilities');
     assert.equal(cap2.body.integrity.ok, true, `integrity after a restart: ${JSON.stringify(cap2.body.integrity.byCode)}`);
     assert.equal(cap2.body.integrity.byCode.ROOM_ORPHAN_ORG, undefined, 'the Room still belongs to an organisation the report can see');
-    // Backup → restore: every organisation, with its facets, and every session.
+    // Backup → restore: every organisation and every session.
     const backup = await (await fetch(`http://127.0.0.1:${port}/admin/backup`, { method: 'POST', headers: A })).json();
     backupDir = backup.dir;
     const copy = new DatabaseSync(path.join(backupDir, 'scoutbox.db'), { readOnly: true });
@@ -584,8 +497,8 @@ await atest('server: a fixture database boots; registration, settings, suspensio
   try {
     await new Promise((resolve, reject) => { restored.stdout.on('data', () => { if (/listening on/.test(log2)) resolve(); }); restored.on('exit', (c) => reject(new Error(`restored server exited ${c}: ${log2}`))); setTimeout(() => reject(new Error(`restore timeout: ${log2}`)), 20_000).unref(); });
     const r = await fetch(`http://127.0.0.1:${port2}/admin/clubs`, { headers: A });
-    const clubs = await r.json();
-    assert.equal(clubs.length, 6); assert.equal(clubs.find((o) => o.id === newOrgId).verifiedDomain, 'rovers.example'); assert.equal(clubs.find((o) => o.id === 'org-eastport').memos[0].name, 'Seeded');
+    const clubs = (await r.json()).items;
+    assert.equal(clubs.length, 6); assert.equal(clubs.find((o) => o.id === newOrgId).verifiedDomain, 'rovers.example');
     assert.equal((await fetch(`http://127.0.0.1:${port2}/org/notifications`, { headers: { authorization: `Bearer ${regToken}` } })).status, 200, 'the session survives backup and restore');
     const raw = openRaw(restoreDir); assert.equal(hasBlobTable(raw), false); assert.deepEqual(raw.prepare('PRAGMA foreign_key_check').all(), []); raw.close();
   } finally {

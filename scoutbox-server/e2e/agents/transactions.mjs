@@ -327,7 +327,7 @@ await stop(server);
 {
   const store = openStore(DATA_DIR);
   const snap = store.load();
-  snap.db.orgs.push({ ...structuredClone(snap.db.orgs.find((o) => o.type === 'agency')), id: 'org-southgate', name: 'Southgate Sports Management', slug: 'southgate' });
+  snap.db.orgs.push({ ...structuredClone(snap.db.orgs.find((o) => o.type === 'agency')), id: 'org-southgate', name: 'Southgate Sports Management' });
   // The releasing club has to be a VERIFIED organisation, because root
   // verification authority — the recorded club signatory — only exists inside
   // one (M14). The seeded academy is unverified, so the fixture verifies it.

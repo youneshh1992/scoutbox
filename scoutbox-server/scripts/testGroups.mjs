@@ -35,7 +35,7 @@ const plain = (v) => JSON.parse(JSON.stringify(v));
 
 // ------------------------------------------------------------- fixtures: the literals the routes write
 const A = 'org-pro'; const B = 'org-b'; const C = 'org-c';
-const club = (id, name) => ({ ...ORGS()[0], id, name, memos: [] });
+const club = (id, name) => ({ ...ORGS()[0], id, name });
 const group = (over = {}) => ({ id: 'grp-1', name: 'North West Group', adminOrgIds: [A], memberOrgIds: [A], pendingInvites: [], sharedTemplateIds: [], programmes: [], createdAt: NOW, ...over });
 const grant = (over = {}) => ({
   id: 'gnt-1', groupId: 'grp-1', fromOrgId: A, fromOrgName: 'Eastport FC', toOrgIds: [B], resourceKind: 'shortlist', resourceId: '*',

@@ -478,7 +478,7 @@ ok(r.status === 201, 'a pro club signs the grassroots product');
 r = await j('/org/pathway-record', {}, bearer(MOSS));
 ok(r.body.progressed >= 1 && r.body.pathwayClub === true, 'the pro signing makes Moss Side a Pathway Club');
 r = await j('/orgs/directory');
-ok(r.body.find((o) => o.id === 'org-mossside')?.pathwayClub === true, 'the Pathway Club badge shows in the player-facing directory');
+ok(r.body.items.find((o) => o.id === 'org-mossside')?.pathwayClub === true, 'the Pathway Club badge shows in the player-facing directory');
 
 // Federation-route verification: Sunday-league clubs run on free email —
 // they verify through their federation registration instead.
@@ -487,7 +487,7 @@ ok(r.status === 201 && r.body.submitted, 'grassroots club files federation verif
 r = await j('/org/verification/federation', { method: 'POST', body: JSON.stringify({ federation: 'Manchester FA', registrationId: 'MFA-2210', contactEmail: 'not an address' }) }, bearer(MOSS));
 ok(r.status === 400 && r.body.field === 'contactEmail', 'S9c a federation contact that is not an e-mail address is refused');
 r = await j('/admin/clubs', {}, admin);
-ok(r.body.find((o) => o.id === 'org-mossside')?.federationCheck?.status === 'pending', 'the federation check lands in the Trust & Safety queue');
+ok(r.body.items.find((o) => o.id === 'org-mossside')?.federationCheck?.status === 'pending', 'the federation check lands in the Trust & Safety queue');
 
 // Friendlies board: club-to-club, same 50km radius.
 r = await j('/org/friendlies', { method: 'POST', body: JSON.stringify({ ageGroup: 'u15', date: '2099-08-15', venue: 'Hackney Marshes pitch 2', notes: 'Development XI, decent standard.' }) }, bearer(HACKNEY));

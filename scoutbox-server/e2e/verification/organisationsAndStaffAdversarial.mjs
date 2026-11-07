@@ -402,5 +402,19 @@ section('H7 — dashboard counts follow the effective engine');
   ok(umaBack.body.badges.some((b) => b.organisation?.id === 'org-eastport' && b.current), 'lifting the suspension restores display — nothing was destroyed');
 }
 
+section('H8 — the legacy verification toggle refuses junk instead of coercing it (S14g)');
+{
+  const before = (await j('GET', '/admin/clubs', undefined, null, A)).body.items.find((o) => o.id === 'org-harbour');
+  for (const [body, field] of [[{ verified: 'yes' }, 'verified'], [{ suspended: 'false' }, 'suspended'], [{ safeguardingContractSigned: 1 }, 'safeguardingContractSigned'], [{ verifiedDomain: { d: 1 } }, 'verifiedDomain']]) {
+    const r = await j('POST', '/admin/clubs/org-harbour/verification', body, null, A);
+    ok(r.status === 400 && r.body.error === 'FIELD_INVALID' && r.body.field === field, `[neg] a ${field} that is not of its type is refused (400 FIELD_INVALID), not coerced`);
+  }
+  const after = (await j('GET', '/admin/clubs', undefined, null, A)).body.items.find((o) => o.id === 'org-harbour');
+  ok(JSON.stringify(after) === JSON.stringify(before), '[neg] a refused toggle changed nothing about the organisation');
+  const r = await j('POST', '/admin/clubs/org-harbour/verification', { verified: true }, null, A);
+  ok(r.status === 200 && r.body.verified === true && r.body.suspended === false, 'a boolean toggle is applied and the response is the updated organisation');
+  await j('POST', '/admin/clubs/org-harbour/verification', { verified: false }, null, A);
+}
+
 console.log(`\nverification/organisationsAndStaffAdversarial: ${passed} checks passed${process.exitCode ? ' (WITH FAILURES)' : ''}`);
 process.exit(process.exitCode ?? 0);

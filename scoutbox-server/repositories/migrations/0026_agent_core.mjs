@@ -1,9 +1,8 @@
 /**
  * The agent core (S11a) gets its own typed tables: agent profiles (declared jurisdictions, verification facets,
  * history), agency affiliations (roles, history), representation agreements (scope, policy versions, opportunity shares,
- * history) and an agency's settings. REGISTERED in DATA_MIGRATIONS. `up()` is the DDL, plus the clean-up of the retired
- * organisation facet: `agencySettings` leaves orgs.facets_json (its rows are org_agency_settings and
- * org_agency_jurisdictions). Nothing is carried over (no production data; rollback means re-seed).
+ * history) and an agency's settings. REGISTERED in DATA_MIGRATIONS. `up()` is the DDL. (An agency's settings were the
+ * organisation facet `agencySettings`; since S14g the organisations have no facet storage.)
  */
 import { migrationApplied } from '../database.mjs';
 import { TRANSITIONS_MIGRATION } from '../transitionsVouches.mjs';
@@ -20,5 +19,4 @@ export function up(sqlite) {
   if (existing.length) throw new Error(`${id}: ${existing.join(', ')} already exist without the migration record; refusing to guess their state`);
   for (const t of ['orgs', 'org_users']) if (!hasTable(t)) throw new Error(`${id}: ${t} is missing although the earlier steps are recorded; refusing to guess the schema's state`);
   sqlite.exec(AGENT_CORE_DDL);
-  sqlite.exec("UPDATE orgs SET facets_json = json_remove(facets_json, '$.agencySettings') WHERE facets_json IS NOT NULL");
 }

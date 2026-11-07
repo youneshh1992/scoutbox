@@ -138,7 +138,7 @@ export function registerOperations(ctx) {
   adminRouter.get('/outcomes', (_req, res) => {
     const rows = [];
     const totals = signingsFollowUps.outcomeTotalsByOrg(); // counted in SQL, one row per organisation with a signing
-    for (const org of db.orgs) {
+    for (const org of ctx.orgs.list()) {
       const t = totals.get(org.id);
       if (!t) continue;
       if (t.signings < 3) {

@@ -103,7 +103,7 @@ export function registerSigning(rawCtx) {
   const limited = (action, keyPart) => !!rateLimit?.limited(action, keyPart);
   const roleFor = (req, room) => roomRole({ room, user: req.orgUser, isLead: isLead(req.orgUser) });
   const evidenceProvider = () => ctx.recruitmentEvidenceProvider ?? NULL_EVIDENCE_PROVIDER;
-  const orgOf = (orgId) => (db.orgs ?? []).find((o) => o && o.id === orgId) ?? null;
+  const orgOf = (orgId) => ctx.byId.org(orgId);
   const now = (req = null) => {
     if (TEST_CLOCK && req?.get) { const n = Number(req.get('x-scoutbox-test-clock')); if (Number.isFinite(n) && n > 0) return n; }
     return Date.now();

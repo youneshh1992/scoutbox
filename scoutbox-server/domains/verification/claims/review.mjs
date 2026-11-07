@@ -442,22 +442,21 @@ export function registerVerificationReview(ctx) {
     if (emailHolder && emailHolder.id !== user?.id && !user?.email) {
       return res.status(409).json({ error: 'STAFF_EMAIL_TAKEN', message: 'Another current staff member of this organisation has the applicant\'s work e-mail. Link that account (linkUserId) if it is the applicant\'s.' });
     }
-    // The organisation first (its repository is staged); then one unit: the applicant's account, the claims, the
-    // verified flag, the domain, the root grant and the decision commit together.
+    // One unit: the organisation (when it is new), the applicant's account, the claims, the verified flag, the
+    // domain, the root grant and the decision commit together.
     let org = existingOrg;
-    if (!org) {
-      // S3: created through the organisations repository (a table row from the
-      // first byte); the record it returns is what db.orgs holds.
-      org = orgs.insert({
-        id: nextId('org'), name: r.orgName, type: r.orgType === 'agency' ? 'agency' : 'club',
-        level: r.orgType === 'grassroots club' ? 'grassroots' : null,
-        plan: r.orgType === 'grassroots club' ? 'Grassroots' : 'Pro', trustedPartner: false,
-        country: r.country, verified: false, verifiedDomain: null, safeguardingContractSigned: false,
-        ...(r.orgType === 'grassroots club' ? { location: { lat: 51.5, lng: -0.1, city: '' }, federationRef: r.federation ? { federation: r.federation, registrationId: 'pending' } : null } : {}),
-      });
-    }
     if (!user) identityLink ??= 'provisioned_new_user';
     const { approved } = unit(() => {
+      if (!org) {
+        // The placeholder ground and registration of a grassroots club are a known issue (docs/known-issues.md).
+        org = orgs.create({
+          name: r.orgName.trim(), type: r.orgType === 'agency' ? 'agency' : 'club',
+          level: r.orgType === 'grassroots club' ? 'grassroots' : null,
+          plan: r.orgType === 'grassroots club' ? 'Grassroots' : 'Pro',
+          country: r.country.trim() || null,
+          ...(r.orgType === 'grassroots club' ? { location: { lat: 51.5, lng: -0.1, city: null }, federationRef: r.federation?.trim() ? { federation: r.federation.trim(), registrationId: 'pending' } : null } : {}),
+        });
+      }
       if (!user) user = users.create({ orgId: org.id, name: r.applicantName.trim(), role: r.applicantRole.trim() || 'Manager', email: r.workEmail });
       else if (!user.email) user = users.update(user.id, (d) => { d.email = r.workEmail; });
       // …organisation identity claim: established by Trust & Safety review.
@@ -469,7 +468,7 @@ export function registerVerificationReview(ctx) {
       });
       // Keep the LEGACY effective flag in sync — same standing meaning: minors
       // still additionally need the safeguarding contract (unchanged).
-      orgs.update(org.id, { verified: true });
+      orgs.update(org.id, (d) => { d.verified = true; });
       // Domain claim only where the mailbox proof aligns with the stated domain.
       if (r.emailProved && r.domain && domainCovered(domainOfEmail(r.workEmail), r.domain)) {
         if (!reads.domains.has(org.id, r.domain)) verification.domains.add(org.id, { domain: r.domain, status: 'verified', method: 'official_domain_email', verifiedAt: Date.now(), addedBy: 'root_request' });
@@ -667,7 +666,7 @@ export function registerVerificationReview(ctx) {
     if (!org) return res.status(404).json({ error: 'ORG_NOT_FOUND' });
     if (!reasonRequired(req, res)) return;
     unit(() => {
-      orgs.update(org.id, { verificationRevokedAt: Date.now(), verified: false }); // the effective flag follows immediately
+      orgs.update(org.id, (d) => { d.verificationRevokedAt = Date.now(); d.verified = false; }); // the effective flag follows immediately
       for (const c of reads.claims.forSubject('org', org.id)) {
         if (c.status === 'verified') adminTransition(c, 'revoked', req, { reason: reasonText(req) });
       }
@@ -695,7 +694,7 @@ export function registerVerificationReview(ctx) {
           verifiedBy: { kind: 'trust_safety', id: 'admin' }, metadata: { via: 'legacy admin route' },
         });
       }
-      if (orgOf(org.id)?.verificationRevokedAt) orgs.update(org.id, { verificationRevokedAt: null });
+      if (orgOf(org.id)?.verificationRevokedAt) orgs.update(org.id, (d) => { d.verificationRevokedAt = null; });
     } else if (body.verified === false && existing && existing.status === 'verified') {
       transition(existing, 'revoked', { actorKind: 'trust_safety', actorName: 'Trust & Safety', reason: 'legacy admin verification toggle removed verification' });
     }

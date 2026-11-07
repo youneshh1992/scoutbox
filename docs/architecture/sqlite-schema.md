@@ -135,7 +135,7 @@ them.
 | Collection | Class | File | Table(s) | Step |
 |---|---|---|---|---|
 | `users` | persistent | 01 | `org_users` (LIVE since migration 0001) | S0 done |
-| `orgs` | persistent | 01 (+04, 05) | `orgs`; nested `tactical` → `org_tactical_setups/roles/role_criteria/windows`, `squad[]` → `org_squad_members`, `lookingFor[]` → `org_looking_for`, `federationCheck` → `org_federation_checks` (04); `verification.domains[]` → `org_verified_domains` (05); `verification.revokedAt/orgType` → columns on `orgs`; `agencySettings` → 06 | **S3 done** (live; scalars and composites are columns, the nested facets ride in `orgs.facets_json` until S9/S10/S11; blob retired by migration `0004`) |
+| `orgs` | persistent | 01 (+04, 05) | `orgs`; nested `tactical` → `org_tactical_setups/roles/role_criteria/windows`, `squad[]` → `org_squad_members`, `lookingFor[]` → `org_looking_for`, `federationCheck` → `org_federation_checks` (04); `verification.domains[]` → `org_verified_domains` (05); `verification.revokedAt/orgType` → columns on `orgs`; `agencySettings` → 06 | **S3 done; explicit since S14g** (typed columns only, no `facets_json`; the nested facets moved in S9c, S10a and S11a) |
 | `guardians` | persistent | 01 | `guardians` (LIVE since migration 0005; `coGuardians[]` and unknown fields in `facets_json`; the sign-up code only as `email_code_hash` since 3 Nov 2026); `childIds[]` → `guardian_children` (LIVE) | **S4a done** (S4b: lifecycle, after O1) |
 | `players` | persistent | 01 | `players` (scalars, `stats`, `medical.shared/conditionStatus`, `notificationPrefs`, `programme.track/startedAt`, `location`); `seasonHistory[]`, `badges[]`, `drills[]`, `attendance[]`, `timeline[]`, `media[]` (+`media[].tags` → `player_media_tags`), `medical.records[]`, `drillResults[]`, `activityLog[]`, `externalIds[]`, `programme.completed[]` → twelve `player_*` tables; `trialReports[]` derived (copy of `trials.report`); **since migration 0014 (S4b-R) an account deletion keeps the row as the retained record — `id`, `deleted_at`, `birth_date`, `country`; placeholders and NULL elsewhere — served by no account reader** | S4 (scalars, shadow since S1), S5 (sub-records), S4b-R (the retained record; implemented 21 October 2026, independently accepted at `9b109dc`) |
 | `sessions` | temporary | 01 | `sessions` (token stored as `token_hash`) | **S2 done** (live; blob retired by migration `0003`) |
@@ -410,7 +410,7 @@ this branch: 13 checks passed.
 
 | State | Tables | Where |
 |---|---|---|
-| **Implemented, live** (a repository owns the rows; the blob is gone) | 3: `org_users` (rebuilt STRICT with `org_id REFERENCES orgs(id)` and `json_valid` CHECKs in `0004`), `sessions` (`token_hash` only; the table was created by `0002` and became live, with the legacy blob imported and retired, in `0003`), `orgs` (created live by `0004` with the legacy blob imported and retired; scalars and the `location` / `federationRef` composites are columns, the nested facets ride in `facets_json` until S9–S11) | migrations `0001` (S0), `0003` (S2), `0004` (S3) |
+| **Implemented, live** (a repository owns the rows; the blob is gone) | 3: `org_users` (rebuilt STRICT with `org_id REFERENCES orgs(id)` and `json_valid` CHECKs in `0004`), `sessions` (`token_hash` only; the table was created by `0002` and became live, with the legacy blob imported and retired, in `0003`), `orgs` (created live by `0004`; typed columns only and explicit writes since S14g, `facets_json` gone) | migrations `0001` (S0), `0003` (S2), `0004` (S3) |
 | **Implemented, live** (S4a) | 3 + 1: `guardians`, `players` (scalars and the split composites as columns; since S5 only unknown fields and shape metadata in `facets_json`), `guardian_children` (derived from `childIds`, roles per side) — created live by `0005_core_identity_live` with the two blobs imported through the reviewed preflight and retired; `media_deletions` (the crash-safe media-removal queue, `0006`, file 08). The S1 shadow is retired | migrations `0005`, `0006` (S4a) |
 | **Implemented, live** (S5) | 12: the `player_*` sub-record tables (`player_season_history`, `player_badges`, `player_drills`, `player_attendance`, `player_timeline`, `player_media`, `player_media_tags`, `player_medical_records`, `player_drill_results`, `player_activity_log`, `player_external_ids`, `player_programme_completions`), created by `0007_player_subrecords` from the S4a rows through the one mapping; `trialReports` is derived from the trials, not a table ([`s5-player-subrecords.md`](./s5-player-subrecords.md)) | migration `0007` (S5) |
 | **Implemented, live** (S8a-core, 22 October 2026, independently accepted at `7a7efc6`) | 15 + the `channels` rebuild: `recruitment_requests`, `request_trial_slots`, `trials` and its eleven owned child tables, `idempotency_keys`, created by `0015_recruitment` from the two blobs through the repository's own validation (plan §D.7 as accepted at `d0f0205`, §D.8; Q7a/Q7b/Q7c); `channels` rebuilt with the real `request_id` foreign key | migration `0015` (S8a-core) |
@@ -487,36 +487,21 @@ guardians ──< guardian_children >── players ──< player_* (12 sub-rec
   └──< sessions (kind='guardian')                  └──< sessions (kind='player')
 ```
 
-- **`orgs`** — one row per club or agency (live since S3, `repositories/orgs.mjs`). Owner:
-  registration (`server.mjs`, `orgs.insert`), T&S org creation (`domains/verification/claims/review.mjs`,
-  `orgs.insert`), org settings routes, admin verification / credentials / suspension and
-  the `m13` security route (`orgs.update`). Lifecycle: `suspended` flag; no deletion route
-  exists today and S3 adds none (O2, below). CHECKs: `type IN (club, agency)`, `level IS
-  NULL OR level IN (pro, academy, agency, grassroots)` (nullable since S3: the T&S creation
-  path writes `level: null`, which the S1 shadow could not hold), `plan IN (Pro, Academy,
-  Agency, Grassroots)`, `(lat IS NULL) = (lng IS NULL)`, every flag `IN (0,1)`,
-  `json_valid(facets_json)`. Columns: identity (`id, name, type, level, plan, country`), the
-  `location` composite (`city, lat, lng`), the `federationRef` composite (`federation,
-  federation_registration_id`), flags (`trusted_partner, verified, verified_domain,
-  safeguarding_contract_signed, suspended, email_domain, email_domain_verified,
-  mfa_required_for_leads`), `password_hash` (the org's shared bootstrap password, still used
-  for the one-time bootstrap path after `3fe242b`), `created_at`, and `facets_json`
-  (**transitional**): the nested `tactical`, `squad`, `lookingFor`, `federationCheck`,
-  `agencySettings`, the whole `verification` object and any field the schema does not know,
-  plus the record's key order, explicit nulls and composite presence so the record the
-  server sees is byte-for-byte the record it wrote. Since S10a (migration 0023) the
-  `verification` object is gone from the facets: `verification_revoked_at` is the
-  authoritative scalar `verificationRevokedAt`, the domains are `org_verified_domains`
-  rows, and `verification_org_type` was dropped (never read). Index
-  `orgs_type_level`. Three guarantees the repository enforces (review corrections after
-  `0851d38`): a facet change is tracked as persisted only once the save that flushed it
-  **committed** (the store reports commit or rollback to the repository's save hook, so a
-  rolled-back flush is repeated by the next save); the column-backed composites are served
-  through a guard that refuses nested assignment, deletion and property definition, so the
-  view can never hold a `location` or `federationRef` the table does not; and the
-  first-installation import is explicit state, `meta.orgsInit` (`pending` only for a database
-  nothing was ever saved to, `done` otherwise), never a row count — an empty cut-over table
-  stays authoritative and `attach()` imports nothing.
+- **`orgs`** — one row per club or agency (live since S3; explicit writes and SQL reads since S14g,
+  `repositories/orgs.mjs`). Writers: registration (`server.mjs`), T&S org creation
+  (`domains/verification/claims/review.mjs`), the admin verification / credentials / suspension routes, the e-mail
+  domain confirmation and the enterprise security switch, all through `orgs.create`, `orgs.update(id, draft => …)`
+  and `orgs.setPasswordHash`, inside the route's unit of work. Lifecycle: `suspended` flag; no deletion route (O2,
+  below). Typed columns only, no facet storage (an unknown field is refused, a former facet's refusal names its
+  repository): identity (`id, name, type, level, plan, country`; name 1–120, the type, level and plan vocabularies,
+  `level` nullable for the T&S creation path), the ground (`lat, lng, city`: in range, both or neither, a city only
+  with them), the federation registration (`federation, federation_registration_id`: both or neither), the flags
+  (`trusted_partner, verified, verified_domain, safeguarding_contract_signed, suspended, email_domain,
+  email_domain_verified, mfa_required_for_leads`), `verification_revoked_at` (S10a), `password_hash` (never on a
+  record) and `created_at` (required, set at creation). Index `orgs_type_level`. The first-installation import is
+  explicit state, `meta.orgsInit` (`pending` only for a database nothing was ever saved to), never a row count.
+  Former facets: `tactical`, `squad`, `lookingFor`, `federationCheck` (04, S9c), `verification` (05, S10a),
+  `agencySettings` (06, S11a).
 - **`org_users`** — staff accounts (live since S0; rebuilt STRICT at S3). Columns: `id, org_id,
   name, role, email, sso_subject, created_at, removed_at, removed_by, provenance, mfa_json,
   delivery_prefs_json` — typed columns only, no side column (an unknown field is not stored;

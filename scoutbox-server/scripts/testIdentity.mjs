@@ -255,7 +255,7 @@ await test('first boot (real server): production starts with no people or clubs,
     let h = await health();
     assert.equal(h.players, 0, 'no demo players'); assert.equal(h.orgs, 0, 'no demo clubs');
     const directory = await (await fetch(`http://127.0.0.1:${port}/orgs/directory`)).json();
-    assert.deepEqual(directory, [], 'the public club directory is empty');
+    assert.deepEqual(directory, { items: [], nextCursor: null }, 'the public club directory is empty');
     await stop(proc);
     proc = await boot(prodDir, { ...PROD_ENV, SCOUTBOX_SEED_DEMO: '1' });
     h = await health();

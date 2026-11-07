@@ -976,7 +976,7 @@ export function registerOrganisationVerification(ctx) {
     // ---- deterministic automated checks (§6). No network fetch happens here:
     // DNS/https probing from this environment is not implemented — recorded
     // honestly as not_configured rather than pretended.
-    const dupOrg = db.orgs.find((o) => o.name.trim().toLowerCase() === String(b.orgName).trim().toLowerCase());
+    const dupOrg = ctx.orgs.byName(String(b.orgName));
     const dupDomainOrg = domain ? reads.domains.verifiedElsewhere(domain) : null;
     const dupRequest = reads.rootRequests.openDuplicate(domain, String(b.orgName).trim().toLowerCase());
     const checks = {

@@ -38,7 +38,7 @@ const tempDir = (tag) => fs.mkdtempSync(path.join(os.tmpdir(), `sb-${tag}-`));
 const ORG_A = { id: 'org-a', name: 'Org A', type: 'club', level: 'pro', plan: 'Pro', country: 'GB' };
 /** A minimal player record migration 0005 accepts (dob and country are required; everything else is optional). */
 const PLAYER_1 = (name = 'P') => ({ id: 'pl-1', name, dob: '2001-01-01', country: 'GB' });
-const seedOrg = (s, id = 'org-a') => s.prepare("INSERT OR IGNORE INTO orgs (id, name, type, level, plan) VALUES (?, 'Org', 'club', 'pro', 'Pro')").run(id);
+const seedOrg = (s, id = 'org-a') => s.prepare("INSERT OR IGNORE INTO orgs (id, name, type, level, plan, created_at) VALUES (?, 'Org', 'club', 'pro', 'Pro', 0)").run(id);
 const seedUser = (s, id = 'usr-1', org = 'org-a') => { seedOrg(s, org); s.prepare("INSERT INTO org_users (id, org_id, name, name_key, role, created_at) VALUES (?, ?, 'Staff', ?, 'Scout', 1)").run(id, org, `staff ${id}`); };
 
 /**
@@ -283,11 +283,11 @@ test('snapshot mode: writing the users collection back does not cascade-delete v
 });
 
 // ------------------------------------------------------------- concurrency
-await atest('busy timeout: a save waits for a concurrent writer in another process instead of failing; without the pragma the same situation fails at once', async () => {
+await atest('busy timeout: a unit of work waits for a concurrent writer in another process instead of failing; without the pragma the same situation fails at once', async () => {
   const dir = tempDir('s2-busy');
   const store = openStore(dir, { tableBacked: TABLE_BACKED });
   const db = {};
-  attachDataLayer({ db, seed: { orgs: [ORG_A] }, store, nextId, persist: () => {}, sessionTtlMs: TTL });
+  const layer = attachDataLayer({ db, seed: { orgs: [ORG_A] }, store, nextId, persist: () => {}, sessionTtlMs: TTL });
   store.save();
   const holdMs = 1200;
   const holder = spawnChild(process.execPath, ['--input-type=module', '-e', `
@@ -304,12 +304,12 @@ await atest('busy timeout: a save waits for a concurrent writer in another proce
     assert.throws(() => raw.exec("INSERT INTO meta (key, value) VALUES ('x', '1')"), /SQLITE_BUSY|database is locked/, 'a connection without the pragma fails immediately');
     raw.close();
     const t0 = Date.now();
-    // Rewritten in S14a: the save used to write a blob; now it flushes a staged organisation facet.
-    db.orgs[0].tags = ['waited'];
-    store.save();
+    // Rewritten in S14a (a save wrote the blob) and S14g (it flushed an organisation facet): an explicit write in a
+    // unit of work now (BEGIN IMMEDIATE, which waits through the busy handler, as a route's unit does).
+    store.unitOfWork(() => layer.orgs.update('org-a', (d) => { d.suspended = true; }));
     const waited = Date.now() - t0;
     assert.ok(waited >= holdMs - 300, `the store waited for the lock (${waited} ms)`);
-    assert.deepEqual(JSON.parse(store.sqlite.prepare("SELECT facets_json FROM orgs WHERE id = 'org-a'").get().facets_json).tags, ['waited']);
+    assert.equal(store.sqlite.prepare("SELECT suspended FROM orgs WHERE id = 'org-a'").get().suspended, 1);
   };
   // Awaited by the harness: the check counts only once every assertion above has passed.
   try { await run(); } finally { try { holder.kill(); } catch { /* done */ } store.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true }); }

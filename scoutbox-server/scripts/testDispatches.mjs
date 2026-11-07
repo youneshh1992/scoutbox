@@ -108,7 +108,7 @@ test('the repository: create types the whole record (an unknown field, a wrong-t
 });
 
 test('the sweep\'s and the screens\' queries: due() returns queued, retrying and held sends whose time has come, in creation order; unopenedInAppRead() the in-app rows not yet opened whose notification was read (a join); forNotification; pageForOrg pages one organisation\'s staff dispatches newest first by cursor and never another\'s; recent, the counts and the backlog are SQL', () => {
-  const dir = tempDir('dsp-reads'); fixtureFile(dir, { orgs: [...ORGS(), { ...ORGS()[0], id: 'org-two', name: 'Northside', memos: [] }], users: [...USERS(), { id: 'usr-2', orgId: 'org-two', name: 'Rita', role: 'Scout', createdAt: 1 }] }); const s = openRaw(dir); const repo = bare(s);
+  const dir = tempDir('dsp-reads'); fixtureFile(dir, { orgs: [...ORGS(), { ...ORGS()[0], id: 'org-two', name: 'Northside' }], users: [...USERS(), { id: 'usr-2', orgId: 'org-two', name: 'Rita', role: 'Scout', createdAt: 1 }] }); const s = openRaw(dir); const repo = bare(s);
   repo.create(email({ id: 'q-due', notificationId: 'n1' })); repo.create(inApp({ id: 'ia-1', notificationId: 'n1' }));
   repo.create(email({ id: 'q-later', notificationId: 'n2', nextAt: NOW + 60_000 })); repo.create(email({ id: 'r-due', notificationId: 'n3', status: 'retrying' }));
   repo.create(email({ id: 'h-due', notificationId: 'n4', status: 'held_quiet_hours' })); repo.create(email({ id: 'acc', notificationId: 'n5', status: 'accepted' }));
@@ -160,7 +160,7 @@ test('snapshot mode: a tool round-trips every dispatch with its attempts in orde
     const tool = openStore(dir); assert.throws(() => tool.save({ idCounter: 1000, db: { dispatches: bad } }), re); tool.sqlite.close();
   }
   { const s = second(dir); assert.equal(DISPATCHES_TABLE.read(s).length, 3, 'a refused save writes nothing'); s.close(); }
-  const other = { ...ORGS()[0], id: 'org-b', name: 'Other FC', memos: [] };
+  const other = { ...ORGS()[0], id: 'org-b', name: 'Other FC' };
   let tool = openStore(dir); assert.throws(() => tool.save({ idCounter: 1000, db: { orgs: [other], users: [] } }), /no longer lists organisation org-pro but other records still reference it/, 'the kept dispatch s-1 still names org-pro'); tool.sqlite.close();
   tool = openStore(dir); tool.save({ idCounter: 1000, db: { orgs: [other], users: [], dispatches: [inApp({ id: 's-4', audience: { kind: 'player', id: 'pl-adult' }, orgId: null })] } }); tool.sqlite.close();
   { const s = second(dir); assert.deepEqual(DISPATCHES_TABLE.read(s).map((d) => d.id), ['s-4'], 'dropping the dispatches with the organisation is accepted'); s.close(); }

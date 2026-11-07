@@ -177,6 +177,9 @@ export function typeFriendly(raw, at = 'friendlies') {
 const KM_PER_DEGREE = 111.32;
 /** The latitude/longitude box that holds every point within `km` of `loc` (a prefilter; the exact distance is the caller's). */
 export function boxAround(loc, km) {
+  // 1% wider than the radius: the exact test (haversine on a 6,371 km sphere, distances rounded to 0.1 km) can accept a
+  // point a little beyond km / 111.32 degrees, and a prefilter must never drop what the exact test keeps.
+  km *= 1.01;
   const dLat = km / KM_PER_DEGREE;
   const cos = Math.cos((loc.lat * Math.PI) / 180);
   const dLng = cos > 1e-6 ? Math.min(180, km / (KM_PER_DEGREE * cos)) : 180;

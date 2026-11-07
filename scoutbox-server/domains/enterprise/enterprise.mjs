@@ -242,9 +242,10 @@ export function registerEnterprise(ctx) {
 
   orgRouter.put('/security', (req, res) => {
     if (!requireLead(req, res)) return;
-    orgs.update(req.org.id, { mfaRequiredForLeads: req.body?.mfaRequiredForLeads === true });
+    if (typeof req.body?.mfaRequiredForLeads !== 'boolean') return res.status(400).json({ error: 'FIELD_INVALID', field: 'mfaRequiredForLeads', message: 'mfaRequiredForLeads must be true or false.' });
+    const updated = orgs.update(req.org.id, (d) => { d.mfaRequiredForLeads = req.body.mfaRequiredForLeads; });
     persistNow();
-    res.json({ mfaRequiredForLeads: req.org.mfaRequiredForLeads, note: 'Enforced at login: leads without MFA are asked to set it up before privileged actions.' });
+    res.json({ mfaRequiredForLeads: updated.mfaRequiredForLeads, note: 'Enforced at login: leads without MFA are asked to set it up before privileged actions.' });
   });
 
   // Session/device management (own sessions only).
@@ -541,7 +542,7 @@ export function registerEnterprise(ctx) {
       files.unshift({ path: 'scoutbox.db', sha256: fileSha256(databasePath), bytes: fs.statSync(databasePath).size });
       manifest = {
         contract: 'backup.2026-11.v2', createdAt: Date.now(), engine: 'sqlite database copy + media files',
-        counts: { players: db.players.length, retainedPlayers: players.retainedCount(), orgs: db.orgs.length, notifications: notifications.count(), mediaFiles: files.length - 1 },
+        counts: { players: db.players.length, retainedPlayers: players.retainedCount(), orgs: orgs.count(), notifications: notifications.count(), mediaFiles: files.length - 1 },
         media: {
           copied: files.length - 1, queuedForRemoval: leftOut,
           note: 'Files whose removal was committed but not yet completed are left out on purpose: their queue entries are in scoutbox.db, and the restored server serves nothing for them and finishes the removal at boot.',

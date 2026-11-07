@@ -70,7 +70,7 @@ function serverOpen(dir) {
 }
 
 // ------------------------------------------------------------- schema
-test('[schema] 0026 is registered after 0025, creates the fifteen STRICT tables (no JSON column), empty on a fresh database, and retires orgs.agencySettings', () => {
+test('[schema] 0026 is registered after 0025, creates the fifteen STRICT tables (no JSON column), empty on a fresh database (S14g: the organisations have no facets to clean up)', () => {
   const ids = DATA_MIGRATIONS.map((m) => m.id);
   assert.equal(ids.indexOf(MIGRATION), ids.indexOf('0025_transitions_vouches') + 1);
   assert.equal(TABLES.length, 15);
@@ -81,9 +81,8 @@ test('[schema] 0026 is registered after 0025, creates the fifteen STRICT tables 
     assert.equal(s.prepare(`SELECT count(*) AS n FROM ${t}`).get().n, 0);
     assert.ok(!s.prepare(`PRAGMA table_info(${t})`).all().some((c) => /_json$/.test(c.name)), `${t}: no JSON column`);
   }
+  assert.ok(!s.prepare('PRAGMA table_info(orgs)').all().some((c) => c.name === 'facets_json'), 'the organisations have no facet column');
   s.close(); rm(dir);
-  const m = DATA_MIGRATIONS.find((x) => x.id === MIGRATION);
-  assert.match(String(m.up), /json_remove\(facets_json, '\$\.agencySettings'\)/, 'the migration drops the facet from orgs.facets_json');
 });
 
 // ------------------------------------------------------------- typing

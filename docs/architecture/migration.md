@@ -80,11 +80,12 @@ takes the next free id; the placeholder ids in `sqlite-schema.md` mean nothing.
 | S14d | delivery dispatches, the mail outbox, the push log and device tokens become explicit writes and SQL reads; the tables re-typed (vocabulary CHECKs, a staff audience's organisation as a key, integer clocks, an address on every outbox row, one row per device token) | `0010`, `0011` (amended in place) | `dispatches`, `outboxPush` | done |
 | S14e | notifications and their preferences become explicit writes and SQL reads; the tables re-typed (the audience kind's vocabulary, a staff audience a key, length and category CHECKs, the delivery marker; the group key and acknowledger worked out) | `0009` (amended in place) | `notifications` | done |
 | S14f | staff and sessions become explicit writes and SQL reads; the staff table re-typed (a name unique in its organisation, removed accounts included; an e-mail unique among current staff; MFA and delivery preferences as columns, recovery codes as child rows; the remover a key) and an org session's staff and organisation one key | `0001`, `0002` (amended in place; `0004` no longer rebuilds `org_users`) | `users`, `sessions` | done |
-| S14g… | the remaining staged repositories (the organisations' facets, players and guardians) become explicit, one per step (§4.6) | | | **next** |
+| S14g | organisations become explicit writes and SQL reads; the table re-typed (no `facets_json`, length and range CHECKs, a ground as both coordinates or neither, a federation registration as both parts or neither, `created_at` required; the password hash off the record) | `0004` (amended in place; `0021`, `0023`, `0026` no longer edit facets) | `orgs` | done |
+| S14h… | the remaining staged repositories (players and guardians) become explicit (§4.6) | | | **next** |
 | S14 last | the save path, `db` and snapshot mode go (§4.6) | | | |
 
 Steps before S8 were staged (written at save) rather than explicit; S4a's identity writes are explicit since §4.3.1, and
-S6b's since S14b, S7d's since S14c, S7b's and S7c's since S14d, S7a's since S14e, S0's and S2's since S14f.
+S6b's since S14b, S7d's since S14c, S7b's and S7c's since S14d, S7a's since S14e, S0's and S2's since S14f, S3's since S14g.
 
 ## 4. The order of work
 
@@ -104,12 +105,12 @@ and the DDL, so these cannot drift, and include a `date` type for football dates
   own `update` and takes the extra detail its callers used to patch on afterwards.
 - **Units of work.** Every route that writes more than one row (including its notifications and ledger rows) runs in
   one unit. A refusal is thrown inside the unit, replacing hand-written undo code. Routes check every field before
-  writing anything. Only the organisations' writes still have to come first (`orgs.insert` is staged).
+  writing anything.
 - **Reads.** No mirror. The old `db.<collection>` name throws, naming the repository: don't delete it, or the `??= []`
   lines and `Array.isArray` guards quietly see an empty collection. The repository answers indexed queries (`byId`,
   `forOrg`, `forPlayer`, counts…) with fresh deep-frozen records; a read inside a unit sees the unit's writes. Modules
   receive a per-domain reads object on their context (`recruitmentReads`, `scoutingReads`, `verificationReads`,
-  `agentReads`, `complianceReads`, `transactionReads`, `developmentReads`, `boxCamReads`, `discoveryReads`, `insightReads`, `integrationReads`, `enterpriseReads`, `groupReads`, `grassrootsReads`, `safetyReads`; S13e's few readers take the `operations` repository itself, the threads' the `channels` repository, the delivery centre the `dispatches` and `outboxPush` repositories, the feed and preferences the `notifications` repository, and staff readers the `users` repository or `byId.user`); pure projectors take `reads`. Sweeps are indexed predicates, admin figures are
+  `agentReads`, `complianceReads`, `transactionReads`, `developmentReads`, `boxCamReads`, `discoveryReads`, `insightReads`, `integrationReads`, `enterpriseReads`, `groupReads`, `grassrootsReads`, `safetyReads`; S13e's few readers take the `operations` repository itself, the threads' the `channels` repository, the delivery centre the `dispatches` and `outboxPush` repositories, the feed and preferences the `notifications` repository, staff readers the `users` repository or `byId.user`, and organisation readers the `orgs` repository or `byId.org`); pure projectors take `reads`. Sweeps are indexed predicates, admin figures are
   `GROUP BY`s. Lists decode their records' child rows in one batch (`childRowsOf` in `repositories/database.mjs`),
   never a query per record.
 - **Reads that write become sweeps or upserts.** A notice a read used to create comes from a sweep, its marker
@@ -124,10 +125,10 @@ and the DDL, so these cannot drift, and include a `date` type for football dates
 - **Keys.** `org_id` and staff ids are `RESTRICT`. Player, guardian and media ids carry no key (tolerant: records
   outlive an account deletion, as before). Keys between tables of one domain are immediate `RESTRICT`.
   `DEFERRABLE INITIALLY DEFERRED` only for a key whose other side is still written by a staged hook at COMMIT.
-- **Org facets.** To retire a facet from `orgs.facets_json`: the migration drops it with `json_remove`, `orgs.mjs`
-  `RETIRED_FACETS` makes reading or writing it throw, and `orgSafe` (login, admin clubs) adds what the apps read from
-  `session.org` explicitly. A whole-replace save of a list with dependants diffs by id, so kept rows keep their
-  dependants.
+- **Org facets.** None are left (S14g dropped `orgs.facets_json`): an organisation record has only its typed fields, and
+  a former facet's refusal names its repository. `orgSafe` (login, admin clubs) is an allowlist and adds what the apps
+  read from `session.org` explicitly (looking-for, the federation check). A whole-replace save of a list with
+  dependants diffs by id, so kept rows keep their dependants.
 - **Seeded catalogues** (templates, policy versions) are inserted by the migration.
 - **Clean-up.** Nothing creates a collection in memory any more (S14a); a step deletes its domain's old names
   from whatever still mentions them.
@@ -207,9 +208,10 @@ player. `scripts/testUnitOfWork.mjs` holds that line: a player write costs the s
 and 2,000 players. Players get their defaults at creation (`PLAYER_CREATION_DEFAULTS`), not by a boot backfill.
 
 **Left:** an empty unit of work cost about 23 ms at 30k players, mostly the organisations (captured and flushed
-whole per unit, because their remaining facets are still edited in place) and the blob collections' memento. The
-memento went with the blob (S14a), the notifications' whole-mirror copy per unit with S14e; the organisations' part
-goes when their facet writes become explicit.
+whole per unit, because their facets were edited in place) and the blob collections' memento. The memento went with
+the blob (S14a), the notifications' whole-mirror copy per unit with S14e, the organisations' part with S14g
+(`scripts/testUnitOfWork.mjs` asserts an empty unit runs no organisation statement). What is left is the players'
+and guardians' participant (S14h).
 
 ### 4.4 Code and test layout
 
@@ -291,9 +293,23 @@ Split in parts, like S12 and S13.
   unit. Founder decisions: a re-invite restores the removed account; a name already in the organisation is refused
   (`STAFF_NAME_TAKEN`). Junk refused: a non-boolean e-mail switch on `/org/delivery/prefs`, a sign-in or invite name
   over 120 characters.
-- **S14g onwards: the remaining staged repositories become explicit**, one per step, the S8 way:
-  the organisations' remaining facets, players and guardians. Each loses its mirror, its `db.<name>` view and its save hook, and its reads become queries.
-  This is also what closes §4.3.1's cost of an empty unit of work.
+- **S14g (done): organisations** are explicit writes and SQL reads, with no mirror and no `db.orgs` (the name
+  throws). No route wrote a facet any more (probed across every suite), so migration `0004` was amended in place to
+  create the final table without `facets_json` (and `0021`, `0023`, `0026` no longer edit it): name 1–120, country
+  1–40, a city 1–80 only with a ground, latitude and longitude in range and both or neither, a federation
+  registration as both parts or neither, domains up to 253, `created_at` required and set at creation. A record has
+  every field, always (null or false when unset), and never the password hash (`passwordHashOf`, `setPasswordHash`).
+  Writes are `create` and `update(id, draft => …)` and join units: a grassroots registration (the club, its
+  administrator and the session) and the T&S approval of a new organisation are each one unit now. Reads: `byId`,
+  `list` (the sign-in pickers' filters), `page` (`/admin/clubs` and the player-facing `/orgs/directory` page by
+  cursor; the apps read the first page), `locatedInBox` (the opportunity radar), `byName`, `count`. Junk refused:
+  a non-boolean switch or a non-text domain on `/admin/clubs/:id/verification` and a non-boolean
+  `mfaRequiredForLeads` (`400 FIELD_INVALID`) instead of coercing them. Removed: the never-set `closedAt` checks
+  in verification. Founder decisions (7 Nov): the sign-in list stays unpaged, and the T&S-created grassroots
+  club's placeholder ground stays, both in `known-issues.md`.
+- **S14h onwards: the remaining staged repositories become explicit**, the S8 way: players and guardians. Each loses
+  its mirror, its `db.<name>` view and its save hook, and its reads become queries. This also closes what is left of
+  §4.3.1's cost of an empty unit of work.
 - **S14 last: the save path goes.** `persist()`, `persistNow()`, the debounced save, the save hooks,
   `repositories/memento.mjs`, `repositories/readonly.mjs` and `db` itself; then snapshot mode (`openStore(dir)`
   with whole-file `load`/`save`) and every domain's `*_SNAPSHOT`, with the suites setting up their data through the

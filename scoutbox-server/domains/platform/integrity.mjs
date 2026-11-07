@@ -32,6 +32,7 @@ const dupes = (items, keyOf) => {
  * @returns {{ ok: boolean, checked: number, violations: Array<{code:string, key:string, ids:string[]}> }}
  * Keys and ids only — never a name, a note or a date of birth.
  */
+/** `db` holds the `players` and `orgs` to check against (plain arrays: the server reads them from their repositories). */
 export function integrityReport(db, { cases: allCases = [] } = {}) {
   const violations = [];
   const push = (code, list) => { for (const d of list) violations.push({ code, key: String(d.key), ids: d.ids.map(String) }); };
@@ -45,7 +46,6 @@ export function integrityReport(db, { cases: allCases = [] } = {}) {
   ));
   push('CASE_ID_DUPLICATE', dupes(allCases, (c) => c?.id));
   push('PLAYER_ID_DUPLICATE', dupes(db.players ?? [], (p) => p?.id));
-  push('ORG_ID_DUPLICATE', dupes(db.orgs ?? [], (o) => o?.id));
   // A brief id, one Second Look item per (organisation, room, decision cycle), a fingerprint once per item and a brief's
   // rev ≥ 1 are the discovery tables' own keys and CHECKs since S12c (repositories/discovery.mjs): a row that breaks
   // them is never written, so there is nothing left to report here.

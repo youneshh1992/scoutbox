@@ -83,7 +83,7 @@ export function registerTrial(ctx) {
   const limited = (action, keyPart) => !!rateLimit?.limited(action, keyPart);
   const err = (res, error, message, extra = {}) => sendDomainError(res, { error, message, ...extra }, 'trial');
   const orgActor = (req) => ({ kind: 'org', userId: req.orgUser.id, name: req.orgUser.name });
-  const orgOf = (orgId) => (db.orgs ?? []).find((o) => o.id === orgId) ?? null;
+  const orgOf = (orgId) => ctx.byId.org(orgId);
   const roleFor = (req, room) => roomRole({ room, user: req.orgUser, isLead: isLead(req.orgUser) });
   const isPlain = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 

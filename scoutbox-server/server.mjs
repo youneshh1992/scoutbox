@@ -31,6 +31,7 @@ import { MESSAGE_LIMITS } from './repositories/channels.mjs';
 import { NOTIFICATION_LIMITS, feedItem } from './repositories/notifications.mjs';
 import { createIdCounter } from './repositories/counters.mjs';
 import { GRASSROOTS_LIMITS, boxAround } from './repositories/grassroots.mjs';
+import { ORG_LIMITS } from './repositories/orgs.mjs';
 import { CLUB_SETUP_LIMITS, LOOKING_FOR_POSITIONS } from './repositories/clubSetup.mjs';
 import { TRANSITION_LIMITS, vouchCodeHash } from './repositories/transitionsVouches.mjs';
 import { registerM12 } from './m12/index.mjs';
@@ -235,7 +236,7 @@ function seam(step) {
 // logged as codes and ids (no names) and counted on /capabilities; the
 // process still starts, because a running server that says "two open Rooms
 // for one player" is more useful than a dead one that says nothing.
-const integrity = integrityReport(db, { cases: recruitmentCases.cases.withRoom() });
+const integrity = integrityReport({ players: db.players, orgs: orgs.list() }, { cases: recruitmentCases.cases.withRoom() });
 for (const v of integrity.violations) console.error(`INTEGRITY ${v.code} key=${v.key} ids=${v.ids.join(',')}`);
 if (integrity.violations.length) console.error(`INTEGRITY ${integrity.violations.length} violation(s) in the database — nothing was repaired.`);
 
@@ -617,13 +618,19 @@ const nextId = (prefix) => {
   return `${prefix}-${idCounter.next()}`;
 };
 
+/** The organisation as the apps see it: an allowlist of the record (the password hash is never on it, S14g). */
 function orgSafe(o) {
-  const { password: _pw, ...safe } = o;
   // S9c: what the club is looking for and its federation-route request are club setup tables, not facets of the
   // record; the apps read both from the session's organisation, so they are added here explicitly.
   const fed = clubSetup.federation.forOrg(o.id);
   return {
-    ...safe,
+    id: o.id, name: o.name, type: o.type, level: o.level, plan: o.plan, country: o.country,
+    location: o.location ? { lat: o.location.lat, lng: o.location.lng, city: o.location.city } : null,
+    federationRef: o.federationRef ? { federation: o.federationRef.federation, registrationId: o.federationRef.registrationId } : null,
+    trustedPartner: o.trustedPartner, verified: o.verified, verifiedDomain: o.verifiedDomain,
+    safeguardingContractSigned: o.safeguardingContractSigned, suspended: o.suspended,
+    emailDomain: o.emailDomain, emailDomainVerified: o.emailDomainVerified, mfaRequiredForLeads: o.mfaRequiredForLeads,
+    verificationRevokedAt: o.verificationRevokedAt, createdAt: o.createdAt,
     lookingFor: [...clubSetup.lookingFor.forOrg(o.id)],
     federationCheck: fed ? { federation: fed.federation, registrationId: fed.registrationId, contactEmail: fed.contactEmail, status: fed.status, submittedAt: fed.submittedAt } : null,
   };
@@ -1166,7 +1173,7 @@ app.get('/health', (_req, res) => res.json({
   devLogins: DEV_LOGINS,
   uptimeSec: Math.round(process.uptime()),
   players: db.players.length,
-  orgs: db.orgs.length,
+  orgs: orgs.count(),
 }));
 
 app.get('/meta', (_req, res) => {
@@ -1738,7 +1745,7 @@ guardianRouter.post('/block', (req, res) => {
   const childId = playerId || (req.guardian.childIds.length === 1 ? req.guardian.childIds[0] : null);
   if (!orgId || !childId) return res.status(400).json({ error: 'ORG_AND_CHILD_REQUIRED', message: playerId ? undefined : 'Name which child the block is for (playerId).' });
   if (!optText(reason)) return badField(res, 'reason');
-  if (!db.orgs.some((o) => o.id === orgId)) return res.status(404).json({ error: 'ORG_NOT_FOUND' });
+  if (!byId.org(orgId)) return res.status(404).json({ error: 'ORG_NOT_FOUND' });
   unit(() => {
     safetyAudit.blocks.add({ id: nextId('blk'), playerId: childId, orgId, by: 'guardian', reason: reason || '', ts: Date.now() });
     ledgerAppend({ type: 'org_blocked_by_guardian', playerId: childId, orgId, orgName: byId.org(orgId).name, userId: null, scoutName: 'guardian' });
@@ -1799,13 +1806,12 @@ function handleReport(req, res, actor) {
 
 // ---------------------------------------------------------------- org auth
 app.get('/orgs', (req, res) => {
-  let list = db.orgs;
   // Platform separation starts at the login screen: the Grassroots app lists
-  // only grassroots clubs, the main app never lists them.
-  if (req.query.platform === 'grassroots') list = list.filter((o) => o.level === 'grassroots');
-  else if (req.query.platform === 'main') list = list.filter((o) => o.level !== 'grassroots');
-  // M23 P5.6B: the Agent app lists agency organisations only.
-  else if (req.query.platform === 'agent') list = list.filter((o) => o.type === 'agency');
+  // only grassroots clubs, the main app never lists them. M23 P5.6B: the Agent
+  // app lists agency organisations only. Unpaged: the sign-in pickers have no
+  // search yet (docs/known-issues.md).
+  const filter = { grassroots: { level: 'grassroots' }, main: { notLevel: 'grassroots' }, agent: { type: 'agency' } }[req.query.platform] ?? {};
+  const list = orgs.list(filter);
   res.json(list.map((o) => ({
     id: o.id, name: o.name, type: o.type, level: o.level ?? null, plan: o.plan, trustedPartner: o.trustedPartner,
     verified: o.verified, safeguardingCertified: safeguardingCertified(o),
@@ -1827,34 +1833,28 @@ app.post('/auth/org/register-grassroots', (req, res) => {
   if (!Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) {
     if (typeof lat === 'number' || typeof lng === 'number') return badField(res, 'location');
   }
-  if (!federation || !registrationId) {
+  if (typeof country !== 'string' || !country.trim() || country !== country.trim()) return badField(res, 'country');
+  if (!federation?.trim() || !registrationId?.trim()) {
     return res.status(400).json({ error: 'FEDERATION_REQUIRED', message: 'Grassroots clubs must hold a federation registration — name the federation and your registration id.' });
   }
   if (typeof lat !== 'number' || typeof lng !== 'number') {
     return res.status(400).json({ error: 'LOCATION_REQUIRED', message: 'The 50km scouting radius is measured from your ground — a location is required.' });
   }
   if (!reqText(scoutName, 120)) return res.status(400).json({ error: 'SCOUT_NAME_REQUIRED' }); // PRE-M24 (PM-10)
-  // S3: the organisation is a table row from the first byte; the repository
-  // returns the record the rest of this handler (and db.orgs) reads.
-  const org = orgs.insert({
-    id: nextId('org'),
-    name: name.trim(),
-    type: 'club',
-    level: 'grassroots',
-    location: { lat, lng, city: city || '' },
-    federationRef: { federation: String(federation), registrationId: String(registrationId) },
-    plan: 'Grassroots',
-    trustedPartner: false,
-    country,
-    verified: false,
-    verifiedDomain: null,
-    safeguardingContractSigned: false,
-    ...(password ? { password: hashPassword(String(password)) } : {}),
-  });
-  // The administrator's account and session are one unit (the organisation is still written first: its repository is staged).
-  const { user, token } = unit(() => {
-    const created = users.create({ orgId: org.id, name: scoutName.trim(), role: role?.trim() || 'Manager' });
-    return { user: created, token: createSession('org', org.id, { userId: created.id }) };
+  // The organisation, its administrator's account and the session are one unit (S14g).
+  const { org, user, token } = unit(() => {
+    const created = orgs.create({
+      name: name.trim(),
+      type: 'club',
+      level: 'grassroots',
+      location: { lat, lng, city: city?.trim() || null },
+      federationRef: { federation: federation.trim(), registrationId: registrationId.trim() },
+      plan: 'Grassroots',
+      country,
+      passwordHash: password ? hashPassword(String(password)) : null,
+    });
+    const admin = users.create({ orgId: created.id, name: scoutName.trim(), role: role?.trim() || 'Manager' });
+    return { org: created, user: admin, token: createSession('org', created.id, { userId: admin.id }) };
   });
   persist();
   broadcast('orgs');
@@ -1893,10 +1893,11 @@ app.post('/auth/org/login', (req, res) => {
   if (scoutName.trim().length > STAFF_LIMITS.name) return res.status(400).json({ error: 'FIELD_INVALID', field: 'scoutName', message: `scoutName is at most ${STAFF_LIMITS.name} characters.` });
   // Org credentials: provisioned orgs require their password; unprovisioned
   // (seeded demo) orgs are a development shortcut only.
-  if (org.password) {
-    const check = verifyPassword(req.body?.password ?? '', org.password);
+  const passwordHash = orgs.passwordHashOf(org.id);
+  if (passwordHash) {
+    const check = verifyPassword(req.body?.password ?? '', passwordHash);
     if (!check) { noteLoginFailure(`org:${orgId}`); return res.status(401).json({ error: 'BAD_PASSWORD', message: 'This organisation is password-protected.' }); }
-    if (check === 'upgrade') orgs.update(org.id, { password: hashPassword(req.body.password) });
+    if (check === 'upgrade') orgs.setPasswordHash(org.id, hashPassword(req.body.password));
   } else if (!DEV_LOGINS) {
     return devLoginRefused(res);
   }
@@ -1942,7 +1943,7 @@ app.post('/auth/org/login', (req, res) => {
   // Unprovisioned (seeded demo) organisations keep the development shortcut:
   // a login names its own role. That path is refused outside development
   // above (`devLoginRefused`), so it is never reachable in production.
-  const credentialed = !!org.password;
+  const credentialed = !!passwordHash;
   let roleNote;
   if (!user) {
     if (credentialed) {
@@ -3242,14 +3243,14 @@ orgRouter.post('/verification/email/confirm', (req, res) => {
   // organisation's domain columns written together — a failure anywhere, the
   // real COMMIT included, keeps the challenge live and the organisation
   // unverified, and the retry lands both.
-  unit(() => {
+  const updated = unit(() => {
     const consumed = codes.consumeEmailChallenge(req.org.id, code);
     if (!consumed) throw new Error('email challenge: the challenge changed between the check and the confirmation');
     seam('email_challenge.confirm.after_consume');
-    orgs.update(req.org.id, { emailDomain: consumed.email.split('@')[1], emailDomainVerified: true });
+    return orgs.update(req.org.id, (d) => { d.emailDomain = consumed.email.split('@')[1]; d.emailDomainVerified = true; });
   });
   broadcast('orgs');
-  res.json({ emailDomainVerified: true, emailDomain: req.org.emailDomain });
+  res.json({ emailDomainVerified: true, emailDomain: updated.emailDomain });
 });
 
 // ------------------------------------------------- ledger, proof, plan etc
@@ -3905,8 +3906,7 @@ playerRouter.get('/benchmarks', (req, res) => {
 playerRouter.get('/opportunities', (req, res) => {
   if (grassrootsOnly(req, res)) return;
   if (!req.player.location) return res.json({ clubs: [], note: 'Set your location to see clubs within reach.' });
-  const near = db.orgs
-    .filter((o) => o.level === 'grassroots' && o.location)
+  const near = orgs.locatedInBox(boxAround(req.player.location, GRASSROOTS_RADIUS_KM), { level: 'grassroots' })
     .map((o) => ({ org: o, distanceKm: Math.round(haversineKm(o.location, req.player.location) * 10) / 10 }))
     .filter((x) => x.distanceKm <= GRASSROOTS_RADIUS_KM)
     .sort((a, b) => a.distanceKm - b.distanceKm);
@@ -4382,9 +4382,13 @@ guardianRouter.delete('/children/:id', (req, res) => {
 // ------------------------------------------------------------- directory
 // The club directory players browse: verified identity + how clubs actually
 // behave (trials run, report turnaround) — accountability as marketing.
-app.get('/orgs/directory', (_req, res) => {
-  res.json(
-    db.orgs.filter((o) => o.type === 'club').map((o) => {
+// Paged by cursor, oldest club first (domains/platform/paging.mjs): { items, nextCursor }.
+app.get('/orgs/directory', (req, res) => {
+  let page;
+  try { page = orgs.page({ type: 'club' }, readPage(req.query, ['number'])); } catch (e) { return sendPageError(res, e); }
+  res.json({
+    nextCursor: page.nextCursor,
+    items: page.items.map((o) => {
       const trials = recruitment.trials.forOrg(o.id);
       const reported = trials.filter((t) => t.status === 'reported' && t.report);
       const avgReportDays = reported.length
@@ -4397,8 +4401,8 @@ app.get('/orgs/directory', (_req, res) => {
         // Grassroots clubs wear their development record, not resale multiples.
         ...(o.level === 'grassroots' ? pathwayRecord(o) : {}),
       };
-    })
-  );
+    }),
+  });
 });
 
 // Coach reference submission: the code from the emailed request proves the
@@ -4476,7 +4480,7 @@ adminRouter.get('/overview', (_req, res) => {
   res.json({
     players: db.players.length,
     guardians: db.guardians.length,
-    orgs: db.orgs.length,
+    orgs: orgs.count(),
     openReports: safetyAudit.reports.countOpen(),
     blocks: safetyAudit.blocks.count(),
     moderationHits: safetyAudit.moderationLog.count(),
@@ -4547,15 +4551,18 @@ adminRouter.post('/reports/:id/resolve', (req, res) => {
   // The resolution, the organisation's suspension and the reporter's notice commit together.
   const resolved = unit(() => {
     const r = safetyAudit.reports.resolve(report.id, { outcome: outcome.trim(), at: Date.now() });
-    if (action === 'suspend_org' && r.targetOrgId) orgs.update(r.targetOrgId, { suspended: true });
+    if (action === 'suspend_org' && r.targetOrgId) orgs.update(r.targetOrgId, (d) => { d.suspended = true; });
     if (r.by !== 'system') notify({ kind: r.by, id: r.byId }, 'report_resolved', `Your report was reviewed: ${r.outcome}`, r.id); // a system escalation has no reporter to tell
     return r;
   });
   res.json(reportView(resolved));
 });
 
-adminRouter.get('/clubs', (_req, res) => {
-  res.json(db.orgs.map((o) => ({ ...orgSafe(o), safeguardingCertified: safeguardingCertified(o) })));
+// Paged by cursor, oldest first (domains/platform/paging.mjs): { items, nextCursor }.
+adminRouter.get('/clubs', (req, res) => {
+  let page;
+  try { page = orgs.page({}, readPage(req.query, ['number'])); } catch (e) { return sendPageError(res, e); }
+  res.json({ items: page.items.map((o) => ({ ...orgSafe(o), safeguardingCertified: safeguardingCertified(o) })), nextCursor: page.nextCursor });
 });
 
 // Credentialed login for organisations: Trust & Safety provisions (or
@@ -4568,7 +4575,7 @@ adminRouter.post('/clubs/:id/credentials', (req, res) => {
   if (!password || String(password).length < 8) {
     return res.status(400).json({ error: 'PASSWORD_TOO_SHORT', message: 'Club passwords need at least 8 characters.' });
   }
-  orgs.update(org.id, { password: hashPassword(String(password)) });
+  orgs.setPasswordHash(org.id, hashPassword(String(password)));
   persistNow();
   res.json({ ok: true, note: 'Credentials provisioned — the organisation signs in with this password from now on.' });
 });
@@ -4577,20 +4584,24 @@ adminRouter.post('/clubs/:id/verification', (req, res) => {
   const org = byId.org(req.params.id);
   if (!org) return res.status(404).json({ error: 'ORG_NOT_FOUND' });
   const { verified, safeguardingContractSigned, verifiedDomain, suspended } = req.body || {};
+  // S14g: the switches are booleans and the domain is text or null; anything else is refused, never coerced.
+  for (const [f, v] of [['verified', verified], ['safeguardingContractSigned', safeguardingContractSigned], ['suspended', suspended]]) if (v !== undefined && typeof v !== 'boolean') return res.status(400).json({ error: 'FIELD_INVALID', field: f, message: `${f} must be true or false.` });
+  if (verifiedDomain !== undefined && verifiedDomain !== null && !(typeof verifiedDomain === 'string' && verifiedDomain.trim().length <= ORG_LIMITS.domain)) return badField(res, 'verifiedDomain');
   // M14: the legacy toggle stays functional, but its changes now carry
   // claim-level provenance so the boolean and the claim engine never drift (one unit).
-  unit(() => {
-    orgs.update(org.id, {
-      verified: verified !== undefined ? !!verified : undefined,
-      safeguardingContractSigned: safeguardingContractSigned !== undefined ? !!safeguardingContractSigned : undefined,
-      verifiedDomain: verifiedDomain !== undefined ? (verifiedDomain || null) : undefined,
-      suspended: suspended !== undefined ? !!suspended : undefined,
+  const updated = unit(() => {
+    orgs.update(org.id, (d) => {
+      if (verified !== undefined) d.verified = verified;
+      if (safeguardingContractSigned !== undefined) d.safeguardingContractSigned = safeguardingContractSigned;
+      if (verifiedDomain !== undefined) d.verifiedDomain = verifiedDomain?.trim() || null;
+      if (suspended !== undefined) d.suspended = suspended;
     });
     m14Ctx?.syncLegacyOrgVerification?.(org, req.body);
+    return byId.org(org.id);
   });
   persist();
   broadcast('players'); // visibility rules may have changed
-  res.json({ ...orgSafe(org), safeguardingCertified: safeguardingCertified(org) });
+  res.json({ ...orgSafe(updated), safeguardingCertified: safeguardingCertified(updated) });
 });
 
 // §6.5 — Trust & Safety sees an allowlist of each guardian: never the password hash, never the e-mail code.
@@ -4711,7 +4722,7 @@ function revokeOrgUserAccess(userId) {
 }
 
 registerM12({
-  db, byId, safetyReads, scoutingReads, verificationReads, agentReads, complianceReads, developmentReads, development, boxCamReads, discoveryReads, insightReads, grassrootsReads, recruitmentReads, users, players, guardians, unit, app, orgRouter, playerRouter, guardianRouter, adminRouter,
+  db, byId, safetyReads, scoutingReads, verificationReads, agentReads, complianceReads, developmentReads, development, boxCamReads, discoveryReads, insightReads, grassrootsReads, recruitmentReads, users, orgs, players, guardians, unit, app, orgRouter, playerRouter, guardianRouter, adminRouter,
   nextId, persist, persistNow, notify, ledgerAppend, broadcast, safetyAudit, recruitment, recruitmentCases, // S8a: requests and trials are explicit repository writes
   signingsFollowUps, // S8d: follow-ups and outcome reports are explicit repository writes
   scoutingEvidence, // S9a: evidence, coach affiliations and squad invitations are explicit repository writes
@@ -5298,5 +5309,5 @@ app.use((err, req, res, _next) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`scoutbox-server listening on :${PORT} — ${db.players.length} players, ${db.orgs.length} orgs`);
+  console.log(`scoutbox-server listening on :${PORT} — ${db.players.length} players, ${orgs.count()} orgs`);
 });

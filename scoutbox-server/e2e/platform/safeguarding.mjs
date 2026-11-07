@@ -85,14 +85,14 @@ section('D — units of work');
   const blocks = (await admin('/admin/blocks')).body.items;
   ok(blocks.some((b) => b.playerId === 'pl-guni' && b.orgId === 'org-eastport' && b.reason === 'suspended_pending_review'), 'the suspension block is there');
   ok((await j('GET', '/guardian/inbox', undefined, amara)).body.items.find((r) => r.id === req.body.requestId)?.status === 'suspended', 'and the request froze with it');
-  ok((await admin('/admin/clubs')).body.find((c) => c.id === 'org-eastport')?.safeguardingCertified === false, 'an open urgent report withdraws the safeguarding certificate');
+  ok((await admin('/admin/clubs')).body.items.find((c) => c.id === 'org-eastport')?.safeguardingCertified === false, 'an open urgent report withdraws the safeguarding certificate');
   // The resolution, the suspension of the organisation, the reporter's notice.
   const res = await j('POST', `/admin/reports/${rep.body.reportId}/resolve`, { outcome: 'Synthetic outcome.', action: 'suspend_org' }, null, ADMIN);
   ok(res.status === 200 && res.body.status === 'resolved' && res.body.outcome === 'Synthetic outcome.' && Number.isInteger(res.body.resolvedAt), 'the report is resolved');
   neg((await j('POST', `/admin/reports/${rep.body.reportId}/resolve`, { outcome: 'Again.' }, null, ADMIN)).status === 409, 'a second resolution: 409');
   neg((await j('POST', '/admin/reports/rep-nobody/resolve', { outcome: 'x' }, null, ADMIN)).status === 404, 'an unknown report: 404');
   neg((await j('POST', `/admin/reports/${triage[0].id}/resolve`, { outcome: 'x'.repeat(2001) }, null, ADMIN)).body?.field === 'outcome', 'an over-long outcome: 400 naming the field');
-  ok((await admin('/admin/clubs')).body.find((c) => c.id === 'org-eastport')?.suspended === true, 'the organisation is suspended with it');
+  ok((await admin('/admin/clubs')).body.items.find((c) => c.id === 'org-eastport')?.suspended === true, 'the organisation is suspended with it');
   ok((await j('GET', '/guardian/notifications', undefined, amara)).body.some((n) => n.type === 'report_resolved'), 'the reporter heard');
   const sysRes = await j('POST', `/admin/reports/${triage[0].id}/resolve`, { outcome: 'Reviewed.', action: 'dismiss' }, null, ADMIN);
   ok(sysRes.status === 200, 'a system escalation resolves too');

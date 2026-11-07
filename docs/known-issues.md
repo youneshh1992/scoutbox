@@ -23,6 +23,15 @@ fixed on 3 November; these were found while fixing it.
 - **Staff quiet hours are saved but never applied.** `PUT /org/delivery/prefs` stores a staff member's quiet hours,
   but the delivery centre only honours the e-mail on/off switch for staff (players' and guardians' quiet hours do
   work). Found in S14f; making it work is a feature, so it waits for the end of the freeze.
+- **A grassroots club approved through a Trust & Safety application is placed in central London.** The claim review
+  (`domains/verification/claims/review.mjs`) creates the club at 51.5, -0.1 with the federation registration
+  "pending", because the application has no ground location. Its 50 km scouting radius, its place on players' "clubs
+  near you" radar and the friendlies board are then measured from a ground that isn't real, and the club can't
+  correct it. Clubs that register directly give their real ground. The fix (asking for the ground on the application,
+  which needs a place-to-coordinates lookup) is a feature, so it waits for the end of the freeze (Founder, 7 Nov).
+- **The sign-in screens list every organisation.** `GET /orgs` returns the whole list (one indexed query since S14g)
+  for the club picker; it isn't paged because the apps have no search, so clubs past the first page couldn't find
+  themselves. It needs a name search before there are many clubs: a feature, after the freeze (Founder, 7 Nov).
 
 - **Assessment templates are shared by every club.** When one club's lead publishes a new version of a position
   template (`POST /org/assessment-templates`), it becomes the current template for every club: other clubs' new

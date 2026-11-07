@@ -43,7 +43,7 @@ const plain = (v) => JSON.parse(JSON.stringify(v));
 const ORG = 'org-pro'; const OTHER = 'org-two';
 const FIX = () => ({
   users: [...USERS(), { id: 'usr-2', orgId: ORG, name: 'Gone Scout', role: 'Scout', createdAt: 1, removedAt: 5, removedById: 'usr-1' }, { id: 'usr-o', orgId: OTHER, name: 'Other', role: 'Scout', createdAt: 1 }],
-  orgs: [...ORGS(), { ...ORGS()[0], id: OTHER, name: 'Second FC', memos: [] }],
+  orgs: [...ORGS(), { ...ORGS()[0], id: OTHER, name: 'Second FC' }],
   notifications: [], dispatches: [],
   signings: [legacySigning({ id: 'sign-a' }), legacySigning({ id: 'sign-b', playerId: 'pl-b' }), legacySigning({ id: 'sign-c', playerId: 'pl-c', orgId: OTHER, orgName: 'Second FC' })],
 });

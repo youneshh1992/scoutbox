@@ -65,7 +65,7 @@ function syntheticSnapshot({ orgUserId = 'usr-9001' } = {}) {
     ],
   };
 }
-const seedOrgUser = (s, id = 'usr-9001') => { s.prepare("INSERT OR IGNORE INTO orgs (id, name, type, level, plan) VALUES ('org-a', 'Org A', 'club', 'pro', 'Pro')").run(); s.prepare("INSERT INTO org_users (id, org_id, name, name_key, role, created_at) VALUES (?, 'org-a', 'Maria Keane', ?, 'Head of Recruitment', ?)").run(id, `maria keane ${id}`, Date.now()); };
+const seedOrgUser = (s, id = 'usr-9001') => { s.prepare("INSERT OR IGNORE INTO orgs (id, name, type, level, plan, created_at) VALUES ('org-a', 'Org A', 'club', 'pro', 'Pro', 0)").run(); s.prepare("INSERT INTO org_users (id, org_id, name, name_key, role, created_at) VALUES (?, 'org-a', 'Maria Keane', ?, 'Head of Recruitment', ?)").run(id, `maria keane ${id}`, Date.now()); };
 
 // ------------------------------------------------------------- migration 0002
 test('the five core identity tables exist as STRICT tables after the registered migrations, and the registry applies nothing twice', () => {
@@ -90,7 +90,7 @@ test('migration 0002 is atomic: a failure inside it leaves no table and no recor
 // ------------------------------------------------------------- constraints
 test('constraints: CHECKs refuse values the code never writes', () => {
   const s = freshDb();
-  const org = (over) => s.prepare("INSERT INTO orgs (id, name, type, level, plan) VALUES (@id, 'X', @type, @level, @plan)").run({ id: 'o', type: 'club', level: 'pro', plan: 'Pro', ...over });
+  const org = (over) => s.prepare("INSERT INTO orgs (id, name, type, level, plan, created_at) VALUES (@id, 'X', @type, @level, @plan, 0)").run({ id: 'o', type: 'club', level: 'pro', plan: 'Pro', ...over });
   assert.throws(() => org({ level: 'agent' }), /CHECK/);
   assert.throws(() => org({ type: 'academy' }), /CHECK/);
   assert.throws(() => org({ plan: 'Gold' }), /CHECK/);
@@ -136,8 +136,8 @@ test('foreign keys are enforced and cascade the way the model owns its rows', ()
 test('a failing transaction leaves nothing behind', () => {
   const s = freshDb();
   assert.throws(() => transaction(s, () => {
-    s.prepare("INSERT INTO orgs (id, name, type, level, plan) VALUES ('o1', 'X', 'club', 'pro', 'Pro')").run();
-    s.prepare("INSERT INTO orgs (id, name, type, level, plan) VALUES ('o2', 'X', 'club', 'nope', 'Pro')").run();
+    s.prepare("INSERT INTO orgs (id, name, type, level, plan, created_at) VALUES ('o1', 'X', 'club', 'pro', 'Pro', 0)").run();
+    s.prepare("INSERT INTO orgs (id, name, type, level, plan, created_at) VALUES ('o2', 'X', 'club', 'nope', 'Pro', 0)").run();
   }), /CHECK/);
   assert.equal(s.prepare('SELECT COUNT(*) AS n FROM orgs').get().n, 0);
 });

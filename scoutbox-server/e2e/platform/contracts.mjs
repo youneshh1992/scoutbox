@@ -221,7 +221,7 @@ section('§9 — defaults are conservative without muting an obligation, and the
   const prefsDb = new DatabaseSync(':memory:'); prefsDb.exec('PRAGMA foreign_keys = ON;');
   runDataMigrations(prefsDb, DATA_MIGRATIONS, { now: Date.now(), log: () => {} });
   // S14e: a staff audience is a key to org_users, so the two staff members exist (storage setup only).
-  prefsDb.prepare("INSERT INTO orgs (id, name, type, level, plan) VALUES ('org-a', 'Org A', 'club', 'pro', 'Pro')").run();
+  prefsDb.prepare("INSERT INTO orgs (id, name, type, level, plan, created_at) VALUES ('org-a', 'Org A', 'club', 'pro', 'Pro', 0)").run();
   for (const [id, name] of [['u-tom', 'Tom'], ['u-maria', 'Maria']]) prefsDb.prepare("INSERT INTO org_users (id, org_id, name, name_key, role, created_at) VALUES (?, 'org-a', ?, ?, 'Scout', ?)").run(id, name, name.toLowerCase(), Date.now());
   const notifications = createNotificationsRepository({ sqlite: prefsDb, now: Date.now });
   const stub = { get() {}, put() {} };

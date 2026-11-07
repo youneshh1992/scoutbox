@@ -91,8 +91,7 @@ A trust-weights total other than 100 is also fatal (`TRUST_WEIGHTS_INVALID`).
 (the first installation's initialisation states, the session lifetime) and `counters` (the id counter, written at
 every mint).
 
-Most repositories write their rows at once. The staged ones (organisations' facets, players and guardians) keep a
-mirror in memory and
+Most repositories write their rows at once. The staged ones (players and guardians) keep a mirror in memory and
 write what changed at the next save: a 2-second debounce (`persist()`), immediately with `persistNow()`, or in the
 commit of the unit of work they joined.
 
@@ -128,7 +127,7 @@ registration → listen.
   to SQL has no `db.<collection>` at all (reading or assigning it throws and names the
   repository). The whole recruitment domain (cases and Room records, requests, trials,
   contacts, offers, signing packages, signings, follow-ups, outcome reports) has moved, and so
-  have the scouting evidence passport, coach affiliations and squad invitations (S9a) the assessment templates, assessments, video segments and playlists (S9b), and a club's tactical setup, squad, shadow list, looking-for, federation request and vacancies (S9c, which also retired the organisation facets `tactical`, `squad`, `lookingFor` and `federationCheck`: reading one on an organisation throws), the opportunity board, applications, assessment campaigns and players' private suitability preferences (S9d), and the verification claims, their evidence vault, tokens, administrators, root applications, disputes, references, squad invitations by code, conflicts, domain requests and verified domains (S10a, which also retired the organisation facet `verification`: its revocation is the organisation field `verificationRevokedAt`), the Passport's preferences, career entries, achievements, share links and correction requests (S10b), and transition cases and coach references (S10c; a reference's one-time code is stored only as its hash): ask the repository (`recruitmentContactsOffers.contacts.forCase`,
+  have the scouting evidence passport, coach affiliations and squad invitations (S9a) the assessment templates, assessments, video segments and playlists (S9b), and a club's tactical setup, squad, shadow list, looking-for, federation request and vacancies (S9c, which also retired the organisation facets `tactical`, `squad`, `lookingFor` and `federationCheck`; since S14g an organisation record has only its typed fields and writing one of these is refused, naming the repository), the opportunity board, applications, assessment campaigns and players' private suitability preferences (S9d), and the verification claims, their evidence vault, tokens, administrators, root applications, disputes, references, squad invitations by code, conflicts, domain requests and verified domains (S10a, which also retired the organisation facet `verification`: its revocation is the organisation field `verificationRevokedAt`), the Passport's preferences, career entries, achievements, share links and correction requests (S10b), and transition cases and coach references (S10c; a reference's one-time code is stored only as its hash): ask the repository (`recruitmentContactsOffers.contacts.forCase`,
   `signingsFollowUps.signings.forOrgPlayer`, `scoutingEvidence.evidence.currentForPlayer`, …, or the read-only `recruitmentReads`
   `scoutingReads` and `verificationReads` every module context carries). A list that grows without limit pages by cursor through
   `domains/platform/paging.mjs` (`readPage` at the route, a `pageFor…` query in the
@@ -146,8 +145,8 @@ registration → listen.
     caller catches it. Repository refusals do the same (participant failure).
   - Retry is explicit: rerun the whole operation.
   - Staff (`org_users`) writes and session writes join the unit like every other
-    explicit repository (S14f). Only the staged repositories (organisations, players,
-    guardians) still keep mirrors that the unit restores.
+    explicit repository (S14f), and so do organisation writes (S14g). Only the staged
+    repositories (players, guardians) still keep mirrors that the unit restores.
   - Expected negative results (no live code, nothing to delete) are return values and do
     not poison the unit.
 - **`store.afterCommit(fn)`** is the mechanism for side effects: broadcasts, pushes, SSE

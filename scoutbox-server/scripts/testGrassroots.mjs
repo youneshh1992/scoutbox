@@ -37,7 +37,7 @@ const plain = (v) => JSON.parse(JSON.stringify(v));
 // ------------------------------------------------------------- fixtures: the literals the routes write
 const MOSS = 'org-moss'; const LEY = 'org-ley'; const FAR = 'org-far';
 const STAFF = { moss: 'usr-moss', ley: 'usr-ley', far: 'usr-far' };
-const club = (id, name, location) => ({ ...ORGS()[0], id, name, level: 'grassroots', plan: 'Grassroots', location, memos: [] });
+const club = (id, name, location) => ({ ...ORGS()[0], id, name, level: 'grassroots', plan: 'Grassroots', location });
 const FIX = () => ({
   users: [...USERS(), { id: STAFF.moss, orgId: MOSS, name: 'Kev', role: 'Manager', createdAt: 1 }, { id: STAFF.ley, orgId: LEY, name: 'Sam', role: 'Manager', createdAt: 1 }, { id: STAFF.far, orgId: FAR, name: 'Jo', role: 'Manager', createdAt: 1 }],
   orgs: [...ORGS(), club(MOSS, 'Hackney Wick', { city: 'London', lat: 51.545, lng: -0.025 }), club(LEY, 'Leyton Orient Youth', { city: 'London', lat: 51.56, lng: -0.012 }), club(FAR, 'Moss Side', { city: 'Manchester', lat: 53.46, lng: -2.24 })],
@@ -117,6 +117,9 @@ test('[open days] created with positions; registered once; answered once; no-gho
   assert.deepEqual(ot.upcomingForOrgs([MOSS, LEY], '2026-11-06').map((t) => t.id), ['open-1']);
   assert.deepEqual(ot.inBox(boxAround({ lat: 51.56, lng: -0.012 }, 50)).map((t) => t.id), ['open-past', 'open-1'], 'inside the box, past days too, by date');
   assert.deepEqual(ot.inBox(boxAround({ lat: 53.46, lng: -2.24 }, 50)), [], 'Manchester never sees London');
+  // The prefilter never drops what the exact test keeps: a ground 50.0 km due north or east (haversine, R = 6,371 km) is inside the box.
+  { const here = { lat: 51.5, lng: -0.1 }; const box = boxAround(here, 50); const deg = (50.04 / 6371) * (180 / Math.PI);
+    assert.ok(here.lat + deg <= box.maxLat, 'due north at the edge'); assert.ok(here.lng + deg / Math.cos((here.lat * Math.PI) / 180) <= box.maxLng, 'due east at the edge'); }
   // pages newest first
   const p1 = ot.pageForOrg(MOSS, { limit: 1 });
   assert.deepEqual(p1.items.map((t) => t.id), ['open-past']);

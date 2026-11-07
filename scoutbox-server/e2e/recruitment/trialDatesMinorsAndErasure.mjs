@@ -470,7 +470,7 @@ const D = {};
   ok(day.status === 200 && day.body.trial.emergency === null && day.body.trial.playerName === null && !JSON.stringify(day.body).includes('70 000 11 22'), 'D6g the club can still READ the day (its own staff and history) with nothing person-shaped in it');
   const ics = await j('GET', `/org/trials/${et.id}/ics`, undefined, maria.token);
   ok(ics.status === 200 && ics.text.includes('removed player') && !ics.text.includes('Svensson'), 'D6h the calendar export still works and names nobody');
-  const dir = (await j('GET', '/orgs/directory', undefined, null)).body.find((o) => o.id === 'org-eastport');
+  const dir = (await j('GET', '/orgs/directory', undefined, null)).body.items.find((o) => o.id === 'org-eastport');
   ok(dir.trialsRun >= 2 && dir.reportsFiled >= 1, 'D6i the public club directory still counts the trials that were run and the reports filed (aggregates only)');
 
   // foreign org sees nothing

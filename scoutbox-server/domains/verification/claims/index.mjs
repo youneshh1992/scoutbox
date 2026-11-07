@@ -25,7 +25,7 @@ import { registerVerificationReview } from './review.mjs';
 export function registerM14(ctx) {
   const { db, byId, nextId, persist, verification, unit } = ctx;
   const reads = verification.reads;
-  bootstrapVerification({ verification, orgs: [...db.orgs] });
+  bootstrapVerification({ verification, orgs: ctx.orgs.list() });
 
   // -------- verification metrics (§61): counters only, never names/emails.
   metrics.verification = {

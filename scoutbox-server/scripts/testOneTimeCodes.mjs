@@ -143,14 +143,14 @@ test('e-mail confirmation as one unit of work: a failure after the consumption a
     const consumed = L.codes.consumeEmailChallenge('org-pro', code);
     assert.ok(consumed);
     if (fault === 'after_consume') throw new Error('injected failure after the consumption');
-    L.layer.orgs.update('org-pro', { emailDomain: consumed.email.split('@')[1], emailDomainVerified: true });
+    L.layer.orgs.update('org-pro', (d) => { d.emailDomain = consumed.email.split('@')[1]; d.emailDomainVerified = true; });
     if (fault === 'commit') L.store.failCommitOfOpenTransaction();
   });
   const state = () => ({ challenge: rowsOf(dir, 'email_challenges').map((r) => r.org_id), verified: rowsOf(dir, 'orgs').find((o) => o.id === 'org-pro').email_domain_verified });
   for (const [fault, re] of [['after_consume', /injected failure after the consumption/], ['commit', /FOREIGN KEY constraint failed/]]) {
     assert.throws(() => confirm(fault), re, fault);
     assert.deepEqual(state(), { challenge: ['org-pro'], verified: 0 }, `${fault}: the challenge is retained and the organisation unverified`);
-    assert.equal(L.db.orgs.find((o) => o.id === 'org-pro').emailDomainVerified ?? false, false, `${fault}: memory restored`);
+    assert.equal(L.layer.orgs.byId('org-pro').emailDomainVerified, false, `${fault}: nothing committed`);
     assert.deepEqual(L.codes.checkEmailChallenge('org-pro', code).status, 'ok', `${fault}: the code still works`);
   }
   confirm(null);
@@ -190,7 +190,7 @@ const durable = (dir) => ({ codes: rowsOf(dir, 'pairing_codes').map((r) => r.cod
 /** Run `work` in a unit of work, beside an unrelated organisation edit, whose caller swallows the repository error; returns what the caller caught and what the unit threw. */
 const swallowing = (L, work) => {
   let caught = null; let outer = null;
-  try { L.store.unitOfWork(() => { L.layer.orgs.update('org-pro', { suspended: true }); try { work(); } catch (e) { caught = e; } }); } catch (e) { outer = e; }
+  try { L.store.unitOfWork(() => { L.layer.orgs.update('org-pro', (d) => { d.suspended = true; }); try { work(); } catch (e) { caught = e; } }); } catch (e) { outer = e; }
   return { caught, outer };
 };
 
@@ -258,18 +258,18 @@ test('the boundary itself: joined successes commit with the unit (issue, consume
   const exec = L.store.sqlite.exec.bind(L.store.sqlite);
   let begins = 0;
   L.store.sqlite.exec = (sql) => { if (/^BEGIN/.test(sql)) begins += 1; return exec(sql); };
-  const issued = L.store.unitOfWork(() => { const p = L.codes.issuePairingCode('pl-child1'); L.layer.orgs.update('org-pro', { suspended: true }); assert.deepEqual(L.codes.consumePairingCode(p.code), { playerId: 'pl-child1' }); return p; });
+  const issued = L.store.unitOfWork(() => { const p = L.codes.issuePairingCode('pl-child1'); L.layer.orgs.update('org-pro', (d) => { d.suspended = true; }); assert.deepEqual(L.codes.consumePairingCode(p.code), { playerId: 'pl-child1' }); return p; });
   L.store.sqlite.exec = exec;
   assert.ok(issued.code); assert.deepEqual(rowsOf(dir, 'pairing_codes'), []); assert.equal(suspendedOf(dir), 1); assert.equal(begins, 1, 'one transaction');
   // An uncaught failure.
-  assert.throws(() => L.store.unitOfWork(() => { L.codes.issuePairingCode('pl-child1'); L.layer.orgs.update('org-pro', { suspended: false }); throw new Error('ordinary failure'); }), /ordinary failure/);
+  assert.throws(() => L.store.unitOfWork(() => { L.codes.issuePairingCode('pl-child1'); L.layer.orgs.update('org-pro', (d) => { d.suspended = false; }); throw new Error('ordinary failure'); }), /ordinary failure/);
   assert.deepEqual(rowsOf(dir, 'pairing_codes'), []); assert.equal(suspendedOf(dir), 1);
   // Expected negatives inside a unit are results, not failures: the unit commits.
   L.store.unitOfWork(() => {
     assert.equal(L.codes.consumePairingCode('NOPE22'), null); assert.equal(L.codes.consumeEmailChallenge('org-pro', 'NOPE22'), null);
     assert.deepEqual(L.codes.checkEmailChallenge('org-pro', 'NOPE22'), { status: 'none' }); assert.deepEqual(L.codes.noteFailedEmailAttempt('org-pro'), { attemptsRemaining: 0, invalidated: false });
     assert.equal(L.codes.revokePairingCodesFor('pl-nobody'), 0); assert.equal(L.codes.revokeEmailChallenge('org-pro'), 0); assert.deepEqual(L.codes.sweepExpired(), { emailChallenges: 0, pairingCodes: 0 });
-    L.layer.orgs.update('org-pro', { suspended: false });
+    L.layer.orgs.update('org-pro', (d) => { d.suspended = false; });
   });
   assert.equal(suspendedOf(dir), 0, 'the edit after the negatives committed');
   // Validation is inside the boundary.
@@ -388,7 +388,7 @@ test('boot: a stale code array handed in with the seed is never imported — the
 test('collisions: two organisations may hold the same e-mail code by chance (each challenge is found by its organisation) and both verify; a minted pairing code equal to another child\'s live code is redrawn, never shared, and eight consecutive collisions refuse the issue with nothing written', () => {
   const dir = tempDir('otc-collide'); s5File(dir);
   let s = openRaw(dir);
-  s.prepare("INSERT INTO orgs (id, name, type, plan, facets_json) VALUES ('org-two', 'Two FC', 'club', 'Pro', '{}')").run();
+  s.prepare("INSERT INTO orgs (id, name, type, plan, created_at) VALUES ('org-two', 'Two FC', 'club', 'Pro', 0)").run();
   let n = 0; const draws = ['SAME22', 'SAME22', 'SAME22', 'OTHER3'];
   const codes = createOneTimeCodesRepository({ sqlite: s, now: () => NOW, newCode: () => draws[n++] });
   codes.issueEmailChallenge('org-pro', 'a@eastport.test'); codes.issueEmailChallenge('org-two', 'b@two.test');

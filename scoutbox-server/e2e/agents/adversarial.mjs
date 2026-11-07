@@ -338,7 +338,7 @@ await stop(server);
   const store = openStore(DATA_DIR);
   const snap = store.load();
   const agency = snap.db.orgs.find((o) => o.type === 'agency');
-  snap.db.orgs.push({ ...structuredClone(agency), id: 'org-southgate', name: 'Southgate Sports Management', slug: 'southgate' });
+  snap.db.orgs.push({ ...structuredClone(agency), id: 'org-southgate', name: 'Southgate Sports Management' });
   // A password-protected guardian reachable by id AND by email, for the
   // failed-login alias check (F-11). The seeded guardians have open (null)
   // passwords in development, so nothing about them can ever fail to

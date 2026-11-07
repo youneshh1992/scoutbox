@@ -216,7 +216,7 @@ export function writeTableBacked(sqlite, snapshot, { now = Date.now() } = {}) {
   const present = checkTableBackedShapes(snapshot);
   const single = (name) => TABLES.find((t) => t.name === name);
   // `replace` THROWS on a row the table refuses, which rolls the caller's whole transaction back.
-  if (present.includes('orgs') && single('orgs').replace(sqlite, snapshot.orgs)) written.push('orgs');
+  if (present.includes('orgs') && single('orgs').replace(sqlite, snapshot.orgs, { now })) written.push('orgs');
   // S5: the `trials` the snapshot carries (written below, in the same transaction) judge every `trialReports` claim on its players; a snapshot without them is judged by the stored trials.
   if (IDENTITY_COLLECTIONS.every((n) => present.includes(n)) && IDENTITY_SNAPSHOT.replace(sqlite, { players: snapshot.players, guardians: snapshot.guardians }, { now, trials: Object.hasOwn(snapshot, 'trials') && snapshot.trials !== undefined ? snapshot.trials : undefined })) written.push(...IDENTITY_COLLECTIONS);
   // S4b-R: the retained records go right after the identity pair (which carried the
@@ -469,15 +469,15 @@ export function attachDataLayer({ db, seed = {}, store, nextId, sessionTtlMs, no
   if (!sqlite) throw new TypeError('the data layer needs a store with a SQLite connection (node:sqlite); there is no in-memory or JSON fallback');
   const migrations = runDataMigrations(sqlite, DATA_MIGRATIONS, { now: now(), log, context: { sessionTtlMs } });
 
-  // The staged repositories (organisations, players and guardians)
+  // The staged repositories (players and guardians)
   // keep a mirror in memory, expose it as a read-only `db.<name>` view
   // and write what changed at the next save (`store.save()`, scheduled by persist()) or the unit of work's commit.
   // Every other repository writes its rows at once and reads through SQL; its old `db.<name>` throws.
   // The organisations attach first: org_users, and most tables after them, reference orgs.
-  const orgs = createOrgsRepository({ sqlite, log, warn, unit: store.unit });
+  // S14g: the organisations are explicit, with no mirror; their old collection name throws.
+  const orgs = createOrgsRepository({ sqlite, nextId, log, now, unit: store.unit });
   const orgsBoot = orgs.initState() === 'pending' ? orgs.initialize(seed.orgs ?? []) : orgs.attach();
-  Object.defineProperty(db, 'orgs', { value: orgs.view, writable: false, configurable: false, enumerable: true });
-  store.setSaveHook?.(orgs.saveHook());
+  retireCollection(db, 'orgs', 'orgs');
 
   // The identity pair: a first installation's players are checked against the trials handed in with them (none in
   // the seed); afterwards their trial reports come from the recruitment repository, attached below.
@@ -713,7 +713,7 @@ export function attachDataLayer({ db, seed = {}, store, nextId, sessionTtlMs, no
     report: () => ({
       ...dataSchemaReport(sqlite, DATA_MIGRATIONS),
       domains: {
-        orgs: { rows: orgs.count(), mode: 'live', transitional: 'facets_json (unknown fields; tactical, squad, lookingFor and federationCheck are clubSetup tables since S9c; verification is verification tables since S10a, its revokedAt the verificationRevokedAt column)' },
+        orgs: { rows: orgs.count(), mode: 'live', writeMode: 'explicit: create, update(id, draft => …) and setPasswordHash write at once, inside the route\'s unit of work when one is open', readMode: 'SQL: byId, list, page, locatedInBox, byName, passwordHashOf, count; no mirror and no db.* view; fresh deep-frozen records without the password hash', typing: 'typed columns only: name 1–120, the type, level and plan vocabularies, a location as latitude, longitude and city (lat/lng in range, both or neither), a federation registration as both its parts or neither, the flags as booleans, created_at required; no facet storage (an unknown field is refused)' },
         players: { rows: identity.players.count(), retained: identity.players.retainedCount(), mode: 'live', transitional: 'facets_json (unknown fields and shape metadata)', subrecords: { mode: 'live', tables: identity.players.subrecordRows(), trialReports: 'derived from trials' }, deletion: 'S4b-R (migration 0014): an account deletion keeps the row as a retained record — id, deleted_at, birth_date, country; placeholders and NULL elsewhere; owned rows and links removed — served by no account reader; retained records travel in backups as playersRetained' },
         guardians: { rows: identity.guardians.count(), mode: 'live', links: identity.report().links, transitional: 'facets_json (coGuardians)' },
         users: { rows: users.count(), mode: 'live', writeMode: 'explicit: create, update(id, draft => …), startMfa / enableMfa / disableMfa and useRecoveryCode (a code is spent by deleting its row) write at once, inside the route\'s unit of work when one is open', readMode: 'SQL: byId, byOrgAndName, forOrg, firstActive, activeByEmail, bySsoSubject, mfaSecretOf; no mirror and no db.* view; fresh deep-frozen records without the MFA secret or recovery codes', typing: 'typed columns: name 1–120 and unique in its organisation (case-insensitive, removed accounts included), role 1–60, an e-mail unique among current staff, an SSO subject unique in its organisation, the provenance vocabulary, MFA and delivery preferences as columns, recovery-code hashes as child rows', references: 'org_id → orgs and removed_by_id → org_users (RESTRICT); recovery codes and sessions cascade with their account' },

@@ -1,5 +1,5 @@
 // Runtime probe: opens a store on <dir>, boots the data layer with one
-// organisation, saves, changes a facet, injects a save failure, retries, and
+// organisation, saves, writes it in a unit that fails, retries, and
 // prints one JSON line with what happened. scripts/testRuntime.mjs runs it on
 // the current runtime, on a masked (simulated older) runtime and on any real
 // extra Node.js binaries. Exit 0 when every step worked, 3 when the runtime was
@@ -17,21 +17,17 @@ try {
   const store = openStore(dir, { tableBacked: TABLE_BACKED });
   out.steps.push('opened');
   const db = {};
-  const seed = { orgs: [{ id: 'org-1', name: 'One FC', type: 'club', level: 'grassroots', plan: 'Grassroots', memos: [] }], guardians: [], players: [{ id: 'pl-1', name: 'P', dob: '2001-01-01', country: 'GB' }] };
-  attachDataLayer({ db, seed, store, nextId, persist: () => {}, sessionTtlMs: 30 * 86_400_000 });
-  // A save hook registered after the data layer's: its flush runs after the facets were flushed, and fails once on
-  // request. (Rewritten in S14a: the failure used to be an unserialisable blob.)
-  let failNext = false;
-  store.setSaveHook({ flush() { if (failNext) { failNext = false; throw new Error('injected failure after the facet flush'); } } });
+  const seed = { orgs: [{ id: 'org-1', name: 'One FC', type: 'club', level: 'grassroots', plan: 'Grassroots' }], guardians: [], players: [{ id: 'pl-1', name: 'P', dob: '2001-01-01', country: 'GB' }] };
+  const layer = attachDataLayer({ db, seed, store, nextId, persist: () => {}, sessionTtlMs: 30 * 86_400_000 });
   store.save();
   out.steps.push('saved');
-  db.orgs[0].memos.push({ id: 'sq-1', name: 'Kid', position: 'ST', playerId: null, source: 'manual', addedAt: 1 });
-  failNext = true;
-  try { store.save(); out.steps.push('failed-save-did-not-throw'); } catch (err) { out.steps.push(`failed-save-threw: ${String(err.message).slice(0, 60)}`); }
-  out.rolledBack = JSON.parse(store.sqlite.prepare("SELECT facets_json FROM orgs WHERE id = 'org-1'").get().facets_json).memos.length === 0;
-  store.save();
+  // A unit of work that fails after its write rolls the write back; the retry commits it. (Rewritten in S14a, where
+  // the failure was an unserialisable blob, and S14g, where it was a failing save after an organisation facet edit.)
+  try { store.unitOfWork(() => { layer.orgs.update('org-1', (d) => { d.suspended = true; }); throw new Error('injected failure after the write'); }); out.steps.push('failed-save-did-not-throw'); } catch (err) { out.steps.push(`failed-save-threw: ${String(err.message).slice(0, 60)}`); }
+  out.rolledBack = store.sqlite.prepare("SELECT suspended FROM orgs WHERE id = 'org-1'").get().suspended === 0;
+  store.unitOfWork(() => layer.orgs.update('org-1', (d) => { d.suspended = true; }));
   out.steps.push('retried');
-  out.squadRows = JSON.parse(store.sqlite.prepare("SELECT facets_json FROM orgs WHERE id = 'org-1'").get().facets_json).memos.length;
+  out.squadRows = store.sqlite.prepare("SELECT COUNT(*) AS n FROM orgs WHERE id = 'org-1' AND suspended = 1").get().n;
   store.sqlite.close();
   out.ok = out.rolledBack === true && out.squadRows === 1 && out.steps.some((s) => s.startsWith('failed-save-threw'));
 } catch (err) {

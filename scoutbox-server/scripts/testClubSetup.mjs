@@ -14,7 +14,6 @@ import fs from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import { attachDataLayer, DATA_MIGRATIONS, TABLE_BACKED, readTableBacked } from '../repositories/index.mjs';
 import { runDataMigrations } from '../repositories/database.mjs';
-import { toRow } from '../repositories/orgs.mjs';
 import { openStore } from '../store.mjs';
 import { NOW, TTL, tempDir } from './coreIdentityTestFixtures.mjs';
 import { saveFixture, fixtureDb, ORG } from './recruitmentTestFixtures.mjs';
@@ -57,19 +56,13 @@ function serverOpen(dir) {
 }
 
 // ------------------------------------------------------------- schema
-test('[schema] 0021 is registered after 0020, creates the nine STRICT tables empty, and removes the retired facets from orgs.facets_json', () => {
+test('[schema] 0021 is registered after 0020 and creates the nine STRICT tables empty (S14g: the organisations have no facets to clean up)', () => {
   const ids = DATA_MIGRATIONS.map((m) => m.id);
   assert.equal(ids.indexOf(MIGRATION), ids.indexOf('0020_scouting_assessments') + 1);
   for (const n of COLLECTIONS) assert.ok(TABLE_BACKED.includes(n), `${n} is table-backed`);
   const s = new DatabaseSync(':memory:'); s.exec('PRAGMA foreign_keys = ON;');
-  runDataMigrations(s, DATA_MIGRATIONS.filter((m) => m.id < MIGRATION), { now: NOW, log: () => {} });
-  const row = toRow({ id: 'org-old', name: 'Old FC', type: 'club', level: 'grassroots', plan: 'Grassroots', squad: [{ id: 'sq-x' }], tactical: null, lookingFor: ['ST'], federationCheck: { status: 'pending' }, agencyNotes: { kept: true } });
-  const cols = Object.keys(row);
-  s.prepare(`INSERT INTO orgs (${cols.join(', ')}) VALUES (${cols.map((c) => `@${c}`).join(', ')})`).run(row);
   runDataMigrations(s, DATA_MIGRATIONS, { now: NOW, log: () => {} });
-  const facets = JSON.parse(s.prepare("SELECT facets_json FROM orgs WHERE id = 'org-old'").get().facets_json);
-  for (const k of ['squad', 'tactical', 'lookingFor', 'federationCheck']) assert.ok(!(k in facets), `${k} is gone from the facets`);
-  assert.deepEqual(facets.agencyNotes, { kept: true }, 'the other facets stay');
+  assert.ok(!s.prepare('PRAGMA table_info(orgs)').all().some((c) => c.name === 'facets_json'), 'the organisations have no facet column');
   for (const t of TABLES) {
     assert.match(s.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?").get(t).sql, /STRICT\s*$/, `${t} is STRICT`);
     assert.equal(s.prepare(`SELECT count(*) AS n FROM ${t}`).get().n, 0);
@@ -114,17 +107,16 @@ test('[typing] junk is refused with the field named: criteria, roles, windows, s
 });
 
 // ------------------------------------------------------------- the organisation record
-test('[orgs] the retired facets throw on an organisation, a record carrying one is refused, and db.vacancies throws', () => {
+test('[orgs] an organisation carries no retired facet, a record carrying one is refused naming its repository, and db.vacancies throws', () => {
   const dir = saveFixture(tempDir('s9c-orgs'));
   const o = serverOpen(dir);
   try {
     const org = o.layer.orgs.byId(ORG.id);
     for (const k of ['squad', 'tactical', 'lookingFor', 'federationCheck']) {
-      refused(() => org[k], /clubSetup repository/, `reading org.${k}`);
-      refused(() => { org[k] = []; }, /clubSetup repository/, `writing org.${k}`);
+      assert.ok(!(k in org), `an organisation has no ${k}`);
+      refused(() => o.layer.orgs.update(ORG.id, (d) => { d[k] = []; }), /no longer an organisation field: write it through the clubSetup repository/, `writing org.${k}`);
     }
-    assert.ok(!('squad' in { ...org }), 'a spread organisation carries no retired facet');
-    refused(() => o.layer.orgs.insert({ ...OTHER, squad: [] }), /squad is no longer an organisation field/);
+    refused(() => o.layer.orgs.create({ ...OTHER, squad: [] }), /squad is no longer an organisation field/);
     refused(() => o.db.vacancies, /clubSetup repository/);
     refused(() => openStore(tempDir('s9c-orgs-snap')).save({ savedAt: NOW, idCounter: 1000, db: fixtureDb({ orgs: [{ id: ORG.id, name: ORG.name, type: 'club', level: 'pro', plan: 'Pro', lookingFor: ['ST'] }] }) }), /lookingFor is no longer an organisation field/);
   } finally { o.close(); rm(dir); }
@@ -135,7 +127,7 @@ test('[tactical] a re-save diffs roles by id: a kept role keeps its vacancy, a d
   const dir = saveFixture(tempDir('s9c-tac'));
   const o = serverOpen(dir); const { repo } = o;
   try {
-    o.layer.orgs.insert(OTHER);
+    o.layer.orgs.create(OTHER);
     const first = repo.tactical.save(setup({ roles: [role(), role({ id: 'role-2', name: 'Ball-winning 6', positionGroup: 'MID', category: 'mixed', required: [], preferred: [] })] }));
     assert.deepEqual(first.roles.map((r) => r.id), ['role-1', 'role-2']);
     assert.deepEqual(first.roles[0].required, [{ key: 'positionGroup', value: 'ATT' }, { key: 'maxAge', value: 23 }], 'criteria read back typed, in order');

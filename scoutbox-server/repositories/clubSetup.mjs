@@ -38,8 +38,6 @@ import { parseStrictDateOnly } from '../temporal.mjs';
 export const CLUB_SETUP_MIGRATION = '0021_club_setup';
 export const CLUB_SETUP_COLLECTIONS = Object.freeze(['tacticalSetups', 'squadMembers', 'shadowPlayers', 'lookingFor', 'federationChecks', 'vacancies']);
 export const CLUB_SETUP_TABLES = Object.freeze(['org_tactical_setups', 'org_tactical_roles', 'org_tactical_role_criteria', 'org_tactical_windows', 'org_squad_members', 'org_shadow_players', 'org_looking_for', 'org_federation_checks', 'vacancies']);
-/** The organisation facets this step retired (repositories/orgs.mjs refuses them on a record). */
-export const CLUB_SETUP_FACETS = Object.freeze(['tactical', 'squad', 'lookingFor', 'federationCheck']);
 
 export const ROLE_POSITION_GROUPS = Object.freeze(['GK', 'DEF', 'MID', 'ATT']);
 export const ROLE_CATEGORIES = Object.freeze(['mens', 'womens', 'boys', 'girls', 'mixed']);

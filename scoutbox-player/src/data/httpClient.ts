@@ -199,7 +199,8 @@ export const httpClient: PlayerClient = {
   deleteAccount: (playerId) =>
     request<void>('/player/account', playerId, { method: 'DELETE' }),
 
-  getDirectory: () => request<DirectoryClub[]>('/orgs/directory'),
+  // The directory pages by cursor (S14g): the first page is read; "load more" (nextCursor) is still needed.
+  getDirectory: async () => (await request<{ items: DirectoryClub[]; nextCursor: string | null }>('/orgs/directory')).items,
 
   // ---- the Grassroots journey ----
   getProgramme: (playerId) => request<ProgrammeInfo>('/player/programme', playerId),

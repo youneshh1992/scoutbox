@@ -110,7 +110,6 @@ export function effectiveStatus(claim, { org = null, subjectRemoved = false, now
     else {
       if (org.suspended) reasons.push('ORGANISATION_SUSPENDED');
       if (org.verificationRevokedAt) reasons.push('ORGANISATION_REVOKED');
-      if (org.closedAt) reasons.push('ORGANISATION_CLOSED');
     }
   }
   // Historical (current=false but once verified with a closed period) stays
@@ -328,7 +327,6 @@ export function hasVerLevel(source, orgId, userId, atLeast) {
 /** `pending` says whether a root application for the organisation is still open: a boolean, or the verification reads. */
 export function orgVerificationStatus(org, pending = false) {
   if (!org) return 'unverified';
-  if (org.closedAt) return 'closed';
   if (org.verificationRevokedAt) return 'revoked';
   if (org.suspended) return 'suspended';
   if (org.verified) return 'verified';

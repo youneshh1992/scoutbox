@@ -33,7 +33,6 @@ const nextId = (p) => `${p}-${++counter}`;
 const tempDir = (tag) => fs.mkdtempSync(path.join(os.tmpdir(), `sb-${tag}-`));
 const clone = (v) => JSON.parse(JSON.stringify(v));
 const sameShape = (a, b, what) => { assert.deepEqual(Object.keys(b), Object.keys(a), `${what}: key order`); assert.equal(JSON.stringify(b), JSON.stringify(a), `${what}: byte-identical JSON`); };
-const squadMember = (id) => ({ id, name: id, position: 'ST', playerId: null, source: 'manual', addedAt: 1 });
 
 // ------------------------------------------------------------------ fixtures (the shapes the application writes today)
 const adult = () => ({
@@ -70,7 +69,7 @@ const gPrimary = () => ({
 const gCo = () => ({ id: 'gd-co', name: 'Co Parent', email: 'co@example.test', idVerified: false, disclaimerAccepted: false, childIds: ['pl-child1', 'pl-child2'], coGuardianOf: 'gd-primary' });
 const gSignup = () => ({ id: 'gd-signup', name: 'Signup Parent', email: 'signup@example.test', password: 'scrypt$cc$dd', emailVerified: false, emailCode: 'K7Q2ZP', idVerified: false, disclaimerAccepted: false, childIds: [] });
 const FIXTURE = () => ({ players: [adult(), child('pl-child1', 'gd-primary', '2014-03-03'), seeded(), child('pl-child2', 'gd-primary', '2016-08-08')], guardians: [gPrimary(), gCo(), gSignup()] });
-const ORGS = () => [{ id: 'org-pro', name: 'Eastport FC', type: 'club', level: 'pro', plan: 'Pro', country: 'GB', memos: [] }];
+const ORGS = () => [{ id: 'org-pro', name: 'Eastport FC', type: 'club', level: 'pro', plan: 'Pro', country: 'GB' }];
 const baseSeed = (players, guardians) => ({ orgs: ORGS(), players, guardians });
 
 /**
@@ -319,7 +318,7 @@ test('ordinary save: a player or guardian write is in its row when the call retu
   t.close(); fs.rmSync(dir, { recursive: true, force: true });
 });
 
-/** The multi-collection operation under test: a guardian with a child (row + link), an org facet, a player update, a sub-record and a session, in one real unit of work. */
+/** The multi-collection operation under test: a guardian with a child (row + link), an organisation write, a player update, a sub-record and a session, in one real unit of work. */
 function operation(t, { fail = null, afterCommit = null } = {}) {
   const seededPlayer = t.players.byId('pl-seeded');
   let token = null;
@@ -329,10 +328,9 @@ function operation(t, { fail = null, afterCommit = null } = {}) {
     t.players.link('gd-co', 'pl-new', 'co');
     t.players.update('pl-adult', { availability: 'available_now', medical: { shared: true } });
     t.players.addItem('pl-seeded', 'medical.records', { id: 'md-op', type: 'x', title: 'y' });
-    t.db.orgs[0].memos.push(squadMember('sq-op'));
+    t.layer.orgs.update('org-pro', (d) => { d.suspended = true; }); // S14g: an explicit organisation write (it was a staged facet)
     token = t.layer.sessions.create('guardian', 'gd-new').token;
     if (afterCommit) t.store.afterCommit(afterCommit);
-    if (fail === 'flush') t.db.orgs[0].memos.push({ ...squadMember('sq-bad'), addedAt: 1n }); // fails when the staged facet is written at COMMIT (S14a: it was a blob)
     if (fail === 'throw') throw new Error('operation failed late');
     return 'done';
   });
@@ -343,7 +341,7 @@ function assertOperationAbsent(t) {
   assert.equal(t.raw("SELECT COUNT(*) AS n FROM guardian_children WHERE player_id = 'pl-new'").n, 0);
   assert.equal(t.raw("SELECT availability, medical_shared FROM players WHERE id = 'pl-adult'").availability, 'not_seeking'); assert.equal(t.raw("SELECT medical_shared FROM players WHERE id = 'pl-adult'").medical_shared, 0);
   assert.equal(t.raw("SELECT COUNT(*) AS n FROM player_medical_records WHERE player_id = 'pl-seeded'").n, 1);
-  assert.equal(JSON.parse(t.raw("SELECT facets_json FROM orgs WHERE id = 'org-pro'").facets_json).memos.length, 0);
+  assert.equal(t.raw("SELECT suspended FROM orgs WHERE id = 'org-pro'").suspended, 0);
   assert.equal(t.raw("SELECT COUNT(*) AS n FROM sessions WHERE kind = 'guardian'").n, 0);
   // The unrelated edit made BEFORE the unit: the player write committed at once (S4a-E).
   assert.equal(t.raw("SELECT city FROM players WHERE id = 'pl-adult'").city, 'PreUnit');
@@ -355,7 +353,7 @@ function assertMemoryRestored(t, refs) {
   assert.equal(t.players.byId('pl-adult'), adultView, 'same view'); assert.equal(adultView.availability, 'not_seeking'); assert.equal(adultView.medical.shared, false);
   assert.equal(t.players.byId('pl-seeded').medical.records, seededRecords, 'same nested array'); assert.equal(seededRecords.length, 1);
   assert.equal(t.guardians.byId('gd-co').childIds, coKids, 'same childIds view'); assert.deepEqual([...coKids], coKidsBefore);
-  assert.equal(t.db.orgs[0].memos.length, 0);
+  assert.equal(t.layer.orgs.byId('org-pro').suspended, false);
   // The pre-unit edit survives.
   assert.equal(adultView.city, 'PreUnit');
 }
@@ -364,7 +362,7 @@ function assertOperationPersisted(t, token) {
   assert.deepEqual(t.links().filter((l) => l.player_id === 'pl-new'), [{ guardian_id: 'gd-new', player_id: 'pl-new', role: 'primary' }, { guardian_id: 'gd-co', player_id: 'pl-new', role: 'co' }]);
   assert.equal(t.raw("SELECT availability FROM players WHERE id = 'pl-adult'").availability, 'available_now'); assert.equal(t.raw("SELECT medical_shared FROM players WHERE id = 'pl-adult'").medical_shared, 1);
   assert.equal(t.raw("SELECT COUNT(*) AS n FROM player_medical_records WHERE player_id = 'pl-seeded'").n, 2); assert.equal(t.players.byId('pl-seeded').medical.records.length, 2); assert.equal(t.facets('guardians', 'gd-new').emailCode, 'ABC123');
-  assert.equal(JSON.parse(t.raw("SELECT facets_json FROM orgs WHERE id = 'org-pro'").facets_json).memos.length, 1);
+  assert.equal(t.raw("SELECT suspended FROM orgs WHERE id = 'org-pro'").suspended, 1);
   assert.ok(t.layer.sessions.byToken(token), 'the session minted inside the unit is live');
   assert.equal(t.raw("SELECT city FROM players WHERE id = 'pl-adult'").city, 'PreUnit', 'the pre-unit write is kept');
   assert.equal(t.invariantBreaks(), 0);
@@ -389,13 +387,14 @@ test('unit of work (real store, both repositories, an organisation facet and a s
   r.close(); fs.rmSync(dir, { recursive: true, force: true });
 });
 
-test('unit of work: a failure after the row and link writes (the staged facet write at COMMIT) rolls the database back AND restores memory — no half-linked child or guardian, held views, nested arrays and childIds arrays keep identity and content, indexes and link views agree with the tables, unrelated pending edits survive, after-commit work never runs, an ordinary save persists no fragment, an explicit retry lands everything', () => {
+test('unit of work: a failure after the row and link writes (a save hook failing at COMMIT) rolls the database back AND restores memory — no half-linked child or guardian, held views, nested arrays and childIds arrays keep identity and content, indexes and link views agree with the tables, unrelated pending edits survive, after-commit work never runs, an ordinary save persists no fragment, an explicit retry lands everything', () => {
   const dir = tempDir('idrepo-uow-fail');
   const t = boot(dir, { ...FIXTURE() });
   const refs = prepare(t);
   let ran = false; let err = null;
+  let explode = true; t.store.setSaveHook({ flush() { if (explode) { explode = false; throw new Error('injected commit failure'); } } }); // S14g: it was a facet that could not be stored
   try { operation(t, { fail: 'flush', afterCommit: () => { ran = true; } }); } catch (e) { err = e; }
-  assert.match(err.message, /BigInt/); assert.equal(err.unitOfWork, 'rolled_back'); assert.equal(ran, false); assert.equal(t.store.sqlite.isTransaction, false);
+  assert.match(err.message, /injected commit failure/); assert.equal(err.unitOfWork, 'rolled_back'); assert.equal(ran, false); assert.equal(t.store.sqlite.isTransaction, false);
   assertOperationAbsent(t); assertMemoryRestored(t, refs);
   t.store.save();
   assertOperationAbsent(t);
@@ -449,14 +448,14 @@ test('unit of work: a record written twice inside a unit (a value, then back) en
   t.close(); fs.rmSync(dir, { recursive: true, force: true });
 });
 
-test('unit of work: a process killed before COMMIT leaves the pre-operation database — a restart sees no new guardian, child, link, sub-record or facet change', () => {
+test('unit of work: a process killed before COMMIT leaves the pre-operation database — a restart sees no new guardian, child, link, sub-record or organisation change', () => {
   const dir = tempDir('idrepo-crash');
   const t = boot(dir, { ...FIXTURE() }); t.close();
   const r = spawnSync(process.execPath, [path.join(HERE, 'identityCrashChild.mjs'), dir], { encoding: 'utf8', timeout: 30_000 });
   assert.equal(r.signal, 'SIGKILL', `the child must die by SIGKILL: status ${r.status} signal ${r.signal} ${r.stderr.slice(-400)}`); assert.match(r.stdout, /ABOUT_TO_CRASH/);
   const again = reopen(dir);
   assert.equal(again.guardians.byId('gd-crash'), null); assert.equal(again.players.byId('pl-crash'), null); assert.equal(again.raw("SELECT COUNT(*) AS n FROM guardian_children WHERE guardian_id = 'gd-crash'").n, 0);
-  assert.equal(again.players.byId('pl-adult').medical.records.length, 0); assert.equal(JSON.parse(again.raw("SELECT facets_json FROM orgs WHERE id = 'org-pro'").facets_json).memos.length, 0);
+  assert.equal(again.players.byId('pl-adult').medical.records.length, 0); assert.equal(again.raw("SELECT suspended FROM orgs WHERE id = 'org-pro'").suspended, 0);
   assert.equal(again.raw('PRAGMA integrity_check').integrity_check, 'ok'); assert.equal(again.invariantBreaks(), 0);
   again.close(); fs.rmSync(dir, { recursive: true, force: true });
 });

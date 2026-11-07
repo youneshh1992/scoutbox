@@ -3,7 +3,7 @@
 -- Executed first; every other file references these tables. Conventions: docs/architecture/sqlite-schema.md §4.
 -- Status: org_users is LIVE (migration 0001). orgs, guardians, guardian_children, players (scalar part) and
 -- sessions were created by migration 0002 as a verified SHADOW of the blob snapshot (plan step S1); sessions is
--- LIVE since migration 0003 (S2), orgs since 0004 (S3), and guardians, players and guardian_children since
+-- LIVE since migration 0003 (S2), orgs since 0004 (S3; explicit and without facets_json since S14g), and guardians, players and guardian_children since
 -- migration 0005 (S4a, repositories/migrations/0005_core_identity_live.mjs, REGISTERED: the cutover replaces the
 -- three shadow definitions with the ones below, imports both blobs through the reviewed preflight and retires them;
 -- repositories/identity.mjs owns the rows). players and guardians carry one transitional column, `facets_json TEXT
@@ -17,54 +17,52 @@
 -- save rewrites facets_json; guardians.update writes the coGuardians list, and players.update refuses an unknown field.
 -- The media-deletion queue (migration 0006) is in 08_operations_integrations.sql.
 
--- source: db.orgs  (seed.mjs:15-88; registration server.mjs:1734; T&S org creation domains/verification/claims/review.mjs:382)
--- owner/writer: server.mjs (core), m14 (verification fields), m13 (mfaRequiredForLeads), m24 (agencySettings → 06)
--- lifecycle: no deletion route; suspended flag; verification.revokedAt (m14)
+-- source: the organisations (repositories/orgs.mjs)
+-- owner/writer: repositories/orgs.mjs only (explicit since S14g: create, update(id, draft => …), setPasswordHash);
+--   callers are registration (server.mjs), the T&S claim review (domains/verification/claims/review.mjs), the admin
+--   routes, the e-mail domain confirmation and the enterprise security switch
+-- lifecycle: no deletion route; suspended flag; verification_revoked_at (S10a)
 -- mapping: id→id, name→name, type→type, level→level, plan→plan, country→country,
---   location.city/lat/lng→city/lat/lng, federationRef.federation/registrationId→federation/federation_registration_id,
---   trustedPartner→trusted_partner, verified→verified, verifiedDomain→verified_domain,
---   safeguardingContractSigned→safeguarding_contract_signed, password→password_hash, suspended→suspended,
+--   location { lat, lng, city }→lat/lng/city (location null ⇔ lat NULL), federationRef { federation, registrationId }
+--   →federation/federation_registration_id (null ⇔ both NULL), trustedPartner→trusted_partner, verified→verified,
+--   verifiedDomain→verified_domain, safeguardingContractSigned→safeguarding_contract_signed, suspended→suspended,
 --   emailDomain→email_domain, emailDomainVerified→email_domain_verified, mfaRequiredForLeads→mfa_required_for_leads,
---   verificationRevokedAt→verification_revoked_at (S10a; the facet's orgType was never read and is gone),
---   squad[]→org_squad_members (04), tactical→org_tactical_setups (04), lookingFor[]→org_looking_for (04),
---   federationCheck→org_federation_checks (04), verification.domains[]→org_verified_domains (05),
---   agencySettings→org_agency_settings (06)
--- notes: orgs have no createdAt today (created_at nullable, recorded going forward). `level` also compares against
---   'agent' at server.mjs:2598 but no row carries it; CHECK lists the written values. safeguardingCertified is derived.
---   LIVE since migration 0004 (S3, repositories/orgs.mjs). `level` is nullable: the verification review creates
---   non-grassroots organisations with level null (domains/verification/claims/review.mjs). `facets_json` is the S3 TRANSITIONAL storage for every
---   record field that has not cut over yet (agencySettings and
---   unknown fields; squad, tactical, lookingFor and federationCheck left in S9c, verification in S10a) plus the record's shape metadata (`__meta`: key order, explicit nulls, present composites); it is
---   owned by the repository, mutated in place by the owning modules and flushed inside every save, and shrinks as
---   S9–S11 move those facets into the tables named above. verification_revoked_at is the organisation's verification
---   revocation (S10a, migration 0023 dropped the unused verification_org_type column).
+--   verificationRevokedAt→verification_revoked_at, createdAt→created_at; the password hash is password_hash and is
+--   never on a record (passwordHashOf). Former facets live elsewhere: squad[]→org_squad_members, tactical→
+--   org_tactical_setups, lookingFor[]→org_looking_for, federationCheck→org_federation_checks (04),
+--   verification.domains[]→org_verified_domains (05), agencySettings→org_agency_settings (06).
+-- notes: LIVE since migration 0004 (S3), explicit since S14g (0004 amended in place): no facet storage, an unknown
+--   field is refused. `level` is nullable: the verification review creates non-grassroots organisations with level
+--   null. created_at is set at creation (the seed's at its import). safeguardingCertified is derived. A grassroots
+--   club created by the claim review has a placeholder ground (docs/known-issues.md).
 CREATE TABLE orgs (
-  id                           TEXT PRIMARY KEY,
-  name                         TEXT NOT NULL,
-  type                         TEXT NOT NULL CHECK (type IN ('club','agency')),
-  level                        TEXT CHECK (level IS NULL OR level IN ('pro','academy','agency','grassroots')),
-  plan                         TEXT NOT NULL CHECK (plan IN ('Pro','Academy','Agency','Grassroots')),
-  country                      TEXT,
-  city                         TEXT,
-  lat                          REAL,
-  lng                          REAL,
-  federation                   TEXT,
-  federation_registration_id   TEXT,
+  id                           TEXT PRIMARY KEY CHECK (length(id) BETWEEN 1 AND 80),
+  name                         TEXT NOT NULL CHECK (length(name) BETWEEN 1 AND 120),
+  type                         TEXT NOT NULL CHECK (type IN ('club', 'agency')),
+  level                        TEXT CHECK (level IS NULL OR level IN ('pro', 'academy', 'agency', 'grassroots')),
+  plan                         TEXT NOT NULL CHECK (plan IN ('Pro', 'Academy', 'Agency', 'Grassroots')),
+  country                      TEXT CHECK (country IS NULL OR length(country) BETWEEN 1 AND 40),
+  city                         TEXT CHECK (city IS NULL OR length(city) BETWEEN 1 AND 80),
+  lat                          REAL CHECK (lat IS NULL OR lat BETWEEN -90 AND 90),
+  lng                          REAL CHECK (lng IS NULL OR lng BETWEEN -180 AND 180),
+  federation                   TEXT CHECK (federation IS NULL OR length(federation) BETWEEN 1 AND 120),
+  federation_registration_id   TEXT CHECK (federation_registration_id IS NULL OR length(federation_registration_id) BETWEEN 1 AND 60),
   trusted_partner              INTEGER NOT NULL DEFAULT 0 CHECK (trusted_partner IN (0,1)),
   verified                     INTEGER NOT NULL DEFAULT 0 CHECK (verified IN (0,1)),
-  verified_domain              TEXT,
+  verified_domain              TEXT CHECK (verified_domain IS NULL OR length(verified_domain) BETWEEN 1 AND 253),
   safeguarding_contract_signed INTEGER NOT NULL DEFAULT 0 CHECK (safeguarding_contract_signed IN (0,1)),
   suspended                    INTEGER NOT NULL DEFAULT 0 CHECK (suspended IN (0,1)),
-  password_hash                TEXT,                       -- scrypt string; NULL = unprovisioned (dev-only login)
-  email_domain                 TEXT,
+  password_hash                TEXT CHECK (password_hash IS NULL OR length(password_hash) BETWEEN 1 AND 512), -- scrypt string; NULL = unprovisioned (dev-only login)
+  email_domain                 TEXT CHECK (email_domain IS NULL OR length(email_domain) BETWEEN 1 AND 253),
   email_domain_verified        INTEGER NOT NULL DEFAULT 0 CHECK (email_domain_verified IN (0,1)),
   mfa_required_for_leads       INTEGER NOT NULL DEFAULT 0 CHECK (mfa_required_for_leads IN (0,1)),
   verification_revoked_at      INTEGER,                    -- the organisation's verification revocation (S10a)
-  created_at                   INTEGER,
-  facets_json                  TEXT CHECK (facets_json IS NULL OR json_valid(facets_json)), -- S3 transitional storage (see notes)
-  CHECK ((lat IS NULL) = (lng IS NULL))
+  created_at                   INTEGER NOT NULL,
+  CHECK ((lat IS NULL) = (lng IS NULL)),
+  CHECK (city IS NULL OR lat IS NOT NULL),
+  CHECK ((federation IS NULL) = (federation_registration_id IS NULL))
 ) STRICT;
-CREATE INDEX orgs_type_level ON orgs (type, level);        -- /orgs directory filters (server.mjs:1683-1696, 4052)
+CREATE INDEX orgs_type_level ON orgs (type, level);        -- the sign-in pickers' and the directory's filters
 
 -- source: the staff accounts (repositories/users.mjs)
 -- owner/writer: repositories/users.mjs only (explicit since S14f: create, update(id, draft => …), the MFA operations)

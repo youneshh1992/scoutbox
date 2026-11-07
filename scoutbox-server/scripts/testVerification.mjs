@@ -132,7 +132,7 @@ test('[rules] the database keeps the code\'s uniqueness rules: one open identity
   } finally { s.close(); rm(dir); }
 });
 
-test('[units] a rolled-back unit leaves no claim, evidence or event; db.ver* names throw naming the repository; the org facet is retired', () => {
+test('[units] a rolled-back unit leaves no claim, evidence or event; db.ver* names throw naming the repository; an organisation has no verification field', () => {
   const dir = tempDir('s10a-unit'); saveFixture(dir);
   const s = serverOpen(dir);
   try {
@@ -145,8 +145,8 @@ test('[units] a rolled-back unit leaves no claim, evidence or event; db.ver* nam
     assert.equal(s.repo.reads.claims.byId('vclm-1'), null);
     assert.deepEqual(s.repo.counts(), Object.fromEntries(COLLECTIONS.map((n) => [n, 0])));
     for (const n of [...COLLECTIONS, 'verMigrated']) assert.throws(() => s.db[n], /verification repository/, `db.${n} throws`);
-    const org = s.db.orgs.find((o) => o.id === ORG.id);
-    assert.throws(() => org.verification, /verification repository/, 'org.verification throws');
+    assert.ok(!('verification' in s.layer.orgs.byId(ORG.id)), 'an organisation has no verification field');
+    assert.throws(() => s.layer.orgs.update(ORG.id, (d) => { d.verification = {}; }), /verification is no longer an organisation field: write it through the verification repository/);
   } finally { s.close(); rm(dir); }
 });
 
@@ -155,13 +155,13 @@ test('[bootstrap] organisations already verified become migration claims (and th
   saveFixture(dir, { orgs: [{ ...ORG, plan: 'Pro', verified: true, emailDomain: 'eastport.example', emailDomainVerified: true }, { id: 'org-new', name: 'New FC', type: 'club', plan: 'Pro', verified: false }] });
   const s = serverOpen(dir);
   try {
-    const created = bootstrapVerification({ verification: s.repo, orgs: [...s.db.orgs], now: NOW });
+    const created = bootstrapVerification({ verification: s.repo, orgs: s.layer.orgs.list(), now: NOW });
     assert.equal(created, 2, 'an identity and a domain claim for the verified organisation only');
     const claims = s.repo.reads.claims.forSubject('org', ORG.id);
     assert.deepEqual(claims.map((c) => [c.claimType, c.status, c.verificationMethod]), [['ORGANISATION_IDENTITY', 'verified', 'migration'], ['ORGANISATION_DOMAIN', 'verified', 'migration']]);
     assert.deepEqual(s.repo.reads.domains.forOrg(ORG.id).map((d) => d.domain), ['eastport.example']);
     assert.equal(s.repo.reads.events.forClaim(claims[0].id).length, 1, 'each claim logs its creation');
-    assert.equal(bootstrapVerification({ verification: s.repo, orgs: [...s.db.orgs], now: NOW }), 0, 'never twice');
+    assert.equal(bootstrapVerification({ verification: s.repo, orgs: s.layer.orgs.list(), now: NOW }), 0, 'never twice');
     assert.equal(s.repo.reads.claims.forSubject('org', ORG.id).length, 2);
   } finally { s.close(); rm(dir); }
 });

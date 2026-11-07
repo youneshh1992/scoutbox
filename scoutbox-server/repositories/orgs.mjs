@@ -1,269 +1,218 @@
 /**
- * Organisations — the third live domain (plan step S3).
+ * Organisations as one typed table with explicit writes (S3, migration `0004_orgs_live`; explicit since S14g,
+ * docs/architecture/migration.md §4.6; sql/01_identity.sql).
  *
- * Owns the `orgs` table and the `db.orgs` view. Every organisation field has
- * exactly one authoritative location:
+ * Record (the keys every reader sees, all always present):
+ *   { id, name, type, level, plan, country,
+ *     location: null | { lat, lng, city },              city null when the club gave none
+ *     federationRef: null | { federation, registrationId },
+ *     trustedPartner, verified, verifiedDomain, safeguardingContractSigned, suspended,
+ *     emailDomain, emailDomainVerified, mfaRequiredForLeads, verificationRevokedAt, createdAt }
+ * The password hash is never on a record: `passwordHashOf` gives it to the sign-in check and `setPasswordHash`
+ * writes it. Responses are allowlists, never the record.
  *
- *   COLUMNS (migrated scalars, written only through `insert`/`update`, one
- *   row written immediately inside a transaction): id, name, type, level,
- *   plan, country, trustedPartner, verified, verifiedDomain,
- *   safeguardingContractSigned, suspended, password (→ password_hash),
- *   emailDomain, emailDomainVerified, mfaRequiredForLeads, createdAt, and the
- *   two composites location{city,lat,lng} and federationRef{federation,
- *   registrationId}.
+ * Facets that moved to other repositories: tactical, squad, lookingFor and federationCheck are club setup tables
+ * (S9c), verification is the verification tables (S10a, its revokedAt the column verification_revoked_at), and
+ * agencySettings is the agent core's (S11a). Since S14g there is no facet storage at all: an unknown field is
+ * refused.
  *
- *   FACETS (`facets_json`, the transitional storage for any field this step
- *   does not know): mutated in place by the modules that own them, exactly as
- *   the blob record was, and persisted by `flush()` inside every snapshot save
- *   transaction.
+ * WRITES are explicit operations (`create`, `update(id, draft => …)`, `setPasswordHash`), each joining the open unit
+ * of work, the caller's transaction or its own. READS are SQL: no mirror and no db.* view (`db.orgs` throws); fresh,
+ * deep-frozen records. Refusals carry a code and name the id and the field, never a value.
  *
- *   RETIRED (S9c): tactical, squad, lookingFor and federationCheck are tables of
- *   the club setup repository (repositories/clubSetup.mjs). Reading, writing or
- *   deleting one on an organisation throws, naming that repository, and a
- *   record that carries one is refused, so a reader that was missed fails
- *   loudly instead of seeing (or `??=`-creating) an empty list. RETIRED (S10a): `verification` likewise — its domains are
- *   rows of the verification repository (repositories/verification.mjs) and its revokedAt is the scalar
- *   `verificationRevokedAt` (column verification_revoked_at). RETIRED (S11a): `agencySettings` — rows of the agent core
- *   repository (repositories/agentCore.mjs, `settings`).
- *
- * Shape preservation. A record read back from a row has the same keys, in
- * the same order, with the same absent-versus-null distinction as the record
- * that was written: `facets_json.__meta` records the key order, which migrated
- * keys were explicitly null, and which composites were present. `__meta` never
- * appears on a record.
- *
- * Authority is decided by the cutover record `0004_orgs_live` in
- * `data_migrations`, never by the table existing (the S1 shadow created it)
- * or holding rows.
- *
- * Initialisation is explicit state, never a row count. The cutover migration
- * records `meta.orgsInit`: `done` when it imported a blob (even an empty one)
- * or found a snapshot that simply had no organisations, `pending` only when
- * the database had never been saved to (a genuine first installation). The
- * data layer then calls `initialize(records)` exactly once — the seed, inside
- * one transaction with the state change, so an interruption leaves it pending
- * and the next boot retries — and `attach()` never imports anything: an empty
- * authoritative table stays empty whatever array or blob the caller holds.
- *
- * Change tracking reflects COMMITTED state only. `flush()` runs inside the
- * store's save transaction and records what it wrote as pending; the store
- * reports the commit (`commit()`), which promotes it, or the rollback
- * (`rollback()`), which discards it, so a change flushed into a save that
- * later failed is flushed again by the next save.
+ * A first installation's organisations (the seed) are imported once by `initialize`, while `meta.orgsInit` is
+ * `pending` (set by the migration); a snapshot save settles it.
  */
 import { PLANS } from '../catalogue.mjs';
-import { readonlyView, markView } from './readonly.mjs';
-import { captureGraph, restoreGraph } from './memento.mjs';
-import { migrationApplied } from './database.mjs';
-import { requireRuntime } from '../runtime.mjs';
+import { transaction, migrationApplied } from './database.mjs';
+import { pageOf } from '../domains/platform/paging.mjs';
 
 export const ORGS_CUTOVER_MIGRATION = '0004_orgs_live';
-/** `meta` key holding the initialisation state (`pending` | `done`); absent on a file cut over before the state existed, which reads as `done`. */
+/** `meta` key holding the initialisation state (`pending` | `done`). */
 export const ORGS_INIT_META = 'orgsInit';
 export const ORG_TYPES = Object.freeze(['club', 'agency']);
 export const ORG_LEVELS = Object.freeze(['pro', 'academy', 'agency', 'grassroots']);
 /** The plans an organisation can be on: the catalogue's (one definition; the orgs table's CHECK lists the same four). */
 export const ORG_PLANS = Object.freeze(Object.keys(PLANS));
+export const ORG_LIMITS = Object.freeze({ id: 80, name: 120, country: 40, city: 80, federation: 120, registrationId: 60, domain: 253, passwordHash: 512 });
+const L = ORG_LIMITS;
+const list = (xs) => xs.map((x) => `'${x}'`).join(', ');
 
-/** Scalar record keys that live in a column of their own. */
-const SCALARS = Object.freeze({
-  name: 'name', type: 'type', level: 'level', plan: 'plan', country: 'country',
-  trustedPartner: 'trusted_partner', verified: 'verified', verifiedDomain: 'verified_domain',
-  safeguardingContractSigned: 'safeguarding_contract_signed', suspended: 'suspended', password: 'password_hash',
-  emailDomain: 'email_domain', emailDomainVerified: 'email_domain_verified', mfaRequiredForLeads: 'mfa_required_for_leads',
-  createdAt: 'created_at', verificationRevokedAt: 'verification_revoked_at',
-});
-const BOOLEANS = new Set(['trustedPartner', 'verified', 'safeguardingContractSigned', 'suspended', 'emailDomainVerified', 'mfaRequiredForLeads']);
-/** Composite record keys: an object whose listed sub-keys are columns; any other sub-key is a facet remainder. */
-const COMPOSITES = Object.freeze({
-  location: { city: 'city', lat: 'lat', lng: 'lng' },
-  federationRef: { federation: 'federation', registrationId: 'federation_registration_id' },
-});
-/** Organisation facets that moved to a domain repository's tables: the club setup (S9c), verification (S10a) and the agent core's agency settings (S11a). */
-const RETIRED_FACET_OWNER = Object.freeze({ tactical: 'clubSetup', squad: 'clubSetup', lookingFor: 'clubSetup', federationCheck: 'clubSetup', verification: 'verification', agencySettings: 'agentCore' });
-export const RETIRED_FACETS = Object.freeze(new Set(Object.keys(RETIRED_FACET_OWNER)));
-const retiredFacet = (key) => new TypeError(`org.${String(key)} is gone: read and write it through the ${RETIRED_FACET_OWNER[key]} repository (repositories/${RETIRED_FACET_OWNER[key]}.mjs)${key === 'verification' ? '; its revokedAt is the organisation field verificationRevokedAt' : ''}`);
-/** Every record key the columns own; anything else is a facet. */
-export const MIGRATED_KEYS = Object.freeze(new Set(['id', ...Object.keys(SCALARS), ...Object.keys(COMPOSITES)]));
+export const ORGS_DDL = `
+CREATE TABLE orgs (
+  id                           TEXT PRIMARY KEY CHECK (length(id) BETWEEN 1 AND ${L.id}),
+  name                         TEXT NOT NULL CHECK (length(name) BETWEEN 1 AND ${L.name}),
+  type                         TEXT NOT NULL CHECK (type IN (${list(ORG_TYPES)})),
+  level                        TEXT CHECK (level IS NULL OR level IN (${list(ORG_LEVELS)})),
+  plan                         TEXT NOT NULL CHECK (plan IN (${list(ORG_PLANS)})),
+  country                      TEXT CHECK (country IS NULL OR length(country) BETWEEN 1 AND ${L.country}),
+  city                         TEXT CHECK (city IS NULL OR length(city) BETWEEN 1 AND ${L.city}),
+  lat                          REAL CHECK (lat IS NULL OR lat BETWEEN -90 AND 90),
+  lng                          REAL CHECK (lng IS NULL OR lng BETWEEN -180 AND 180),
+  federation                   TEXT CHECK (federation IS NULL OR length(federation) BETWEEN 1 AND ${L.federation}),
+  federation_registration_id   TEXT CHECK (federation_registration_id IS NULL OR length(federation_registration_id) BETWEEN 1 AND ${L.registrationId}),
+  trusted_partner              INTEGER NOT NULL DEFAULT 0 CHECK (trusted_partner IN (0,1)),
+  verified                     INTEGER NOT NULL DEFAULT 0 CHECK (verified IN (0,1)),
+  verified_domain              TEXT CHECK (verified_domain IS NULL OR length(verified_domain) BETWEEN 1 AND ${L.domain}),
+  safeguarding_contract_signed INTEGER NOT NULL DEFAULT 0 CHECK (safeguarding_contract_signed IN (0,1)),
+  suspended                    INTEGER NOT NULL DEFAULT 0 CHECK (suspended IN (0,1)),
+  password_hash                TEXT CHECK (password_hash IS NULL OR length(password_hash) BETWEEN 1 AND ${L.passwordHash}),
+  email_domain                 TEXT CHECK (email_domain IS NULL OR length(email_domain) BETWEEN 1 AND ${L.domain}),
+  email_domain_verified        INTEGER NOT NULL DEFAULT 0 CHECK (email_domain_verified IN (0,1)),
+  mfa_required_for_leads       INTEGER NOT NULL DEFAULT 0 CHECK (mfa_required_for_leads IN (0,1)),
+  verification_revoked_at      INTEGER,
+  created_at                   INTEGER NOT NULL,
+  CHECK ((lat IS NULL) = (lng IS NULL)),
+  CHECK (city IS NULL OR lat IS NOT NULL),
+  CHECK ((federation IS NULL) = (federation_registration_id IS NULL))
+) STRICT;
+CREATE INDEX orgs_type_level ON orgs (type, level);
+`;
 
-const COLUMNS = ['id', 'name', 'type', 'level', 'plan', 'country', 'city', 'lat', 'lng', 'federation', 'federation_registration_id',
-  'trusted_partner', 'verified', 'verified_domain', 'safeguarding_contract_signed', 'suspended', 'password_hash',
-  'email_domain', 'email_domain_verified', 'mfa_required_for_leads', 'verification_revoked_at', 'created_at', 'facets_json'];
-const INSERT_SQL = `INSERT INTO orgs (${COLUMNS.join(', ')}) VALUES (${COLUMNS.map((c) => `@${c}`).join(', ')})`;
-const UPDATE_SQL = `UPDATE orgs SET ${COLUMNS.filter((c) => c !== 'id').map((c) => `${c} = @${c}`).join(', ')} WHERE id = @id`;
-const SELECT_SQL = `SELECT ${COLUMNS.join(', ')} FROM orgs`;
-
+// Local (not scoutingEvidence's): recruitment.mjs imports this module, and scoutingEvidence.mjs imports recruitment.mjs.
+const deepFreeze = (v) => { if (v !== null && typeof v === 'object' && !Object.isFrozen(v)) { Object.freeze(v); for (const k of Object.keys(v)) deepFreeze(v[k]); } return v; };
+const refusal = (code, message, extra = {}) => Object.assign(new Error(`${code}: ${message}`), { code, ...extra });
 const isPlainObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
-const clone = (v) => (v === null || typeof v !== 'object' ? v : JSON.parse(JSON.stringify(v)));
-const describe = (v) => (v === null ? 'null' : Array.isArray(v) ? 'an array' : typeof v === 'object' ? 'an object' : `a ${typeof v} (${JSON.stringify(v)})`);
+const isClock = (v) => Number.isSafeInteger(v) && v >= 0;
+const describe = (v) => (v === null ? 'null' : Array.isArray(v) ? 'an array' : typeof v === 'object' ? 'an object' : `a ${typeof v}`);
+const textOk = (v, max) => typeof v === 'string' && v.length >= 1 && v.length <= max && v === v.trim();
 
-/**
- * Decide whether a record can be stored, without coercing it. Returns
- * `{ ok: true }` or `{ ok: false, reason }`. Booleans must be booleans, text
- * fields strings, `createdAt` a non-negative integer, lat/lng finite numbers
- * both present or both absent, `type`/`plan` in their CHECK lists, `level`
- * in its list or null (the verification review creates non-grassroots
- * organisations with `level: null`, which the column allows).
- */
-export function validateOrgRecord(rec) {
-  if (!isPlainObject(rec)) return { ok: false, reason: 'not an object' };
-  if (typeof rec.id !== 'string' || !rec.id) return { ok: false, reason: 'no id' };
-  if (typeof rec.name !== 'string' || !rec.name) return { ok: false, reason: 'no name' };
-  if (!ORG_TYPES.includes(rec.type)) return { ok: false, reason: `type ${describe(rec.type)} is not one of ${ORG_TYPES.join('/')}` };
-  if (rec.level !== null && rec.level !== undefined && !ORG_LEVELS.includes(rec.level)) return { ok: false, reason: `level ${describe(rec.level)} is not one of ${ORG_LEVELS.join('/')} or null` };
-  if (!ORG_PLANS.includes(rec.plan)) return { ok: false, reason: `plan ${describe(rec.plan)} is not one of ${ORG_PLANS.join('/')}` };
-  for (const key of ['country', 'verifiedDomain', 'password', 'emailDomain']) {
-    if (rec[key] !== undefined && rec[key] !== null && typeof rec[key] !== 'string') return { ok: false, reason: `${key} is ${describe(rec[key])}, not a string` };
-  }
-  for (const key of BOOLEANS) {
-    if (rec[key] !== undefined && rec[key] !== null && typeof rec[key] !== 'boolean') return { ok: false, reason: `${key} is ${describe(rec[key])}, not a boolean` };
-  }
-  if (rec.createdAt !== undefined && rec.createdAt !== null && !(Number.isInteger(rec.createdAt) && rec.createdAt >= 0)) return { ok: false, reason: `createdAt is ${describe(rec.createdAt)}, not an integer timestamp` };
-  if (rec.location !== undefined && rec.location !== null) {
-    if (!isPlainObject(rec.location)) return { ok: false, reason: `location is ${describe(rec.location)}, not an object` };
-    const { lat, lng, city } = rec.location;
-    const hasLat = lat !== undefined && lat !== null, hasLng = lng !== undefined && lng !== null;
-    if (hasLat !== hasLng) return { ok: false, reason: 'location has one of lat/lng without the other' };
-    if (hasLat && !(Number.isFinite(lat) && Number.isFinite(lng))) return { ok: false, reason: 'location lat/lng are not finite numbers' };
-    if (city !== undefined && city !== null && typeof city !== 'string') return { ok: false, reason: `location.city is ${describe(city)}, not a string` };
-  }
-  if (rec.federationRef !== undefined && rec.federationRef !== null) {
-    if (!isPlainObject(rec.federationRef)) return { ok: false, reason: `federationRef is ${describe(rec.federationRef)}, not an object` };
-    for (const key of ['federation', 'registrationId']) {
-      const v = rec.federationRef[key];
-      if (v !== undefined && v !== null && typeof v !== 'string') return { ok: false, reason: `federationRef.${key} is ${describe(v)}, not a string` };
+export const ORG_RECORD_KEYS = Object.freeze(['id', 'name', 'type', 'level', 'plan', 'country', 'location', 'federationRef',
+  'trustedPartner', 'verified', 'verifiedDomain', 'safeguardingContractSigned', 'suspended',
+  'emailDomain', 'emailDomainVerified', 'mfaRequiredForLeads', 'verificationRevokedAt', 'createdAt']);
+const BOOLEANS = Object.freeze(['trustedPartner', 'verified', 'safeguardingContractSigned', 'suspended', 'emailDomainVerified', 'mfaRequiredForLeads']);
+/** The fields an update's draft may change (the id and the creation time never change; the password has its own operation). */
+const EDITABLE = Object.freeze(ORG_RECORD_KEYS.filter((k) => k !== 'id' && k !== 'createdAt'));
+/** Fields that moved to another repository, named in the refusal so a missed writer learns where they went. */
+const RETIRED_FACET_OWNER = Object.freeze({ tactical: 'clubSetup', squad: 'clubSetup', lookingFor: 'clubSetup', federationCheck: 'clubSetup', verification: 'verification', agencySettings: 'agentCore' });
+
+/** Fill the optional fields of an incoming record with their defaults (null, or false for a flag). */
+const withDefaults = (raw, createdAt) => {
+  const given = Object.fromEntries(Object.entries(raw).filter(([, v]) => v !== undefined)); // an undefined field is an absent one
+  const r = { level: null, country: null, location: null, federationRef: null, verifiedDomain: null, emailDomain: null, verificationRevokedAt: null, createdAt, ...given };
+  for (const k of BOOLEANS) if (r[k] === undefined) r[k] = false;
+  if (isPlainObject(r.location)) r.location = { lat: r.location.lat, lng: r.location.lng, city: r.location.city === undefined || r.location.city === '' ? null : r.location.city, ...Object.fromEntries(Object.entries(r.location).filter(([k]) => !['lat', 'lng', 'city'].includes(k))) };
+  // The record's fields in their one order; anything else after them (and refused by the typing).
+  return Object.fromEntries([...ORG_RECORD_KEYS.map((k) => [k, r[k]]), ...Object.entries(r).filter(([k]) => !ORG_RECORD_KEYS.includes(k))]);
+};
+
+/** The problems with a record (an incoming one after its defaults, or a draft after an update), by field. */
+export function orgRecordProblems(r) {
+  const out = [];
+  const unknown = Object.keys(r).filter((k) => !ORG_RECORD_KEYS.includes(k));
+  for (const k of unknown) out.push(RETIRED_FACET_OWNER[k] ? `${k} is no longer an organisation field: write it through the ${RETIRED_FACET_OWNER[k]} repository` : `unknown field ${k}`);
+  if (!textOk(r.id, L.id)) out.push(`id must be text of 1 to ${L.id} characters`);
+  if (!textOk(r.name, L.name)) out.push(`name must be text of 1 to ${L.name} characters without surrounding spaces`);
+  if (!ORG_TYPES.includes(r.type)) out.push(`type must be one of ${ORG_TYPES.join(', ')}`);
+  if (r.level !== null && !ORG_LEVELS.includes(r.level)) out.push(`level must be one of ${ORG_LEVELS.join(', ')} or null`);
+  if (!ORG_PLANS.includes(r.plan)) out.push(`plan must be one of ${ORG_PLANS.join(', ')}`);
+  if (r.country !== null && !textOk(r.country, L.country)) out.push(`country must be text of 1 to ${L.country} characters or null`);
+  for (const k of ['verifiedDomain', 'emailDomain']) if (r[k] !== null && !textOk(r[k], L.domain)) out.push(`${k} must be text of 1 to ${L.domain} characters or null`);
+  for (const k of BOOLEANS) if (typeof r[k] !== 'boolean') out.push(`${k} must be a boolean`);
+  if (r.verificationRevokedAt !== null && !isClock(r.verificationRevokedAt)) out.push('verificationRevokedAt must be an integer timestamp or null');
+  if (!isClock(r.createdAt)) out.push('createdAt must be an integer timestamp');
+  if (r.location !== null) {
+    const loc = r.location;
+    if (!isPlainObject(loc) || Object.keys(loc).some((k) => !['lat', 'lng', 'city'].includes(k))) out.push(`location must be { lat, lng, city } or null (got ${describe(loc)})`);
+    else {
+      if (!(Number.isFinite(loc.lat) && Math.abs(loc.lat) <= 90 && Number.isFinite(loc.lng) && Math.abs(loc.lng) <= 180)) out.push('location.lat and location.lng must be a latitude (-90 to 90) and a longitude (-180 to 180)');
+      if (loc.city !== null && !textOk(loc.city, L.city)) out.push(`location.city must be text of 1 to ${L.city} characters or null`);
     }
   }
-  if (rec.verificationRevokedAt !== undefined && rec.verificationRevokedAt !== null && !Number.isSafeInteger(rec.verificationRevokedAt)) return { ok: false, reason: `verificationRevokedAt is ${describe(rec.verificationRevokedAt)}, not an integer timestamp` };
-  if ('__meta' in rec) return { ok: false, reason: 'the reserved field "__meta" is not allowed on a record' };
-  const retired = Object.keys(rec).filter((k) => RETIRED_FACETS.has(k));
-  if (retired.length) return { ok: false, reason: `${retired.join(', ')} ${retired.length > 1 ? 'are' : 'is'} no longer an organisation field (club setup tables since S9c, verification tables since S10a, agent core tables since S11a: write it through that repository or its snapshot collections)` };
-  return { ok: true };
-}
-
-/** Record → row parameters. Every migrated key goes to its column; the rest, plus the shape metadata, to facets_json. */
-export function toRow(rec) {
-  const p = {};
-  for (const c of COLUMNS) p[c] = null;
-  p.id = rec.id;
-  const meta = { order: Object.keys(rec), nulls: [], present: [], sub: {} };
-  for (const [key, col] of Object.entries(SCALARS)) {
-    const v = rec[key];
-    if (v === null) { meta.nulls.push(key); continue; }
-    if (v === undefined) continue;
-    p[col] = BOOLEANS.has(key) ? (v ? 1 : 0) : v;
-  }
-  for (const [key, subs] of Object.entries(COMPOSITES)) {
-    const v = rec[key];
-    if (v === null) { meta.nulls.push(key); continue; }
-    if (v === undefined) continue;
-    meta.present.push(key);
-    meta.sub[key] = Object.keys(v);
-    for (const [sub, col] of Object.entries(subs)) {
-      if (v[sub] === null) meta.nulls.push(`${key}.${sub}`);
-      else if (v[sub] !== undefined) p[col] = v[sub];
+  if (r.federationRef !== null) {
+    const f = r.federationRef;
+    if (!isPlainObject(f) || Object.keys(f).some((k) => !['federation', 'registrationId'].includes(k))) out.push(`federationRef must be { federation, registrationId } or null (got ${describe(f)})`);
+    else {
+      if (!textOk(f.federation, L.federation)) out.push(`federationRef.federation must be text of 1 to ${L.federation} characters`);
+      if (!textOk(f.registrationId, L.registrationId)) out.push(`federationRef.registrationId must be text of 1 to ${L.registrationId} characters`);
     }
   }
-  // Booleans default to 0 in the table; an absent boolean reads back as absent via meta (not in order → not rendered).
-  for (const key of BOOLEANS) if (p[SCALARS[key]] === null) p[SCALARS[key]] = 0;
-  const facets = {};
-  for (const key of meta.order) {
-    if (MIGRATED_KEYS.has(key)) continue;
-    facets[key] = rec[key];
-  }
-  // Composite remainders: sub-keys the columns do not know stay with the record.
-  for (const [key, subs] of Object.entries(COMPOSITES)) {
-    const v = rec[key];
-    if (!isPlainObject(v)) continue;
-    const rest = Object.fromEntries(Object.entries(v).filter(([sub]) => !(sub in subs)));
-    if (Object.keys(rest).length) { facets.__rest ??= {}; facets.__rest[key] = rest; }
-  }
-  facets.__meta = meta;
-  p.facets_json = JSON.stringify(facets);
-  return p;
+  return out;
 }
 
-/** Row → record, in the original key order with the original absent/null shape. */
-export function fromRow(r) {
-  const facets = r.facets_json ? JSON.parse(r.facets_json) : {};
-  const meta = facets.__meta ?? { order: [], nulls: [], present: [] };
-  const rest = facets.__rest ?? {};
-  const nulls = new Set(meta.nulls);
-  const values = {};
-  values.id = r.id;
-  for (const [key, col] of Object.entries(SCALARS)) {
-    if (nulls.has(key)) { values[key] = null; continue; }
-    const v = r[col];
-    if (v === null || v === undefined) continue;
-    values[key] = BOOLEANS.has(key) ? v === 1 : v;
-  }
-  for (const [key, subs] of Object.entries(COMPOSITES)) {
-    if (nulls.has(key)) { values[key] = null; continue; }
-    const obj = {};
-    let any = meta.present.includes(key);
-    for (const [sub, col] of Object.entries(subs)) {
-      if (nulls.has(`${key}.${sub}`)) { obj[sub] = null; any = true; continue; }
-      if (r[col] !== null && r[col] !== undefined) { obj[sub] = r[col]; any = true; }
-    }
-    if (rest[key]) { Object.assign(obj, rest[key]); any = true; }
-    if (!any) continue;
-    // Sub-keys in the order the record had them (then anything new at the end).
-    const ordered = {};
-    for (const sub of meta.sub?.[key] ?? []) if (sub in obj) ordered[sub] = obj[sub];
-    for (const sub of Object.keys(obj)) if (!(sub in ordered)) ordered[sub] = obj[sub];
-    values[key] = ordered;
-  }
-  for (const [key, v] of Object.entries(facets)) {
-    if (key === '__meta' || key === '__rest') continue;
-    values[key] = v;
-  }
-  // Original key order first, then anything the row holds that the order did not list.
-  const rec = {};
-  for (const key of meta.order) if (key in values) rec[key] = values[key];
-  for (const key of Object.keys(values)) if (!(key in rec)) rec[key] = values[key];
-  // Booleans that were absent on the way in are absent on the way out (the table stores 0).
-  for (const key of BOOLEANS) if (!meta.order.includes(key) && rec[key] === false) delete rec[key];
-  return rec;
+const COLS = 'id, name, type, level, plan, country, city, lat, lng, federation, federation_registration_id, trusted_partner, verified, verified_domain, safeguarding_contract_signed, suspended, password_hash, email_domain, email_domain_verified, mfa_required_for_leads, verification_revoked_at, created_at';
+const COL_LIST = COLS.split(', ');
+const SELECT = `SELECT ${COLS} FROM orgs`;
+const INSERT = `INSERT INTO orgs (${COLS}) VALUES (${COL_LIST.map((c) => `@${c}`).join(', ')})`;
+const UPDATE = `UPDATE orgs SET ${COL_LIST.filter((c) => c !== 'id' && c !== 'password_hash' && c !== 'created_at').map((c) => `${c} = @${c}`).join(', ')} WHERE id = @id`;
+const b = (v) => (v ? 1 : 0);
+const params = (r, passwordHash = null) => ({
+  id: r.id, name: r.name, type: r.type, level: r.level, plan: r.plan, country: r.country,
+  city: r.location?.city ?? null, lat: r.location?.lat ?? null, lng: r.location?.lng ?? null,
+  federation: r.federationRef?.federation ?? null, federation_registration_id: r.federationRef?.registrationId ?? null,
+  trusted_partner: b(r.trustedPartner), verified: b(r.verified), verified_domain: r.verifiedDomain,
+  safeguarding_contract_signed: b(r.safeguardingContractSigned), suspended: b(r.suspended), password_hash: passwordHash,
+  email_domain: r.emailDomain, email_domain_verified: b(r.emailDomainVerified), mfa_required_for_leads: b(r.mfaRequiredForLeads),
+  verification_revoked_at: r.verificationRevokedAt, created_at: r.createdAt,
+});
+/** The record for a table row (plain; the repository freezes what it hands out). */
+function fromDb(d) {
+  return {
+    id: d.id, name: d.name, type: d.type, level: d.level, plan: d.plan, country: d.country,
+    location: d.lat === null ? null : { lat: d.lat, lng: d.lng, city: d.city },
+    federationRef: d.federation === null ? null : { federation: d.federation, registrationId: d.federation_registration_id },
+    trustedPartner: d.trusted_partner === 1, verified: d.verified === 1, verifiedDomain: d.verified_domain,
+    safeguardingContractSigned: d.safeguarding_contract_signed === 1, suspended: d.suspended === 1,
+    emailDomain: d.email_domain, emailDomainVerified: d.email_domain_verified === 1, mfaRequiredForLeads: d.mfa_required_for_leads === 1,
+    verificationRevokedAt: d.verification_revoked_at, createdAt: d.created_at,
+  };
 }
+const passwordProblem = (h) => (h === null || textOk(h, L.passwordHash) ? null : `the password hash must be text of 1 to ${L.passwordHash} characters or null`);
 
 const cutOver = (sqlite) => migrationApplied(sqlite, ORGS_CUTOVER_MIGRATION);
 
+// ------------------------------------------------------------------ the snapshot path
 /**
- * Whole-table access for tools that treat the file as one snapshot (backups,
- * restores, the persistence suites). Declines (`null` / `false`) before the
- * cutover record exists, so the caller keeps using the legacy blob. `replace`
- * upserts every record and THROWS on the first unsupported one (rolling the
- * caller's whole save back); `prune` deletes the rows a snapshot no longer
- * lists and runs after the staff table was written, so a staff member who
- * still names the organisation makes the foreign key refuse the save instead
- * of the organisation vanishing under them.
+ * Type one snapshot organisation: `{ ok: true, row, passwordHash }` or `{ ok: false, reason }`. A snapshot row is a
+ * record plus `password` (the hash, or null); absent optional fields take their defaults (`createdAt` the save's
+ * time); an unknown field is refused.
+ */
+export function typeOrgSnapshotRow(raw, { now = Date.now() } = {}) {
+  if (!isPlainObject(raw)) return { ok: false, reason: `not an object (${describe(raw)})` };
+  const at = `organisation ${typeof raw.id === 'string' ? raw.id : '(no id)'}`;
+  const { password = null, ...rest } = raw;
+  const r = withDefaults(rest, now);
+  const problems = orgRecordProblems(r);
+  const pw = passwordProblem(password); if (pw) problems.push(pw);
+  if (problems.length) return { ok: false, reason: `${at}: ${problems.join('; ')}` };
+  return { ok: true, row: r, passwordHash: password };
+}
+
+const blocked = (detail, extra = {}) => refusal('ORGS_IMPORT_BLOCKED', `${detail}; nothing was written`, extra);
+const readSnapshot = (sqlite) => sqlite.prepare(`${SELECT} ORDER BY rowid`).all().map((d) => ({ ...fromDb(d), password: d.password_hash }));
+
+/**
+ * Whole-table access for snapshot mode (tools, fixtures, the persistence suites). `replace` types every row first
+ * (an unknown field or a wrong-typed value refuses the whole write, naming the row) and upserts in place, so the
+ * many tables that reference a kept organisation keep their rows. `prune` deletes the rows a snapshot no longer
+ * lists; it runs after every table that names an organisation, so a row still referenced makes the save fail.
  */
 export const ORGS_TABLE = {
   name: 'orgs',
-  read(sqlite) {
-    if (!cutOver(sqlite)) return null;
-    return sqlite.prepare(`${SELECT_SQL} ORDER BY rowid`).all().map(fromRow);
-  },
-  replace(sqlite, rows) {
+  read(sqlite) { return cutOver(sqlite) ? readSnapshot(sqlite) : null; },
+  replace(sqlite, rows, { now = Date.now() } = {}) {
     if (!cutOver(sqlite)) return false;
-    if (!Array.isArray(rows)) throw new TypeError('orgs: the snapshot collection must be an array of records');
-    const seen = new Set();
-    rows.forEach((rec, i) => {
-      const v = validateOrgRecord(rec);
-      const label = isPlainObject(rec) && typeof rec.id === 'string' ? `id ${rec.id}` : `entry #${i}`;
-      if (!v.ok) throw new Error(`orgs: snapshot row ${label} was refused (${v.reason}); the save was rolled back and no organisation was changed`);
-      if (seen.has(rec.id)) throw new Error(`orgs: snapshot row ${label} was refused (duplicate id); the save was rolled back and no organisation was changed`);
-      seen.add(rec.id);
+    if (!sqlite.isTransaction) throw new Error('orgs: replace() runs inside the caller\'s transaction');
+    if (!Array.isArray(rows)) throw blocked(`the orgs snapshot collection must be an array (got ${describe(rows)})`);
+    const typed = []; const problems = []; const seen = new Set();
+    rows.forEach((raw, i) => {
+      const v = typeOrgSnapshotRow(raw, { now });
+      if (!v.ok) { problems.push(`entry #${i}: ${v.reason}`); return; }
+      if (seen.has(v.row.id)) { problems.push(`entry #${i}: duplicates organisation ${v.row.id}`); return; }
+      seen.add(v.row.id); typed.push(v);
     });
-    const exists = sqlite.prepare('SELECT 1 FROM orgs WHERE id = ?');
-    const insert = sqlite.prepare(INSERT_SQL);
-    const update = sqlite.prepare(UPDATE_SQL);
-    for (const rec of rows) (exists.get(rec.id) ? update : insert).run(toRow(rec));
+    if (problems.length) throw blocked(`${problems.length} invalid entr${problems.length === 1 ? 'y' : 'ies'} in the orgs snapshot collection — ${problems.slice(0, 20).join('; ')}`, { problems });
+    const upsert = sqlite.prepare(`${INSERT} ON CONFLICT(id) DO UPDATE SET ${COL_LIST.filter((c) => c !== 'id').map((c) => `${c} = excluded.${c}`).join(', ')}`);
+    try {
+      for (const { row, passwordHash } of typed) upsert.run(params(row, passwordHash));
+    } catch (err) {
+      throw blocked(`the orgs snapshot collection could not be stored (${String(err?.message ?? err).replace(/^SQLITE_\w+:\s*/, '')})`);
+    }
     return true;
   },
   prune(sqlite, rows) {
     if (!cutOver(sqlite) || !Array.isArray(rows)) return;
-    const keep = new Set(rows.map((r) => r.id));
+    const keep = new Set(rows.filter((r) => isPlainObject(r)).map((r) => r.id));
     const del = sqlite.prepare('DELETE FROM orgs WHERE id = ?');
     for (const r of sqlite.prepare('SELECT id FROM orgs').all()) {
       if (keep.has(r.id)) continue;
@@ -274,298 +223,124 @@ export const ORGS_TABLE = {
   },
 };
 
-export function createOrgsRepository({ sqlite, log = () => {}, warn = () => {}, unit = null }) {
-  if (!sqlite) throw new TypeError('the organisations repository needs a SQLite connection (node:sqlite); the data layer has no in-memory fallback');
-  // `unit` is the store's `{ active() }`: while the store runs a unit of work,
-  // row writes join its transaction and the bookkeeping is staged (§ unit of work).
-  const inUnit = () => !!unit?.active?.();
-  // The transaction-state guards below need `sqlite.isTransaction` (Node.js
-  // 22.16 / 24.0); the store refused the runtime before opening the file, and
-  // a connection handed in by a tool is checked the same way.
-  requireRuntime();
-  if (typeof sqlite.isTransaction !== 'boolean') throw new Error('NODE_UNSUPPORTED: this SQLite connection has no transaction state (isTransaction); the organisations repository cannot tell a save transaction from autocommit');
-  // Checked before any statement is prepared: on a pre-S3 file the table is the
-  // S1 shadow (no facets column) and the clear message must win over SQLite's.
-  if (!migrationApplied(sqlite, ORGS_CUTOVER_MIGRATION)) throw new Error(`orgs: the cutover record ${ORGS_CUTOVER_MIGRATION} is missing from data_migrations; the table cannot be trusted as the source of truth`);
-  const stmt = {
-    all: sqlite.prepare(`${SELECT_SQL} ORDER BY rowid`),
-    insert: sqlite.prepare(INSERT_SQL),
-    update: sqlite.prepare(UPDATE_SQL),
-    facets: sqlite.prepare('UPDATE orgs SET facets_json = @facets_json WHERE id = @id'),
-    count: sqlite.prepare('SELECT COUNT(*) AS n FROM orgs'),
-    cutover: sqlite.prepare('SELECT 1 FROM data_migrations WHERE id = ?'),
-    meta: sqlite.prepare('SELECT value FROM meta WHERE key = ?'),
-    setMeta: sqlite.prepare('INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value'),
-  };
+// ------------------------------------------------------------------ the repository
+const WRITES = new Set(['create', 'update', 'setPasswordHash', 'initialize']);
 
-  const records = [];                 // plain record objects (scalars + facets), insertion order
-  const proxies = [];                 // the view records, same order
-  const byIdMap = new Map();          // id → plain record
-  const viewById = new Map();         // id → its view (records[i] ↔ proxies[i]), so a lookup by id never scans
-  const committedFacets = new Map();  // id → facets_json as last COMMITTED, for change detection
-  const pendingFacets = new Map();    // id → facets_json written by a flush whose transaction has not committed yet
-
-  const refuse = (what) => { throw new TypeError(`${what} is written through the organisations repository (orgs.insert / orgs.update), never directly on the in-memory view.`); };
-  const refuseNested = (key) => refuse(`an organisation (field "${String(key)}", including its nested values)`);
-
-  /**
-   * A composite (`location`, `federationRef`) is a column-backed value: its
-   * nested object is served through a guard that refuses assignment, deletion
-   * and property definition at any depth, so the view can never hold a value
-   * the table does not. Reads, spreads and JSON are unchanged; the guard for a
-   * given object is stable (same identity on every read).
-   */
-  const guards = new WeakMap();
-  const guard = (value, key) => {
-    if (value === null || typeof value !== 'object') return value;
-    let g = guards.get(value);
-    if (!g) {
-      g = markView(new Proxy(value, {
-        get(t, prop, receiver) { return guard(Reflect.get(t, prop, receiver), key); },
-        set() { return refuseNested(key); },
-        deleteProperty() { return refuseNested(key); },
-        defineProperty() { return refuseNested(key); },
-        setPrototypeOf() { return refuseNested(key); },
-      }));
-      guards.set(value, g);
-    }
-    return g;
-  };
-
-  /**
-   * The view of one organisation: reading is the plain record (composites
-   * through their guard); assigning a MIGRATED key throws (use `update`);
-   * assigning or deleting any other key is allowed and lands in the facets,
-   * persisted by the next save's `flush`.
-   */
-  const recordView = (target) => markView(new Proxy(target, {
-    get(t, key, receiver) {
-      if (RETIRED_FACETS.has(key)) throw retiredFacet(key);
-      const value = Reflect.get(t, key, receiver);
-      return key in COMPOSITES ? guard(value, key) : value;
-    },
-    set(t, key, value) {
-      if (RETIRED_FACETS.has(key)) throw retiredFacet(key);
-      if (MIGRATED_KEYS.has(key)) return refuse(`an organisation (field "${String(key)}")`);
-      if (key === '__meta' || key === '__rest') return refuse(`an organisation (reserved field "${String(key)}")`);
-      t[key] = value; return true;
-    },
-    deleteProperty(t, key) {
-      if (RETIRED_FACETS.has(key)) throw retiredFacet(key);
-      if (MIGRATED_KEYS.has(key)) return refuse(`an organisation (field "${String(key)}")`);
-      delete t[key]; return true;
-    },
-    defineProperty(t, key, desc) {
-      if (RETIRED_FACETS.has(key)) throw retiredFacet(key);
-      if (MIGRATED_KEYS.has(key)) return refuse(`an organisation (field "${String(key)}")`);
-      return Reflect.defineProperty(t, key, desc);
-    },
-  }));
-  /**
-   * Remember a record. Outside a unit of work its facets are committed (the
-   * statement that wrote them has autocommitted); inside one they are PENDING
-   * until the store reports the commit, so a rollback leaves nothing claimed.
-   */
-  const remember = (rec, facetsJson) => {
-    records.push(rec); byIdMap.set(rec.id, rec);
-    if (inUnit()) pendingFacets.set(rec.id, facetsJson); else committedFacets.set(rec.id, facetsJson);
-    const view = recordView(rec); proxies.push(view); viewById.set(rec.id, view); return view;
-  };
-  /** `db.orgs`: the records, read-only as an array (push/splice/assignment throw); each element is a record view. */
-  const view = markView(new Proxy(proxies, {
-    set(_t, key) { return refuse(`the organisations collection (index "${String(key)}")`); },
-    deleteProperty(_t, key) { return refuse(`the organisations collection (index "${String(key)}")`); },
-    defineProperty(_t, key) { return refuse(`the organisations collection (index "${String(key)}")`); },
-  }));
-
-  const load = () => {
-    records.length = 0; proxies.length = 0; byIdMap.clear(); viewById.clear(); committedFacets.clear(); pendingFacets.clear();
-    for (const r of stmt.all.all()) remember(fromRow(r), r.facets_json);
-  };
+/** `createOrgsRepository({ sqlite, nextId, unit, now, log })`: the organisation writes and queries, plus `reads` (the queries alone). */
+export function createOrgsRepository({ sqlite, nextId = null, unit = null, now = Date.now, log = () => {} }) {
+  if (!sqlite) throw new TypeError('the organisations repository needs a SQLite connection (node:sqlite); organisations have no in-memory fallback');
+  if (!cutOver(sqlite)) throw new Error(`orgs: the cutover record ${ORGS_CUTOVER_MIGRATION} is missing from data_migrations; the table cannot be trusted as the source of truth`);
+  const operation = (fn) => (unit?.active?.() ? unit.join(fn) : sqlite.isTransaction ? fn() : transaction(sqlite, fn));
+  const cache = new Map();
+  const q = (sql) => { let s = cache.get(sql); if (!s) cache.set(sql, (s = sqlite.prepare(sql))); return s; };
+  const dec = (rows) => rows.map((d) => deepFreeze(fromDb(d)));
+  const byId = (id) => (typeof id === 'string' && id ? dec(q(`${SELECT} WHERE id = ?`).all(id))[0] ?? null : null);
+  const invalid = (id, problems) => refusal('ORG_RECORD_INVALID', `organisation ${id}: ${problems.join('; ')}`, { problems });
   const readInitState = () => {
-    const row = stmt.meta.get(ORGS_INIT_META);
-    if (!row) return 'done'; // cut over before the state existed: the table is authoritative, nothing to initialise
+    const row = q('SELECT value FROM meta WHERE key = ?').get(ORGS_INIT_META);
+    if (!row) return 'done';
     if (row.value !== 'pending' && row.value !== 'done') throw new Error(`orgs: meta.${ORGS_INIT_META} holds ${JSON.stringify(row.value)}, which is neither "pending" nor "done"`);
     return row.value;
   };
-  const checkRecords = (rows) => {
-    const problems = [];
-    const seen = new Set();
-    rows.forEach((rec, i) => {
-      const v = validateOrgRecord(rec);
-      const label = isPlainObject(rec) && typeof rec.id === 'string' ? `id ${rec.id}` : `entry #${i}`;
-      if (!v.ok) problems.push(`${label}: ${v.reason}`); else if (seen.has(rec.id)) problems.push(`${label}: duplicate id`); else seen.add(rec.id);
-    });
-    if (problems.length) throw new Error(`orgs: ${problems.length} organisation record(s) cannot be imported — ${problems.slice(0, 20).join('; ')}`);
+  /** `type`, `level` and `notLevel` narrow a list (`level: null` is the organisations without a level). */
+  const where = ({ type, level, notLevel } = {}) => {
+    const sql = []; const args = [];
+    if (type !== undefined) { sql.push('type = ?'); args.push(type); }
+    if (level === null) sql.push('level IS NULL'); else if (level !== undefined) { sql.push('level = ?'); args.push(level); }
+    if (notLevel !== undefined) { sql.push('(level IS NULL OR level <> ?)'); args.push(notLevel); }
+    return { sql: sql.length ? ` WHERE ${sql.join(' AND ')}` : '', args };
   };
-  /**
-   * `insert`/`update` commit on their own, OR join the store's unit of work
-   * (whose rollback restores this repository's state through `restoreState`).
-   * Inside anyone else's open transaction their bookkeeping could not follow
-   * a rollback, so they refuse.
-   */
-  const requireAutocommit = (what) => {
-    if (sqlite.isTransaction && !inUnit()) throw new Error(`orgs.${what} writes in a transaction of its own and cannot run inside an open transaction (a save flushes facets only; use the store's unit of work)`);
-  };
+  let updating = null;
 
   const repo = {
-    view,
-    byId: (id) => (id && viewById.get(id)) || null,
-    count: () => records.length,
-    cutOver: () => !!stmt.cutover.get(ORGS_CUTOVER_MIGRATION),
-    /** `pending` (a first installation that has not been initialised yet) or `done`. */
-    initState: () => readInitState(),
-
+    // ---------------------------------------------------------- writes
     /**
-     * Boot. Refuses to run without the cutover record. Loads the table and
-     * nothing else: whatever array the caller holds (the seed, a superseded
-     * blob copy, a stale blob) is never imported here — an organisation it
-     * names that the table does not hold is reported as ignored. A first
-     * installation is initialised by `initialize`, which the data layer calls
-     * only while the recorded state is `pending`.
+     * Create an organisation (the id is minted here unless the caller gives one). Absent optional fields take their
+     * defaults; junk is refused by field; `passwordHash` is stored, never put on the record. Returns the stored record.
      */
-    attach(given) {
-      if (!repo.cutOver()) throw new Error(`orgs: the cutover record ${ORGS_CUTOVER_MIGRATION} is missing from data_migrations; the table cannot be trusted as the source of truth`);
-      const rows = Array.isArray(given) ? given : [];
-      if (rows.length) {
-        const ids = new Set(sqlite.prepare('SELECT id FROM orgs').all().map((r) => r.id));
-        const unknown = rows.filter((o) => isPlainObject(o) && !ids.has(o.id)).length;
-        if (unknown) warn(`orgs: the table holds ${ids.size} row(s) and is authoritative (initialisation ${readInitState()}); an in-memory array with ${unknown} organisation(s) the table does not hold was ignored`);
-      }
-      load();
-      return { engine: 'sqlite', loaded: records.length, imported: 0 };
-    },
-
+    create: ({ passwordHash = null, ...fields } = {}) => operation(() => {
+      const r = withDefaults({ ...fields, id: fields.id ?? (nextId ? nextId('org') : undefined) }, fields.createdAt ?? now());
+      const problems = orgRecordProblems(r);
+      const pw = passwordProblem(passwordHash); if (pw) problems.push(pw);
+      if (problems.length) throw invalid(r.id, problems);
+      if (q('SELECT 1 FROM orgs WHERE id = ?').get(r.id)) throw refusal('ORG_EXISTS', `organisation ${r.id} already exists`);
+      q(INSERT).run(params(r, passwordHash));
+      return byId(r.id);
+    }),
     /**
-     * First-installation initialisation: import the given records (the seed)
-     * and record `done`, in one transaction. Allowed only while the state is
-     * `pending`; refused when the table already holds rows (they were written
-     * outside the repository — a decision for a person, not a merge). Every
-     * record is validated first; an interruption leaves the state `pending`
-     * and nothing inserted, so the next boot does this again.
+     * `update(id, (draft) => …)`: the draft is a plain copy of the record; the change is typed whole and written at
+     * once. The id and creation time never change; an unknown field is refused. Returns the stored record.
+     */
+    update: (id, edit) => operation(() => {
+      if (typeof edit !== 'function') throw new TypeError('orgs.update(id, (draft) => …) takes a function');
+      if (updating === id) throw refusal('ORG_UPDATE_REENTRANT', `organisation ${id} is already being updated`);
+      const before = byId(id);
+      if (!before) throw refusal('ORG_NOT_FOUND', `organisation ${id} does not exist`);
+      const draft = JSON.parse(JSON.stringify(before));
+      updating = id;
+      try { edit(draft); } finally { updating = null; }
+      for (const k of ORG_RECORD_KEYS) {
+        if (EDITABLE.includes(k)) continue;
+        if (JSON.stringify(draft[k]) !== JSON.stringify(before[k])) throw invalid(id, [`${k} does not change through update`]);
+      }
+      const next = isPlainObject(draft.location) && draft.location.city === '' ? { ...draft, location: { ...draft.location, city: null } } : draft;
+      const problems = orgRecordProblems(next);
+      if (problems.length) throw invalid(id, problems);
+      const { password_hash: _keep, created_at: _never, ...cols } = params(next);
+      q(UPDATE).run(cols);
+      return byId(id);
+    }),
+    /** Store a new password hash (or null to remove the password). Returns the stored record. */
+    setPasswordHash: (id, hash) => operation(() => {
+      const pw = passwordProblem(hash); if (pw) throw invalid(id, [pw]);
+      if (q('UPDATE orgs SET password_hash = ? WHERE id = ?').run(hash, id).changes !== 1) throw refusal('ORG_NOT_FOUND', `organisation ${id} does not exist`);
+      return byId(id);
+    }),
+    /**
+     * First-installation initialisation: import the given records (the seed) and record `done`, in one transaction.
+     * Allowed only while the state is `pending` and the table is empty; every record is typed first.
      */
     initialize(given) {
-      if (!repo.cutOver()) throw new Error(`orgs: the cutover record ${ORGS_CUTOVER_MIGRATION} is missing from data_migrations; the table cannot be trusted as the source of truth`);
       if (readInitState() !== 'pending') throw new Error(`orgs: the organisations were already initialised (meta.${ORGS_INIT_META} is "done"); the table is authoritative and nothing is imported`);
-      const stored = stmt.count.get().n;
+      const stored = repo.count();
       if (stored) throw new Error(`orgs: initialisation is pending but the table already holds ${stored} row(s) written outside the repository; refusing to initialise over them`);
-      // The collection is validated AS GIVEN (review of cb1d22b): a value that is
-      // not an array — an object, null, a string, a number, nothing — is refused
-      // and never read as an empty installation; an explicitly empty array is
-      // a valid, empty installation. Nothing is written and the state stays
-      // pending, so a corrected boot initialises later.
       if (!Array.isArray(given)) throw new TypeError(`orgs: initialize() needs the first installation's organisations as an array (got ${given === undefined ? 'absent' : describe(given)}); nothing was written and initialisation stays pending`);
-      const rows = given;
-      checkRecords(rows);
-      sqlite.exec('BEGIN');
-      try {
-        for (const rec of rows) stmt.insert.run(toRow(clone(rec)));
-        stmt.setMeta.run(ORGS_INIT_META, 'done');
-        sqlite.exec('COMMIT');
-      } catch (err) { sqlite.exec('ROLLBACK'); throw err; }
-      log(`orgs: initialised ${rows.length} organisation(s) from the in-memory records (first installation)`);
-      load();
-      return { engine: 'sqlite', loaded: records.length, imported: rows.length };
+      const at = now();
+      const typed = given.map((raw, i) => { const v = typeOrgSnapshotRow(raw, { now: at }); if (!v.ok) throw new Error(`orgs: entry #${i} cannot be imported — ${v.reason}`); return v; });
+      transaction(sqlite, () => {
+        for (const { row, passwordHash } of typed) q(INSERT).run(params(row, passwordHash));
+        q('INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').run(ORGS_INIT_META, 'done');
+      });
+      log(`orgs: initialised ${typed.length} organisation(s) from the first installation's records`);
+      return { engine: 'sqlite', rows: typed.length, imported: typed.length };
     },
 
-    /** Create an organisation. The caller supplies the id (ids are minted by the server's counter, as before). */
-    insert(fields) {
-      requireAutocommit('insert');
-      const rec = clone(fields);
-      const v = validateOrgRecord(rec);
-      if (!v.ok) throw new TypeError(`an organisation record was refused: ${v.reason}`);
-      if (byIdMap.has(rec.id)) throw new Error(`organisation ${rec.id} already exists`);
-      const row = toRow(rec);
-      stmt.insert.run(row);
-      return remember(rec, row.facets_json);
+    // ---------------------------------------------------------- reads
+    byId,
+    /** Every organisation (or those of a `type` / `level`, or not of `notLevel`), in creation order. Bounded by the clubs, not the player base. */
+    list: (filter = {}) => { const w = where(filter); return dec(q(`${SELECT}${w.sql} ORDER BY rowid`).all(...w.args)); },
+    /** One page of `list(filter)`, oldest first; `page` is the route's `readPage(query, ['number'])`: `{ items, nextCursor }`. */
+    page: (filter = {}, { limit, after = null }) => {
+      const w = where(filter);
+      const rows = q(`SELECT rowid AS rid, ${COLS} FROM orgs${w.sql}${w.sql ? ' AND' : ' WHERE'} rowid > ? ORDER BY rowid LIMIT ?`).all(...w.args, after ? after[0] : 0, limit + 1);
+      const page = pageOf(rows, limit, (r) => [r.rid]);
+      return { items: dec(page.items), nextCursor: page.nextCursor };
     },
-
-    /**
-     * Change migrated fields. `undefined` leaves a field alone, `null` sets an
-     * explicit null (where the column allows it). Composites are replaced
-     * whole. Facet keys cannot be set here: they are written on the record.
-     */
-    update(id, patch) {
-      requireAutocommit('update');
-      const rec = byIdMap.get(id);
-      if (!rec) throw new Error(`organisation ${id} does not exist`);
-      if (patch.id !== undefined && patch.id !== id) throw new TypeError('an organisation id never changes');
-      const next = clone(rec);
-      for (const [key, value] of Object.entries(patch)) {
-        if (key === 'id' || value === undefined) continue;
-        if (!MIGRATED_KEYS.has(key)) throw new TypeError(`"${key}" is not a migrated organisation field; write it on the record (it is kept in the facets)`);
-        next[key] = clone(value);
-      }
-      const v = validateOrgRecord(next);
-      if (!v.ok) throw new TypeError(`an organisation update was refused: ${v.reason}`);
-      const row = toRow(next);
-      stmt.update.run(row);
-      for (const key of Object.keys(rec)) if (!(key in next)) delete rec[key];
-      Object.assign(rec, next);
-      // The whole row (facets included) is committed by this statement — or,
-      // inside a unit of work, pending until the store reports the commit.
-      if (inUnit()) pendingFacets.set(id, row.facets_json);
-      else { committedFacets.set(id, row.facets_json); pendingFacets.delete(id); }
-      return viewById.get(id);
+    /** The organisations of a `level` whose ground lies inside the latitude/longitude `box` (a prefilter; the exact distance is the caller's). */
+    locatedInBox: (box, { level } = {}) => dec(q(`${SELECT} WHERE lat IS NOT NULL AND lat BETWEEN ? AND ? AND lng BETWEEN ? AND ?${level ? ' AND level = ?' : ''} ORDER BY rowid`).all(box.minLat, box.maxLat, box.minLng, box.maxLng, ...(level ? [level] : []))),
+    /** An organisation with this name (case-insensitive, surrounding spaces ignored), or null. */
+    byName: (name) => (typeof name === 'string' && name.trim() ? dec(q(`${SELECT} WHERE lower(name) = lower(?) ORDER BY rowid LIMIT 1`).all(name.trim()))[0] ?? null : null),
+    /** The stored password hash for the sign-in check (never on a record), or null. */
+    passwordHashOf: (id) => q('SELECT password_hash FROM orgs WHERE id = ?').get(id)?.password_hash ?? null,
+    count: (filter = {}) => { const w = where(filter); return q(`SELECT COUNT(*) AS n FROM orgs${w.sql}`).get(...w.args).n; },
+    /** `pending` (a first installation that has not been initialised yet) or `done`. */
+    initState: () => readInitState(),
+    attach() {
+      const rows = repo.count();
+      log(`orgs: ${rows} organisation(s) in the table`);
+      return { engine: 'sqlite', rows, imported: 0 };
     },
-
-    /**
-     * Persist facet changes made on the records since the last COMMITTED
-     * flush: one UPDATE per changed organisation, inside the caller's
-     * transaction (the store calls this from every snapshot save), recorded as
-     * pending until the caller reports `commit()` or `rollback()`. Returns how
-     * many rows were written.
-     */
-    flush() {
-      if (!sqlite.isTransaction) throw new Error('orgs.flush runs inside a save transaction; the store reports its commit or rollback afterwards');
-      let changed = 0;
-      for (const rec of records) {
-        const row = toRow(rec);
-        // What the database holds for this row RIGHT NOW: the value this
-        // transaction already wrote (an insert or update inside a unit of work,
-        // pending until its commit), else the committed value. The intended
-        // value is compared against that — never against the committed value
-        // alone — so a facet changed inside a unit and changed BACK before the
-        // commit overwrites the intermediate row the update wrote.
-        const stored = pendingFacets.has(rec.id) ? pendingFacets.get(rec.id) : committedFacets.get(rec.id);
-        if (row.facets_json === stored) continue;
-        stmt.facets.run({ id: rec.id, facets_json: row.facets_json });
-        pendingFacets.set(rec.id, row.facets_json);
-        changed += 1;
-      }
-      return changed;
-    },
-    /** The save transaction that ran `flush` committed: what it wrote is now the committed state. */
-    commit() {
-      for (const [id, json] of pendingFacets) committedFacets.set(id, json);
-      pendingFacets.clear();
-    },
-    /** The save transaction that ran `flush` rolled back: nothing it wrote exists; the changes stay pending for the next save. */
-    rollback() { pendingFacets.clear(); },
-    /** Organisations whose facet changes have not been committed yet (for reports and tests; never ids in logs). */
-    uncommitted: () => records.filter((rec) => toRow(rec).facets_json !== committedFacets.get(rec.id)).length,
-    /**
-     * Unit-of-work participation. `snapshotState()` captures every record (by
-     * identity, so a held record is restored in place), the view order, the id
-     * index and the committed facets; `restoreState()` puts them all back after
-     * a rollback — records inserted during the unit disappear from the view,
-     * facet and column changes made during it are undone on the same objects,
-     * and nothing is claimed as committed that was not.
-     */
-    snapshotState: () => ({ graph: captureGraph([records]), proxies: proxies.slice(), byId: new Map(byIdMap), committed: new Map(committedFacets), pending: new Map(pendingFacets) }),
-    restoreState(state) {
-      if (!state) return;
-      restoreGraph(state.graph);
-      proxies.length = 0; for (const p of state.proxies) proxies.push(p);
-      byIdMap.clear(); for (const [id, rec] of state.byId) byIdMap.set(id, rec);
-      viewById.clear(); records.forEach((rec, i) => viewById.set(rec.id, proxies[i]));
-      committedFacets.clear(); for (const [id, json] of state.committed) committedFacets.set(id, json);
-      pendingFacets.clear(); for (const [id, json] of state.pending) pendingFacets.set(id, json);
-    },
-    /** What the store registers: the flush, its outcome callbacks, and the unit-of-work state hooks. */
-    saveHook: () => ({ flush: () => repo.flush(), commit: () => repo.commit(), rollback: () => repo.rollback(), snapshotState: () => repo.snapshotState(), restoreState: (s) => repo.restoreState(s) }),
   };
+  repo.reads = Object.freeze(Object.fromEntries(Object.entries(repo).filter(([k, v]) => typeof v === 'function' && !WRITES.has(k) && k !== 'attach')));
   return repo;
 }
-
-export { readonlyView };

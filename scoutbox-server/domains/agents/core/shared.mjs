@@ -10,7 +10,7 @@
  * M23_P56A_AGENT_STORE_PROPOSAL.md):
  *
  *   - the licensed natural person is an `org_users` row + an `agentProfiles`
- *     row; the agency is a `db.orgs` row of type 'agency' and holds no licence;
+ *     row; the agency is an `orgs` row of type 'agency' and holds no licence;
  *   - membership is an `agencyAffiliations` row with a window and roles;
  *     membership alone authorises no regulated action;
  *   - verification is a set of FACETS with fail-honest states; a self-entered
