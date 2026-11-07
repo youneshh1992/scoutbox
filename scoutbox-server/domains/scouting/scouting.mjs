@@ -15,6 +15,7 @@ const GRASSROOTS_STAGES = ['review', 'invited', 'awaiting_response', 'decision',
 import { readPage, sendPageError, pageOf } from '../platform/paging.mjs';
 import { CRITERIA_KEYS, CLUB_SETUP_LIMITS, typeTacticalSetup } from '../../repositories/clubSetup.mjs';
 import { parseStrictDateOnly } from '../../temporal.mjs';
+import { bornByForAge } from '../../repositories/identity.mjs';
 import { POSITION_GROUPS, ANCHOR_LEVELS, VERDICTS, VIEWINGS, ASSESSMENT_LIMITS as A_LIMITS } from '../../repositories/scoutingAssessments.mjs';
 import { textOrRefuse, storedName } from './passport.mjs';
 
@@ -834,6 +835,30 @@ export function registerScouting(ctx) {
     res.json({ vacancy: vacancyView(closed) });
   });
 
+  /**
+   * S14i: each criterion's verdict as SQL over the player row, beside evaluateCriterion (which keeps the sources and
+   * stays the answer on the page): `met`, and `unknown` where the JS returns unknown; anything else is not met.
+   * `at` is the clock of the age cutoffs (ageOn's rule, as bornByForAge computes it).
+   */
+  const CRITERION_SQL = {
+    positionGroup: (v) => ({ met: ['p.position IN (SELECT value FROM json_each(?))', [JSON.stringify(groups[v] ?? [])]] }),
+    minAge: (v, at) => ({ met: ['p.birth_date <= ?', [bornByForAge(v, at)]] }),
+    maxAge: (v, at) => ({ met: ['p.birth_date > ?', [bornByForAge(v + 1, at)]] }),
+    foot: (v) => ({ unknown: ['p.foot IS NULL', []], met: ['p.foot = ?', [v]] }),
+    availability: (v) => ({ unknown: ['p.availability IS NULL', []], met: ['p.availability = ?', [v]] }),
+    maxLevel: (v) => ({ met: ["NOT (p.level = 'pro' AND ? <> 'pro')", [v]] }),
+    minAppearances: (v) => ({ unknown: ['p.stats_appearances IS NULL', []], met: ['p.stats_appearances >= ?', [v]] }),
+    category: (v) => ({ unknown: ['p.football_category IS NULL', []], met: ["(? = 'mixed' OR p.football_category = ?)", [v, v]] }),
+  };
+  /** `CASE … END` giving 'm' (met), 'u' (unknown) or 'n' (not met) for one criterion, with its arguments. */
+  function verdictSql(c, at) {
+    const f = CRITERION_SQL[c.key];
+    if (!f) return ["'u'", []];
+    const { met, unknown } = f(c.value, at);
+    return unknown
+      ? [`(CASE WHEN ${unknown[0]} THEN 'u' WHEN ${met[0]} THEN 'm' ELSE 'n' END)`, [...unknown[1], ...met[1]]]
+      : [`(CASE WHEN ${met[0]} THEN 'm' ELSE 'n' END)`, met[1]];
+  }
   function evaluateCriterion(c, p, view) {
     // Returns { verdict: 'met'|'not_met'|'unknown', source }
     const src = (field) => `profile field: ${field}`;
@@ -876,7 +901,23 @@ export function registerScouting(ctx) {
     // S9c: `onSquad` is the squad only; a player the club already shadows is `shadowed`.
     const onSquad = new Set(scoutingReads.squad.playerIds(req.org.id));
     const shadowed = new Set(scoutingReads.shadow.forOrg(req.org.id).map((s) => s.playerId));
-    const candidates = players.visibleCandidates(req.org)
+    let page;
+    try { page = readPage(req.query, ['number', 'number', 'number']); } catch (e) { return sendPageError(res, e); }
+    // S14i: paged by cursor in SQL. A required criterion not met excludes the player in the query; the order is the
+    // most required criteria met, then the fewest unknowns, then the creation order (the old stable sort's).
+    const at = Date.now();
+    // Sorted by key, so the statement depends only on which criteria a role names (a bounded set of shapes); the
+    // values are bound. The sums and the AND are the same in any order.
+    const byKey = (list) => [...list].sort((x, y) => (x.key < y.key ? -1 : x.key > y.key ? 1 : 0));
+    const req_ = byKey(role.required).map((c) => verdictSql(c, at));
+    const all_ = [...req_, ...byKey(role.preferred).map((c) => verdictSql(c, at))];
+    const sum = (list, v) => (list.length ? [list.map(([sql]) => `(${sql} = '${v}')`).join(' + '), list.flatMap(([, a]) => a)] : ['0', []]);
+    const [metSql, metArgs] = sum(req_, 'm'); const [unkSql, unkArgs] = sum(all_, 'u');
+    const result = players.visiblePage(req.org, {}, {
+      order: [[metSql, 'DESC', metArgs], [unkSql, 'ASC', unkArgs], ['p.rowid', 'ASC']],
+      where: req_.map(([sql, args]) => ({ sql: `${sql} <> 'n'`, args })),
+    }, page);
+    const candidates = result.items
       .map((p) => ({ p, view: playerViewForOrg(p, req.org) }))
       .filter((x) => x.view) // the wall, the radius, the blocks — same as search
       .map(({ p, view }) => {
@@ -894,11 +935,11 @@ export function registerScouting(ctx) {
           caseId: reads.cases.forOrgPlayer(req.org.id, p.id).find((c) => c.stage !== 'closed')?.id ?? null,
         };
       })
-      .filter((c) => !c.required.some((r) => r.verdict === 'not_met'))
-      .sort((a, b) => (b.requiredMet - a.requiredMet) || (a.unknowns - b.unknowns));
+      .filter((c) => !c.required.some((r) => r.verdict === 'not_met'));
     res.json({
       vacancy: vacancyView(v), role,
       candidates,
+      nextCursor: result.nextCursor,
       note: 'Rule-based comparison: criteria met / not met / unknown with the data source for each. Unknown stays unknown — no invented suitability scores, potential ratings or market values.',
     });
   });

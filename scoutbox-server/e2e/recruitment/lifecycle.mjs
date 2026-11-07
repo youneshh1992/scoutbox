@@ -579,7 +579,7 @@ const harbour = await login('org-harbour', 'Rita Vale', 'Head of Recruitment');
 const kola = (await j('POST', '/auth/player/login', { playerId: 'pl-adeyemi' })).body;
 ok([maria, tom, harbour, kola].every((x) => x?.token), 'HTTP actors logged in');
 
-const players = (await j('GET', '/org/players', undefined, maria.token)).body;
+const players = (await j('GET', '/org/players', undefined, maria.token)).body.items;
 const ADULT = players.find((p) => /Kola Adeyemi/.test(p.name));
 const created = await j('POST', '/org/rooms', { playerId: ADULT.id, sourceContext: 'search' }, maria.token);
 const ROOM = created.body.room?.roomId;

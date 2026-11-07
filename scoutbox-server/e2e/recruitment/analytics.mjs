@@ -587,7 +587,7 @@ async function roomsFor(token) {
 }
 const roomIds = [];
 {
-  const players = (await j('GET', '/org/players', undefined, maria.token)).body;
+  const players = (await j('GET', '/org/players', undefined, maria.token)).body.items;
   const list = Array.isArray(players) ? players : (players.items ?? players.players ?? []);
   for (const p of list.slice(0, 8)) {
     const r = await j('POST', '/org/rooms', { playerId: p.id, sourceContext: 'search' }, maria.token);

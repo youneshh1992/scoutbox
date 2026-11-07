@@ -175,10 +175,13 @@ section('§6 — EN/FR parity in both web apps');
 section('§7 — every sort has a stable tie-break, and the ordering is declared');
 {
   const serverSrc = read('scoutbox-server/server.mjs');
-  const discover = serverSrc.slice(serverSrc.indexOf("orgRouter.get('/players'"), serverSrc.indexOf("orgRouter.get('/players/:id'"));
-  ok((discover.match(/String\(a\.id\)\.localeCompare\(String\(b\.id\)\)/g) ?? []).length === 2, 'both Discover sorts (Pro and Grassroots) end on the player id');
-  ok(/X-ScoutBox-Ordering/.test(discover), 'the ordering is declared on the wire');
-  neg(!/score|rank|quality|ability/i.test(discover.match(/X-ScoutBox-Ordering'[\s\S]*?\);/)[0]), 'the declared ordering names no score, rank or ability');
+  // S14i: the Discover order is the query's (repositories/identity.mjs directoryOrder), read from source.
+  const identitySrc = read('scoutbox-server/repositories/identity.mjs');
+  const discover = identitySrc.slice(identitySrc.indexOf('const directoryOrder'), identitySrc.indexOf('// ---------------------------------------------------------- list operations'));
+  ok((discover.match(/\['p\.id', 'ASC'\]\]/g) ?? []).length === 2, 'both Discover sorts (Pro and Grassroots) end on the player id');
+  const route = serverSrc.slice(serverSrc.indexOf("orgRouter.get('/players'"), serverSrc.indexOf("orgRouter.get('/players/:id'"));
+  ok(/X-ScoutBox-Ordering/.test(route), 'the ordering is declared on the wire');
+  neg(!/score|rank|quality|ability/i.test(route.match(/X-ScoutBox-Ordering'[\s\S]*?\);/)[0]), 'the declared ordering names no score, rank or ability');
   const shared = read('scoutbox-server/domains/discovery/shared.mjs');
   ok(/orderNobodyMissed[\s\S]*localeCompare/.test(shared), 'Nobody Missed sorts have an id tie-break');
   ok(/orderSecondLook[\s\S]*KIND_ORDER/.test(shared), 'Second Look orders by relevance kind, then time — never a priority score');
@@ -696,12 +699,13 @@ section('§27 — Discover ordering is deterministic and declared');
 {
   const a = await j('GET', '/org/players', undefined, maria.token);
   const b = await j('GET', '/org/players', undefined, maria.token);
-  ok(a.body.map((p) => p.id).join() === b.body.map((p) => p.id).join(), 'two reads, the same order');
+  ok(a.body.items.map((p) => p.id).join() === b.body.items.map((p) => p.id).join(), 'two reads, the same order');
   ok(a.headers.get('x-scoutbox-ordering') === 'academy_plus,profile_completeness,player_id', 'the Pro ordering is declared');
   neg(!/score|rank/.test(a.headers.get('x-scoutbox-ordering')), 'and it is not a ranking');
-  const ids = a.body.map((p) => p.id);
-  const sortedByRule = a.body.slice().sort((x, y) => (y.academyPlus ? 1 : 0) - (x.academyPlus ? 1 : 0) || y.profileSignal - x.profileSignal || String(x.id).localeCompare(String(y.id))).map((p) => p.id);
-  ok(ids.join() === sortedByRule.join(), 'the body follows the declared rule exactly');
+  const ids = a.body.items.map((p) => p.id);
+  const sortedByRule = a.body.items.slice().sort((x, y) => (y.academyPlus ? 1 : 0) - (x.academyPlus ? 1 : 0) || y.profileSignal - x.profileSignal || (x.id < y.id ? -1 : x.id > y.id ? 1 : 0)).map((p) => p.id);
+  ok(ids.join() === sortedByRule.join(), 'the body follows the declared rule exactly (S14i: the id tie-break in code-point order, as SQL compares it)');
+  ok(Array.isArray(a.body.items) && 'nextCursor' in a.body, 'S14i: the directory is a page ({ items, nextCursor })');
   if (hack?.token) {
     const g = await j('GET', '/org/players', undefined, hack.token);
     ok(g.status === 200 && g.headers.get('x-scoutbox-ordering') === 'first_team_seeker,distance,profile_completeness,player_id', 'the Grassroots ordering is declared differently — distance, never ability');
@@ -748,7 +752,7 @@ section('§29 — a broadcast event carries only its allowlisted keys');
 section('§30 — personal data stays off the surfaces that do not need it');
 {
   const list = await j('GET', '/org/players', undefined, maria.token);
-  neg(!list.body.some((p) => 'dob' in p), 'the Discover list ships no date of birth');
+  neg(!list.body.items.some((p) => 'dob' in p), 'the Discover list ships no date of birth');
   const notif = await j('GET', '/org/notifications', undefined, tom.token);
   neg(!/"dob"|"email"|"token"/.test(JSON.stringify(notif.body)), 'notifications carry no date of birth, email or token');
   const prefs = await j('GET', '/org/notification-preferences', undefined, tom.token);

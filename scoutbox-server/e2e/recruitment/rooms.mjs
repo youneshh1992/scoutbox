@@ -362,7 +362,7 @@ const kola = (await j('POST', '/auth/player/login', { playerId: 'pl-adeyemi' }))
 const amara = (await j('POST', '/auth/guardian/login', { guardianId: 'gd-amara' })).body;
 ok([maria, tom, harbour, alex, dee, kola, amara].every((x) => x?.token), 'HTTP actors logged in');
 
-const players = (await j('GET', '/org/players', undefined, maria.token)).body;
+const players = (await j('GET', '/org/players', undefined, maria.token)).body.items;
 const ADULT = players.find((p) => /Kola Adeyemi/.test(p.name));
 const MINOR = players.find((p) => p.guardianManaged) ?? players.find((p) => p.age && p.age < 18);
 ok(ADULT?.id, 'the adult demo player resolves');

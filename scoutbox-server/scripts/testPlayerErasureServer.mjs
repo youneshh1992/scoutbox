@@ -36,7 +36,7 @@ const RETAINED_ROW = (id, deletedAt, birthDate, country) => ({
   contract_until_date: null, market_value_range: null, agent_name: null, academy_plus: 0, first_team_seeker: 0, availability: 'not_seeking', contract_status: 'unknown', level: 'amateur',
   football_category: null, identity_verified: 0, guardian_id: null, lat: null, lng: null, stats_appearances: null, stats_goals: null, stats_assists: null, stats_pace_kmh: null,
   stats_pass_completion_pct: null, stats_duel_success_pct: null, stats_clean_sheets: null, medical_shared: 0, medical_condition_status: 'unknown', prefs_quiet_start: null,
-  prefs_quiet_end: null, prefs_school_hours_mute: null, prefs_timezone: null, programme_track: null, programme_started_at: null, password_hash: null, created_at: null,
+  prefs_quiet_end: null, prefs_school_hours_mute: null, prefs_timezone: null, programme_track: null, programme_started_at: null, password_hash: null, profile_signal: 0, created_at: null,
   deleted_at: deletedAt,
 });
 

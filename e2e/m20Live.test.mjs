@@ -165,7 +165,7 @@ ok(!!MARIA, 'a Head of Recruitment is signed in');
 // Real recruitment work, made through the real routes, so every figure the
 // screen shows is a projection of something that actually happened.
 {
-  const players = (await j('GET', '/org/players', undefined, MARIA)).body;
+  const players = (await j('GET', '/org/players', undefined, MARIA)).body.items;
   const list = Array.isArray(players) ? players : (players.items ?? players.players ?? []);
   const ids = [];
   for (const p of list.slice(0, 8)) {

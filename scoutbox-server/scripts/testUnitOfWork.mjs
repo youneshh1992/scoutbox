@@ -532,6 +532,39 @@ test('cost (migration.md §4.3.1): a player write — standalone, inside a unit 
   }
 });
 
+test('cost (S14i): a page of the org directory runs as many SQL statements with 2,000 players as with 200, and decodes only the page', () => {
+  const counted = { on: false, n: 0 };
+  const restore = [];
+  for (const [proto, names] of [[StatementSync.prototype, ['run', 'get', 'all', 'iterate']], [DatabaseSync.prototype, ['exec']]]) {
+    for (const name of names) {
+      const original = proto[name];
+      proto[name] = function counting(...args) { if (counted.on) counted.n += 1; return original.apply(this, args); };
+      restore.push(() => { proto[name] = original; });
+    }
+  }
+  try {
+    const pageFor = (n) => {
+      const dir = tempDir(`dir-${n}`);
+      const seed = { ...fixtureSeed(), players: Array.from({ length: n }, (_, i) => ({ id: `pl-${i}`, name: `Player ${i}`, dob: '2000-01-01', country: 'GB', academyPlus: i % 7 === 0 })) };
+      const t = boot(dir, seed);
+      const org = t.layer.orgs.byId('org-pro');
+      t.layer.players.directoryPage(org, {}, { limit: 50, after: null }); // prepares the statements
+      counted.n = 0; counted.on = true;
+      const first = t.layer.players.directoryPage(org, {}, { limit: 50, after: null });
+      const second = t.layer.players.directoryPage(org, {}, { limit: 50, after: JSON.parse(Buffer.from(first.nextCursor, 'base64url').toString()) });
+      counted.on = false;
+      assert.equal(first.items.length + second.items.length, 100);
+      t.store.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
+      return counted.n;
+    };
+    const small = pageFor(200); const large = pageFor(2000);
+    assert.ok(small > 0);
+    assert.equal(large, small, `two directory pages' statements do not grow with the player count (200 players: ${small}, 2,000 players: ${large})`);
+  } finally {
+    for (const undo of restore) undo();
+  }
+});
+
 test('cost (migration.md §4.3.1, S14g, S14h): an empty unit of work runs no statement on the organisations, the players or the guardians, however many there are', () => {
   const sqlOf = [];
   const restore = [];

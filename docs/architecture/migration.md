@@ -82,7 +82,8 @@ takes the next free id; the placeholder ids in `sqlite-schema.md` mean nothing.
 | S14f | staff and sessions become explicit writes and SQL reads; the staff table re-typed (a name unique in its organisation, removed accounts included; an e-mail unique among current staff; MFA and delivery preferences as columns, recovery codes as child rows; the remover a key) and an org session's staff and organisation one key | `0001`, `0002` (amended in place; `0004` no longer rebuilds `org_users`) | `users`, `sessions` | done |
 | S14g | organisations become explicit writes and SQL reads; the table re-typed (no `facets_json`, length and range CHECKs, a ground as both coordinates or neither, a federation registration as both parts or neither, `created_at` required; the password hash off the record) | `0004` (amended in place; `0021`, `0023`, `0026` no longer edit facets) | `orgs` | done |
 | S14h | players and guardians become explicit writes and SQL reads; the tables re-typed (no `facets_json`, lengths, ranges and vocabularies CHECKed, keys inside the domain RESTRICT, one primary link per player; `coGuardians` worked out, the external id's copied claim a review key) | `0005`, `0007` (amended in place; `0002` no longer creates identity shadows) | `identity` | done |
-| S14i | the player directory and discovery reads page in SQL, with profile completeness projected into a column (§4.6) | | | **next** |
+| S14i | the hot player reads in SQL: the directory, the Film Room, the fixture graph and a role's candidates page by cursor; the feed, similar players, the rotation and the benchmarks read light rows or a `GROUP BY`; the whole visibility rule in SQL; profile completeness a column (`players.profile_signal`) | `0005`, `0007` (amended in place) | `identity` | done |
+| S14j | matching and Nobody Missed: the candidates' facts projected into a table kept by their writers (§4.6) | | | **next** |
 | S14 last | the save path, `db` and snapshot mode go (§4.6) | | | |
 
 Steps before S8 were staged (written at save) rather than explicit; S4a's identity writes are explicit since §4.3.1 (and
@@ -202,11 +203,15 @@ separate risk; the script moves the fixtures' instants to today to measure the s
   grows with their history; it needs paging (and the apps a "load more") if feeds get long. The preference gate reads
   the person's preferences once per notice. The delivery sweep's two scans are indexed SQL (the undispatched marker,
   and a join from the unopened in-app dispatches to the read notifications).
-- Players (S14h): the org directory, similar players and "more like this", the clip deck, the feed, the fixtures
-  list, the benchmark cohort, a role's candidates, the insight rotation, matching and Nobody Missed read every
-  visible player (`players.visibleCandidates`: the under-18 wall, the grassroots box and the directory filters in SQL,
-  the lists decoded a batch at a time) and sort in code. That is S14i: paging in SQL with profile completeness
-  projected into a column.
+- Players (S14i): the directory, the Film Room, the fixture graph and a role's candidates are exact SQL pages (the
+  whole visibility rule, the blocks and the 50 km radius included, is the query's), and the feed reads the newest
+  rows by index. Similar players, "more like this" and the discovery rotation still rank every visible player, but
+  over light rows (the row's own columns, no lists), decoding only the winners; the benchmarks read the cohort's light
+  rows and one `GROUP BY` of drill bests. Matching and Nobody Missed still build each candidate's facts in code (S14j).
+  A deep directory page walks the index from its leading key (Academy+, or First Team Seeker for Grassroots). The
+  Grassroots directory orders by distance, so each page sorts the players inside the club's radius. The Film Room
+  pages by view count, which other scouts' views change, so a clip can move across a cursor while someone pages. The
+  apps' player pickers (assessment, case, objective) walk every directory page; a large club needs a search box there.
 
 ### 4.3.1 Costs that grow with the whole player base
 
@@ -330,10 +335,25 @@ Split in parts, like S12 and S13.
   box and the directory filters in SQL, the rest in code, output and order unchanged). The preflight and the
   shape-preserving mapping are deleted; the seed is imported with `create`. Junk refused: non-boolean switches,
   stats given as text, over-long names, non-numeric height and weight.
-- **S14i: the hot player reads.** The org directory, similar players, the clip deck, the feed, the fixtures list, the
-  benchmark cohort, a role's candidates, the insight rotation, matching and Nobody Missed still read every visible
-  player after S14h. They page in SQL, with profile completeness (which counts the trials' reports) projected into a
-  column kept by the writers.
+- **S14i (done): the hot player reads.** `0005` is amended in place: `players.profile_signal` (0–99, required) is
+  the directory's sort figure, `domain.mjs` `trustScoreFromFacts` (the one definition `computeTrustScore` also uses)
+  over the row and its counts of attendances, clips and the trials' filed reports. The identity repository refreshes
+  it in every player write; a trial write refreshes its player's (the recruitment repository); a snapshot save
+  refreshes all at its end. `players_directory (academy_plus DESC, profile_signal DESC, id)` serves the Pro order.
+  The whole visibility rule is SQL now: the wall, the Grassroots radius (`haversine_km`, registered on the
+  connection from `haversineKm`, on both sides of ±180°) and the blocks. The SQL functions are the JS rules
+  (`haversine_km`, `distance_tenths`, `lower_js`). `0007`: a clip's `uploaded_at` is a `toISOString` instant
+  (CHECKed and indexed), so the feed compares it as text. Paged by cursor (`{ items, nextCursor }`, the apps read the
+  first page): `/org/players` (the declared order, the id tie-break in code-point order), `/org/filmroom`,
+  `/org/fixtures` (groups newest first, then by fixture name), `/org/vacancies/:id/candidates` (`nextCursor` beside
+  `candidates`; a required criterion not met excludes in the query, each criterion's SQL beside its JS check).
+  Similar players and "more like this", the rotation and the benchmarks read light rows (`players.scanLight`); the
+  feed reads the newest 40 of each kind. Junk refused: an unknown `ageGroup`, a `newDays` that is not a whole number
+  from 1 (`400 FIELD_INVALID`); paging junk as everywhere. Founder decision (7 Nov): showing 50 at a time in the
+  directory and the Film Room is fine until a frontend "load more" pass.
+- **S14j: matching and Nobody Missed.** Each candidate's facts (Passport, evidence, assessments, trust,
+  availability) are built in code from several domains for every visible player (capped at 2,000). They move to a
+  facts table kept by those domains' writers, so the candidate reads page in SQL.
 - **S14 last: the save path goes.** `persist()`, `persistNow()`, the debounced save, the save hooks,
   `repositories/memento.mjs`, `repositories/readonly.mjs` and `db` itself; then snapshot mode (`openStore(dir)`
   with whole-file `load`/`save`) and every domain's `*_SNAPSHOT`, with the suites setting up their data through the

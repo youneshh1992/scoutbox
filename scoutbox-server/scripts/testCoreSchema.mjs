@@ -96,17 +96,19 @@ test('constraints: CHECKs refuse values the code never writes', () => {
   assert.throws(() => org({ plan: 'Gold' }), /CHECK/);
   org({});
   assert.throws(() => s.prepare("UPDATE orgs SET lat = 1 WHERE id = 'o'").run(), /CHECK/, 'lat without lng');
-  const player = (over) => s.prepare("INSERT INTO players (id, name, birth_date, country, foot, availability) VALUES (@id, 'P', @dob, 'GB', @foot, @availability)").run({ id: 'p', dob: '2000-01-01', foot: null, availability: 'not_seeking', ...over });
+  const player = (over) => s.prepare("INSERT INTO players (id, profile_signal, name, birth_date, country, foot, availability) VALUES (@id, 30, 'P', @dob, 'GB', @foot, @availability)").run({ id: 'p', dob: '2000-01-01', foot: null, availability: 'not_seeking', ...over });
   assert.throws(() => player({ foot: 'both' }), /CHECK/);
   assert.throws(() => player({ dob: '2000-1-1' }), /CHECK/);
   assert.throws(() => player({ availability: 'maybe' }), /CHECK/);
-  assert.throws(() => s.prepare("INSERT INTO players (id, name, birth_date, country, height_cm) VALUES ('p2', 'P', '2000-01-01', 'GB', 'tall')").run(), /cannot store TEXT value in INTEGER column/, 'STRICT refuses text in an INTEGER column');
+  assert.throws(() => s.prepare("INSERT INTO players (id, profile_signal, name, birth_date, country, height_cm) VALUES ('p2', 30, 'P', '2000-01-01', 'GB', 'tall')").run(), /cannot store TEXT value in INTEGER column/, 'STRICT refuses text in an INTEGER column');
   // S14h: lengths and ranges.
-  assert.throws(() => s.prepare("INSERT INTO players (id, name, birth_date, country) VALUES ('p3', ?, '2000-01-01', 'GB')").run('N'.repeat(121)), /CHECK/, 'a name over 120 characters');
-  assert.throws(() => s.prepare("INSERT INTO players (id, name, birth_date, country, height_cm) VALUES ('p3', 'P', '2000-01-01', 'GB', 400)").run(), /CHECK/, 'a height out of range');
-  assert.throws(() => s.prepare("INSERT INTO players (id, name, birth_date, country, stats_pass_completion_pct) VALUES ('p3', 'P', '2000-01-01', 'GB', 120)").run(), /CHECK/, 'a percentage over 100');
-  assert.throws(() => s.prepare("INSERT INTO players (id, name, birth_date, country, prefs_quiet_start) VALUES ('p3', 'P', '2000-01-01', 'GB', '9pm')").run(), /CHECK/, 'quiet hours not HH:MM');
-  assert.throws(() => s.prepare("INSERT INTO players (id, name, birth_date, country, city) VALUES ('p3', 'P', '2000-01-01', 'GB', '')").run(), /CHECK/, 'an empty city is NULL');
+  assert.throws(() => s.prepare("INSERT INTO players (id, profile_signal, name, birth_date, country) VALUES ('p3', 30, ?, '2000-01-01', 'GB')").run('N'.repeat(121)), /CHECK/, 'a name over 120 characters');
+  assert.throws(() => s.prepare("INSERT INTO players (id, profile_signal, name, birth_date, country, height_cm) VALUES ('p3', 30, 'P', '2000-01-01', 'GB', 400)").run(), /CHECK/, 'a height out of range');
+  assert.throws(() => s.prepare("INSERT INTO players (id, profile_signal, name, birth_date, country, stats_pass_completion_pct) VALUES ('p3', 30, 'P', '2000-01-01', 'GB', 120)").run(), /CHECK/, 'a percentage over 100');
+  assert.throws(() => s.prepare("INSERT INTO players (id, profile_signal, name, birth_date, country, prefs_quiet_start) VALUES ('p3', 30, 'P', '2000-01-01', 'GB', '9pm')").run(), /CHECK/, 'quiet hours not HH:MM');
+  assert.throws(() => s.prepare("INSERT INTO players (id, profile_signal, name, birth_date, country, city) VALUES ('p3', 30, 'P', '2000-01-01', 'GB', '')").run(), /CHECK/, 'an empty city is NULL');
+  assert.throws(() => s.prepare("INSERT INTO players (id, profile_signal, name, birth_date, country) VALUES ('p3', 100, 'P', '2000-01-01', 'GB')").run(), /CHECK/, 'a profile figure over 99 (S14i)');
+  assert.throws(() => s.prepare("INSERT INTO players (id, name, birth_date, country) VALUES ('p3', 'P', '2000-01-01', 'GB')").run(), /NOT NULL/, 'the profile figure is required (S14i)');
   assert.equal(s.prepare("SELECT COUNT(*) AS n FROM pragma_table_info('players') WHERE name = 'facets_json'").get().n, 0, 'no facet storage (S14h)');
   assert.equal(s.prepare("SELECT COUNT(*) AS n FROM pragma_table_info('guardians') WHERE name = 'facets_json'").get().n, 0, 'no facet storage (S14h)');
   const session = (over) => s.prepare("INSERT INTO sessions (token_hash, sid, kind, ref_id, org_user_id, created_at, expires_at) VALUES (@h, @sid, @kind, 'r', @user, 1, 2)").run({ h: 'h', sid: 's', kind: 'player', user: null, ...over });
@@ -123,9 +125,9 @@ test('constraints: the guardian e-mail is unique regardless of case (new rule; c
 // ------------------------------------------------------------- foreign keys
 test('foreign keys are enforced and cascade the way the model owns its rows', () => {
   const s = freshDb();
-  assert.throws(() => s.prepare("INSERT INTO players (id, name, birth_date, country, guardian_id) VALUES ('p', 'P', '2010-01-01', 'GB', 'gd-none')").run(), /FOREIGN KEY/);
+  assert.throws(() => s.prepare("INSERT INTO players (id, profile_signal, name, birth_date, country, guardian_id) VALUES ('p', 30, 'P', '2010-01-01', 'GB', 'gd-none')").run(), /FOREIGN KEY/);
   s.prepare("INSERT INTO guardians (id, name, email) VALUES ('g', 'G', 'g@example.com')").run();
-  s.prepare("INSERT INTO players (id, name, birth_date, country, guardian_id) VALUES ('p', 'P', '2010-01-01', 'GB', 'g')").run();
+  s.prepare("INSERT INTO players (id, profile_signal, name, birth_date, country, guardian_id) VALUES ('p', 30, 'P', '2010-01-01', 'GB', 'g')").run();
   assert.throws(() => s.prepare("INSERT INTO guardian_children (guardian_id, player_id, role) VALUES ('g', 'p-none', 'co')").run(), /FOREIGN KEY/);
   s.prepare("INSERT INTO guardian_children (guardian_id, player_id, role) VALUES ('g', 'p', 'primary')").run();
   assert.throws(() => s.prepare("INSERT INTO sessions (token_hash, sid, kind, ref_id, org_user_id, created_at, expires_at) VALUES ('h', 's', 'org', 'org-a', 'usr-none', 1, 2)").run(), /FOREIGN KEY/);

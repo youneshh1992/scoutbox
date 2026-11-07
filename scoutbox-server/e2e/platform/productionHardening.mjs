@@ -301,7 +301,7 @@ const rita = await login('org-harbour', 'Rita Vale', 'Head of Recruitment');
 const kola = (await j('POST', '/auth/player/login', { playerId: 'pl-adeyemi' })).body;
 ok([maria, tom, rita, kola].every((x) => x?.token), 'HTTP actors logged in');
 
-const players = (await j('GET', '/org/players', undefined, maria.token)).body;
+const players = (await j('GET', '/org/players', undefined, maria.token)).body.items;
 const ADULT = players.find((p) => /Kola Adeyemi/.test(p.name)) ?? players[0];
 const OTHER = players.find((p) => p.id !== ADULT.id);
 const THIRD = players.find((p) => p.id !== ADULT.id && p.id !== OTHER.id);
@@ -481,7 +481,7 @@ section('§22 — a change with no honest clock emits nothing at all');
 // -------------------------------------------------------------- privacy
 section('§30 — an adult date of birth does not ship to clubs');
 {
-  const list = (await j('GET', '/org/players', undefined, maria.token)).body;
+  const list = (await j('GET', '/org/players', undefined, maria.token)).body.items;
   neg(!list.some((p) => 'dob' in p), 'no player in the org list carries a raw date of birth');
   ok(list.every((p) => typeof p.age === 'number' || p.age === null), 'age — which is what the UI shows — is still there');
   const one = await j('GET', `/org/players/${ADULT.id}`, undefined, maria.token);
@@ -490,7 +490,7 @@ section('§30 — an adult date of birth does not ship to clubs');
 
 section('§31 — the terminology split reaches the wire');
 {
-  const list = (await j('GET', '/org/players', undefined, maria.token)).body;
+  const list = (await j('GET', '/org/players', undefined, maria.token)).body.items;
   const p = list[0];
   ok(typeof p.profileSignal === 'number', 'the legacy completeness figure is published as profileSignal');
   ok(p.trustScore === p.profileSignal, 'trustScore remains as a deprecated alias so nothing downstream breaks');
@@ -677,7 +677,7 @@ section('§38 — Trust Score wording is reserved for evidence confidence');
 
 section('§39 — the two numbers are separately addressable');
 {
-  const list = (await j('GET', '/org/players', undefined, maria.token)).body;
+  const list = (await j('GET', '/org/players', undefined, maria.token)).body.items;
   const p = list.find((x) => x.id === ADULT.id) ?? list[0];
   const trust = await j('GET', `/org/players/${p.id}/trust`, undefined, maria.token);
   if (trust.status === 200) {

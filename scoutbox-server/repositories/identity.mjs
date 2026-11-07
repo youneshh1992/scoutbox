@@ -46,7 +46,7 @@
  */
 import { transaction, migrationApplied } from './database.mjs';
 import { parseStrictDateOnly } from '../temporal.mjs';
-import { isAdult, ADULT_AGE, GRASSROOTS_RADIUS_KM } from '../domain.mjs';
+import { isAdult, ADULT_AGE, GRASSROOTS_RADIUS_KM, TRUST, computeTrustScore, trustScoreFromFacts, haversineKm } from '../domain.mjs';
 import { pageOf } from '../domains/platform/paging.mjs';
 import { boxAround } from './grassroots.mjs';
 import {
@@ -148,6 +148,7 @@ CREATE TABLE players (
   programme_track           TEXT ${optText('programme_track', L.programmeTrack)},
   programme_started_at      INTEGER,
   password_hash             TEXT ${optText('password_hash', L.passwordHash)},
+  profile_signal            INTEGER NOT NULL CHECK (profile_signal BETWEEN 0 AND ${TRUST.MAX}),
   created_at                INTEGER,
   deleted_at                INTEGER,
   CHECK ((lat IS NULL) = (lng IS NULL)),
@@ -159,6 +160,7 @@ CREATE INDEX players_birth_date ON players (birth_date);
 CREATE INDEX players_search ON players (country, position, availability);
 CREATE INDEX players_level ON players (level);
 CREATE INDEX players_located ON players (lat, lng) WHERE lat IS NOT NULL;
+CREATE INDEX players_directory ON players (academy_plus DESC, profile_signal DESC, id) WHERE deleted_at IS NULL;
 
 CREATE TABLE guardian_children (
   guardian_id TEXT NOT NULL REFERENCES guardians(id) ON DELETE RESTRICT,
@@ -303,11 +305,11 @@ const P_COLS = ['id', 'name', 'birth_date', 'country', 'city', 'position', 'foot
   'identity_verified', 'guardian_id', 'lat', 'lng', 'stats_appearances', 'stats_goals', 'stats_assists', 'stats_pace_kmh',
   'stats_pass_completion_pct', 'stats_duel_success_pct', 'stats_clean_sheets', 'medical_shared', 'medical_condition_status',
   'prefs_quiet_start', 'prefs_quiet_end', 'prefs_school_hours_mute', 'prefs_timezone', 'programme_track', 'programme_started_at',
-  'password_hash', 'created_at', 'deleted_at'];
+  'password_hash', 'profile_signal', 'created_at', 'deleted_at'];
 export const PLAYER_COLUMNS = Object.freeze(P_COLS);
 const P_SELECT = `SELECT ${P_COLS.join(', ')} FROM players`;
 const P_INSERT = `INSERT INTO players (${P_COLS.join(', ')}) VALUES (${P_COLS.map((c) => `@${c}`).join(', ')})`;
-const P_UPDATE_COLS = P_COLS.filter((c) => !['id', 'guardian_id', 'password_hash', 'created_at', 'deleted_at'].includes(c));
+const P_UPDATE_COLS = P_COLS.filter((c) => !['id', 'guardian_id', 'password_hash', 'profile_signal', 'created_at', 'deleted_at'].includes(c));
 const P_UPDATE = `UPDATE players SET ${P_UPDATE_COLS.map((c) => `${c} = @${c}`).join(', ')} WHERE id = @id AND deleted_at IS NULL`;
 const b = (v) => (v ? 1 : 0);
 const nb = (v) => (v === null || v === undefined ? null : v ? 1 : 0);
@@ -324,7 +326,8 @@ function playerParams(r, passwordHash = null) {
     medical_shared: b(r.medical.shared), medical_condition_status: r.medical.conditionStatus,
     prefs_quiet_start: n.quietStart ?? null, prefs_quiet_end: n.quietEnd ?? null, prefs_school_hours_mute: nb(n.schoolHoursMute), prefs_timezone: n.timezone ?? null,
     programme_track: r.programme?.track ?? null, programme_started_at: r.programme?.startedAt ?? null,
-    password_hash: passwordHash, created_at: r.createdAt, deleted_at: null,
+    // A new row has no trial reports yet (the trials name it later and refresh the figure); refreshProfileSignals keeps it after.
+    password_hash: passwordHash, profile_signal: computeTrustScore({ ...r, trialReports: [] }), created_at: r.createdAt, deleted_at: null,
   };
 }
 const allNull = (...vs) => vs.every((v) => v === null || v === undefined);
@@ -350,6 +353,22 @@ function playerFromDb(d, children, trialReports) {
   for (const k of PLAYER_SUBRECORD_KEYS) rec[k] = children[k];
   rec.trialReports = trialReports;
   return rec;
+}
+
+/** S14i: the columns of a light record (scanLight, the fixture graph, the feed): the row's own facts, no lists. */
+const LIGHT_COLS = ['id', 'name', 'birth_date', 'country', 'city', 'position', 'foot', 'height_cm', 'weight_kg', 'level', 'availability', 'academy_plus',
+  'first_team_seeker', 'football_category', 'identity_verified', 'lat', 'lng', 'created_at', 'profile_signal',
+  'stats_appearances', 'stats_goals', 'stats_assists', 'stats_pace_kmh', 'stats_pass_completion_pct', 'stats_duel_success_pct', 'stats_clean_sheets'];
+/** A light record: a player's own fields as the full record names them, `profileSignal`, and no lists (they are absent, not empty). */
+function lightFromRow(d) {
+  const stats = allNull(d.stats_appearances, d.stats_goals, d.stats_assists, d.stats_pace_kmh, d.stats_pass_completion_pct, d.stats_duel_success_pct, d.stats_clean_sheets)
+    ? null : { appearances: d.stats_appearances, goals: d.stats_goals, assists: d.stats_assists, paceKmh: d.stats_pace_kmh, passCompletionPct: d.stats_pass_completion_pct, duelSuccessPct: d.stats_duel_success_pct, cleanSheets: d.stats_clean_sheets };
+  return Object.freeze({
+    id: d.id, name: d.name, dob: d.birth_date, country: d.country, city: d.city, position: d.position, foot: d.foot, heightCm: d.height_cm, weightKg: d.weight_kg,
+    level: d.level, availability: d.availability, academyPlus: d.academy_plus === 1, firstTeamSeeker: d.first_team_seeker === 1, footballCategory: d.football_category,
+    identityVerified: d.identity_verified === 1, location: d.lat === null ? null : Object.freeze({ lat: d.lat, lng: d.lng }), createdAt: d.created_at,
+    profileSignal: d.profile_signal, stats: stats && Object.freeze(stats), light: true,
+  });
 }
 
 // ------------------------------------------------------------------ the guardian record
@@ -432,10 +451,76 @@ function adultsSql(nowMs) {
 }
 /** Can this organisation ever see a minor (domain.mjs visibleToOrg: a verified club only)? */
 const seesMinors = (org) => org?.type === 'club' && org.verified === true;
+/**
+ * S14i: the SQL functions the player reads use, registered on the connection from the JS rules themselves (one
+ * definition each): `haversine_km` (domain.mjs haversineKm, the Grassroots radius), `distance_tenths` (the distance a
+ * Grassroots club is shown, in tenths of a km, as views/playerViews.mjs rounds it) and `lower_js` (JavaScript's
+ * toLowerCase, which also lowers accented letters; SQLite's lower() is ASCII only).
+ */
+const withFunctions = new WeakSet();
+export function registerPlayerFunctions(sqlite) {
+  if (withFunctions.has(sqlite)) return;
+  const at = (lat, lng) => ({ lat, lng });
+  const real = (...vs) => vs.every((v) => typeof v === 'number' && Number.isFinite(v));
+  sqlite.function('haversine_km', { deterministic: true }, (aLat, aLng, bLat, bLng) => (real(aLat, aLng, bLat, bLng) ? haversineKm(at(aLat, aLng), at(bLat, bLng)) : null));
+  sqlite.function('distance_tenths', { deterministic: true }, (aLat, aLng, bLat, bLng) => (real(aLat, aLng, bLat, bLng) ? Math.round(haversineKm(at(aLat, aLng), at(bLat, bLng)) * 10) : null));
+  sqlite.function('lower_js', { deterministic: true }, (v) => (typeof v === 'string' ? v.toLowerCase() : v));
+  withFunctions.add(sqlite);
+}
+/** The longitude ranges of a box, split in two where it crosses ±180° (so the far side of the antimeridian is kept). */
+function lngRanges(box) {
+  if (box.maxLng - box.minLng >= 360) return [[-180, 180]];
+  if (box.minLng < -180) return [[box.minLng + 360, 180], [-180, box.maxLng]];
+  if (box.maxLng > 180) return [[box.minLng, 180], [-180, box.maxLng - 360]];
+  return [[box.minLng, box.maxLng]];
+}
+
+// ------------------------------------------------------------------ profile completeness (S14i)
+/**
+ * `players.profile_signal`: the directory's sort figure, domain.mjs `trustScoreFromFacts` over the row's facts and its
+ * list counts (attendance, clips, the trials' filed reports). Every write that can change a fact refreshes it in its own
+ * transaction or unit: the player writes here, a trial write in the recruitment repository, a snapshot save at its end.
+ * `ids` null refreshes every live player.
+ */
+const signalSqlCache = new WeakMap();
+function signalSql(sqlite) {
+  let sql = signalSqlCache.get(sqlite);
+  if (sql) return sql;
+  // Cached only once the trial reports exist (a connection that reads before their migration asks again next time).
+  const hasTrials = !!sqlite.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'trial_reports'").get();
+  const reports = hasTrials ? '(SELECT COUNT(*) FROM trial_reports r JOIN trials t ON t.id = r.trial_id WHERE t.player_id = p.id)' : '0';
+  const stats = ['stats_appearances', 'stats_goals', 'stats_assists', 'stats_pace_kmh', 'stats_pass_completion_pct', 'stats_duel_success_pct', 'stats_clean_sheets'].map((c) => `p.${c} IS NOT NULL`).join(' OR ');
+  const select = `SELECT p.id, p.profile_signal, p.identity_verified, p.position, p.foot, p.height_cm, p.weight_kg, (${stats}) AS has_stats,
+      (SELECT COUNT(*) FROM player_attendance a WHERE a.player_id = p.id) AS attendance,
+      (SELECT COUNT(*) FROM player_media m WHERE m.player_id = p.id) AS media,
+      ${reports} AS reports
+      FROM players p WHERE p.deleted_at IS NULL`;
+  sql = {
+    all: sqlite.prepare(select),
+    one: sqlite.prepare(`${select} AND p.id = ?`),
+    many: sqlite.prepare(`${select} AND p.id IN (SELECT value FROM json_each(?))`),
+    update: sqlite.prepare('UPDATE players SET profile_signal = ? WHERE id = ?'),
+  };
+  if (hasTrials) signalSqlCache.set(sqlite, sql);
+  return sql;
+}
+export const signalOfRow = (d) => trustScoreFromFacts({
+  identityVerified: d.identity_verified === 1, attendanceCount: d.attendance, trialReportCount: d.reports, mediaCount: d.media,
+  profileComplete: !!(d.position && d.foot && d.height_cm && d.weight_kg && d.has_stats),
+});
+export function refreshProfileSignals(sqlite, ids = null) {
+  const sql = signalSql(sqlite);
+  const list = ids === null ? null : [...new Set(ids.filter((x) => typeof x === 'string' && x))];
+  if (list !== null && !list.length) return 0;
+  const rows = list === null ? sql.all.all() : list.length === 1 ? sql.one.all(list[0]) : sql.many.all(JSON.stringify(list));
+  let changed = 0;
+  for (const d of rows) { const v = signalOfRow(d); if (v !== d.profile_signal) { sql.update.run(v, d.id); changed += 1; } }
+  return changed;
+}
 
 // ------------------------------------------------------------------ the retained record (S4b-R)
 /** The fixed storage placeholders of a retained row: constants the table's constraints need, never read back as facts about the person. */
-export const RETAINED_PLACEHOLDERS = Object.freeze({ name: RETAINED_PLAYER_NAME, academy_plus: 0, first_team_seeker: 0, availability: 'not_seeking', contract_status: 'unknown', level: 'amateur', identity_verified: 0, medical_shared: 0, medical_condition_status: 'unknown' });
+export const RETAINED_PLACEHOLDERS = Object.freeze({ name: RETAINED_PLAYER_NAME, profile_signal: 0, academy_plus: 0, first_team_seeker: 0, availability: 'not_seeking', contract_status: 'unknown', level: 'amateur', identity_verified: 0, medical_shared: 0, medical_condition_status: 'unknown' });
 const RETAINED_KEYS = Object.freeze(['id', 'deletedAt', 'birthDate', 'country']);
 /** A retained record `{ id, deletedAt, birthDate, country }` → the full row (the kept facts, the placeholders, NULL elsewhere). */
 export function retainedRowFor(rec) {
@@ -577,6 +662,7 @@ function writeIdentity(sqlite, typed) {
   for (const { r, passwordHash } of typed.players) { insP.run(playerParams(r, passwordHash)); writeChildRows(st, r); }
   const insL = sqlite.prepare('INSERT INTO guardian_children (guardian_id, player_id, role) VALUES (@guardian_id, @player_id, @role)');
   for (const l of typed.links) insL.run(l);
+  refreshProfileSignals(sqlite);
   return { players: typed.players.length, guardians: typed.guardians.length, links: typed.links.length };
 }
 
@@ -637,6 +723,9 @@ export function createIdentityRepositories({ sqlite, log = () => {}, unit = null
   const q = (sql) => { let s = cache.get(sql); if (!s) cache.set(sql, (s = sqlite.prepare(sql))); return s; };
   const st = prepareSubrecordStatements(sqlite);
   const reportsFor = (ids) => (trialReportsOf && ids.length ? trialReportsOf(ids) : new Map());
+  registerPlayerFunctions(sqlite);
+  let blocksTable = false; // remembered once true: a read before the safety migration asks again next time
+  const hasBlocks = () => (blocksTable ||= !!sqlite.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'blocks'").get());
 
   // ---------------------------------------------------------- decoding
   const decodePlayers = (rows) => {
@@ -685,9 +774,13 @@ export function createIdentityRepositories({ sqlite, log = () => {}, unit = null
       if (!seesMinors(org)) adults();
       if ((org.level ?? null) === 'grassroots') {
         if (!org.location) return null;
-        const box = boxAround(org.location, GRASSROOTS_RADIUS_KM);
-        sql.push("p.level <> 'pro'", 'p.lat IS NOT NULL AND p.lat BETWEEN ? AND ? AND p.lng BETWEEN ? AND ?'); args.push(box.minLat, box.maxLat, box.minLng, box.maxLng);
+        // The box narrows by index; the exact radius is domain.mjs haversineKm, as visibleToOrg applies it.
+        const box = boxAround(org.location, GRASSROOTS_RADIUS_KM); const lngs = lngRanges(box);
+        sql.push("p.level <> 'pro'", `p.lat IS NOT NULL AND p.lat BETWEEN ? AND ? AND (${lngs.map(() => 'p.lng BETWEEN ? AND ?').join(' OR ')})`, 'haversine_km(?, ?, p.lat, p.lng) <= ?');
+        args.push(box.minLat, box.maxLat, ...lngs.flat(), org.location.lat, org.location.lng, GRASSROOTS_RADIUS_KM);
       }
+      // A player who blocked the organisation is not a candidate (isBlocked, the safety tables').
+      if (hasBlocks()) { sql.push('NOT EXISTS (SELECT 1 FROM blocks b WHERE b.player_id = p.id AND b.org_id = ?)'); args.push(org.id); }
     }
     if (f.adultsOnly) adults();
     for (const [k, col] of [['position', 'position'], ['availability', 'availability'], ['country', 'country']]) if (f[k] !== undefined && f[k] !== null) { sql.push(`p.${col} = ?`); args.push(f[k]); }
@@ -697,6 +790,15 @@ export function createIdentityRepositories({ sqlite, log = () => {}, unit = null
     if (Number.isSafeInteger(f.ageAtLeast)) { sql.push('p.birth_date <= ?'); args.push(bornByForAge(f.ageAtLeast, at)); }
     if (Number.isSafeInteger(f.ageBelow)) { sql.push('p.birth_date > ?'); args.push(bornByForAge(f.ageBelow, at)); }
     if (typeof f.exceptId === 'string') { sql.push('p.id <> ?'); args.push(f.exceptId); }
+    // `positions`: the position is one of these (and `orNoPosition`: or none is declared).
+    if (Array.isArray(f.positions)) { sql.push(`(p.position IN (SELECT value FROM json_each(?))${f.orNoPosition ? ' OR p.position IS NULL' : ''})`); args.push(JSON.stringify(f.positions)); }
+    if (typeof f.text === 'string' && f.text) {
+      // The directory's search: name or country, and the city of an adult only (a minor's city is never shown to a club,
+      // so it is never matched either), case-insensitively as JavaScript lowers text.
+      const a = adultsSql(at);
+      sql.push(`(instr(lower_js(p.name), ?) > 0 OR instr(lower_js(p.country), ?) > 0 OR (p.city IS NOT NULL AND instr(lower_js(p.city), ?) > 0 AND ${a.sql}))`);
+      const needle = f.text.toLowerCase(); args.push(needle, needle, needle, ...a.args);
+    }
     return { sql: sql.join(' AND '), args };
   };
   /** Visit the players a filter admits, in creation order, decoding a batch at a time; `visit` returning false stops the scan. */
@@ -712,6 +814,26 @@ export function createIdentityRepositories({ sqlite, log = () => {}, unit = null
       if (rows.length < SCAN_BATCH) return;
     }
   };
+
+  /**
+   * Keyset paging over the admitted players (S14i). `order` lists `[sqlExpression, 'ASC' | 'DESC', args?]`, the last one unique
+   * (the id); `after` is the previous page's last key. Returns the rows (with `k0…kN`, the key) of one page plus one.
+   */
+  const keysetRows = (w, order, { limit, after = null }) => {
+    const keys = order.map(([expr], i) => `${expr} AS k${i}`).join(', ');
+    const keyArgs = order.flatMap(([, , a = []]) => a);
+    // (k0 beyond a0) OR (k0 = a0 AND k1 beyond a1) OR …: "beyond" is < for a descending key, > for an ascending one.
+    // The leading key's bound is repeated on its own so the index can seek to the page instead of walking to it.
+    const beyond = after ? ` WHERE k0 ${order[0][1] === 'DESC' ? '<=' : '>='} ? AND (${order.map((_, i) => `(${[...order.slice(0, i).map((__, j) => `k${j} = ?`), `k${i} ${order[i][1] === 'DESC' ? '<' : '>'} ?`].join(' AND ')})`).join(' OR ')})` : '';
+    const afterArgs = after ? [after[0], ...order.flatMap((_, i) => [...after.slice(0, i), after[i]])] : [];
+    const sql = `SELECT * FROM (SELECT p.rowid AS rid, ${P_COLS.map((c) => `p.${c}`).join(', ')}, ${keys} FROM players p WHERE ${w.sql})${beyond} ORDER BY ${order.map(([, dir], i) => `k${i} ${dir}`).join(', ')} LIMIT ?`;
+    return q(sql).all(...keyArgs, ...w.args, ...afterArgs, limit + 1);
+  };
+  const keyOfRow = (n) => (r) => Array.from({ length: n }, (_, i) => r[`k${i}`]);
+  /** The order of the org directory (server.mjs /org/players): declared in its X-ScoutBox-Ordering header. */
+  const directoryOrder = (org) => ((org.level ?? null) === 'grassroots'
+    ? [['p.first_team_seeker', 'DESC'], ['distance_tenths(?, ?, p.lat, p.lng)', 'ASC', [org.location?.lat ?? null, org.location?.lng ?? null]], ['p.profile_signal', 'DESC'], ['p.id', 'ASC']]
+    : [['p.academy_plus', 'DESC'], ['p.profile_signal', 'DESC'], ['p.id', 'ASC']]);
 
   // ---------------------------------------------------------- list operations (the rows of the player_* tables)
   const checkSubKey = (key) => { if (!SUBRECORD_KEYS.includes(key)) throw new TypeError(`"${key}" is not a player list; the lists are ${SUBRECORD_KEYS.join(', ')}`); };
@@ -769,6 +891,7 @@ export function createIdentityRepositories({ sqlite, log = () => {}, unit = null
       q(P_INSERT).run(playerParams(r, passwordHash));
       writeChildRows(st, r);
       if (r.guardianId !== null) q("INSERT INTO guardian_children (guardian_id, player_id, role) VALUES (?, ?, 'primary')").run(r.guardianId, r.id);
+      refreshProfileSignals(sqlite, [r.id]);
       return playerById(r.id);
     }),
     /**
@@ -801,6 +924,7 @@ export function createIdentityRepositories({ sqlite, log = () => {}, unit = null
       if (problems.length) throw playerInvalid(id, problems);
       const params = playerParams(typed);
       q(P_UPDATE).run(Object.fromEntries(['id', ...P_UPDATE_COLS].map((c) => [c, params[c]])));
+      refreshProfileSignals(sqlite, [id]);
       return playerById(id);
     }),
     /** Store a new password hash (or null). Returns the stored record. */
@@ -819,6 +943,7 @@ export function createIdentityRepositories({ sqlite, log = () => {}, unit = null
       const { row, tags } = itemRows(key, items[items.length - 1], items.length - 1, id);
       st[key].insert.run(row);
       if (tags) for (const t of tags) st.tags.insert.run(t);
+      refreshProfileSignals(sqlite, [id]);
       return listOf(id, key);
     }),
     /** Replace a player's whole `key` list; returns the stored list. */
@@ -830,6 +955,7 @@ export function createIdentityRepositories({ sqlite, log = () => {}, unit = null
       if (problems.length) throw subRefusal(`replacing ${key} of player ${id} was refused: ${problems.join('; ')}`);
       st[key].deleteAll.run(id); // a clip's tags cascade with the clip
       writeArrayRows(st, key, id, next);
+      refreshProfileSignals(sqlite, [id]);
       return listOf(id, key);
     }),
     /** Change fields of the ONE item of `key` that `where` matches (`{ id }`, `{ season }`); returns the stored item. */
@@ -905,8 +1031,120 @@ export function createIdentityRepositories({ sqlite, log = () => {}, unit = null
     scan,
     /** The players a filter admits, in creation order (`limit` caps the count). */
     list: (filter = {}, { limit = Infinity } = {}) => { const out = []; scan(filter, (r) => { out.push(r); return out.length < limit; }); return out; },
-    /** The live players the organisation may see by the SQL part of the rule (see scanWhere), with the further filters. */
+    /** The live players the organisation may see (see scanWhere: the whole visibility rule), with the further filters. */
     visibleCandidates: (org, filter = {}, opts = {}) => players.list({ ...filter, visibleTo: org }, opts),
+    /**
+     * One page of the organisation's player directory (S14i), in the directory's declared order (directoryOrder), with
+     * the scan filters plus `text`. `page` is `{ limit, after }` from readPage(query, directoryCursorShape(org)).
+     */
+    directoryPage: (org, filter = {}, page) => {
+      const w = scanWhere({ ...filter, visibleTo: org });
+      if (!w) return { items: [], nextCursor: null };
+      const order = directoryOrder(org);
+      const rows = keysetRows(w, order, page);
+      const out = pageOf(rows, page.limit, keyOfRow(order.length));
+      return { items: decodePlayers(out.items), nextCursor: out.nextCursor };
+    },
+    /**
+     * One page of the players an organisation may see (the whole rule, see scanWhere) in a caller's order: `order` as
+     * keysetRows takes it (the last key unique), `where` further `{ sql, args }` conditions on `p`. Items are decoded.
+     */
+    visiblePage: (org, filter = {}, { order, where = [] }, page) => {
+      const w = scanWhere({ ...filter, visibleTo: org });
+      if (!w) return { items: [], nextCursor: null };
+      for (const c of where) { w.sql += ` AND (${c.sql})`; w.args.push(...(c.args ?? [])); }
+      const out = pageOf(keysetRows(w, order, page), page.limit, keyOfRow(order.length));
+      return { items: decodePlayers(out.items), nextCursor: out.nextCursor, keys: out.items.map(keyOfRow(order.length)) };
+    },
+    /**
+     * Visit the admitted players as LIGHT records, in creation order: the row's own fields (no lists, no trial
+     * reports) plus `profileSignal`, for reads that rank every candidate and then decode only the winners (similar
+     * players, the discovery rotation). `visit` returning false stops.
+     */
+    scanLight: (filter, visit) => {
+      const w = scanWhere(filter);
+      if (!w) return;
+      let after = 0;
+      for (;;) {
+        const rows = q(`SELECT p.rowid AS rid, ${LIGHT_COLS.map((c) => `p.${c}`).join(', ')} FROM players p WHERE ${w.sql} AND p.rowid > ? ORDER BY p.rowid LIMIT ?`).all(...w.args, after, SCAN_BATCH * 10);
+        if (!rows.length) return;
+        after = rows[rows.length - 1].rid;
+        for (const d of rows) if (visit(lightFromRow(d)) === false) return;
+        if (rows.length < SCAN_BATCH * 10) return;
+      }
+    },
+    /**
+     * The Film Room deck (S14i): one page of the playable clips (a url) of the players the organisation may see,
+     * verified clips first, then the most viewed, then the player id and the clip's place in their list (player_media_deck).
+     * Returns `{ items: [{ player, media }], nextCursor }`, the players decoded once per page.
+     */
+    clipPage: (org, page) => {
+      const w = scanWhere({ visibleTo: org });
+      if (!w) return { items: [], nextCursor: null };
+      const order = [['k0', 'DESC'], ['k1', 'DESC'], ['k2', 'ASC'], ['k3', 'ASC']];
+      // The leading key's bound is repeated so the index seeks to the page.
+      const cols = ['(m.verified_clip_attendance_id IS NOT NULL)', 'm.views', 'm.player_id', 'm.position'];
+      const beyond = page.after ? ` AND ${cols[0]} <= ? AND (${order.map((_, i) => `(${[...cols.slice(0, i).map((c) => `${c} = ?`), `${cols[i]} ${order[i][1] === 'DESC' ? '<' : '>'} ?`].join(' AND ')})`).join(' OR ')})` : '';
+      const afterArgs = page.after ? [page.after[0], ...order.flatMap((_, i) => [...page.after.slice(0, i), page.after[i]])] : [];
+      const rows = q(`SELECT m.player_id AS player_id, m.id AS media_id, ${cols.map((c, i) => `${c} AS k${i}`).join(', ')}
+        FROM player_media m JOIN players p ON p.id = m.player_id WHERE m.url IS NOT NULL AND ${w.sql}${beyond}
+        ORDER BY (m.verified_clip_attendance_id IS NOT NULL) DESC, m.views DESC, m.player_id, m.position LIMIT ?`).all(...w.args, ...afterArgs, page.limit + 1);
+      const out = pageOf(rows, page.limit, (r) => [r.k0, r.k1, r.k2, r.k3]);
+      const byPlayer = new Map(players.byIds(out.items.map((r) => r.player_id)).map((p) => [p.id, p]));
+      return {
+        items: out.items.map((r) => { const player = byPlayer.get(r.player_id); return player ? { player, media: player.media.find((m) => m.id === r.media_id) } : null; }).filter((x) => x?.media),
+        nextCursor: out.nextCursor,
+      };
+    },
+    /**
+     * The fixture graph (S14i): one page of the (fixture, date) groups of the attendances of the players the
+     * organisation may see, the newest date first, then the fixture name. Each group lists its attendances in the
+     * players' creation order (a player may appear twice), with the venue of the first. `{ items, nextCursor }`.
+     */
+    fixturePage: (org, page) => {
+      const w = scanWhere({ visibleTo: org });
+      if (!w) return { items: [], nextCursor: null };
+      const beyond = page.after ? ' AND (a.match_date < ? OR (a.match_date = ? AND a.fixture > ?))' : '';
+      const groups = q(`SELECT a.match_date AS date, a.fixture AS fixture FROM player_attendance a JOIN players p ON p.id = a.player_id
+        WHERE ${w.sql}${beyond} GROUP BY a.match_date, a.fixture ORDER BY a.match_date DESC, a.fixture ASC LIMIT ?`).all(...w.args, ...(page.after ? [page.after[0], page.after[0], page.after[1]] : []), page.limit + 1);
+      const out = pageOf(groups, page.limit, (g) => [g.date, g.fixture]);
+      if (!out.items.length) return { items: [], nextCursor: null };
+      const members = q(`SELECT a.match_date AS date, a.fixture AS fixture, a.venue AS venue, ${LIGHT_COLS.map((c) => `p.${c}`).join(', ')}
+        FROM json_each(?) j CROSS JOIN player_attendance a ON a.match_date = j.value ->> 0 AND a.fixture = j.value ->> 1 JOIN players p ON p.id = a.player_id
+        WHERE ${w.sql} ORDER BY p.rowid, a.position`).all(JSON.stringify(out.items.map((g) => [g.date, g.fixture])), ...w.args);
+      const byKey = new Map(out.items.map((g) => [`${g.fixture}|${g.date}`, { fixture: g.fixture, venue: undefined, date: g.date, players: [] }]));
+      for (const m of members) { const g = byKey.get(`${m.fixture}|${m.date}`); if (g.venue === undefined) g.venue = m.venue; g.players.push(lightFromRow(m)); }
+      return { items: [...byKey.values()], nextCursor: out.nextCursor };
+    },
+    /**
+     * The club feed's player half (S14i): the admitted players created since `since` and the clips uploaded since
+     * then, each newest first and at most `limit`: `{ players: [light], clips: [{ player: light, media }] }`.
+     */
+    recentFor: (org, since, limit) => {
+      const w = scanWhere({ visibleTo: org });
+      if (!w) return { players: [], clips: [] };
+      const fresh = q(`SELECT ${LIGHT_COLS.map((c) => `p.${c}`).join(', ')} FROM players p WHERE ${w.sql} AND p.created_at >= ? ORDER BY p.created_at DESC, p.rowid DESC LIMIT ?`).all(...w.args, since, limit).map(lightFromRow);
+      const clipRows = q(`SELECT m.player_id, m.id AS media_id FROM player_media m JOIN players p ON p.id = m.player_id
+        WHERE m.uploaded_at >= ? AND ${w.sql} ORDER BY m.uploaded_at DESC, m.rowid DESC LIMIT ?`).all(new Date(since).toISOString(), ...w.args, limit);
+      const byPlayer = new Map(players.byIds(clipRows.map((r) => r.player_id)).map((p) => [p.id, p]));
+      const clips = clipRows.map((r) => { const player = byPlayer.get(r.player_id); const media = player?.media.find((m) => m.id === r.media_id); return media ? { player, media } : null; }).filter(Boolean);
+      return { players: fresh, clips };
+    },
+    /**
+     * Every live player's best result per drill (S14i, the benchmarks' cohort), for the players a scan filter admits:
+     * Map drill id → [{ playerId, max, min }]. One GROUP BY; no player is decoded.
+     */
+    drillBests: (filter = {}) => {
+      const w = scanWhere(filter);
+      const out = new Map();
+      if (!w) return out;
+      for (const r of q(`SELECT d.drill_id, d.player_id, MAX(d.value) AS max, MIN(d.value) AS min FROM player_drill_results d JOIN players p ON p.id = d.player_id WHERE ${w.sql} GROUP BY d.drill_id, d.player_id ORDER BY d.drill_id, p.rowid`).all(...w.args)) {
+        if (!out.has(r.drill_id)) out.set(r.drill_id, []);
+        out.get(r.drill_id).push({ playerId: r.player_id, max: r.max, min: r.min });
+      }
+      return out;
+    },
+    directoryCursorShape: (org) => directoryOrder(org).map((_, i, all) => (i === all.length - 1 ? 'string' : 'number')),
     count: () => q('SELECT COUNT(*) AS n FROM players WHERE deleted_at IS NULL').get().n,
     /** The stored password hash for the sign-in check (never on a record), or null. */
     passwordHashOf: (id) => q('SELECT password_hash FROM players WHERE id = ? AND deleted_at IS NULL').get(id)?.password_hash ?? null,

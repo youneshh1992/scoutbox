@@ -138,7 +138,7 @@ const NM = '#/recruitment/nobody-missed';
 
 const scout = await enterClub(ctxA, 'http://localhost:8802/', 'Eastport FC', 'Maria Keane', 'Head of Recruitment');
 const MARIA = await tokenOf(scout);
-const players = (await j('GET', '/org/players', undefined, MARIA)).body;
+const players = (await j('GET', '/org/players', undefined, MARIA)).body.items;
 const ALONSO = players.find((p) => /Kola Adeyemi/.test(p.name));
 if (!ALONSO) fail('fixture: the seeded discovery player is missing');
 
@@ -563,7 +563,7 @@ await dee.waitForTimeout(1300);
   await goto(dee, NM);
   await dee.waitForTimeout(1500);
   const q = (await j('GET', `/org/nobody-missed?briefId=${gb.id}`, undefined, DEE)).body;
-  const visible = (await j('GET', '/org/players', undefined, DEE)).body.map((p) => p.id);
+  const visible = (await j('GET', '/org/players', undefined, DEE)).body.items.map((p) => p.id);
   const leaked = (q.items ?? []).filter((c) => !visible.includes(c.playerId));
   if (leaked.length) fail(`M10: ${leaked.length} candidate(s) were matched that this club cannot see`);
   say('M10: every grassroots candidate passed the visibility gates before matching');

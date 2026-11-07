@@ -343,7 +343,7 @@ const kola = (await j('POST', '/auth/player/login', { playerId: 'pl-adeyemi' }))
 const amara = (await j('POST', '/auth/guardian/login', { guardianId: 'gd-amara' })).body;
 ok([maria, tom, harbour, alex, dee, kola, amara].every((x) => x?.token), 'HTTP actors logged in');
 
-const players = (await j('GET', '/org/players', undefined, maria.token)).body;
+const players = (await j('GET', '/org/players', undefined, maria.token)).body.items;
 const ADULT = players.find((p) => /Kola Adeyemi/.test(p.name));
 const OTHER = players.find((p) => p.id !== ADULT.id);
 
@@ -754,7 +754,7 @@ section('A second archived room for the same player does not double the alert');
   // given player lands in the list is a Discover ordering detail this test has
   // no business depending on (it did, until M18.2 added a stable tie-break and
   // the "third" player became one an earlier section had made invisible).
-  const visibleNow = (await j('GET', '/org/players', undefined, maria.token)).body;
+  const visibleNow = (await j('GET', '/org/players', undefined, maria.token)).body.items;
   const THIRD = visibleNow.find((p) => p.id !== ADULT.id && p.id !== OTHER.id && p.name);
   const olderRes = await j('POST', '/org/rooms', { playerId: THIRD.id }, maria.token);
   if (!olderRes.body?.room) fail(`could not open a room for ${THIRD.id}: ${olderRes.status} ${JSON.stringify(olderRes.body).slice(0, 200)}`);

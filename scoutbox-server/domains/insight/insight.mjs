@@ -182,13 +182,20 @@ export function registerInsight(ctx) {
   orgRouter.get('/discovery-rotation', (req, res) => {
     const week = Math.floor(dayKey() / 7);
     const assessedIds = new Set(ctx.scoutingReads.assessments.forOrg(req.org.id).filter((a) => a.state !== 'draft').map((a) => a.playerId));
-    const pool = players.visibleCandidates(req.org).filter((p) => orgCanSee(req.org, p) && !assessedIds.has(p.id));
-    const scored = pool.map((p) => ({
-      p, r: crypto.createHash('sha256').update(`${p.id}:${req.org.id}:${week}`).digest()[0],
-    })).sort((a, b) => a.r - b.r).slice(0, 6);
+    // S14i: the pool is the query's (the whole visibility rule), read as light rows; the six with the smallest weekly
+    // hash byte win, a tie keeping the creation order (as the stable sort did), and only they are decoded.
+    const best = [];
+    players.scanLight({ visibleTo: req.org }, (p) => {
+      if (assessedIds.has(p.id)) return;
+      const r = crypto.createHash('sha256').update(`${p.id}:${req.org.id}:${week}`).digest()[0];
+      if (best.length === 6 && r >= best[5].r) return;
+      let i = best.length; while (i > 0 && best[i - 1].r > r) i -= 1;
+      best.splice(i, 0, { id: p.id, r }); if (best.length > 6) best.pop();
+    });
+    const scored = players.byIds(best.map((b) => b.id)).filter((p) => orgCanSee(req.org, p));
     res.json({
       week,
-      items: scored.map(({ p }) => (playerViewForOrg ? playerViewForOrg(p, req.org) : { id: p.id, name: p.name, position: p.position })),
+      items: scored.map((p) => (playerViewForOrg ? playerViewForOrg(p, req.org) : { id: p.id, name: p.name, position: p.position })),
       note: 'A rotating slice of eligible players you have not assessed — same pool as search, different order each week. Rotation never includes anyone outside your standing visibility rules, and nothing can pay its way in.',
     });
   });

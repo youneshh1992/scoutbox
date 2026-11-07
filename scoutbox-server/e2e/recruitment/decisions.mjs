@@ -723,7 +723,7 @@ section('C — the concurrency matrix (§92): one truth per case, whatever the o
   const st5 = await stage(c5); const s5 = (await surface(c5)).body;
   neg(fa.filter((r) => r.status < 300).length === 1 && ((st5 === 'offer_consideration' && s5.current?.outcome === 'progress') || (st5 === 'closed' && s5.current === null && s5.draft?.rev === 1)), `C5 finalize vs close: one of them happened, the case and the decision agree (${codes(fa)} → ${st5})`);
   // finalize vs player deletion
-  const roster = (await j('GET', '/org/players', undefined, maria.token)).body;
+  const roster = (await j('GET', '/org/players', undefined, maria.token)).body.items;
   // Players later sections still need: Kola, Mateus, Guni, Imani, Osei, Nowak, Kim. Anyone else who is an adult may leave.
   const KEEP = ['pl-adeyemi', 'pl-carvalho', 'pl-guni', 'pl-imani', 'pl-osei', 'pl-nowak', 'pl-kim'];
   const leaver = (roster.items ?? roster).find((pl) => (pl.age ?? 0) >= 18 && !KEEP.includes(pl.id));

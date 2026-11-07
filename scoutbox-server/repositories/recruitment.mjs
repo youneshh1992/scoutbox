@@ -39,6 +39,7 @@ import {
   TRIAL_CANCEL_ACTORS, TRIAL_STATUSES, TRIAL_STAFF_CHECK_STATES, TRIAL_DAY_EVENT_KINDS, TRIAL_CONSENT_SCOPES, TRIAL_KEY_ACTS, TRIAL_LIMITS,
 } from '../domains/recruitment/lifecycle/trial.mjs';
 import { TRIAL_REPORT_FIELDS } from '../domain.mjs';
+import { refreshProfileSignals } from './identity.mjs';
 
 export const RECRUITMENT_MIGRATION = '0015_recruitment';
 export const RECRUITMENT_COLLECTIONS = Object.freeze(['requests', 'trials']);
@@ -956,7 +957,8 @@ export function createRecruitmentRepository({ sqlite, unit = null, now = Date.no
   const typedOr = (name, raw) => { const t = TYPERS[name](raw, name); if (!t.ok) throw refusal('RECRUITMENT_INPUT_INVALID', t.reason); return t.record; };
   const IMMUTABLE = { requests: ['id', 'playerId', 'orgId', 'userId', 'type', 'createdAt'], trials: ['id', 'requestId', 'playerId', 'orgId', 'acceptedAt'] };
   const guardiansExist = (name, r) => { const missing = guardianIdsOf(name, r).filter((g) => !st.guardian.get(g)); if (missing.length) throw refusal('RECRUITMENT_GUARDIAN_MISSING', `${TABLE_OF[name]} ${r.id} names a guardian that does not exist (${ids(missing)})`); };
-  const write = (name, record) => { guardiansExist(name, record); if (name === 'requests') writeRequest(st, record); else writeTrial(st, record); };
+  // S14i: a trial's filed report counts in its player's profile figure, refreshed with the write.
+  const write = (name, record) => { guardiansExist(name, record); if (name === 'requests') writeRequest(st, record); else { writeTrial(st, record); refreshProfileSignals(sqlite, [record.playerId]); } };
 
   /** `create(record)`: a new record, typed whole; an existing id is refused. */
   const create = (name) => (raw) => operation(() => {

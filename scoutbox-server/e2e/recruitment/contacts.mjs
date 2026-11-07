@@ -720,7 +720,7 @@ section('R — roles are decided now, from the database');
   const agencyRoom = collect('agency room on minor', await j('POST', '/org/rooms', { playerId: 'pl-guni', sourceContext: 'search' }, agent.token));
   neg(expect(agencyRoom, 403, 'NOT_VISIBLE', ''), 'R6 an agency cannot even open a case on a minor (403 NOT_VISIBLE), so it has no case to contact through');
   neg((await j('POST', `/org/rooms/${M_ROOM}/contacts`, { body: 'x' }, agent.token)).status === 404, 'R6b and Eastport\'s case on that minor is invisible to it');
-  neg((await j('GET', '/org/players', undefined, agent.token)).body.every((p) => p.id !== 'pl-guni'), 'R6c the minor is not in the agency\'s search either');
+  neg((await j('GET', '/org/players', undefined, agent.token)).body.items.every((p) => p.id !== 'pl-guni'), 'R6c the minor is not in the agency\'s search either');
   const unverifiedRoom = collect('unverified club on minor', await j('POST', '/org/rooms', { playerId: 'pl-guni', sourceContext: 'search' }, rita.token));
   neg(expect(unverifiedRoom, 403, 'NOT_VISIBLE', ''), 'R7 an unverified club cannot open a case on a minor either — the minor gate is untouched');
   neg(expect(collect('no auth', await j('GET', `/org/rooms/${J.RID}/contacts`, undefined, undefined)), 401, 'ORG_AUTH_REQUIRED', ''), 'R8 no session, no contacts');

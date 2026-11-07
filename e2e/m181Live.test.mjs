@@ -134,7 +134,7 @@ const MARIA = await tokenOf(scout);
 if (!MARIA) fail('fixture: the scout has no session token');
 // A second identity in the SAME organisation — the colleague in H1 and H2.
 const TOM = (await j('POST', '/auth/org/login', { orgId: 'org-eastport', scoutName: 'Tom Field', role: 'Head of Recruitment' })).body.token;
-const players = (await j('GET', '/org/players', undefined, MARIA)).body;
+const players = (await j('GET', '/org/players', undefined, MARIA)).body.items;
 const SUBJECT = players.find((p) => /Kola Adeyemi/.test(p.name)) ?? players[0];
 if (!SUBJECT) fail('fixture: no visible player');
 

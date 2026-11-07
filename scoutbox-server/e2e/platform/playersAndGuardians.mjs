@@ -93,7 +93,26 @@ section('B — junk refused at the route, naming the field');
   const maria = await login('/auth/org/login', { orgId: 'org-eastport', scoutName: 'Maria Keane', role: 'Head of Recruitment' });
   neg(refusedField(await j('GET', '/org/players?country=GB&country=ES', undefined, maria), 'country'), 'a directory filter sent twice');
   const dir = await j('GET', '/org/players?position=CM', undefined, maria);
-  ok(dir.status === 200 && dir.body.length >= 1 && dir.body.every((p) => p.position === 'CM'), 'the directory filters in SQL');
+  ok(dir.status === 200 && dir.body.items.length >= 1 && dir.body.items.every((p) => p.position === 'CM'), 'the directory filters in SQL');
+  // S14i: the directory and the other hot player reads page by cursor in SQL; junk filters are refused, not read as "any".
+  neg(refusedField(await j('GET', '/org/players?ageGroup=u99', undefined, maria), 'ageGroup'), 'an unknown age group');
+  neg(refusedField(await j('GET', '/org/players?newDays=soon', undefined, maria), 'newDays'), 'a day count that is not a number');
+  neg(refusedField(await j('GET', '/org/players?newDays=0', undefined, maria), 'newDays'), 'a day count of zero');
+  neg((await j('GET', '/org/players?limit=0', undefined, maria)).body?.error === 'PAGE_LIMIT_INVALID', 'a junk page size');
+  neg((await j('GET', '/org/players?cursor=junk', undefined, maria)).body?.error === 'PAGE_CURSOR_INVALID', 'a junk cursor');
+  {
+    const whole = (await j('GET', '/org/players?limit=100', undefined, maria)).body;
+    const seen = []; let cursor = null;
+    do { const pg = (await j('GET', `/org/players?limit=2${cursor ? `&cursor=${cursor}` : ''}`, undefined, maria)).body; seen.push(...pg.items.map((p) => p.id)); cursor = pg.nextCursor; } while (cursor);
+    ok(whole.nextCursor === null && seen.join() === whole.items.map((p) => p.id).join(), `pages of two walk the whole directory in its order, nobody lost or repeated (${seen.length} players)`);
+    const sig = whole.items.map((p) => p.profileSignal);
+    ok(whole.items.every((p, i) => i === 0 || (whole.items[i - 1].academyPlus ? 1 : 0) > (p.academyPlus ? 1 : 0) || ((whole.items[i - 1].academyPlus ? 1 : 0) === (p.academyPlus ? 1 : 0) && sig[i - 1] >= sig[i])), 'the stored figure orders the page as the served profileSignal reads');
+  }
+  for (const [path, shape] of [['/org/filmroom', 'clips'], ['/org/fixtures', 'fixture groups']]) {
+    const pg = await j('GET', `${path}?limit=1`, undefined, maria);
+    ok(pg.status === 200 && Array.isArray(pg.body.items) && pg.body.items.length <= 1 && 'nextCursor' in pg.body, `${path} is a page of ${shape}`);
+    neg((await j('GET', `${path}?cursor=junk`, undefined, maria)).body?.error === 'PAGE_CURSOR_INVALID', `${path} refuses a junk cursor`);
+  }
   neg(refusedField(await j('POST', '/admin/guardians/gd-amara/idv', { approved: 'true' }, null, ADMIN), 'approved'), 'an admin ID decision sent as text');
   const g = (await j('GET', '/guardian/me', undefined, amara)).body;
   ok(g.idVerified === true, 'the refused decision changed nothing');

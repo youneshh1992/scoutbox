@@ -1181,7 +1181,7 @@ export function SquadScreen({ session, tick, notify, openPlayer }: ScreenProps) 
   const load = useCallback(() => {
     api.getSquad(session).then(setSquad).catch(() => {});
     api.getMatchdays(session).then(setMatchdays).catch(() => {});
-    api.searchPlayers(session, {}).then(setVisible).catch(() => {});
+    api.allPlayers(session).then(setVisible).catch(() => {});
   }, [session]);
   useEffect(load, [load, tick]);
   if (!squad) return null;

@@ -2017,53 +2017,45 @@ orgRouter.get('/players', (req, res) => {
   for (const f of ['q', 'position', 'academyPlus', 'availability', 'country', 'ageGroup', 'newDays']) {
     if (req.query[f] !== undefined && typeof req.query[f] !== 'string') return res.status(400).json({ error: 'FIELD_INVALID', field: f, message: `${f} is given once, as text.` });
   }
-  // S14h: the filters the table can answer, and the SQL part of the visibility rule, are applied in the query; the
-  // exact rule (wall, radius, blocks) stays at the source, in the view.
-  const ages = { u16: { ageBelow: 16 }, u18: { ageBelow: 18 }, '18-21': { ageAtLeast: 18, ageBelow: 22 }, senior: { ageAtLeast: 22 } }[ageGroup] ?? {};
-  const days = newDays ? Number(newDays) : null;
-  let list = players.visibleCandidates(req.org, {
+  const AGE_GROUPS = { u16: { ageBelow: 16 }, u18: { ageBelow: 18 }, '18-21': { ageAtLeast: 18, ageBelow: 22 }, senior: { ageAtLeast: 22 } };
+  // S14i: an unknown age group or a day count that is not a whole number of days is refused, not read as "any".
+  if (ageGroup && !Object.hasOwn(AGE_GROUPS, ageGroup)) return res.status(400).json({ error: 'FIELD_INVALID', field: 'ageGroup', message: `ageGroup is one of ${Object.keys(AGE_GROUPS).join(', ')}.` });
+  if (newDays && !(/^\d{1,5}$/.test(newDays) && Number(newDays) > 0)) return res.status(400).json({ error: 'FIELD_INVALID', field: 'newDays', message: 'newDays is a whole number of days, from 1.' });
+  let page;
+  try { page = readPage(req.query, players.directoryCursorShape(req.org)); } catch (e) { return sendPageError(res, e); }
+  // S14i: the whole visibility rule (the wall, the Grassroots radius, the blocks), the filters, the search and the
+  // declared order are the query's, so the page is exact; the view still applies the rule at the source.
+  //   Pro / agency: Academy+ first (a boosted, opted-in cohort), then PROFILE COMPLETENESS (never ability), then the id.
+  //   Grassroots: First Team Seekers first (need-based, never purchasable), then the nearest ground (to 0.1 km, as
+  //   shown), then completeness, then the id. The id makes the order total, so two reads never swap equal players.
+  const result = players.directoryPage(req.org, {
     position: position || undefined, availability: availability || undefined, country: country || undefined,
-    academyPlus: academyPlus === 'true' || undefined, ...ages,
-    ...(Number.isFinite(days) ? { createdSince: Date.now() - days * 24 * 3600 * 1000 } : {}),
-  })
-    .map((p) => playerViewForOrg(p, req.org)) // wall + verification + blocks, at the source
-    .filter(Boolean);
-
-  if (q) {
-    const needle = String(q).toLowerCase();
-    list = list.filter(
-      (p) => p.name.toLowerCase().includes(needle) || (p.city || '').toLowerCase().includes(needle) || (p.country || '').toLowerCase().includes(needle)
-    );
-  }
-
-  if (req.org.level === 'grassroots') {
-    // First Team Seekers surface first (need-based, never purchasable),
-    // then nearest ground, then trust.
-    // M18.2: the final key is the player id. Without it two players with the
-    // same completeness figure could swap places between two reads of the
-    // same list, which reads as movement where there is none. The ordering
-    // itself is unchanged and is stated to the user in the client — see
-    // M18_2_SORTING_AUDIT.md for why it was kept rather than replaced.
-    list.sort((a, b) =>
-      (b.firstTeamSeeker ? 1 : 0) - (a.firstTeamSeeker ? 1 : 0) ||
-      (a.distanceKm ?? 999) - (b.distanceKm ?? 999) ||
-      b.profileSignal - a.profileSignal ||
-      String(a.id).localeCompare(String(b.id)));
-  } else {
-    // Academy+ is a boosted cohort: opted-in players surface first. Then
-    // PROFILE COMPLETENESS (never ability), then the id as a stable tie-break.
-    list.sort((a, b) =>
-      (b.academyPlus ? 1 : 0) - (a.academyPlus ? 1 : 0) ||
-      b.profileSignal - a.profileSignal ||
-      String(a.id).localeCompare(String(b.id)));
-  }
-  // The ordering is declared, not inferred. The header (rather than a body
-  // change) keeps the array contract every client already consumes.
+    academyPlus: academyPlus === 'true' || undefined, ...(AGE_GROUPS[ageGroup] ?? {}),
+    ...(newDays ? { createdSince: Date.now() - Number(newDays) * 24 * 3600 * 1000 } : {}),
+    text: q || undefined,
+  }, page);
+  // The ordering is declared, not inferred.
   res.set('X-ScoutBox-Ordering', req.org.level === 'grassroots'
     ? 'first_team_seeker,distance,profile_completeness,player_id'
     : 'academy_plus,profile_completeness,player_id');
-  res.json(list);
+  res.json({ items: result.items.map((p) => playerViewForOrg(p, req.org)).filter(Boolean), nextCursor: result.nextCursor });
 });
+
+/**
+ * The `k` players the organisation may see that are most like `base` (domain.mjs similarityScore), best first; a tie
+ * keeps the creation order, as the stable sort over the whole list did. Ranked over light rows (S14i): only the
+ * winners are decoded by the caller.
+ */
+function mostSimilar(base, org, k) {
+  const best = [];
+  players.scanLight({ visibleTo: org, exceptId: base.id }, (c) => {
+    const score = similarityScore(base, c);
+    if (best.length === k && score <= best[k - 1].score) return;
+    let i = best.length; while (i > 0 && best[i - 1].score < score) i -= 1;
+    best.splice(i, 0, { c, score }); if (best.length > k) best.pop();
+  });
+  return best;
+}
 
 orgRouter.get('/players/:id', (req, res) => {
   const p = findPlayer(req.params.id);
@@ -2081,11 +2073,8 @@ orgRouter.get('/players/:id', (req, res) => {
   if (isBlocked(p.id, req.org.id)) return res.status(404).json({ error: 'PLAYER_NOT_FOUND' });
   ledgerAppend({ type: 'view', playerId: p.id, orgId: req.org.id, orgName: req.org.name, userId: req.orgUser.id, scoutName: req.orgUser.name });
   const view = playerViewForOrg(p, req.org);
-  const similar = players.visibleCandidates(req.org, { exceptId: p.id })
-    .filter((c) => visibleToOrg(c, req.org) && !isBlocked(c.id, req.org.id))
-    .map((c) => ({ playerId: c.id, name: c.name, position: c.position, score: similarityScore(p, c) }))
-    .sort((a, b) => b.score - a.score)
-    .slice(0, 3);
+  // S14i: ranked over light rows (the visibility rule is the query's); the winners keep the creation order on a tie.
+  const similar = mostSimilar(p, req.org, 3).map(({ c, score }) => ({ playerId: c.id, name: c.name, position: c.position, score }));
   const archetypes = ARCHETYPES
     .map((a) => ({ archetypeId: a.id, label: a.label, score: similarityScore(p, a) }))
     .sort((a, b) => b.score - a.score)
@@ -2114,11 +2103,9 @@ orgRouter.post('/players/:id/notes', (req, res) => {
 orgRouter.get('/players/:id/morelike', (req, res) => {
   const p = findPlayer(req.params.id);
   if (!p || !visibleToOrg(p, req.org) || isBlocked(p.id, req.org.id)) return res.status(404).json({ error: 'PLAYER_NOT_FOUND' });
-  const ranked = players.visibleCandidates(req.org, { exceptId: p.id })
-    .filter((c) => visibleToOrg(c, req.org) && !isBlocked(c.id, req.org.id))
-    .map((c) => ({ ...playerViewForOrg(c, req.org), similarity: similarityScore(p, c) }))
-    .sort((a, b) => b.similarity - a.similarity)
-    .slice(0, 10);
+  const top = mostSimilar(p, req.org, 10);
+  const full = new Map(players.byIds(top.map(({ c }) => c.id)).map((c) => [c.id, c]));
+  const ranked = top.map(({ c, score }) => { const view = full.has(c.id) ? playerViewForOrg(full.get(c.id), req.org) : null; return view ? { ...view, similarity: score } : null; }).filter(Boolean);
   res.json({ base: { id: p.id, name: p.name, position: p.position }, players: ranked });
 });
 
@@ -2432,23 +2419,24 @@ orgRouter.post('/notifications/read', (req, res) => {
 // The Film Room: full-screen swipe deck of playable clips from players this
 // org is allowed to see. Verified Clips surface first.
 orgRouter.get('/filmroom', (req, res) => {
-  const deck = [];
-  for (const p of players.visibleCandidates(req.org)) {
-    const view = playerViewForOrg(p, req.org);
-    if (!view) continue;
-    for (const m of p.media) {
-      if (!m.url) continue;
-      deck.push({
+  // S14i: paged by cursor in SQL ({ items, nextCursor }): verified clips first, then the most viewed.
+  let page;
+  try { page = readPage(req.query, ['number', 'number', 'string', 'number']); } catch (e) { return sendPageError(res, e); }
+  const { items, nextCursor } = players.clipPage(req.org, page);
+  res.json({
+    items: items.map(({ player: p, media: m }) => {
+      const view = playerViewForOrg(p, req.org);
+      if (!view) return null;
+      return {
         media: { id: m.id, title: m.title, url: m.url, views: m.views ?? 0, verifiedClip: m.verifiedClip, tags: m.tags ?? {} },
         player: {
           id: view.id, name: view.name, position: view.position, age: view.age,
           trustScore: view.trustScore, academyPlus: view.academyPlus, guardianManaged: !!view.guardianManaged,
         },
-      });
-    }
-  }
-  deck.sort((a, b) => (b.media.verifiedClip ? 1 : 0) - (a.media.verifiedClip ? 1 : 0) || b.media.views - a.media.views);
-  res.json(deck);
+      };
+    }).filter(Boolean),
+    nextCursor,
+  });
 });
 
 // Per-clip view tracking — honest scouting signal back to the player.
@@ -2492,22 +2480,17 @@ orgRouter.get('/feed', (req, res) => {
   const FOURTEEN_DAYS = Date.now() - 14 * 24 * 3600 * 1000;
   const items = [];
   const shortlisted = new Set(safetyAudit.ledger.playersListedBy(req.org.id, ['shortlist', 'save']));
-  for (const p of players.visibleCandidates(req.org)) {
-    const view = playerViewForOrg(p, req.org);
-    if (!view) continue;
-    if (p.createdAt && p.createdAt >= FOURTEEN_DAYS) {
-      items.push({ type: 'new_player', ts: p.createdAt, playerId: p.id, playerName: p.name, position: p.position, age: view.age, guardianManaged: !!view.guardianManaged });
-    }
-    for (const m of p.media) {
-      const uploadedTs = new Date(m.uploadedAt).getTime();
-      if (uploadedTs >= FOURTEEN_DAYS) {
-        items.push({
-          type: shortlisted.has(p.id) ? 'shortlist_new_clip' : 'new_clip',
-          ts: uploadedTs, playerId: p.id, playerName: p.name,
-          mediaId: m.id, title: m.title, hasVideo: !!m.url, verifiedClip: !!m.verifiedClip,
-        });
-      }
-    }
+  // S14i: the newest 40 of each kind from SQL (the visibility rule is the query's); the page is the newest 40 of all.
+  const recent = players.recentFor(req.org, FOURTEEN_DAYS, 40);
+  for (const p of recent.players) {
+    items.push({ type: 'new_player', ts: p.createdAt, playerId: p.id, playerName: p.name, position: p.position, age: ageOn(p.dob), guardianManaged: !isAdult(p) });
+  }
+  for (const { player: p, media: m } of recent.clips) {
+    items.push({
+      type: shortlisted.has(p.id) ? 'shortlist_new_clip' : 'new_clip',
+      ts: new Date(m.uploadedAt).getTime(), playerId: p.id, playerName: p.name,
+      mediaId: m.id, title: m.title, hasVideo: !!m.url, verifiedClip: !!m.verifiedClip,
+    });
   }
   // A trial whose subject removed their account (P4A-D14 tombstone) has no
   // report to file, so it is neither listed as due nor reminded about.
@@ -2591,16 +2574,14 @@ orgRouter.get('/trials/:id/ics', (req, res) => {
 
 // Fixture-graph scouting: verified attendances form a map of real fixtures.
 orgRouter.get('/fixtures', (req, res) => {
-  const groups = {};
-  for (const p of players.visibleCandidates(req.org)) {
-    if (!playerViewForOrg(p, req.org)) continue;
-    for (const a of p.attendance) {
-      const key = `${a.fixture}|${a.date}`;
-      groups[key] ??= { fixture: a.fixture, venue: a.venue, date: a.date, players: [] };
-      groups[key].players.push({ id: p.id, name: p.name, position: p.position, age: ageOn(p.dob), trustScore: computeTrustScore(p) });
-    }
-  }
-  res.json(Object.values(groups).sort((a, b) => (a.date < b.date ? 1 : -1)));
+  // S14i: paged by cursor in SQL ({ items, nextCursor }): the (fixture, date) groups, newest date first.
+  let page;
+  try { page = readPage(req.query, ['string', 'string']); } catch (e) { return sendPageError(res, e); }
+  const { items, nextCursor } = players.fixturePage(req.org, page);
+  res.json({
+    items: items.map((g) => ({ fixture: g.fixture, venue: g.venue, date: g.date, players: g.players.map((p) => ({ id: p.id, name: p.name, position: p.position, age: ageOn(p.dob), trustScore: p.profileSignal })) })),
+    nextCursor,
+  });
 });
 
 // The club's Requests and Trials lists, newest first, paged by cursor (domains/platform/paging.mjs): { items, nextCursor }.
@@ -3882,7 +3863,13 @@ playerRouter.post('/programme/sessions/:id/complete', (req, res) => {
 // cohort in the same position group. Small cohorts return null.
 playerRouter.get('/benchmarks', (req, res) => {
   if (grassrootsOnly(req, res)) return;
-  const cohort = players.list({ notLevel: 'pro', exceptId: req.player.id }).filter((c) => inCohort(req.player, c));
+  // S14i: the cohort (grassrootsJourney.mjs inCohort: not pro, the same position track) is a SQL filter, read as light
+  // rows for the statistics and as one GROUP BY for the drill bests; nobody is decoded.
+  const track = trackForPosition(req.player.position);
+  const cohortFilter = { notLevel: 'pro', exceptId: req.player.id, positions: PLAYER_POSITIONS.filter((pos) => trackForPosition(pos) === track), orNoPosition: trackForPosition(null) === track };
+  const cohort = [];
+  players.scanLight(cohortFilter, (c) => { if (inCohort(req.player, c)) cohort.push(c); });
+  const bests = players.drillBests(cohortFilter);
   const drillBests = (playerX, drillId, lowerIsBetter) => {
     const results = (playerX.drillResults ?? []).filter((r) => r.drillId === drillId);
     if (!results.length) return null;
@@ -3892,7 +3879,7 @@ playerRouter.get('/benchmarks', (req, res) => {
   const drills = DRILLS.map((d) => {
     const mine = drillBests(req.player, d.id, d.lowerIsBetter);
     if (mine === null) return null;
-    const cohortValues = cohort.map((c) => drillBests(c, d.id, d.lowerIsBetter)).filter((v) => v !== null);
+    const cohortValues = (bests.get(d.id) ?? []).map((b) => (d.lowerIsBetter ? b.min : b.max));
     const percentile = percentileAmong(mine, cohortValues, d.lowerIsBetter);
     // M12 F12F: sample size and method travel with every comparison; a
     // too-small cohort says "not enough evidence" instead of a number.

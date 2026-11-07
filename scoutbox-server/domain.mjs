@@ -170,16 +170,32 @@ export const TRUST = {
   MAX: 99,
 };
 
-export function computeTrustScore(player) {
+/**
+ * The profile-completeness figure ("profileSignal", served as the deprecated `trustScore`) from its five facts. The ONE
+ * definition: `computeTrustScore` reads them off a record, and the identity repository off row counts to keep
+ * `players.profile_signal` (S14i), which the directory sorts by.
+ */
+export function trustScoreFromFacts({ identityVerified, attendanceCount, trialReportCount, mediaCount, profileComplete }) {
   const t = TRUST;
   let score = t.BASE;
-  if (player.identityVerified) score += t.IDENTITY_VERIFIED;
-  score += Math.min((player.attendance?.length ?? 0) * t.PER_ATTENDANCE, t.ATTENDANCE_CAP);
-  score += Math.min((player.trialReports?.length ?? 0) * t.PER_TRIAL_REPORT, t.TRIAL_REPORT_CAP);
-  score += Math.min((player.media?.length ?? 0) * t.PER_MEDIA, t.MEDIA_CAP);
-  const complete = player.position && player.foot && player.heightCm && player.weightKg && player.stats;
-  if (complete) score += t.PROFILE_COMPLETE;
+  if (identityVerified) score += t.IDENTITY_VERIFIED;
+  score += Math.min(attendanceCount * t.PER_ATTENDANCE, t.ATTENDANCE_CAP);
+  score += Math.min(trialReportCount * t.PER_TRIAL_REPORT, t.TRIAL_REPORT_CAP);
+  score += Math.min(mediaCount * t.PER_MEDIA, t.MEDIA_CAP);
+  if (profileComplete) score += t.PROFILE_COMPLETE;
   return Math.min(score, t.MAX);
+}
+/** Is the profile complete for the figure: position, foot, height, weight and some statistics. */
+export const profileIsComplete = (player) => !!(player.position && player.foot && player.heightCm && player.weightKg && player.stats);
+
+export function computeTrustScore(player) {
+  return trustScoreFromFacts({
+    identityVerified: !!player.identityVerified,
+    attendanceCount: player.attendance?.length ?? 0,
+    trialReportCount: player.trialReports?.length ?? 0,
+    mediaCount: player.media?.length ?? 0,
+    profileComplete: profileIsComplete(player),
+  });
 }
 
 export function trustBreakdown(player) {
@@ -190,7 +206,7 @@ export function trustBreakdown(player) {
     verifiedAttendance: Math.min((player.attendance?.length ?? 0) * t.PER_ATTENDANCE, t.ATTENDANCE_CAP),
     trialReports: Math.min((player.trialReports?.length ?? 0) * t.PER_TRIAL_REPORT, t.TRIAL_REPORT_CAP),
     media: Math.min((player.media?.length ?? 0) * t.PER_MEDIA, t.MEDIA_CAP),
-    profileComplete: (player.position && player.foot && player.heightCm && player.weightKg && player.stats) ? t.PROFILE_COMPLETE : 0,
+    profileComplete: profileIsComplete(player) ? t.PROFILE_COMPLETE : 0,
     total: computeTrustScore(player),
   };
 }

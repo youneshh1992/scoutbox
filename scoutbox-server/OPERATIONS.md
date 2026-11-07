@@ -121,9 +121,15 @@ registration → listen.
   S14h these are SQL lookups answering fresh, deep-frozen records: `req.player` and `req.guardian` are
   copies taken when the request was authenticated, so a route that writes and then answers reads the
   record the write returned (or `players.byId` again), never the one it held. A route that needs many
-  players asks the identity repository: `players.visibleCandidates(org, filters)` (the under-18 wall
-  and the grassroots box in SQL; the caller still applies `visibleToOrg` and the blocks),
-  `players.scan` / `list`, `players.byExternalId`, `guardians.forPlayer`, `guardians.byEmail`.
+  players asks the identity repository: `players.visibleCandidates(org, filters)` (since S14i the
+  whole visibility rule in SQL: the under-18 wall, the exact Grassroots radius and the blocks; the
+  views still apply `visibleToOrg` at the source), a page in SQL (`players.directoryPage`,
+  `players.visiblePage(org, filter, { order, where }, page)`, `players.clipPage`, `players.fixturePage`),
+  light rows for a ranking over every candidate (`players.scanLight`: the row's own columns and
+  `profileSignal`, no lists; decode only the winners with `players.byIds`), `players.recentFor`,
+  `players.drillBests`, `players.scan` / `list`, `players.byExternalId`, `guardians.forPlayer`,
+  `guardians.byEmail`. `players.profile_signal` is kept by the repositories (every player write, every
+  trial write); nothing else writes it.
 - **Read SQL where the domain has no view.** Since §4.3 step 2 a domain whose reads moved
   to SQL has no `db.<collection>` at all (reading or assigning it throws and names the
   repository). The whole recruitment domain (cases and Room records, requests, trials,

@@ -11,6 +11,7 @@ import { runDataMigrations } from '../repositories/database.mjs';
 import { createIdentityRepositories, CORE_IDENTITY_INIT_META, PLAYER_RECORD_KEYS, GUARDIAN_RECORD_KEYS, bornByForAge } from '../repositories/identity.mjs';
 import { SUBRECORD_TABLES } from '../repositories/playerSubrecords.mjs';
 import { adult, child, gSignup, FIXTURE, T0, NOW, TTL, tempDir, clone } from './coreIdentityTestFixtures.mjs';
+import { computeTrustScore, visibleToOrg, haversineKm } from '../domain.mjs';
 
 let passed = 0;
 const only = process.env.TEST_ONLY || '';
@@ -245,7 +246,7 @@ test('units of work: an operation joins the open unit; a refusal or a throw roll
 });
 
 // ------------------------------------------------------------------ reads
-test('scans: visibleCandidates applies the under-18 wall (by the country\'s age of majority) for an organisation that cannot see minors, and the grassroots box; the directory filters are SQL; a batch scan visits every admitted player once', () => {
+test('scans: visibleCandidates applies the under-18 wall (by the country\'s age of majority) for an organisation that cannot see minors, and the grassroots radius; the directory filters are SQL; a batch scan visits every admitted player once', () => {
   const t = boot();
   const kr17 = bornByForAge(18, NOW); // 18 today: a minor in KR (19), an adult in GB (18)
   t.players.create({ id: 'pl-kr', name: 'Seoul Player', dob: kr17, country: 'KR', guardianId: 'gd-signup' });
@@ -256,13 +257,85 @@ test('scans: visibleCandidates applies the under-18 wall (by the country\'s age 
   assert.deepEqual(ids('org-agency'), adultsAll, 'an agency sees adults only (the KR 18-year-old is a minor)');
   assert.deepEqual(ids('org-unverified'), adultsAll, 'an unverified club too');
   assert.deepEqual(ids('org-pro'), [...adultsAll, 'pl-child1', 'pl-child2', 'pl-kr'].sort(), 'a verified club may see minors');
-  assert.deepEqual(ids('org-grass'), ['pl-adult', 'pl-gb18', 'pl-seeded'], 'a grassroots club: not pro, inside the box around its ground (a prefilter: Manchester is in the box, the exact 50 km test is the caller\'s)');
+  assert.deepEqual(ids('org-grass'), ['pl-adult', 'pl-gb18'], 'a grassroots club: not pro, within 50 km of its ground, exactly (S14i: Manchester is inside the index box but beyond the radius)');
   assert.deepEqual(ids('org-pro', { position: 'CB' }), ['pl-gb18']);
   assert.deepEqual(ids('org-pro', { ageBelow: 18 }), ['pl-child1', 'pl-child2'].sort(), 'ageBelow is exactly ageOn\'s rule');
   assert.deepEqual(ids('org-pro', { ageAtLeast: 18, ageBelow: 19 }), ['pl-gb18', 'pl-kr'].sort());
   assert.deepEqual(ids('org-pro', { createdSince: NOW - 1 }), [], 'seed players and new ones without createdAt are not new');
   const seen = []; t.players.scan({}, (p) => { seen.push(p.id); }); assert.equal(seen.length, t.players.count());
   const two = []; t.players.scan({}, (p) => { two.push(p.id); return two.length < 2; }); assert.equal(two.length, 2, 'returning false stops the scan');
+  t.close();
+});
+
+test('S14i: players.profile_signal is computeTrustScore of the record after every kind of write (create, update, addItem, setItems, the seed import), and is never written by update', () => {
+  const t = boot();
+  const check = (label) => { for (const p of t.players.list({})) assert.equal(t.get('SELECT profile_signal AS v FROM players WHERE id = ?', p.id).v, computeTrustScore(p), `${label}: ${p.id}`); };
+  check('the seed import');
+  t.players.create({ id: 'pl-new', name: 'New Player', dob: '1999-01-01', country: 'GB', position: 'CM', foot: 'left', heightCm: 175, weightKg: 70, stats: { appearances: 3 } });
+  check('create (a complete profile)');
+  t.players.update('pl-new', (d) => { d.identityVerified = true; d.foot = null; });
+  check('update (identity, an incomplete profile)');
+  for (let i = 0; i < 7; i += 1) t.players.addItem('pl-new', 'media', { id: `med-n${i}`, title: `Clip ${i}`, kind: 'video', uploadedAt: new Date(NOW).toISOString(), url: null, views: 0, tags: {}, verifiedClip: null });
+  check('addItem (clips, past the cap)');
+  t.players.setItems('pl-new', 'attendance', [{ id: 'att-n1', fixture: 'Cup', venue: 'Ground', date: '2026-01-01', verified: true }]);
+  check('setItems (attendance)');
+  t.players.setItems('pl-new', 'media', []);
+  check('setItems (clips cleared)');
+  assert.throws(() => t.players.update('pl-new', (d) => { d.profileSignal = 99; }), /unknown field profileSignal/, 'the figure is not a field of the record');
+  assert.throws(() => t.players.addItem('pl-new', 'media', { id: 'med-bad', title: 'Bad', kind: 'video', uploadedAt: '1 May 2026' }), /uploadedAt is not a UTC instant/, 'S14i: a clip\'s upload time is an ISO instant');
+  t.close();
+});
+
+test('S14i: the directory page is exact and in its declared order: the whole visibility rule in SQL (the wall, the 50 km radius on both sides of ±180°, the blocks), the search over name, country and an adult\'s city (as JavaScript lowers text), and cursor pages that lose and repeat nobody at any size', () => {
+  const t = boot();
+  for (let i = 0; i < 23; i += 1) t.players.create({ id: `pl-d${String(i).padStart(2, '0')}`, name: `Dir ${i}`, dob: '1998-02-02', country: i % 2 ? 'GB' : 'ES', city: i === 4 ? 'Ávila' : null, academyPlus: i % 5 === 0, identityVerified: i % 3 === 0, firstTeamSeeker: i % 4 === 0, location: { lat: 53.8 + i * 0.01, lng: -1.55 } });
+  t.layer.safetyAudit.blocks.add({ id: 'blk-1', playerId: 'pl-d07', orgId: 'org-pro', by: 'player', reason: 'synthetic', ts: NOW });
+  const walk = (org, filter, limit) => { const out = []; let after = null; for (;;) { const pg = t.players.directoryPage(orgOf(t, org), filter, { limit, after }); out.push(...pg.items.map((p) => p.id)); if (!pg.nextCursor) return out; after = JSON.parse(Buffer.from(pg.nextCursor, 'base64url').toString()); } };
+  const viewOrder = (org) => {
+    const o = orgOf(t, org);
+    const all = t.players.list({}).filter((p) => visibleToOrg(p, o) && !t.layer.safetyAudit.blocks.has(p.id, o.id));
+    const dist = (p) => Math.round(haversineKm(o.location, p.location) * 10);
+    return all.sort((a, b) => (o.level === 'grassroots'
+      ? (b.firstTeamSeeker - a.firstTeamSeeker) || (dist(a) - dist(b)) || (computeTrustScore(b) - computeTrustScore(a))
+      : (b.academyPlus - a.academyPlus) || (computeTrustScore(b) - computeTrustScore(a))) || (a.id < b.id ? -1 : 1)).map((p) => p.id);
+  };
+  for (const org of ['org-pro', 'org-agency', 'org-grass']) {
+    const expected = viewOrder(org);
+    for (const limit of [1, 4, 50]) assert.deepEqual(walk(org, {}, limit), expected, `${org}, pages of ${limit}`);
+  }
+  assert.ok(!walk('org-pro', {}, 50).includes('pl-d07') && walk('org-agency', {}, 50).includes('pl-d07'), 'a block hides the player from the organisation it names only');
+  assert.deepEqual(walk('org-pro', { text: 'ávi' }, 50), ['pl-d04'], 'an accented city matched as JavaScript lowers it');
+  assert.deepEqual(walk('org-pro', { text: 'child pl-child1' }, 50), ['pl-child1'], 'a name');
+  assert.deepEqual(walk('org-pro', { text: 'nowhere' }, 50), [], 'nothing');
+  t.players.update('pl-child1', (d) => { d.city = 'Hiddenham'; });
+  assert.deepEqual(walk('org-pro', { text: 'hiddenham' }, 50), [], 'a minor\'s city is never shown, so never matched');
+  // The antimeridian: a club at 179.9°E sees a player 20 km away at 179.9°W, and not one 60 km away.
+  t.layer.orgs.create({ id: 'org-fiji', name: 'Taveuni FC', type: 'club', level: 'grassroots', plan: 'Grassroots', country: 'FJ', verified: true, location: { lat: -16.8, lng: 179.9, city: 'Waiyevo' } });
+  t.players.create({ id: 'pl-east', name: 'Across The Line', dob: '1990-01-01', country: 'FJ', location: { lat: -16.8, lng: -179.99 } });
+  t.players.create({ id: 'pl-far-east', name: 'Too Far', dob: '1990-01-01', country: 'FJ', location: { lat: -16.8, lng: -179.5 } });
+  assert.deepEqual(walk('org-fiji', {}, 50), ['pl-east'], 'the radius holds across ±180°');
+  t.close();
+});
+
+test('S14i: the light scan, the Film Room clip page, the fixture graph, the feed\'s recent rows and the drill bests read what the decoded records say', () => {
+  const t = boot();
+  const pro = orgOf(t, 'org-pro');
+  const light = []; t.players.scanLight({ visibleTo: pro }, (p) => { light.push(p); });
+  assert.deepEqual(light.map((p) => p.id), t.players.visibleCandidates(pro).map((p) => p.id), 'the same players, in creation order');
+  for (const p of light) { const full = t.players.byId(p.id); assert.equal(p.profileSignal, computeTrustScore(full)); for (const k of ['name', 'dob', 'position', 'foot', 'heightCm', 'weightKg', 'level']) assert.deepEqual(p[k], full[k], `${p.id}.${k}`); assert.deepEqual(p.stats, full.stats); assert.equal(p.media, undefined, 'no lists on a light record'); }
+  t.players.addItem('pl-adult', 'media', { id: 'med-a1', title: 'Played', kind: 'video', uploadedAt: new Date(NOW - 86_400_000).toISOString(), url: 'https://media.test/a1', views: 9, tags: {}, verifiedClip: null });
+  t.players.addItem('pl-adult', 'media', { id: 'med-a2', title: 'Verified', kind: 'video', uploadedAt: new Date(NOW - 2 * 86_400_000).toISOString(), url: 'https://media.test/a2', views: 1, tags: {}, verifiedClip: 'att-x' });
+  t.players.addItem('pl-adult', 'media', { id: 'med-a3', title: 'No url', kind: 'video', uploadedAt: new Date(NOW).toISOString(), url: null, views: 50, tags: {}, verifiedClip: null });
+  const deck = []; let after = null; for (;;) { const pg = t.players.clipPage(pro, { limit: 1, after }); deck.push(...pg.items.map((x) => x.media.id)); if (!pg.nextCursor) break; after = JSON.parse(Buffer.from(pg.nextCursor, 'base64url').toString()); }
+  assert.deepEqual(deck, ['med-a2', 'med-a1'], 'playable clips only, verified first, then views');
+  const groups = t.players.fixturePage(pro, { limit: 50, after: null }).items;
+  assert.deepEqual(groups.map((g) => [g.fixture, g.date, g.venue, g.players.map((p) => p.id)]), [['Cup Final', '2026-06-01', 'Hough End', ['pl-seeded']]]);
+  assert.equal(t.players.fixturePage(orgOf(t, 'org-grass'), { limit: 50, after: null }).items.length, 0, 'Manchester is beyond the Leeds club\'s radius');
+  const recent = t.players.recentFor(pro, NOW - 3 * 86_400_000, 40);
+  assert.deepEqual(recent.clips.map((c) => c.media.id), ['med-a3', 'med-a1', 'med-a2'], 'clips uploaded since, newest first');
+  assert.deepEqual(recent.players, [], 'no player created in the window');
+  const bests = t.players.drillBests({ notLevel: 'pro' });
+  assert.deepEqual(bests.get('drill-sprint'), [{ playerId: 'pl-seeded', max: 4.2, min: 4.2 }]);
   t.close();
 });
 

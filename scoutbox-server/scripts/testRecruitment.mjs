@@ -15,6 +15,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync, StatementSync } from 'node:sqlite';
 import { attachDataLayer, DATA_MIGRATIONS, TABLE_BACKED } from '../repositories/index.mjs';
+import { computeTrustScore, TRUST } from '../domain.mjs';
 import { openStore } from '../store.mjs';
 import { NOW, TTL, tempDir, hasBlobTable } from './coreIdentityTestFixtures.mjs';
 import { legacyTrialRequest, contactRequest, openDayRequest, p4bInvitation, minorInvitation, acceptedRequest, scheduledTrial, acceptedTrial, session, preP4bTrial, workedTrial, cancelledTrial, report, CASES, persisted, T, saveFixture, fixtureDb } from './recruitmentTestFixtures.mjs';
@@ -252,6 +253,22 @@ test('[repository] the deletion unit: tombstoneForPlayer writes every request an
   const n = L.repo.tombstoneForPlayer('pl-adult', { request: (r) => ({ ...r, playerName: null, message: null, subjectRemovedAt: NOW }), trial: (t) => ({ ...t, playerName: null, subjectRemovedAt: NOW }) });
   assert.deepEqual(n, { requests: 5, trials: 2 });
   withRo(d, (s) => { assert.equal(col(s, "SELECT count(*) FROM recruitment_requests WHERE player_id = 'pl-adult' AND subject_removed_at IS NULL"), 0); assert.equal(col(s, "SELECT count(*) FROM trials WHERE player_id = 'pl-adult' AND player_name IS NOT NULL"), 0); assert.equal(col(s, "SELECT count(*) FROM recruitment_requests WHERE player_id = 'pl-child1' AND subject_removed_at IS NULL"), 1, 'another player\'s request untouched'); });
+  L.close(); rm(d);
+});
+
+test('[repository] S14i: a player\'s stored profile figure (players.profile_signal) counts the reports filed on their trials: right after a snapshot save, and refreshed by the trial write that files one, in its own unit (a unit that fails leaves it as it was)', () => {
+  const d = file('signal'); const L = serverOpen(d);
+  const stored = () => withRo(d, (s) => col(s, "SELECT profile_signal FROM players WHERE id = 'pl-adult'"));
+  const derived = () => computeTrustScore(L.layer.players.byId('pl-adult'));
+  assert.equal(L.layer.players.byId('pl-adult').trialReports.length, 1, 'the fixture\'s reported trial');
+  assert.equal(stored(), derived(), 'the snapshot save refreshed the figure against the final trials');
+  const before = stored();
+  assert.throws(() => L.unit(() => { L.repo.trials.update('trial-1', (x) => { x.report = report(); }); throw new Error('synthetic unit failure'); }), /synthetic unit failure/);
+  assert.equal(stored(), before, 'a failed unit leaves the figure as it was');
+  L.repo.trials.update('trial-1', (x) => { x.report = report(); });
+  assert.equal(L.layer.players.byId('pl-adult').trialReports.length, 2);
+  assert.equal(stored(), derived(), 'the write that files a report refreshes the figure');
+  assert.equal(stored(), Math.min(before + TRUST.PER_TRIAL_REPORT, TRUST.MAX), 'by one report\'s worth');
   L.close(); rm(d);
 });
 

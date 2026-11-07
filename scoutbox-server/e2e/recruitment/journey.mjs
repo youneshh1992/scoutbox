@@ -286,7 +286,7 @@ section('B — the canonical adult journey: 25 steps, one projection, every stag
 const J = {};
 {
   // 1. the player exists  2. discovery  3. watch
-  const found = (await j('GET', '/org/players?query=Kola', undefined, maria.token)).body;
+  const found = (await j('GET', '/org/players?query=Kola', undefined, maria.token)).body.items;
   ok(Array.isArray(found) && found.some((p) => p.id === 'pl-adeyemi'), 'B1 Kola exists and the club discovers him in search');
   const rooms0 = (await j('GET', '/org/rooms', undefined, maria.token)).body;
   neg(!(rooms0.items ?? rooms0).some?.((r) => r.playerId === 'pl-adeyemi'), '#1 B2 discovery opened no case: nothing is watched by being seen');

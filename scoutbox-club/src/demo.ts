@@ -354,6 +354,7 @@ export const demoApi: ScoutboxApi = {
     return delay(undefined);
   },
 
+  allPlayers: (s) => demoApi.searchPlayers(s, {}),
   searchPlayers: (s, f: SearchFilters) => {
     // Mirrors the server: agencies and unverified clubs never see minors.
     let list = PLAYERS.filter((p) => canSee(p, s.org));

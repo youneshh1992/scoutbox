@@ -90,6 +90,7 @@ CREATE TABLE player_attendance (
   CHECK ((lat IS NULL) = (lng IS NULL))
 ) STRICT;
 CREATE UNIQUE INDEX player_attendance_player ON player_attendance (player_id, position);
+CREATE INDEX player_attendance_fixture ON player_attendance (match_date DESC, fixture);
 
 CREATE TABLE player_timeline (
   player_id TEXT NOT NULL REFERENCES players(id) ON DELETE CASCADE,
@@ -105,7 +106,7 @@ CREATE TABLE player_media (
   position                    INTEGER NOT NULL,
   title                       TEXT NOT NULL,
   kind                        TEXT,
-  uploaded_at                 TEXT,
+  uploaded_at                 TEXT CHECK (uploaded_at IS NULL OR (length(uploaded_at) = 24 AND uploaded_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z')),
   url                         TEXT,
   views                       INTEGER NOT NULL DEFAULT 0,
   verified_clip_attendance_id TEXT,
@@ -115,6 +116,8 @@ CREATE TABLE player_media (
   box_session_id              TEXT
 ) STRICT;
 CREATE UNIQUE INDEX player_media_player ON player_media (player_id, position);
+CREATE INDEX player_media_uploaded ON player_media (uploaded_at) WHERE uploaded_at IS NOT NULL;
+CREATE INDEX player_media_deck ON player_media ((verified_clip_attendance_id IS NOT NULL) DESC, views DESC, player_id, position) WHERE url IS NOT NULL;
 
 CREATE TABLE player_media_tags (
   media_id TEXT NOT NULL REFERENCES player_media(id) ON DELETE CASCADE,
@@ -191,7 +194,9 @@ const itemSpec = ({ scalars, booleans = [], json = [], composites = {}, defaults
   scalars: Object.freeze(scalars), booleans: new Set(booleans), json: new Set(json), composites: Object.freeze(composites),
   defaults: Object.freeze(defaults), columns: Object.freeze(columns),
 });
-/** `types`: record key → 'text' | 'date' | 'int' | 'real' | 'bool' | 'json'; `required`: keys that must be present and non-null; `enums`: allowed values. */
+/** S14i: a clip's upload instant, as every writer stores it (toISOString), so the feed compares it as text in SQL. */
+const INSTANT_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
+/** `types`: record key → 'text' | 'date' | 'instant' | 'int' | 'real' | 'bool' | 'json'; `required`: keys that must be present and non-null; `enums`: allowed values. */
 export const SUBRECORD_SPECS = Object.freeze({
   media: Object.freeze({
     table: 'player_media', idKey: 'id', children: 'tags',
@@ -200,7 +205,7 @@ export const SUBRECORD_SPECS = Object.freeze({
       defaults: { views: 0 },
       columns: ['id', 'title', 'kind', 'uploaded_at', 'url', 'views', 'verified_clip_attendance_id', 'captions', 'size_bytes', 'captured_by', 'box_session_id'],
     }),
-    types: { id: 'text', title: 'text', kind: 'text', uploadedAt: 'text', url: 'text', views: 'int', verifiedClip: 'text', captions: 'text', sizeBytes: 'int', capturedBy: 'text', boxSessionId: 'text' },
+    types: { id: 'text', title: 'text', kind: 'text', uploadedAt: 'instant', url: 'text', views: 'int', verifiedClip: 'text', captions: 'text', sizeBytes: 'int', capturedBy: 'text', boxSessionId: 'text' },
     required: ['id', 'title'], enums: { capturedBy: ['box_cam'] }, unique: [['id']], nullable: ['url', 'verifiedClip', 'captions'],
   }),
   attendance: Object.freeze({
@@ -281,6 +286,7 @@ const checkValue = (problems, label, v, type, { required = false, enums = null }
   switch (type) {
     case 'text': if (typeof v !== 'string') problems.push(`${label} is ${describe(v)}, not text`); break;
     case 'date': if (typeof v !== 'string') problems.push(`${label} is ${describe(v)}, not text`); else if (v.length !== 10) problems.push(`${label} is not a 10-character date (YYYY-MM-DD)`); break;
+    case 'instant': if (typeof v !== 'string') problems.push(`${label} is ${describe(v)}, not text`); else if (!INSTANT_RE.test(v) || Number.isNaN(Date.parse(v))) problems.push(`${label} is not a UTC instant as toISOString writes it (YYYY-MM-DDTHH:MM:SS.sssZ)`); break;
     case 'int': if (!isSafeInt(v)) problems.push(`${label} is ${typeof v === 'number' ? String(v) : describe(v)}, not a safe integer`); break;
     case 'real': if (!isFinite_(v)) problems.push(`${label} is ${typeof v === 'number' ? String(v) : describe(v)}, not a finite number`); break;
     case 'bool': if (typeof v !== 'boolean') problems.push(`${label} is ${describe(v)}, not a boolean`); break;

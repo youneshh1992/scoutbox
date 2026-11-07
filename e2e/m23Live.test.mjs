@@ -239,7 +239,7 @@ say('L3: and the derived M12 stage is unchanged, which is the invariant the refu
 // L4 — a plain M12 case (no Room) still works. Refusing a Room must not
 // become a licence to break the cases that have no lifecycle to protect.
 const players = await j('/org/players', {}, lead.auth);
-const spare = (players.body ?? []).find((p) => p.name !== PLAYER_NAME && p.id);
+const spare = (players.body?.items ?? []).find((p) => p.name !== PLAYER_NAME && p.id);
 const plain = await j('/org/cases', {
   method: 'POST', body: JSON.stringify({ playerId: spare.id, priority: 'low' }),
 }, lead.auth);

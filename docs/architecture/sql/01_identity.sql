@@ -195,6 +195,7 @@ CREATE TABLE players (
   programme_track           TEXT CHECK (programme_track IS NULL OR length(programme_track) BETWEEN 1 AND 60),
   programme_started_at      INTEGER,
   password_hash             TEXT CHECK (password_hash IS NULL OR length(password_hash) BETWEEN 1 AND 512),
+  profile_signal            INTEGER NOT NULL CHECK (profile_signal BETWEEN 0 AND 99), -- S14i: domain.mjs trustScoreFromFacts, kept by every write (the directory's sort key)
   created_at                INTEGER,
   deleted_at                INTEGER,
   CHECK ((lat IS NULL) = (lng IS NULL)),
@@ -206,6 +207,7 @@ CREATE INDEX players_birth_date ON players (birth_date);
 CREATE INDEX players_search ON players (country, position, availability);
 CREATE INDEX players_level ON players (level);
 CREATE INDEX players_located ON players (lat, lng) WHERE lat IS NOT NULL;
+CREATE INDEX players_directory ON players (academy_plus DESC, profile_signal DESC, id) WHERE deleted_at IS NULL;
 
 -- source: db.guardians[].childIds[]  (mirrors players.guardianId; both maintained by hand: server.mjs:1420, 3137, 4018)
 -- owner/writer: server.mjs (core)
@@ -339,6 +341,7 @@ CREATE TABLE player_attendance (
   CHECK ((lat IS NULL) = (lng IS NULL))
 ) STRICT;
 CREATE UNIQUE INDEX player_attendance_player ON player_attendance (player_id, position);
+CREATE INDEX player_attendance_fixture ON player_attendance (match_date DESC, fixture);
 
 CREATE TABLE player_timeline (
   player_id TEXT NOT NULL REFERENCES players(id) ON DELETE CASCADE,
@@ -354,7 +357,7 @@ CREATE TABLE player_media (
   position                    INTEGER NOT NULL,
   title                       TEXT NOT NULL,
   kind                        TEXT,
-  uploaded_at                 TEXT,
+  uploaded_at                 TEXT CHECK (uploaded_at IS NULL OR (length(uploaded_at) = 24 AND uploaded_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z')), -- S14i: a toISOString instant (the feed compares it as text)
   url                         TEXT,
   views                       INTEGER NOT NULL DEFAULT 0,
   verified_clip_attendance_id TEXT,
@@ -364,6 +367,8 @@ CREATE TABLE player_media (
   box_session_id              TEXT
 ) STRICT;
 CREATE UNIQUE INDEX player_media_player ON player_media (player_id, position);
+CREATE INDEX player_media_uploaded ON player_media (uploaded_at) WHERE uploaded_at IS NOT NULL;
+CREATE INDEX player_media_deck ON player_media ((verified_clip_attendance_id IS NOT NULL) DESC, views DESC, player_id, position) WHERE url IS NOT NULL;
 
 CREATE TABLE player_media_tags (
   media_id TEXT NOT NULL REFERENCES player_media(id) ON DELETE CASCADE,

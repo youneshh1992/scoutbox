@@ -547,6 +547,8 @@ export interface ScoutboxApi {
   }): Promise<Session>;
   report(s: Session, input: ReportInput): Promise<void>;
   searchPlayers(s: Session, f: SearchFilters): Promise<Player[]>;
+  /** Every player the club may see, every page of the directory (the pickers: choose a player for an assessment, a case, an objective). */
+  allPlayers(s: Session): Promise<Player[]>;
   getPlayer(s: Session, id: string): Promise<PlayerDetail>;
   act(s: Session, playerId: string, action: 'save' | 'shortlist' | 'signing'): Promise<void>;
   getShortlist(s: Session): Promise<Player[]>;
@@ -656,7 +658,21 @@ export const httpApi: ScoutboxApi = {
     if (f.country) params.set('country', f.country);
     if (f.ageGroup) params.set('ageGroup', f.ageGroup);
     if (f.newDays) params.set('newDays', String(f.newDays));
-    return request<Player[]>(`/org/players?${params}`, { headers: headers(s) });
+    // S14i: the directory is paged ({ items, nextCursor }); this reads the first page only. "Load more" is needed.
+    return request<{ items: Player[]; nextCursor: string | null }>(`/org/players?${params}`, { headers: headers(s) }).then((page) => page.items);
+  },
+
+  async allPlayers(s) {
+    // S14i: the directory is paged; a picker walks every page so no player it may choose is missing.
+    // A picker over a large directory needs a search box instead.
+    const out: Player[] = [];
+    let cursor: string | null = null;
+    do {
+      const page: { items: Player[]; nextCursor: string | null } = await request(`/org/players?limit=100${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`, { headers: headers(s) });
+      out.push(...page.items);
+      cursor = page.nextCursor;
+    } while (cursor);
+    return out;
   },
 
   getPlayer: (s, id) => request<PlayerDetail>(`/org/players/${id}`, { headers: headers(s) }),
@@ -689,7 +705,8 @@ export const httpApi: ScoutboxApi = {
 
   getFeed: (s) => request<FeedItem[]>('/org/feed', { headers: headers(s) }),
 
-  getFilmRoom: (s) => request<FilmRoomItem[]>('/org/filmroom', { headers: headers(s) }),
+  // S14i: the Film Room deck is paged ({ items, nextCursor }); this reads the first page only. "Load more" is needed.
+  getFilmRoom: (s) => request<{ items: FilmRoomItem[]; nextCursor: string | null }>('/org/filmroom', { headers: headers(s) }).then((page) => page.items),
 
   recordClipView: (s, playerId, mediaId) =>
     request<void>(`/org/players/${playerId}/media/${mediaId}/view`, { method: 'POST', headers: headers(s) }),
@@ -699,7 +716,8 @@ export const httpApi: ScoutboxApi = {
 
   getScoutTags: (s) => request<string[]>('/org/tags', { headers: headers(s) }),
 
-  getFixtures: (s) => request<FixtureGroup[]>('/org/fixtures', { headers: headers(s) }),
+  // S14i: the fixture graph is paged ({ items, nextCursor }); this reads the first page only. "Load more" is needed.
+  getFixtures: (s) => request<{ items: FixtureGroup[]; nextCursor: string | null }>('/org/fixtures', { headers: headers(s) }).then((page) => page.items),
 
   getSavedSearches: (s) => request<SavedSearch[]>('/org/searches', { headers: headers(s) }),
 

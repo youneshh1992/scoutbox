@@ -263,26 +263,26 @@ ok(orgList.body.every((o) => o.level !== 'grassroots'), 'main login screen never
 // Hackney (London, verified): sees local minor Guni, not Manchester's Kola,
 // and never a pro-level player.
 let gsearch = await j('/org/players', {}, bearer(HACKNEY));
-const names = gsearch.body.map((p) => p.name);
+const names = gsearch.body.items.map((p) => p.name);
 ok(names.includes('Guni Adebayo'), 'verified grassroots club sees a LOCAL minor (safeguarding bar identical)');
 ok(!names.includes('Kola Adeyemi'), 'players beyond 50km are invisible to grassroots clubs');
 ok(!names.includes('Elias Svensson'), 'pro-level players never appear on Grassroots');
-ok(gsearch.body.every((p) => typeof p.distanceKm === 'number' && p.distanceKm <= 50), 'grassroots views carry distance, all within radius');
-ok(gsearch.body.every((p) => !('academyPlus' in p) && !('marketValueRange' in p) && !('agentName' in p)), 'pro-market surface (Academy+, value, agent) stripped on Grassroots');
+ok(gsearch.body.items.every((p) => typeof p.distanceKm === 'number' && p.distanceKm <= 50), 'grassroots views carry distance, all within radius');
+ok(gsearch.body.items.every((p) => !('academyPlus' in p) && !('marketValueRange' in p) && !('agentName' in p)), 'pro-market surface (Academy+, value, agent) stripped on Grassroots');
 r = await j('/org/players/pl-adeyemi', {}, bearer(HACKNEY));
 ok(r.status === 403 || r.status === 404, 'direct profile fetch beyond the radius refused');
 
 // Moss Side (Manchester, unverified): adults-only, local-only.
 gsearch = await j('/org/players', {}, bearer(MOSS));
-ok(gsearch.body.some((p) => p.name === 'Kola Adeyemi'), 'Manchester grassroots club sees Manchester amateur');
-ok(!gsearch.body.some((p) => p.guardianManaged), 'unverified grassroots club sees no minors — same rule as everywhere');
+ok(gsearch.body.items.some((p) => p.name === 'Kola Adeyemi'), 'Manchester grassroots club sees Manchester amateur');
+ok(!gsearch.body.items.some((p) => p.guardianManaged), 'unverified grassroots club sees no minors — same rule as everywhere');
 
 // Grassroots signing sets the player semi-pro (still on the platform).
 await j('/org/players/pl-adeyemi/request', { method: 'POST', body: JSON.stringify({ type: 'contact', message: 'First-team spot this season.' }) }, bearer(MOSS));
 r = await j('/org/players/pl-adeyemi/signing', { method: 'POST' }, bearer(MOSS));
 ok(r.status === 201, 'grassroots club records a signing');
 gsearch = await j('/org/players', {}, bearer(MOSS));
-ok(gsearch.body.find((p) => p.id === 'pl-adeyemi')?.level === 'semi_pro', 'grassroots signing makes the player semi-pro, still visible locally');
+ok(gsearch.body.items.find((p) => p.id === 'pl-adeyemi')?.level === 'semi_pro', 'grassroots signing makes the player semi-pro, still visible locally');
 
 // A pro signing removes the player from Grassroots entirely (Svensson,
 // signed by Eastport in section 8, is now level pro).
@@ -299,7 +299,7 @@ r = await j('/auth/org/register-grassroots', {
 ok(r.status === 201 && r.body.token && r.body.org.level === 'grassroots' && r.body.org.verified === false, 'grassroots registration opens unverified (adults-only) with a token');
 const LEYTON = r.body.token; // London grassroots club, ~2km from Hackney Marsh
 gsearch = await j('/org/players', {}, bearer(LEYTON));
-ok(gsearch.body.every((p) => !p.guardianManaged && p.distanceKm <= 50), 'freshly registered club: local adults only until verification');
+ok(gsearch.body.items.every((p) => !p.guardianManaged && p.distanceKm <= 50), 'freshly registered club: local adults only until verification');
 
 // ---- 13. the Grassroots player journey (M9)
 // Kola became semi-pro via the Moss Side signing above — the level-up moment
@@ -347,7 +347,7 @@ ok(r.status === 409, 'double registration refused');
 // First Team Seekers: surfaced first to grassroots clubs, never purchasable.
 await j('/player/first-team-seeker', { method: 'POST', body: JSON.stringify({ enabled: true }) }, bearer(KOLA));
 gsearch = await j('/org/players', {}, bearer(MOSS));
-ok(gsearch.body.find((p) => p.id === 'pl-adeyemi')?.firstTeamSeeker === true, 'seeker flag visible to grassroots clubs');
+ok(gsearch.body.items.find((p) => p.id === 'pl-adeyemi')?.firstTeamSeeker === true, 'seeker flag visible to grassroots clubs');
 
 // Coach vouches: email-code verified, moderated, coach email never exposed.
 r = await j('/player/vouches/request', { method: 'POST', body: JSON.stringify({ coachName: 'Ade Falana', coachEmail: 'ade@sundayleague.org.uk', role: 'Manager' }) }, bearer(KOLA));

@@ -106,7 +106,9 @@ function build() {
     }
   }
   const leadOf = (i) => `usr-${[i, i + ORGS, i + 2 * ORGS].find((j) => j % 3 === 0)}`;
-  return { db, now, busy: busy.o, busyUser: leadOf(busy.i), typical: typical.o, typicalUser: leadOf(typical.i), popular, guardian: minors[0].guardianId, ORGS };
+  // S14i: a Grassroots club whose 50 km radius holds the population's ground (51.5, -0.1).
+  const grass = clubs.find(({ o }) => o.level === 'grassroots' && Math.abs(o.location.lat - 51.5) < 0.2 && Math.abs(o.location.lng + 0.1) < 0.6) ?? null;
+  return { db, now, grass: grass?.o ?? null, grassUser: grass ? `usr-${grass.i}` : null, busy: busy.o, busyUser: leadOf(busy.i), typical: typical.o, typicalUser: leadOf(typical.i), popular, guardian: minors[0].guardianId, ORGS };
 }
 
 // ------------------------------------------------------------------ the server
@@ -162,6 +164,7 @@ const tokens = {};
   const layer = attachDataLayer({ db: {}, store, nextId: (p) => `${p}-${Math.random().toString(36).slice(2)}`, sessionTtlMs: 30 * DAY, warn: () => {} });
   tokens.busy = layer.sessions.create('org', world.busy.id, { userId: world.busyUser }).token;
   tokens.typical = layer.sessions.create('org', world.typical.id, { userId: world.typicalUser }).token;
+  if (world.grass) tokens.grass = layer.sessions.create('org', world.grass.id, { userId: world.grassUser }).token;
   tokens.player = layer.sessions.create('player', world.popular.id).token;
   tokens.guardian = layer.sessions.create('guardian', world.guardian).token;
   store.sqlite.close();
@@ -191,6 +194,10 @@ const typicalRoom = await room(tokens.typical);
 const ROUTES = [
   ['busy club', tokens.busy, ['/org/rooms', '/org/rooms-funnel', '/org/rooms/needs-attention', '/org/rooms/summaries', '/org/cases', '/org/audit', '/org/requests', '/org/trials', '/org/recruitment-counts', '/org/followups', '/org/signings', '/org/recruitment-analytics', '/org/funnel', ...(busyRoom ? [`/org/rooms/${busyRoom}`, `/org/rooms/${busyRoom}/journey`, `/org/rooms/${busyRoom}/activity`, `/org/rooms/${busyRoom}/offers`, `/org/rooms/${busyRoom}/contacts`, `/org/rooms/${busyRoom}/trials`] : [])]],
   ['typical club', tokens.typical, ['/org/rooms', '/org/cases', '/org/audit', '/org/requests', '/org/recruitment-counts', '/org/recruitment-analytics', ...(typicalRoom ? [`/org/rooms/${typicalRoom}`, `/org/rooms/${typicalRoom}/journey`] : [])]],
+  // S14i: the hot player reads (the directory, similar players, the deck, the feed, the fixtures, the rotation, benchmarks).
+  ['busy club', tokens.busy, ['/org/players', '/org/players?academyPlus=true&position=CM', '/org/players?q=player%2012', `/org/players/${world.popular.id}`, `/org/players/${world.popular.id}/morelike`, '/org/filmroom', '/org/feed', '/org/fixtures', '/org/discovery-rotation']],
+  ...(tokens.grass ? [['grassroots', tokens.grass, ['/org/players', '/org/filmroom', '/org/feed', '/org/fixtures']]] : []),
+  ['popular player', tokens.player, ['/player/benchmarks']],
   ['popular player', tokens.player, ['/player/inbox', '/player/journeys', '/player/trials', '/player/offers', '/player/signings', '/player/followups']],
   ['guardian', tokens.guardian, ['/guardian/inbox', '/guardian/trials', '/guardian/offers']],
 ];

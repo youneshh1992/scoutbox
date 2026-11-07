@@ -105,7 +105,7 @@ export function AssessmentsScreen({ session, tick, notify }: ScreenProps) {
   const [editing, setEditing] = useState<Assessment | null>(null);
   const [compare, setCompare] = useState<CompareResult | null>(null);
 
-  useEffect(() => { api.searchPlayers(session, {}).then((ps) => setPlayers(ps.map((p) => ({ id: p.id, name: p.name })))).catch(() => {}); }, [session]);
+  useEffect(() => { api.allPlayers(session).then((ps) => setPlayers(ps.map((p) => ({ id: p.id, name: p.name })))).catch(() => {}); }, [session]);
 
   const openEditor = async (a?: Assessment) => {
     if (a) return setEditing(a);
@@ -283,7 +283,7 @@ export function RecruitmentScreen({ session, tick, notify, openPlayer }: ScreenP
   const [staff] = useAsync<StaffRow[]>(() => m12.listStaff(session), [tick]);
   const [players, setPlayers] = useState<{ id: string; name: string }[]>([]);
   const [newPlayer, setNewPlayer] = useState('');
-  useEffect(() => { api.searchPlayers(session, {}).then((ps) => setPlayers(ps.map((p) => ({ id: p.id, name: p.name })))).catch(() => {}); }, [session]);
+  useEffect(() => { api.allPlayers(session).then((ps) => setPlayers(ps.map((p) => ({ id: p.id, name: p.name })))).catch(() => {}); }, [session]);
 
   const act = (fn: () => Promise<unknown>, done: string) => fn().then(() => { notify(done); reload(); }).catch((e) => notify(e instanceof Error ? e.message : 'Failed', true));
 
@@ -379,6 +379,7 @@ export function SquadPlannerScreen({ session, tick, notify }: ScreenProps) {
   const showCandidates = async (v: Vacancy) => {
     try {
       const r = await m12.vacancyCandidates(session, v.id);
+      // S14i: the candidates are paged (r.nextCursor); this shows the first page only. "Load more" is needed.
       setCands({ candidates: r.candidates, note: r.note, roleName: r.role.name });
     } catch (e) { notify(e instanceof Error ? e.message : 'Failed', true); }
   };
@@ -676,7 +677,7 @@ function SharedObjectives({ session, tick, notify }: { session: Session; tick: n
   const [players, setPlayers] = useState<{ id: string; name: string }[]>([]);
   const [rows, setRows] = useState<{ player: string; obj: Objective }[]>([]);
   useEffect(() => {
-    api.searchPlayers(session, {}).then(async (ps) => {
+    api.allPlayers(session).then(async (ps) => {
       setPlayers(ps.map((p) => ({ id: p.id, name: p.name })));
       const all: { player: string; obj: Objective }[] = [];
       for (const p of ps.slice(0, 12)) {
