@@ -1,7 +1,7 @@
 // Transition cases and coach references (vouches; repositories/transitionsVouches.mjs, migration 0025): the STRICT
-// tables, the typers' refusals, a case read back whole with its pack, grants and history, updates that keep the pack,
-// owner and period and only add grants, a reference code stored only as its hash (single use, unique), the routes'
-// queries, units of work and fixtures. Temporary databases only; nothing touches DATA_DIR. Run with: npm test
+// tables, a create that must read back as written, a case read back whole with its pack, grants and history, the named
+// acts (grants only inserted and revoked once, the history only inserted, a case leaves open once), a reference code
+// stored only as its hash (single use, unique), the routes' queries, units of work and fixtures. Temporary databases only; nothing touches DATA_DIR. Run with: npm test
 
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -12,7 +12,7 @@ import { NOW, TTL, tempDir } from './coreIdentityTestFixtures.mjs';
 import { saveFixture, ORG } from './recruitmentTestFixtures.mjs';
 import {
   TRANSITIONS_MIGRATION as MIGRATION, TRANSITIONS_TABLES as TABLES, TRANSITIONS_COLLECTIONS as COLLECTIONS,
-  typeTransitionCase, typeVouch, vouchCodeHash,
+  vouchCodeHash,
 } from '../repositories/transitionsVouches.mjs';
 
 let passed = 0;
@@ -66,33 +66,34 @@ test('[schema] 0025 is registered after 0024 and creates the five STRICT tables 
   s.close(); rm(dir);
 });
 
-// ------------------------------------------------------------- typing
-test('[typing] the typers refuse junk with the record and field named', () => {
-  assert.equal(typeTransitionCase(transition()).ok, true);
-  assert.deepEqual(typeTransitionCase(transition()).record.caseOwner, PLAYER, 'caseOwner is startedBy');
-  assert.match(typeTransitionCase(transition({ sneaky: 1 })).reason, /trn-1 carries field\(s\) this build does not store: sneaky/);
-  assert.match(typeTransitionCase(transition({ pack: { mediaIds: [], evidenceIds: [], feedbackIds: [] } })).reason, /pack holds no item/);
-  assert.match(typeTransitionCase(transition({ pack: { mediaIds: ['m', 'm'] } })).reason, /pack\.mediaIds names an entry twice/);
-  assert.match(typeTransitionCase(transition({ pack: { notes: ['x'] } })).reason, /pack carries field/);
-  assert.match(typeTransitionCase(transition({ status: 'released' })).reason, /status must be one of/);
-  assert.match(typeTransitionCase(transition({ status: 'placed' })).reason, /placement is set exactly when the case is placed/);
-  assert.match(typeTransitionCase(transition({ caseOwner: { kind: 'guardian', id: 'gd-1', name: 'G' } })).reason, /caseOwner is always who started/);
-  assert.match(typeTransitionCase(transition({ history: [hist('aud-1', 'opened', { orgId: ORG.id })] })).reason, /detail must be \{ items \} for opened/);
-  assert.match(typeTransitionCase(transition({ history: [hist('aud-1', 'withdrawn', { items: 1 })] })).reason, /detail must be null for withdrawn/);
-  assert.match(typeTransitionCase(transition({ recipients: [grant({ expiresAt: NOW - 1 })] })).reason, /expiresAt is before the grant/);
-  assert.equal(typeVouch(vouch()).ok, true);
-  assert.equal(typeVouch(vouch()).record.verificationMethod, 'email_code');
-  assert.match(typeVouch(vouch({ code: 'ABCD2345' })).reason, /carries field\(s\) this build does not store: code/);
-  assert.match(typeVouch(vouch({ codeHash: 'ABCD2345' })).reason, /codeHash must be a SHA-256 hex digest/);
-  assert.match(typeVouch(vouch({ status: 'published', codeHash: null })).reason, /text and publishedAt are required once published/);
-  assert.match(typeVouch(vouch({ status: 'published', text: 'Good.', publishedAt: NOW })).reason, /codeHash is held exactly while the reference is pending/);
-  assert.match(typeVouch(vouch({ identityVerified: true })).reason, /identityVerified is always false/);
-  assert.match(typeVouch(vouch({ coachName: '' })).reason, /coachName must not be empty/);
+// ------------------------------------------------------------- creates
+test('[create] a record the columns cannot hold is refused with the record and field named, and nothing is written', () => {
+  const dir = tempDir('s10c-create'); saveFixture(dir);
+  const s = serverOpen(dir);
+  const T = s.repo.transitionCases; const V = s.repo.vouches;
+  try {
+    refused(() => T.create(transition({ sneaky: 1 })), /TRANSITIONS_INPUT_INVALID: transition_cases trn-1 sneaky: is not stored as written/);
+    refused(() => T.create(transition({ pack: { mediaIds: ['m', 'm'] } })), /trn-1 pack\.mediaIds\[1\]: UNIQUE constraint failed/);
+    refused(() => T.create(transition({ pack: { mediaIds: ['m'], notes: ['x'] } })), /trn-1 pack\.notes: is not stored as written/);
+    refused(() => T.create(transition({ status: 'released' })), /trn-1 row: CHECK constraint failed/);
+    refused(() => T.create(transition({ status: 'placed' })), /trn-1 row: CHECK constraint failed/, 'a placed case names its placement');
+    refused(() => T.create(transition({ caseOwner: { kind: 'guardian', id: 'gd-1', name: 'G' } })), /trn-1 caseOwner\.kind: is not stored as written/, 'the owner is who started the case');
+    refused(() => T.create(transition({ history: [hist('aud-1', 'opened', { orgId: ORG.id })] })), /trn-1 history\[0\]: CHECK constraint failed/);
+    refused(() => T.create(transition({ history: [hist('aud-1', 'withdrawn', { items: 1 })] })), /trn-1 history\[0\]: CHECK constraint failed/);
+    refused(() => T.create(transition({ recipients: [grant({ expiresAt: NOW - 1 })] })), /trn-1 recipients\[0\]: CHECK constraint failed/);
+    refused(() => V.create(vouch({ code: 'ABCD2345' })), /vouches vch-1 code: is not stored as written/);
+    refused(() => V.create(vouch({ codeHash: 'ABCD2345' })), /vch-1 row: CHECK constraint failed/, 'a code is stored as its SHA-256 hex digest');
+    refused(() => V.create(vouch({ status: 'published', codeHash: null })), /vch-1 row: CHECK constraint failed/, 'published needs its text');
+    refused(() => V.create(vouch({ status: 'published', text: 'Good.', publishedAt: NOW })), /vch-1 row: CHECK constraint failed/, 'a published reference holds no code');
+    refused(() => V.create(vouch({ identityVerified: true })), /vch-1 identityVerified: is not stored as written/, 'an email code never proves identity');
+    refused(() => V.create(vouch({ coachName: '' })), /vch-1 row: CHECK constraint failed/);
+    assert.deepEqual(s.repo.counts(), { transitionCases: 0, vouches: 0 }, 'nothing was written');
+  } finally { s.close(); rm(dir); }
 });
 
 // ------------------------------------------------------------- writes and reads
-test('[cases] a case is created whole and read back; an update keeps the pack, owner and period, only adds grants (revoked once) and only grows the history', () => {
-  const dir = tempDir('s10c-cases'); saveFixture(dir);
+test('[cases] a case is created whole and read back; its acts only insert grants (revoked once) and history, and it leaves open once', () => {
+  const dir = tempDir('s10c-cases'); saveFixture(dir, { orgs: [{ ...ORG, plan: 'Pro' }, { id: 'org-2', name: 'Other FC', type: 'club', plan: 'Pro' }] });
   const s = serverOpen(dir);
   const T = s.repo.transitionCases;
   try {
@@ -100,36 +101,42 @@ test('[cases] a case is created whole and read back; an update keeps the pack, o
     assert.ok(Object.isFrozen(t) && Object.isFrozen(t.pack.mediaIds), 'deep-frozen');
     assert.deepEqual(t.pack, { mediaIds: ['med-2', 'med-1'], evidenceIds: ['ev-1'], feedbackIds: [] }, 'the pack keeps its order');
     assert.deepEqual(t.history, [hist('aud-1', 'opened', { items: 1 })]);
-    refused(() => T.create(transition()), /already exists/, 'duplicate id');
-    const g = T.update('trn-1', (d) => { d.recipients.push(grant()); d.history.push(hist('aud-2', 'recipient_added', { orgId: ORG.id })); });
+    refused(() => T.create(transition()), /TRANSITIONS_DUPLICATE: transition_cases trn-1 already exists/, 'duplicate id');
+    assert.equal(typeof T.update, 'undefined', 'no whole-record update');
+    const g = T.grant('trn-1', { recipient: grant() }, { history: [hist('aud-2', 'recipient_added', { orgId: ORG.id })] });
     assert.deepEqual(g.recipients, [grant()]);
     assert.deepEqual(T.grantedTo(ORG.id, NOW).map((x) => x.id), ['trn-1'], 'the club sees the case it holds a live grant for');
     assert.deepEqual(T.grantedTo(ORG.id, NOW + 31 * DAY), [], 'not after the grant expired');
-    refused(() => T.update('trn-1', (d) => { d.recipients.push(grant({ orgId: 'org-none' })); }), /FOREIGN KEY/, 'a grant to a missing organisation');
-    refused(() => T.update('trn-1', (d) => { d.pack.mediaIds.push('med-9'); }), /pack cannot change/, 'pack change');
-    refused(() => T.update('trn-1', (d) => { d.startedBy.id = 'pl-9'; }), /startedBy|caseOwner/, 'owner change');
-    refused(() => T.update('trn-1', (d) => { d.periodEndsAt += DAY; }), /periodEndsAt cannot change/, 'period change');
-    refused(() => T.update('trn-1', (d) => { d.recipients = []; }), /a grant cannot be removed/, 'grant removed');
-    refused(() => T.update('trn-1', (d) => { d.recipients[0].expiresAt += DAY; }), /keeps its organisation and dates/, 'grant extended');
-    refused(() => T.update('trn-1', (d) => { d.history.pop(); }), /only grows/, 'history dropped');
-    refused(() => T.update('trn-1', () => { T.update('trn-1', () => {}); }), /already being updated/, 'nested update');
-    const r = T.update('trn-1', (d) => { d.recipients[0].revokedAt = NOW + 1; d.history.push(hist('aud-3', 'recipient_revoked', { orgId: ORG.id })); });
+    refused(() => T.grant('trn-1', { recipient: grant({ orgId: 'org-none' }) }), /FOREIGN KEY/, 'a grant to a missing organisation');
+    refused(() => T.grant('trn-1', { recipient: grant({ extra: 1 }) }), /recipients\[1\]\.extra: is not stored as written/, 'a grant reads back as written');
+    refused(() => T.grant('trn-1', { recipient: grant() }, { history: [hist('aud-1', 'recipient_added', { orgId: ORG.id })] }), /history aud-1: UNIQUE|PRIMARY KEY/, 'a history id is used once');
+    assert.equal(T.byId('trn-1').recipients.length, 1, 'a refused act wrote nothing');
+    T.recordView('trn-1', { ord: 0, at: NOW + 1 });
+    const r = T.revokeGrant('trn-1', { ord: 0, at: NOW + 1 }, { history: [hist('aud-3', 'recipient_revoked', { orgId: ORG.id })] });
     assert.equal(r.recipients[0].revokedAt, NOW + 1);
     assert.deepEqual(T.grantedTo(ORG.id, NOW), [], 'a revoked grant shows nothing');
-    refused(() => T.update('trn-1', (d) => { d.recipients[0].revokedAt = NOW + 2; }), /already revoked/, 'revoked twice');
-    const p = T.update('trn-1', (d) => {
-      d.status = 'placed'; d.placement = { orgId: ORG.id, orgName: ORG.name, at: NOW, note: 'U21s' }; d.followUp = { dueAt: NOW + 60 * DAY, notifiedAt: null };
-      d.history.push(hist('aud-4', 'placed', { orgId: ORG.id }));
-    });
+    refused(() => T.revokeGrant('trn-1', { ord: 0, at: NOW + 2 }), /grant #0 is already revoked/, 'revoked twice');
+    refused(() => T.recordView('trn-1', { ord: 0, at: NOW + 2 }), /grant #0 is revoked/, 'no view under a revoked grant');
+    T.grant('trn-1', { recipient: grant({ grantedAt: NOW + 2 }) });
+    T.grant('trn-1', { recipient: grant({ orgId: 'org-2', orgName: 'Other FC', grantedAt: NOW + 2 }) });
+    const p = T.place('trn-1', { placement: { orgId: ORG.id, orgName: ORG.name, at: NOW + 3, note: 'U21s' }, followUpDueAt: NOW + 60 * DAY, at: NOW + 3 }, { history: [hist('aud-4', 'placed', { orgId: ORG.id })] });
     assert.equal(p.status, 'placed'); assert.equal(p.history.length, 4); assert.deepEqual(p.followUp, { dueAt: NOW + 60 * DAY, notifiedAt: null });
+    assert.deepEqual(p.recipients.map((x) => x.revokedAt), [NOW + 1, null, NOW + 3], "the placing club's grant stays, every other ends");
+    refused(() => T.withdraw('trn-1', { at: NOW }), /transition_cases trn-1 is not open/, 'a case leaves open once');
+    refused(() => T.grant('trn-1', { recipient: grant() }), /is not open; a grant is refused/, 'no grant on a closed case');
     assert.deepEqual(T.followUpsDue(NOW + 61 * DAY).map((x) => x.id), ['trn-1']);
-    T.update('trn-1', (d) => { d.followUp.notifiedAt = NOW + 61 * DAY; });
+    T.markFollowUpNotified('trn-1', { at: NOW + 61 * DAY });
     assert.deepEqual(T.followUpsDue(NOW + 62 * DAY), [], 'a check-in is sent once');
+    refused(() => T.markFollowUpNotified('trn-1', { at: NOW + 62 * DAY }), /has no check-in due/);
     T.create(transition({ id: 'trn-2', history: [hist('aud-5', 'opened', { items: 1 })] }));
     assert.deepEqual(T.expiredBy(NOW + 61 * DAY).map((x) => x.id), ['trn-2'], 'only open cases expire');
+    assert.equal(T.expire('trn-2', {}, { history: [hist('aud-6', 'expired', null, { byKind: 'system', byId: 'sweep', byName: 'system' })] }).status, 'expired');
     assert.deepEqual(T.forPlayers([PID, 'pl-other']).map((x) => x.id), ['trn-1', 'trn-2']);
-    assert.equal(typeof s.repo.reads.transitionCases.update, 'undefined', 'the reads carry no writes');
-    refused(() => T.update('trn-2', (d) => { d.recipients.push(grant({ grantedAt: NOW + 61 * DAY, expiresAt: NOW + 60 * DAY })); }), /expiresAt is before the grant/, 'a grant after the period ended (the route answers 409 CASE_CLOSED first)');
+    assert.equal(typeof s.repo.reads.transitionCases.grant, 'undefined', 'the reads carry no writes');
+    T.create(transition({ id: 'trn-3', history: [hist('aud-7', 'opened', { items: 1 })] }));
+    refused(() => T.grant('trn-3', { recipient: grant({ grantedAt: NOW + 61 * DAY, expiresAt: NOW + 60 * DAY }) }), /CHECK constraint failed/, 'a grant after the period ended (the route answers 409 CASE_CLOSED first)');
+    const w = T.withdraw('trn-3', { at: NOW }, { history: [hist('aud-8', 'withdrawn')] });
+    assert.equal(w.status, 'withdrawn');
   } finally { s.close(); rm(dir); }
 });
 
@@ -145,16 +152,19 @@ test('[vouches] a code is stored only as its hash, found by the code as typed, s
     assert.equal(V.pendingByCode('WRONG000'), null);
     refused(() => V.create(vouch({ id: 'vch-2' })), /that code is already issued/, 'a second reference with the same code');
     assert.deepEqual(V.publishedFor(PID), [], 'pending is not published');
-    const pub = V.update('vch-1', (d) => { d.status = 'published'; d.text = 'Reliable.'; d.publishedAt = NOW; d.codeHash = null; });
-    assert.equal(pub.codeHash, null); assert.equal(V.pendingByCode('ABCD2345'), null, 'single use');
-    refused(() => V.update('vch-1', (d) => { d.codeHash = vouchCodeHash('NEW12345'); }), /a code is issued once|codeHash is held exactly/, 'a code re-issued');
-    refused(() => V.update('vch-1', (d) => { d.coachEmail = 'other@example.test'; }), /coachEmail cannot change/, 'identity change');
+    const pub = V.publish('vch-1', { text: 'Reliable.', at: NOW });
+    assert.equal(pub.codeHash, null); assert.equal(pub.status, 'published'); assert.equal(V.pendingByCode('ABCD2345'), null, 'single use');
+    refused(() => V.publish('vch-1', { text: 'Again.', at: NOW }), /vouches vch-1 is not pending/, 'a code is spent once');
+    assert.equal(typeof V.update, 'undefined', 'no whole-record update');
     assert.deepEqual(V.publishedFor(PID).map((v) => v.id), ['vch-1']);
-    V.update('vch-1', (d) => { d.withdrawn = { at: NOW, by: 'admin', reason: 'withdrawn by Trust & Safety' }; });
+    V.withdraw('vch-1', { at: NOW, by: 'admin', reason: 'withdrawn by Trust & Safety' });
+    refused(() => V.withdraw('vch-1', { at: NOW, by: 'admin', reason: 'again' }), /already withdrawn/, 'withdrawn once');
     assert.deepEqual(V.publishedFor(PID), [], 'a withdrawn reference leaves every profile');
     assert.equal(V.forPlayer(PID).length, 1, 'the player still sees it in their own list');
     V.create(vouch({ id: 'vch-2', codeHash: null, coachEmail: null, status: 'published', text: 'A season of graft.', publishedAt: NOW }));
     V.create(vouch({ id: 'vch-3', codeHash: vouchCodeHash('ZZZZ9999') }));
+    const revoked = V.revoke('vch-3');
+    assert.deepEqual([revoked.status, revoked.codeHash], ['revoked', null], 'a revoked reference keeps no live code');
     const first = V.page({ limit: 2 }).rows;
     assert.deepEqual(first.map((r) => r.record.id), ['vch-3', 'vch-2', 'vch-1'], 'limit + 1 rows, newest first');
     assert.deepEqual(V.page({ limit: 2, after: first[1].key }).rows.map((r) => r.record.id), ['vch-1']);
@@ -171,7 +181,7 @@ test('[units] a rolled-back unit leaves nothing; db.transitionCases and db.vouch
   } finally { s.close(); rm(dir); }
 });
 
-test('[fixtures] a fixture written through the repository is typed (a plain code refused, nothing written), a grant to a missing organisation is refused, and the records read back as written', () => {
+test('[fixtures] a fixture written through the repository must read back as written (a plain code refused, nothing written), a grant to a missing organisation is refused, and the records read back as written', () => {
   const dir = tempDir('s10c-fix');
   const placed = transition({
     id: 'trn-2', status: 'placed', recipients: [grant({ revokedAt: NOW + 5 })], placement: { orgId: ORG.id, orgName: ORG.name, at: NOW + 5, note: null }, followUp: { dueAt: NOW + 60 * DAY, notifiedAt: null },
@@ -192,7 +202,7 @@ test('[fixtures] a fixture written through the repository is typed (a plain code
     } finally { rm(d); }
   };
   refusedFixture('org', { transitionCases: [transition(), transition({ id: 'trn-3', recipients: [grant({ orgId: 'org-none' })] })] }, /FOREIGN KEY constraint failed/);
-  refusedFixture('code', { vouches: [vouch({ code: 'ABCD2345' })] }, /TRANSITIONS_INPUT_INVALID: vouches vch-1 .*code/);
+  refusedFixture('code', { vouches: [vouch({ code: 'ABCD2345' })] }, /TRANSITIONS_INPUT_INVALID: vouches vch-1 code/);
 });
 
 console.log(`\ntransitions and references repository: ${passed} checks passed`);

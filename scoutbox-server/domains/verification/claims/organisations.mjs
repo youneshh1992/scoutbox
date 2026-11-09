@@ -136,14 +136,14 @@ export function registerOrganisationVerification(ctx) {
         orgId: req.org.id, claimIds: [claim.id], ...fileFields, meta: { note: String(note ?? '').slice(0, L.note) },
         visibility: ['PERSON_IDENTITY', 'LICENCE'].includes(claim.claimType) ? 'trust_and_safety' : 'organisation_internal',
       }, req);
-      if (dup && !claim.riskFlags.includes('DUPLICATE_EVIDENCE_HASH')) verification.claims.update(claim.id, (c) => { c.riskFlags.push('DUPLICATE_EVIDENCE_HASH'); });
+      if (dup) verification.claims.addRiskFlags(claim.id, { codes: ['DUPLICATE_EVIDENCE_HASH'] });
       if (claim.status === 'unverified') applyStatus(claim, 'collecting_evidence', req);
       return added;
     });
     res.status(201).json({ claim: subjectClaimView(reads.claims.byId(claim.id)), evidenceChecks: ev.checks });
   });
-  function applyStatus(claim, to, req, opts = {}, patch = null) {
-    return transition(claim, to, { actorKind: req.orgUser ? 'org_user' : 'system', actorId: req.orgUser?.id, actorName: req.orgUser?.name, ...opts }, req, patch);
+  function applyStatus(claim, to, req, opts = {}, also = {}) {
+    return transition(claim, to, { actorKind: req.orgUser ? 'org_user' : 'system', actorId: req.orgUser?.id, actorName: req.orgUser?.name, ...opts }, req, also);
   }
   /** The claim when it is the caller's own (a user subject), or null: concealment, no cross-tenant existence leak. */
   const onlyMine = (req, c) => (c && c.subjectId === req.orgUser.id && c.subjectType === 'user' ? c : null);
@@ -190,7 +190,7 @@ export function registerOrganisationVerification(ctx) {
       documentOnly, riskFlagCount: flags.length,
       disputed: !!claim.disputedAt,
     });
-    const record = (c) => { c.riskFlags = [...new Set([...c.riskFlags, ...flags])]; c.reviewReasons = reasons; };
+    const record = { addRiskFlags: flags, reviewReasons: reasons };
     if (decision === 'REQUIRES_HUMAN_REVIEW') {
       applyStatus(claim, 'requires_human_review', req, {}, record);
       vmetric('routedToHumanReview');
@@ -254,7 +254,7 @@ export function registerOrganisationVerification(ctx) {
     const peek = ctx.peekToken({ purpose: 'work_email', secret: code, email: email ?? null, subjectId: req.orgUser.id });
     if (peek.error) {
       // count failures against open tokens for this user (risk signal)
-      unit(() => { for (const t of reads.tokens.openFor(req.orgUser.id, 'work_email')) verification.tokens.update(t.id, (d) => { d.attemptsFailed += 1; }); });
+      verification.tokens.recordFailedAttempts(req.orgUser.id, 'work_email');
       vmetric('emailChallengeFailures');
       return res.status(peek.error === 'TOKEN_EXPIRED' ? 410 : 401).json({ error: peek.error });
     }
@@ -275,11 +275,7 @@ export function registerOrganisationVerification(ctx) {
         meta: { domain: dom, domainCoveredByOrg: covered, addressHash: sha256(peek.token.email) }, // the address itself is not stored on the evidence record
       }, req);
       for (const c of open) {
-        verification.claims.update(c.id, (d) => {
-          d.metadata.workEmail = peek.token.email; // subject+org internal, never public
-          d.metadata.domainControl = 'passed';
-          d.metadata.domainCoveredByOrg = covered;
-        });
+        verification.claims.recordWorkEmail(c.id, { workEmail: peek.token.email, domainCoveredByOrg: covered }); // subject+org internal, never public
         verEvent('email.challenge_passed', { claimId: c.id, subjectId: req.orgUser.id, orgId: req.org.id, after: { domain: dom, covered } }, req);
         if (['collecting_evidence', 'unverified'].includes(c.status)) {
           if (c.status === 'unverified') applyStatus(c, 'collecting_evidence', req);
@@ -314,7 +310,7 @@ export function registerOrganisationVerification(ctx) {
         status: 'open', resolution: null, createdAt: Date.now(), resolvedAt: null, resolvedBy: null, resolvedById: null, resolutionAttribution: null,
       });
       if (claim.status === 'verified') applyStatus(claim, 'disputed', req ?? { orgUser: null }, { reason });
-      else if (!claim.reviewReasons.includes('DISPUTED_CLAIM')) verification.claims.update(claim.id, (c) => { c.reviewReasons.push('DISPUTED_CLAIM'); });
+      else verification.claims.addReviewReasons(claim.id, { codes: ['DISPUTED_CLAIM'] });
       verEvent('claim.disputed', { claimId: claim.id, subjectId: claim.subjectId, orgId: claim.organisationId, reason, actorKind: by.byKind, actorId: by.byId, actorName: by.byName });
       return created;
     });
@@ -418,9 +414,8 @@ export function registerOrganisationVerification(ctx) {
         unit(() => {
           before?.();
           for (const c of targets) {
-            const err = applyStatus(c, to, req, { method: 'organisation_admin_confirmation', reason, eventType: to === 'verified' ? 'review.approved' : 'review.rejected' }, (d) => {
-              Object.assign(d, extra);
-              if (to === 'verified') { d.authorityType = 'org_admin'; d.authorityId = req.orgUser.id; }
+            const err = applyStatus(c, to, req, { method: 'organisation_admin_confirmation', reason, eventType: to === 'verified' ? 'review.approved' : 'review.rejected' }, {
+              set: { ...extra, ...(to === 'verified' ? { authorityType: 'org_admin', authorityId: req.orgUser.id } : {}) },
             });
             if (err) throw Object.assign(new Error(err), { decideError: err });
           }
@@ -438,7 +433,7 @@ export function registerOrganisationVerification(ctx) {
           roleNow = String(role).trim().slice(0, L.role);
           correct = () => {
             verEvent('claim.corrected', { claimId: roleClaim.id, subjectId: claim.subjectId, orgId: req.org.id, before: { role: roleClaim.role }, after: { role: String(role).trim() } }, req);
-            verification.claims.update(roleClaim.id, (d) => { d.role = roleNow; });
+            verification.claims.correctRole(roleClaim.id, { role: roleNow });
           };
         }
       }
@@ -503,15 +498,11 @@ export function registerOrganisationVerification(ctx) {
     unit(() => {
       for (const c of claims) {
         verEvent('claim.corrected', { claimId: c.id, subjectId: c.subjectId, orgId: req.org.id, before: { current: true }, after: { current: false, validUntil: until }, reason: 'marked departed' }, req);
-        verification.claims.update(c.id, (d) => {
-          d.current = false;            // history is NOT erased — the verified period closes
-          d.validUntil = d.validUntil ?? until;
-          d.updatedAt = Date.now();
-        });
+        verification.claims.closePeriod(c.id, { until, at: Date.now() }); // history is NOT erased — the verified period closes
       }
       // Powers tied to the relationship end immediately.
       for (const a of reads.admins.activeFor(req.org.id, req.params.userId)) {
-        verification.admins.update(a.id, (d) => { d.status = 'revoked'; d.revokedAt = Date.now(); d.revokedBy = req.orgUser.id; });
+        verification.admins.revoke(a.id, { at: Date.now(), by: req.orgUser.id });
         verEvent('admin.revoked', { orgId: req.org.id, subjectId: a.userId, reason: 'departed' }, req);
       }
     });
@@ -579,7 +570,7 @@ export function registerOrganisationVerification(ctx) {
     }
     unit(() => {
       ctx.useToken(peek.token);
-      verification.domainRequests.update(r.id, (d) => { d.status = 'verified'; d.method = 'official_domain_email'; d.decidedAt = Date.now(); });
+      verification.domainRequests.confirmByEmail(r.id, { at: Date.now() });
       if (!reads.domains.has(req.org.id, r.domain)) verification.domains.add(req.org.id, { domain: r.domain, status: 'verified', method: 'official_domain_email', verifiedAt: Date.now(), addedBy: req.orgUser.id });
       createClaim({
         subjectType: 'org', subjectId: req.org.id, claimType: 'ORGANISATION_DOMAIN', organisationId: req.org.id,
@@ -663,7 +654,7 @@ export function registerOrganisationVerification(ctx) {
       return res.status(403).json({ error: 'SELF_PROMOTION_FORBIDDEN', message: 'The beneficiary cannot approve their own root authority.' });
     }
     const [approved, a] = unit(() => {
-      const tr = verification.rootTransfers.update(t.id, (d) => { d.status = 'approved'; d.approvedBy = req.orgUser.id; d.approvedAt = Date.now(); });
+      const tr = verification.rootTransfers.approve(t.id, { at: Date.now(), by: req.orgUser.id });
       // An existing active root grant is not duplicated (one active grant per person and level).
       const held = reads.admins.activeFor(req.org.id, t.toUserId).find((x) => x.level === 'verification_root_admin');
       const grant = held ?? verification.admins.create({ id: nextId('vadm'), orgId: req.org.id, userId: t.toUserId, level: 'verification_root_admin', status: 'active', invitedBy: t.proposedBy, createdAt: Date.now(), acceptedAt: Date.now(), revokedAt: null, revokedBy: null });
@@ -686,7 +677,7 @@ export function registerOrganisationVerification(ctx) {
       }
     }
     const revoked = unit(() => {
-      const next = verification.admins.update(a.id, (d) => { d.status = 'revoked'; d.revokedAt = Date.now(); d.revokedBy = req.orgUser.id; });
+      const next = verification.admins.revoke(a.id, { at: Date.now(), by: req.orgUser.id });
       verEvent('admin.revoked', { orgId: req.org.id, subjectId: a.userId, reason: String(req.body?.reason ?? 'revoked by organisation') }, req);
       return next;
     });
@@ -710,7 +701,8 @@ export function registerOrganisationVerification(ctx) {
     const found = reads.conflicts.byId(req.params.id);
     const c = found && found.orgId === req.org.id && found.userId === req.orgUser.id ? found : null;
     if (!c) return res.status(404).json({ error: 'CONFLICT_NOT_FOUND' });
-    const withdrawn = verification.conflicts.update(c.id, (d) => { d.withdrawnAt = Date.now(); });
+    if (c.withdrawnAt) return res.status(409).json({ error: 'ALREADY_WITHDRAWN' });
+    const withdrawn = verification.conflicts.withdraw(c.id, { at: Date.now() });
     res.json({ conflict: withdrawn });
   });
 
@@ -806,10 +798,7 @@ export function registerOrganisationVerification(ctx) {
     }
     const accepted = unit(() => {
       ctx.useToken(out.token); // all binding checks passed — consume now
-      const next = verification.playerInvites.update(inv.id, (d) => {
-        d.status = 'accepted'; d.playerId = player.id; d.acceptedAt = Date.now();
-        d.guardianApproved = guardian ? { guardianId: guardian.id, at: Date.now() } : null;
-      });
+      const next = verification.playerInvites.accept(inv.id, { playerId: player.id, at: Date.now(), guardianId: guardian?.id ?? null });
       verEvent('claim.created', { orgId: inv.orgId, subjectId: player.id, after: { invite: inv.id, guardianApproved: !!guardian } });
       notify({ kind: 'org_user', id: inv.byUserId }, 'verification', `${player.name} accepted your squad invitation${guardian ? ' (guardian-approved)' : ''}.`, inv.id);
       return next;
@@ -870,7 +859,7 @@ export function registerOrganisationVerification(ctx) {
     if (ref.status !== 'active') return res.status(409).json({ error: 'NOT_ACTIVE' });
     if (typeof req.body?.reason !== 'string' || !req.body.reason.trim()) return res.status(400).json({ error: 'REASON_REQUIRED' });
     const withdrawn = unit(() => {
-      const next = verification.references.update(ref.id, (d) => { d.status = 'withdrawn'; d.withdrawnAt = Date.now(); d.withdrawReason = req.body.reason.slice(0, L.withdrawReason); });
+      const next = verification.references.withdraw(ref.id, { at: Date.now(), reason: req.body.reason.slice(0, L.withdrawReason) });
       verEvent('claim.corrected', { orgId: req.org.id, subjectId: ref.playerId, before: { reference: ref.id, status: 'active' }, after: { status: 'withdrawn' }, reason: next.withdrawReason }, req);
       return next;
     });
@@ -884,7 +873,7 @@ export function registerOrganisationVerification(ctx) {
     for (const k of ['strengths', 'development', 'summary']) if (!(req.body?.[k] === undefined || req.body?.[k] === null || typeof req.body[k] === 'string')) return fieldInvalid(res, k, `${k} is text.`);
     if (typeof req.body?.summary === 'string' && !req.body.summary.trim()) return res.status(400).json({ error: 'FIELDS_REQUIRED', message: 'A reference keeps its summary.' });
     const next = unit(() => {
-      verification.references.update(old.id, (d) => { d.status = 'superseded'; });
+      verification.references.supersede(old.id);
       const created = verification.references.create({
         ...structuredClone(old), id: nextId('vref'), version: old.version + 1, supersedesId: old.id,
         structured: {
@@ -1009,7 +998,7 @@ export function registerOrganisationVerification(ctx) {
     }
     unit(() => {
       ctx.useToken(peek.token);
-      verification.rootRequests.update(r.id, (d) => { d.emailProved = true; d.checks.evidenceCompleteness = 'email_proved'; });
+      verification.rootRequests.proveEmail(r.id);
       verEvent('email.challenge_passed', { after: { rootRequest: r.id } });
     });
     res.json({ emailProved: true });
@@ -1034,7 +1023,7 @@ export function registerOrganisationVerification(ctx) {
         orgId: null, claimIds: [], ...fileFields, meta: { note: String(note ?? '').slice(0, L.note), rootRequest: r.id },
         visibility: 'trust_and_safety',
       });
-      if (dup && !r.riskFlags.includes('DUPLICATE_EVIDENCE_HASH')) verification.rootRequests.update(r.id, (d) => { d.riskFlags.push('DUPLICATE_EVIDENCE_HASH'); });
+      if (dup) verification.rootRequests.addRiskFlags(r.id, { codes: ['DUPLICATE_EVIDENCE_HASH'] });
       return added;
     });
     res.status(201).json({ evidence: { id: ev.id, checks: ev.checks } });
@@ -1053,7 +1042,7 @@ export function registerOrganisationVerification(ctx) {
       riskFlagCount: r.riskFlags.length,
     });
     unit(() => {
-      verification.rootRequests.update(r.id, (d) => { d.reviewReasons = reasons; d.status = 'requires_human_review'; });
+      verification.rootRequests.submitForReview(r.id, { reviewReasons: reasons });
       verEvent('review.requested', { after: { rootRequest: r.id, reasons } });
     });
     vmetric('routedToHumanReview');

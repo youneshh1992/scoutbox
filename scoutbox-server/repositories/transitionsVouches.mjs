@@ -10,10 +10,12 @@
  *     the player. `verificationMethod` and `identityVerified` are not stored: an email code proves mailbox control,
  *     never identity, so every view says 'email_code' and false.
  *
- * WRITES are explicit: `create(record)` and `update(id, (draft) => …)` type the whole record and write it at once,
- * joined into the open unit of work, the caller's open transaction, or a transaction of their own; an unknown field and
- * an update from inside its own update are refused. A case's pack, owner, note and period never change; its grants
- * only gain rows (a grant's revocation and last view are the only fields that change); its history only grows.
+ * Writes (repositories/writes.mjs). A record is created whole and must read back as written, then changes only through
+ * named acts (`grant`, `revokeGrant`, `place`, `publish`, `withdraw`, …), each an UPDATE of named columns or an INSERT
+ * of new rows, joined into the open unit of work, the caller's open transaction, or a transaction of their own. No act
+ * touches a case's pack, owner, note or period; grants are only inserted (a grant's revocation, once, and its last view
+ * are the only fields that change) and history is only inserted. A case leaves `open` once, guarded in SQL; a code is
+ * spent once. The columns and keys are the only check on stored values.
  *
  * Queries decode deep-frozen records in insertion (rowid) order unless they say otherwise. Modules receive them in
  * `verificationReads` (`transitionCases`, `vouches`).
@@ -23,10 +25,11 @@
  * keys; a case's pack items, grants and history cascade with the case (a case is never deleted).
  */
 import crypto from 'node:crypto';
-import { isPlainObject, ids, describe } from './recruitment.mjs';
+import { isPlainObject, describe } from './recruitment.mjs';
 import { transaction, migrationApplied, childRowsOf } from './database.mjs';
+import { writeKit } from './writes.mjs';
 import { deepFreeze } from './scoutingEvidence.mjs';
-import { text, int, oneOf, group, tableDdl, bad, typeSpec, encode, decode, upsertSql } from './fieldSpecs.mjs';
+import { text, int, oneOf, group, tableDdl, decode } from './fieldSpecs.mjs';
 
 export const TRANSITIONS_MIGRATION = '0025_transitions_vouches';
 export const TRANSITIONS_COLLECTIONS = Object.freeze(['transitionCases', 'vouches']);
@@ -87,6 +90,9 @@ export const TRANSITIONS_DDL = [
     'FOREIGN KEY (placement_org_id) REFERENCES orgs(id) ON DELETE RESTRICT',
     "CHECK ((status = 'placed') = (placement_org_id IS NOT NULL))",
     'CHECK (follow_up_due_at IS NULL OR placement_org_id IS NOT NULL)',
+    'CHECK (placement_org_id IS NULL OR placement_at IS NOT NULL)',
+    'CHECK (placement_org_id IS NOT NULL OR (placement_org_name IS NULL AND placement_at IS NULL AND placement_note IS NULL))',
+    'CHECK (follow_up_due_at IS NOT NULL OR follow_up_notified_at IS NULL)',
   ]),
   'CREATE INDEX transition_cases_player ON transition_cases (player_id);',
   'CREATE INDEX transition_cases_status_period ON transition_cases (status, period_ends_at);',
@@ -117,107 +123,18 @@ export const TRANSITIONS_DDL = [
   ]),
   'CREATE INDEX transition_case_history_case ON transition_case_history (transition_case_id);',
   tableDdl('vouches', VOUCH_SPEC, [
-    'CHECK (length(code_hash) = 64)',
+    "CHECK (length(code_hash) = 64 AND code_hash NOT GLOB '*[^0-9a-f]*')",
     "CHECK ((status = 'pending') = (code_hash IS NOT NULL))",
     "CHECK (status <> 'published' OR (text IS NOT NULL AND published_at IS NOT NULL))",
+    'CHECK ((withdrawn_at IS NULL) = (withdrawn_by IS NULL) AND (withdrawn_at IS NULL) = (withdrawn_reason IS NULL))',
   ]),
   'CREATE INDEX vouches_player_status ON vouches (player_id, status);',
   'CREATE UNIQUE INDEX vouches_code_hash ON vouches (code_hash) WHERE code_hash IS NOT NULL;',
 ].join('\n');
 export const TRANSITIONS_TABLES = Object.freeze(['transition_cases', 'transition_case_pack_items', 'transition_case_recipients', 'transition_case_history', 'vouches']);
 
-// ------------------------------------------------------------------ typing
-export const refusal = (code, message, extra = {}) => Object.assign(new Error(`${code}: ${message}`), { code, ...extra });
-const labelOf = (at, raw) => `${at} ${isPlainObject(raw) && typeof raw.id === 'string' ? raw.id : ''}`.trim();
-
-function typePack(pack, label) {
-  if (!isPlainObject(pack)) return bad(label, 'pack', `must be an object (got ${describe(pack)})`);
-  const unknown = Object.keys(pack).filter((k) => !Object.hasOwn(PACK_KINDS, k));
-  if (unknown.length) return bad(label, 'pack', `carries field(s) this build does not store: ${unknown.join(', ')}`);
-  const out = {};
-  for (const k of Object.keys(PACK_KINDS)) {
-    const list = pack[k] ?? [];
-    if (!Array.isArray(list)) return bad(label, `pack.${k}`, `must be a list (got ${describe(list)})`);
-    if (list.length > L.packItems) return bad(label, `pack.${k}`, `holds more than ${L.packItems} entries`);
-    const i = list.findIndex((x) => typeof x !== 'string' || !x.length || x.length > L.id);
-    if (i >= 0) return bad(label, `pack.${k}[${i}]`, `must be an id of at most ${L.id} characters (got ${describe(list[i])})`);
-    if (new Set(list).size !== list.length) return bad(label, `pack.${k}`, 'names an entry twice');
-    out[k] = [...list];
-  }
-  if (!Object.values(out).some((l) => l.length)) return bad(label, 'pack', 'holds no item');
-  return { ok: true, record: out };
-}
-function typeHistoryEntry(raw, at) {
-  if (!isPlainObject(raw)) return { ok: false, reason: `${at} is not an object (${describe(raw)})` };
-  const { detail = null, ...rest } = raw;
-  const t = typeSpec(HISTORY_SPEC, rest, at); if (!t.ok) return t;
-  const want = ACTION_DETAIL[t.record.action];
-  if (want === null) {
-    if (detail !== null) return bad(at, 'detail', `must be null for ${t.record.action}`);
-  } else {
-    const keys = isPlainObject(detail) ? Object.keys(detail) : null;
-    if (!keys || keys.length !== 1 || keys[0] !== want) return bad(at, 'detail', `must be { ${want} } for ${t.record.action} (got ${describe(detail)})`);
-    const v = detail[want];
-    if (want === 'items' ? !(Number.isSafeInteger(v) && v > 0) : !(typeof v === 'string' && v.length > 0 && v.length <= L.id)) return bad(at, `detail.${want}`, `is not valid (got ${describe(v)})`);
-  }
-  return { ok: true, record: { ...t.record, detail: want === null ? null : { [want]: detail[want] } } };
-}
-/** A transition case: the flat columns, the pack, the grants and the history. `caseOwner` is accepted when it is `startedBy`. */
-export function typeTransitionCase(raw, at = 'transitionCases') {
-  const label = labelOf(at, raw);
-  if (!isPlainObject(raw)) return { ok: false, reason: `${label} is not an object (${describe(raw)})` };
-  const { pack, recipients = [], history = [], caseOwner, ...flatPart } = raw;
-  const t = typeSpec(CASE_SPEC, flatPart, label); if (!t.ok) return t;
-  if (caseOwner !== undefined && JSON.stringify(caseOwner) !== JSON.stringify(t.record.startedBy)) return bad(label, 'caseOwner', 'is always who started the case');
-  const p = typePack(pack, label); if (!p.ok) return p;
-  if (!Array.isArray(recipients)) return bad(label, 'recipients', `must be a list (got ${describe(recipients)})`);
-  const grants = [];
-  for (const [i, r] of recipients.entries()) {
-    const rt = typeSpec(RECIPIENT_SPEC, r, `${label}.recipients[${i}]`); if (!rt.ok) return rt;
-    if (rt.record.expiresAt < rt.record.grantedAt) return bad(`${label}.recipients[${i}]`, 'expiresAt', 'is before the grant');
-    grants.push(rt.record);
-  }
-  if (!Array.isArray(history)) return bad(label, 'history', `must be a list (got ${describe(history)})`);
-  const hist = [];
-  for (const [i, h] of history.entries()) { const ht = typeHistoryEntry(h, `${label}.history[${i}]`); if (!ht.ok) return ht; hist.push(ht.record); }
-  if (new Set(hist.map((h) => h.id)).size !== hist.length) return bad(label, 'history', 'names an id twice');
-  const r = t.record;
-  if ((r.status === 'placed') !== (r.placement !== null)) return bad(label, 'placement', 'is set exactly when the case is placed');
-  if (r.followUp && !r.placement) return bad(label, 'followUp', 'follows a placement only');
-  return { ok: true, record: { ...r, caseOwner: { ...r.startedBy }, pack: p.record, recipients: grants, history: hist } };
-}
-/** A coach reference. A pending one carries its code hash; a published one its text and instant. */
-export function typeVouch(raw, at = 'vouches') {
-  const label = labelOf(at, raw);
-  const t = typeSpec(VOUCH_SPEC, raw, label, ['verificationMethod', 'identityVerified']); if (!t.ok) return t;
-  if (raw.verificationMethod !== undefined && raw.verificationMethod !== 'email_code') return bad(label, 'verificationMethod', "is always 'email_code'");
-  if (raw.identityVerified !== undefined && raw.identityVerified !== false) return bad(label, 'identityVerified', 'is always false (an email code proves the mailbox, not the person)');
-  const v = t.record;
-  if (v.codeHash !== null && !/^[0-9a-f]{64}$/.test(v.codeHash)) return bad(label, 'codeHash', 'must be a SHA-256 hex digest');
-  if ((v.status === 'pending') !== (v.codeHash !== null)) return bad(label, 'codeHash', 'is held exactly while the reference is pending');
-  if (v.status === 'published' && (v.text === null || v.publishedAt === null)) return bad(label, 'text', 'and publishedAt are required once published');
-  return { ok: true, record: { ...v, verificationMethod: 'email_code', identityVerified: false } };
-}
 
 // ------------------------------------------------------------------ rows
-function caseStatements(sqlite) {
-  return {
-    upsert: sqlite.prepare(upsertSql('transition_cases', CASE_SPEC)),
-    packIns: sqlite.prepare('INSERT INTO transition_case_pack_items (transition_case_id, item_kind, ord, item_id) VALUES (?, ?, ?, ?)'),
-    recDel: sqlite.prepare('DELETE FROM transition_case_recipients WHERE transition_case_id = ?'),
-    recIns: sqlite.prepare('INSERT INTO transition_case_recipients (transition_case_id, ord, org_id, org_name, granted_at, expires_at, revoked_at, viewed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'),
-    histIns: sqlite.prepare('INSERT INTO transition_case_history (id, transition_case_id, at, by_kind, by_id, by_name, action, detail_items, detail_org_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'),
-  };
-}
-const encodeCase = (rec) => encode(CASE_SPEC, rec);
-/** Write a typed case: the row, the pack (only when new), the grants whole, the history entries not yet stored. */
-function writeCase(st, rec, { isNew, knownHistory = 0 }) {
-  st.upsert.run(encodeCase(rec));
-  if (isNew) for (const [k, kind] of Object.entries(PACK_KINDS)) rec.pack[k].forEach((id, i) => st.packIns.run(rec.id, kind, i, id));
-  st.recDel.run(rec.id);
-  rec.recipients.forEach((r, i) => st.recIns.run(rec.id, i, r.orgId, r.orgName, r.grantedAt, r.expiresAt, r.revokedAt, r.viewedAt));
-  for (const h of rec.history.slice(knownHistory)) st.histIns.run(h.id, rec.id, h.at, h.byKind, h.byId, h.byName, h.action, h.detail?.items ?? null, h.detail?.orgId ?? null);
-}
 function decodeCases(sqlite, rows) {
   const cids = rows.map((r) => r.id);
   const pack = childRowsOf(sqlite, 'transition_case_pack_items', 'transition_case_id', cids, { order: 'item_kind, ord', subKey: ['item_kind'] });
@@ -239,7 +156,6 @@ function decodeCases(sqlite, rows) {
   });
 }
 const decodeVouch = (row) => ({ ...decode(VOUCH_SPEC, row), verificationMethod: 'email_code', identityVerified: false });
-const encodeVouch = (rec) => { const { verificationMethod: _m, identityVerified: _i, ...r } = rec; return encode(VOUCH_SPEC, r); };
 
 // ------------------------------------------------------------------ whole-domain read (the test suites)
 export const transitionsLive = (sqlite) => migrationApplied(sqlite, TRANSITIONS_MIGRATION);
@@ -260,64 +176,87 @@ export const unresolvedPlayerReferences = (sqlite) => (transitionsLive(sqlite) ?
 export const retainedPlayerReferences = (sqlite) => (transitionsLive(sqlite) ? { transitionsVouches: playerRefCount(sqlite, 'EXISTS (SELECT 1 FROM players p WHERE p.id = x.pid AND p.deleted_at IS NOT NULL)') } : null);
 
 // ------------------------------------------------------------------ the repository
-const WRITES = new Set(['create', 'update']);
-const clone = (v) => JSON.parse(JSON.stringify(v));
-const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 /**
- * `createTransitionsVouchesRepository({ sqlite, unit, now, log })`: `transitionCases` and `vouches`, each with its writes
- * and queries, plus `reads` (the queries alone, merged into `verificationReads`).
+ * `createTransitionsVouchesRepository({ sqlite, unit, now, log })`: `transitionCases` and `vouches`, each with its
+ * whole-record `create`, its named acts and its queries, plus `reads` (the queries alone, merged into
+ * `verificationReads`). A case's act is `act(id, input, { history })`: its own writes, then its history entries (only
+ * ever inserted, each read back as written); it returns the stored case. A vouch's act is `act(id, input)`.
  */
 export function createTransitionsVouchesRepository({ sqlite, unit = null, now = Date.now, log = () => {} } = {}) {
   if (!sqlite) throw new TypeError('the transitions repository needs a SQLite connection (node:sqlite)');
   const operation = (fn) => (unit?.active?.() ? unit.join(fn) : sqlite.isTransaction ? fn() : transaction(sqlite, fn));
-  const cache = new Map();
-  const q = (sql) => { let s = cache.get(sql); if (!s) cache.set(sql, (s = sqlite.prepare(sql))); return s; };
-  const cs = caseStatements(sqlite);
-  const updating = new Set();
-  const guard = (key, fn) => {
-    if (updating.has(key)) throw refusal('TRANSITIONS_NESTED_UPDATE', `${key} is already being updated; make the second change after the first returns`);
-    updating.add(key);
-    try { return fn(); } finally { updating.delete(key); }
-  };
-  const typedOr = (type, raw, name) => { const t = type(raw, name); if (!t.ok) throw refusal('TRANSITIONS_INPUT_INVALID', t.reason); return t.record; };
+  const { refusal: refuse, invalid, rowStep, listOf, readsBackAsWritten, newRecord, columnsOf, q, guarded } = writeKit(sqlite, 'TRANSITIONS');
+  const WRITES = new Set();
+  const writes = (o) => { for (const k of Object.keys(o)) WRITES.add(k); return o; };
+  const insertRow = (table, row) => { const cols = Object.keys(row); q(`INSERT INTO ${table} (${cols.join(', ')}) VALUES (${cols.map((c) => `@${c}`).join(', ')})`).run(row); };
 
   // ---- transition cases
+  const CASES = 'transition_cases';
   const casesWhere = (where, order = 'rowid') => (...args) => decodeCases(sqlite, q(`SELECT * FROM transition_cases WHERE ${where} ORDER BY ${order}`).all(...args)).map(deepFreeze);
   const caseById = (id) => { if (typeof id !== 'string') return null; const row = q('SELECT * FROM transition_cases WHERE id = ?').get(id); return row ? deepFreeze(decodeCases(sqlite, [row])[0]) : null; };
-  const CASE_IMMUTABLE = ['id', 'playerId', 'playerName', 'startedBy', 'note', 'pack', 'periodEndsAt', 'createdAt'];
   const forPlayers = casesWhere('player_id IN (SELECT value FROM json_each(?))');
+  const nextOrd = (table, id) => q(`SELECT COALESCE(MAX(ord) + 1, 0) AS n FROM ${table} WHERE transition_case_id = ?`).get(id).n;
+  const insertGrant = (id, r) => { if (!isPlainObject(r)) throw invalid(`${CASES} ${id} recipient: must be an object (got ${describe(r)})`); insertRow('transition_case_recipients', { transition_case_id: id, ord: nextOrd('transition_case_recipients', id), ...columnsOf(CASES, id, RECIPIENT_SPEC, r) }); };
+  const insertHistory = (id, h) => {
+    if (!isPlainObject(h)) throw invalid(`${CASES} ${id} history: an entry must be an object (got ${describe(h)})`);
+    const d = isPlainObject(h.detail) ? h.detail : {};
+    insertRow('transition_case_history', { transition_case_id: id, ...columnsOf(CASES, id, HISTORY_SPEC, h), detail_items: d.items ?? null, detail_org_id: d.orgId ?? null });
+  };
+  /** The grants not yet revoked end at `at` (all of them, or all but one organisation's). */
+  const revokeOpenGrants = (id, at, keepOrgId = null) => q('UPDATE transition_case_recipients SET revoked_at = @at WHERE transition_case_id = @id AND revoked_at IS NULL AND (@keep IS NULL OR org_id <> @keep)').run({ id, at, keep: keepOrgId });
+  const isOpen = (id, what) => guarded(CASES, { id }, "status = 'open'", {}, `${CASES} ${id} is not open; ${what} is refused`);
+  /** A recipient's grant (`ord`, its position among the case's recipients) while it is not revoked. */
+  const liveGrant = (id, ord, cols, what) => guarded('transition_case_recipients', { transition_case_id: id, ord }, 'revoked_at IS NULL', cols, `${CASES} ${id} grant #${ord} ${what}`);
+  const caseActs = (defs) => writes(Object.fromEntries(Object.entries(defs).map(([act, fn]) => [act, (id, input = {}, { history = [] } = {}) => operation(() => {
+    if (!q('SELECT 1 FROM transition_cases WHERE id = ?').get(id)) throw refuse('NOT_FOUND', `${CASES} ${id} is not a record of the repository`);
+    const check = rowStep(CASES, id, act, () => fn(id, input));
+    const entries = listOf(CASES, id, 'history', history, { objects: true });
+    for (const h of entries) rowStep(CASES, id, `history ${h.id}`, () => insertHistory(id, h));
+    const stored = caseById(id);
+    if (typeof check === 'function') check(stored);
+    entries.forEach((h) => readsBackAsWritten(CASES, id, h, stored.history.find((x) => x.id === h.id), `history ${h.id}`));
+    return stored;
+  })])));
   const transitionCases = {
-    create: (raw) => operation(() => {
-      const r = typedOr(typeTransitionCase, raw, 'transitionCases');
-      if (caseById(r.id)) throw refusal('TRANSITIONS_DUPLICATE', `transition_cases ${r.id} already exists`);
-      writeCase(cs, r, { isNew: true });
-      return caseById(r.id);
+    ...writes({
+      /** A new case, whole: its row, pack, grants and history. An existing id is refused; it must read back as written. */
+      create: (t) => operation(() => {
+        newRecord(CASES, (id) => !!q('SELECT 1 FROM transition_cases WHERE id = ?').get(id), t);
+        const step = (part, fn) => rowStep(CASES, t.id, part, fn);
+        step('row', () => insertRow(CASES, columnsOf(CASES, t.id, CASE_SPEC, t)));
+        if (t.pack !== undefined && !isPlainObject(t.pack)) throw invalid(`${CASES} ${t.id} pack: must be an object (got ${describe(t.pack)})`);
+        for (const [k, kind] of Object.entries(PACK_KINDS)) {
+          listOf(CASES, t.id, `pack.${k}`, t.pack?.[k]).forEach((itemId, i) => step(`pack.${k}[${i}]`, () => insertRow('transition_case_pack_items', { transition_case_id: t.id, item_kind: kind, ord: i, item_id: itemId })));
+        }
+        listOf(CASES, t.id, 'recipients', t.recipients).forEach((r, i) => step(`recipients[${i}]`, () => insertGrant(t.id, r)));
+        listOf(CASES, t.id, 'history', t.history).forEach((h, i) => step(`history[${i}]`, () => insertHistory(t.id, h)));
+        const stored = caseById(t.id); readsBackAsWritten(CASES, t.id, t, stored); return stored;
+      }),
     }),
-    /**
-     * `update(id, change)`: `change` edits a plain copy of the stored case; the result is typed whole and written at once.
-     * The pack, owner, note and period never change; grants only gain rows and only their revocation (once) and last
-     * view change; the history only grows.
-     */
-    update: (id, change) => guard(`transition_cases ${id}`, () => operation(() => {
-      if (typeof change !== 'function') throw new TypeError('transitionCases.update(id, change) needs a function that edits the copy it is given');
-      const stored = caseById(id);
-      if (!stored) throw refusal('TRANSITIONS_NOT_FOUND', `transition_cases ${id} is not a record of the repository`);
-      const draft = clone(stored);
-      const returned = change(draft);
-      const next = typedOr(typeTransitionCase, returned === undefined ? draft : returned, 'transitionCases');
-      for (const k of CASE_IMMUTABLE) if (!same(next[k], stored[k])) throw refusal('TRANSITIONS_INPUT_INVALID', `transition_cases ${id}: ${k} cannot change`);
-      if (next.recipients.length < stored.recipients.length) throw refusal('TRANSITIONS_INPUT_INVALID', `transition_cases ${id}: a grant cannot be removed`);
-      stored.recipients.forEach((r, i) => {
-        const n = next.recipients[i];
-        if (n.orgId !== r.orgId || n.orgName !== r.orgName || n.grantedAt !== r.grantedAt || n.expiresAt !== r.expiresAt) throw refusal('TRANSITIONS_INPUT_INVALID', `transition_cases ${id}: grant #${i} keeps its organisation and dates`);
-        if (r.revokedAt !== null && n.revokedAt !== r.revokedAt) throw refusal('TRANSITIONS_INPUT_INVALID', `transition_cases ${id}: grant #${i} was already revoked`);
-      });
-      if (stored.history.some((h, i) => !same(h, next.history[i]))) throw refusal('TRANSITIONS_INPUT_INVALID', `transition_cases ${id}: the history only grows (a stored entry cannot change or go)`);
-      const taken = next.history.slice(stored.history.length).find((h) => q('SELECT 1 FROM transition_case_history WHERE id = ?').get(h.id));
-      if (taken) throw refusal('TRANSITIONS_DUPLICATE', `transition_case_history ${taken.id} already exists`);
-      writeCase(cs, next, { isNew: false, knownHistory: stored.history.length });
-      return caseById(id);
-    })),
+    ...caseActs({
+      /** A grant to one more club (a new recipient row; a grant is revoked, never removed). */
+      grant: (id, { recipient }) => {
+        isOpen(id, 'a grant');
+        insertGrant(id, recipient);
+        const ord = nextOrd('transition_case_recipients', id) - 1;
+        return (stored) => readsBackAsWritten(CASES, id, recipient, stored.recipients[ord], `recipients[${ord}]`);
+      },
+      /** The owner withdraws one club's grant, once. */
+      revokeGrant: (id, { ord, at }) => liveGrant(id, ord, { revoked_at: at }, 'is already revoked'),
+      /** The club opened the pack under its live grant. */
+      recordView: (id, { ord, at }) => liveGrant(id, ord, { viewed_at: at }, 'is revoked'),
+      /** The owner closes the case: every grant ends. */
+      withdraw: (id, { at }) => { guarded(CASES, { id }, "status = 'open'", { status: 'withdrawn' }, `${CASES} ${id} is not open`); revokeOpenGrants(id, at); },
+      /** The player was placed: the case closes, the placing club's grant stays, every other ends, and a check-in falls due. */
+      place: (id, { placement, followUpDueAt, at }) => {
+        guarded(CASES, { id }, "status = 'open'", { status: 'placed', ...columnsOf(CASES, id, CASE_SPEC.filter((f) => f.k === 'placement'), { placement }), follow_up_due_at: followUpDueAt }, `${CASES} ${id} is not open`);
+        revokeOpenGrants(id, at, placement?.orgId ?? null);
+      },
+      /** The sweep: the period ended with the case still open. */
+      expire: (id) => guarded(CASES, { id }, "status = 'open'", { status: 'expired' }, `${CASES} ${id} is not open`),
+      /** The sweep sent the placement check-in, once. */
+      markFollowUpNotified: (id, { at }) => guarded(CASES, { id }, 'follow_up_due_at IS NOT NULL AND follow_up_notified_at IS NULL', { follow_up_notified_at: at }, `${CASES} ${id} has no check-in due`),
+    }),
     byId: caseById,
     /** The player's cases, oldest first. */
     forPlayer: casesWhere('player_id = ?'),
@@ -334,29 +273,30 @@ export function createTransitionsVouchesRepository({ sqlite, unit = null, now = 
   // ---- coach references
   const vouchById = (id) => { if (typeof id !== 'string') return null; const row = q('SELECT * FROM vouches WHERE id = ?').get(id); return row ? deepFreeze(decodeVouch(row)) : null; };
   const vouchesWhere = (where, order = 'rowid') => (...args) => q(`SELECT * FROM vouches WHERE ${where} ORDER BY ${order}`).all(...args).map((r) => deepFreeze(decodeVouch(r)));
-  const VOUCH_IMMUTABLE = ['id', 'playerId', 'playerName', 'coachName', 'coachEmail', 'role', 'ts'];
-  const writeVouch = (rec) => q(upsertSql('vouches', VOUCH_SPEC)).run(encodeVouch(rec));
+  const vouchActs = (defs) => writes(Object.fromEntries(Object.entries(defs).map(([act, fn]) => [act, (id, input = {}) => operation(() => {
+    if (!q('SELECT 1 FROM vouches WHERE id = ?').get(id)) throw refuse('NOT_FOUND', `vouches ${id} is not a record of the repository`);
+    rowStep('vouches', id, act, () => fn(id, input));
+    return vouchById(id);
+  })])));
   const vouches = {
-    create: (raw) => operation(() => {
-      const r = typedOr(typeVouch, raw, 'vouches');
-      if (vouchById(r.id)) throw refusal('TRANSITIONS_DUPLICATE', `vouches ${r.id} already exists`);
-      if (r.codeHash && q('SELECT 1 FROM vouches WHERE code_hash = ?').get(r.codeHash)) throw refusal('TRANSITIONS_DUPLICATE', `vouches ${r.id}: that code is already issued`);
-      writeVouch(r);
-      return vouchById(r.id);
+    ...writes({
+      /** A new reference, whole. An existing id, or a code already issued, is refused; it must read back as written. */
+      create: (v) => operation(() => {
+        newRecord('vouches', (id) => !!q('SELECT 1 FROM vouches WHERE id = ?').get(id), v);
+        if (v.codeHash && q('SELECT 1 FROM vouches WHERE code_hash = ?').get(v.codeHash)) throw refuse('DUPLICATE', `vouches ${v.id}: that code is already issued`);
+        rowStep('vouches', v.id, 'row', () => insertRow('vouches', columnsOf('vouches', v.id, VOUCH_SPEC, v)));
+        const stored = vouchById(v.id); readsBackAsWritten('vouches', v.id, v, stored); return stored;
+      }),
     }),
-    /** `update(id, change)`: `change` edits a plain copy of the stored reference; the result is typed whole and written at once. */
-    update: (id, change) => guard(`vouches ${id}`, () => operation(() => {
-      if (typeof change !== 'function') throw new TypeError('vouches.update(id, change) needs a function that edits the copy it is given');
-      const stored = vouchById(id);
-      if (!stored) throw refusal('TRANSITIONS_NOT_FOUND', `vouches ${id} is not a record of the repository`);
-      const draft = clone(stored);
-      const returned = change(draft);
-      const next = typedOr(typeVouch, returned === undefined ? draft : returned, 'vouches');
-      for (const k of VOUCH_IMMUTABLE) if (!same(next[k], stored[k])) throw refusal('TRANSITIONS_INPUT_INVALID', `vouches ${id}: ${k} cannot change`);
-      if (next.codeHash !== null && next.codeHash !== stored.codeHash) throw refusal('TRANSITIONS_INPUT_INVALID', `vouches ${id}: a code is issued once`);
-      writeVouch(next);
-      return vouchById(id);
-    })),
+    ...vouchActs({
+      /** The coach's text, published with the emailed code, which is spent (cleared). */
+      publish: (id, { text, seasons = null, conflictOfInterest = null, at }) => guarded('vouches', { id }, "status = 'pending'",
+        { status: 'published', text, seasons, conflict_of_interest: conflictOfInterest, published_at: at, code_hash: null }, `vouches ${id} is not pending`),
+      /** Trust & Safety revokes the reference; a pending code dies with it. */
+      revoke: (id) => guarded('vouches', { id }, '', { status: 'revoked', code_hash: null }, `vouches ${id}`),
+      /** Trust & Safety withdraws a reference from every profile view, once; the record stays. */
+      withdraw: (id, { at, by, reason }) => guarded('vouches', { id }, 'withdrawn_at IS NULL', { withdrawn_at: at, withdrawn_by: by, withdrawn_reason: reason }, `vouches ${id} is already withdrawn`),
+    }),
     byId: vouchById,
     /** The pending reference this code was issued for, or null (the code as typed: trimmed and upper-cased before hashing). */
     pendingByCode: (code) => { const row = q("SELECT * FROM vouches WHERE code_hash = ? AND status = 'pending'").get(vouchCodeHash(code)); return row ? deepFreeze(decodeVouch(row)) : null; },

@@ -77,9 +77,9 @@ export function registerVerificationReview(ctx) {
       ? { id, name: name || id, attribution: 'declared_reviewer' }
       : { id: 'admin', name: 'Trust & Safety', attribution: 'shared_admin_key' };
   };
-  const adminTransition = (claim, to, req, opts = {}, patch = null) => {
+  const adminTransition = (claim, to, req, opts = {}, also = {}) => {
     const rev = reviewerOf(req);
-    return transition(claim, to, { actorKind: 'trust_safety', actorId: rev.id, actorName: rev.name, attribution: rev.attribution, ...opts }, req, patch);
+    return transition(claim, to, { actorKind: 'trust_safety', actorId: rev.id, actorName: rev.name, attribution: rev.attribution, ...opts }, req, also);
   };
   const reasonText = (req) => String(req.body.reason);
 
@@ -150,12 +150,11 @@ export function registerVerificationReview(ctx) {
     const lookup = lookupCredential({ providerId, identifier: claim.metadata.identifier, holderName: String(claim.metadata.holderName ?? '').toLowerCase() });
     verEvent(lookup.result ? 'automated_check.passed' : 'automated_check.failed', { claimId: claim.id, subjectId: claim.subjectId, after: { provider: providerId, state: lookup.state, result: lookup.result } }, req);
     const view = () => { const c = reads.claims.byId(claim.id); return { id: c.id, status: c.status, display: c.metadata.display }; };
-    const addReasons = (...codes) => (d) => { d.reviewReasons = [...new Set([...d.reviewReasons, ...codes])]; };
     if (lookup.state !== 'configured') {
       // Fail HONEST: unavailable/unconfigured providers leave the claim
       // pending — never "verified", never "rejected".
       const registry = { provider: providerId, state: lookup.state, checkedAt: Date.now() };
-      const routed = transition(claim, 'requires_human_review', { actorKind: 'system', reason: 'no authoritative register available' }, req, (d) => { d.metadata.registry = registry; addReasons('NO_AUTHORITATIVE_SOURCE', 'DOCUMENT_AUTHENTICITY_UNCONFIRMED')(d); });
+      const routed = transition(claim, 'requires_human_review', { actorKind: 'system', reason: 'no authoritative register available' }, req, { metadata: { registry }, addReviewReasons: ['NO_AUTHORITATIVE_SOURCE', 'DOCUMENT_AUTHENTICITY_UNCONFIRMED'] });
       vmetric('routedToHumanReview');
       return res.json({
         claim: view(),
@@ -173,7 +172,7 @@ export function registerVerificationReview(ctx) {
       const regUntil = isAbsent(rec.validUntil) ? null : parseDateOrInstant(rec.validUntil, { dayEdge: 'end' });
       if (regUntil && !regUntil.ok) {
         const registry = { provider: providerId, result: 'unreadable_record', checkedAt: Date.now(), reference: rec.identifier };
-        transition(claim, 'requires_human_review', { actorKind: 'system', reason: 'registry record carried an unreadable expiry' }, req, (d) => { d.metadata.registry = registry; addReasons('REGISTRY_RECORD_UNREADABLE')(d); });
+        transition(claim, 'requires_human_review', { actorKind: 'system', reason: 'registry record carried an unreadable expiry' }, req, { metadata: { registry }, addReviewReasons: ['REGISTRY_RECORD_UNREADABLE'] });
         vmetric('routedToHumanReview');
         return res.json({ claim: view(), provider: { id: providerId, result: 'unreadable_record' }, note: 'The register matched but its expiry date could not be read. Nothing is verified from a record that cannot be dated; a reviewer decides.' });
       }
@@ -184,23 +183,22 @@ export function registerVerificationReview(ctx) {
           meta: { identifier: rec.identifier, licenceType: rec.licenceType, validUntil: rec.validUntil },
         }, req);
         const registry = { provider: providerId, result: 'match', checkedAt: Date.now(), reference: rec.identifier };
-        return transition(claim, 'automated_checks_passed', { actorKind: 'system' }, req, (d) => {
-          d.validUntil = regUntil ? regUntil.ms : d.validUntil;
-          d.metadata.display = `Licence verified: ${rec.licenceType}`;
-          d.metadata.registry = registry;
+        return transition(claim, 'automated_checks_passed', { actorKind: 'system' }, req, {
+          set: regUntil ? { validUntil: regUntil.ms } : {},
+          metadata: { display: `Licence verified: ${rec.licenceType}`, registry },
         }) ?? transition(claim, 'verified', { actorKind: 'system', method: 'authoritative_registry', eventType: 'claim.verified' }, req);
       });
       if (err) return res.status(409).json({ error: err });
       return res.json({ claim: view(), provider: { id: providerId, result: 'match' } });
     }
     if (lookup.result === 'ambiguous') {
-      transition(claim, 'requires_human_review', { actorKind: 'system', reason: 'registry returned an ambiguous match' }, req, addReasons('REGISTRY_AMBIGUOUS_MATCH'));
+      transition(claim, 'requires_human_review', { actorKind: 'system', reason: 'registry returned an ambiguous match' }, req, { addReviewReasons: ['REGISTRY_AMBIGUOUS_MATCH'] });
       vmetric('routedToHumanReview');
       return res.json({ claim: view(), provider: { id: providerId, result: 'ambiguous' }, note: 'The register returned more than one plausible record — a human resolves ambiguity, never a guess.' });
     }
     // no_match: absence of a record VERIFIES NOTHING and PROVES NOTHING.
     const registry = { provider: providerId, result: 'no_match', checkedAt: Date.now() };
-    transition(claim, 'requires_human_review', { actorKind: 'system', reason: 'registry found no matching record' }, req, (d) => { d.metadata.registry = registry; addReasons('DOCUMENT_AUTHENTICITY_UNCONFIRMED')(d); });
+    transition(claim, 'requires_human_review', { actorKind: 'system', reason: 'registry found no matching record' }, req, { metadata: { registry }, addReviewReasons: ['DOCUMENT_AUTHENTICITY_UNCONFIRMED'] });
     vmetric('routedToHumanReview');
     res.json({ claim: view(), provider: { id: providerId, result: 'no_match' }, note: 'No register record matched. The credential stays unverified; a reviewer can examine the evidence.' });
   });
@@ -281,7 +279,7 @@ export function registerVerificationReview(ctx) {
     if (!(req.body?.reviewer === undefined || req.body?.reviewer === null || typeof req.body.reviewer === 'string')) return fieldInvalid(res, 'reviewer', 'reviewer is text.');
     const assignedTo = String(req.body?.reviewer ?? 'Trust & Safety').slice(0, L.assignedTo);
     unit(() => {
-      verification.claims.update(c.id, (d) => { d.metadata.assignedTo = assignedTo; });
+      verification.claims.assign(c.id, { assignedTo });
       verEvent('review.assigned', { claimId: c.id, after: { reviewer: assignedTo } });
     });
     res.json({ assigned: assignedTo });
@@ -305,15 +303,13 @@ export function registerVerificationReview(ctx) {
     const method = c.claimType === 'LICENCE' ? 'scoutbox_manual_review' : (req.body?.method && ['scoutbox_manual_review', 'federation_confirmation', 'authoritative_registry'].includes(req.body.method) ? req.body.method : 'scoutbox_manual_review');
     const err = allOrNothing(() => {
       if (c.status === 'pending') { const hop = adminTransition(c, 'requires_human_review', req, { reason: 'escalated for manual decision' }); if (hop) return hop; }
-      return adminTransition(c, 'verified', req, { method, reason: reasonText(req), eventType: 'review.approved' }, (d) => {
-        d.authorityType = 'trust_safety'; d.authorityId = 'admin';
-        if (d.claimType === 'LICENCE') {
-          // A manual document review is labelled as exactly that — it is NOT a
-          // register check, and the display copy says so.
-          d.metadata.display = method === 'authoritative_registry'
-            ? `Licence verified: ${d.metadata.licenceType}`
-            : `${d.metadata.licenceType}: confirmed by Trust & Safety document review (not an independent register check)`.slice(0, L.display);
-        }
+      // A manual document review of a licence is labelled as exactly that — it is NOT a register check, and the display
+      // copy says so.
+      const display = c.claimType !== 'LICENCE' ? null : method === 'authoritative_registry'
+        ? `Licence verified: ${c.metadata.licenceType}`
+        : `${c.metadata.licenceType}: confirmed by Trust & Safety document review (not an independent register check)`.slice(0, L.display);
+      return adminTransition(c, 'verified', req, { method, reason: reasonText(req), eventType: 'review.approved' }, {
+        set: { authorityType: 'trust_safety', authorityId: 'admin' }, metadata: display ? { display } : {},
       });
     });
     if (err) return res.status(409).json({ error: err });
@@ -469,10 +465,8 @@ export function registerVerificationReview(ctx) {
       if (!reads.admins.activeFor(org.id, user.id).some((a) => a.level === 'verification_root_admin')) {
         verification.admins.create({ id: nextId('vadm'), orgId: org.id, userId: user.id, level: 'verification_root_admin', status: 'active', invitedBy: 'trust_safety', createdAt: Date.now(), acceptedAt: Date.now(), revokedAt: null, revokedBy: null });
       }
-      const decided = verification.rootRequests.update(r.id, (d) => {
-        d.identityLink = identityLink;
-        d.status = 'approved'; d.decidedAt = Date.now(); d.decidedBy = rev.name; d.decidedById = rev.id; d.decisionAttribution = rev.attribution; d.decisionReason = reasonText(req).slice(0, L.decisionReason);
-        d.resultOrgId = org.id; d.resultUserId = user.id;
+      const decided = verification.rootRequests.approve(r.id, {
+        at: Date.now(), by: rev, reason: reasonText(req).slice(0, L.decisionReason), identityLink, resultOrgId: org.id, resultUserId: user.id,
       });
       verEvent('review.approved', { orgId: org.id, subjectId: user.id, after: { rootRequest: r.id, org: org.id, rootAdmin: user.id, identityLink }, reason: decided.decisionReason, actorKind: 'trust_safety', actorId: rev.id, actorName: rev.name, attribution: rev.attribution }, req);
       ctx.ledgerAppend?.({ type: 'verification_root_approved', orgId: org.id, playerId: null, detail: { request: r.id } });
@@ -491,7 +485,7 @@ export function registerVerificationReview(ctx) {
     if (!['requires_human_review', 'collecting_evidence'].includes(r.status)) return res.status(409).json({ error: 'REQUEST_NOT_DECIDABLE' });
     const rev = reviewerOf(req);
     const rejected = unit(() => {
-      const next = verification.rootRequests.update(r.id, (d) => { d.status = 'rejected'; d.decidedAt = Date.now(); d.decidedBy = rev.name; d.decidedById = rev.id; d.decisionAttribution = rev.attribution; d.decisionReason = reasonText(req).slice(0, L.decisionReason); });
+      const next = verification.rootRequests.reject(r.id, { at: Date.now(), by: rev, reason: reasonText(req).slice(0, L.decisionReason) });
       verEvent('review.rejected', { after: { rootRequest: r.id }, reason: next.decisionReason, actorKind: 'trust_safety', actorId: rev.id, actorName: rev.name, attribution: rev.attribution }, req);
       return next;
     });
@@ -545,10 +539,7 @@ export function registerVerificationReview(ctx) {
       } else {
         verEvent('review.rejected', { orgId: r.orgId, after: { domainRequest: r.id }, reason: reasonText(req) });
       }
-      return verification.domainRequests.update(r.id, (d) => {
-        d.status = approve ? 'verified' : 'rejected'; if (approve) d.method = 'scoutbox_manual_review';
-        d.decidedAt = Date.now(); d.decidedBy = rev.name; d.decidedById = rev.id;
-      });
+      return verification.domainRequests.decide(r.id, { approve, at: Date.now(), by: rev });
     });
     res.json({ request: decided });
   });
@@ -576,11 +567,11 @@ export function registerVerificationReview(ctx) {
       if (!p.ok) return res.status(400).json({ error: 'DATE_INVALID', field: 'validUntil', message: `validUntil is a calendar day (YYYY-MM-DD) or an instant (${p.why}).`, expected: p.expected });
       validUntilCorrection = p.ms;
     }
-    const corrections = (draft) => {
-      if (req.body.role) draft.role = String(req.body.role).slice(0, L.role);
-      if (req.body.validUntil !== undefined) draft.validUntil = validUntilCorrection;
-      if (req.body.current !== undefined) draft.current = !!req.body.current;
+    const period = {
+      ...(req.body.validUntil !== undefined ? { validUntil: validUntilCorrection } : {}),
+      ...(req.body.current !== undefined ? { current: !!req.body.current } : {}),
     };
+    const corrections = { set: { ...(req.body.role ? { role: String(req.body.role).slice(0, L.role) } : {}), ...period } };
     const rev2 = reviewerOf(req);
     // One unit: the claim's outcome and the dispute's resolution commit together.
     let refusedWith = null;
@@ -593,13 +584,10 @@ export function registerVerificationReview(ctx) {
         // A refused outcome (e.g. the person opened a new claim meanwhile) leaves the dispute open, nothing half-done.
         if (err) throw Object.assign(new Error(err), { resolveError: err });
       } else if (c && action === 'correct') {
-        verification.claims.update(c.id, (draft) => { if (req.body.validUntil !== undefined) draft.validUntil = validUntilCorrection; if (req.body.current !== undefined) draft.current = !!req.body.current; });
+        verification.claims.correctPeriod(c.id, period);
         verEvent('claim.corrected', { claimId: c.id, subjectId: c.subjectId, orgId: c.organisationId, reason: reasonText(req), actorKind: 'trust_safety' });
       }
-      return verification.disputes.update(d.id, (x) => {
-        x.status = 'resolved'; x.resolvedAt = Date.now(); x.resolvedBy = rev2.name; x.resolvedById = rev2.id; x.resolutionAttribution = rev2.attribution;
-        x.resolution = `${action}: ${reasonText(req).slice(0, 300)}`;
-      });
+      return verification.disputes.resolve(d.id, { at: Date.now(), by: rev2, resolution: `${action}: ${reasonText(req).slice(0, 300)}` });
     }); } catch (e) { if (e.resolveError) { refusedWith = e.resolveError; return null; } throw e; } })();
     if (refusedWith) return res.status(409).json({ error: refusedWith });
     if (resolved.byKind === 'org_user') notify({ kind: 'org_user', id: resolved.byId }, 'verification', `Your verification dispute was resolved: ${resolved.resolution.slice(0, 140)}`, resolved.claimId);
@@ -624,7 +612,7 @@ export function registerVerificationReview(ctx) {
           const err = adminTransition(c, 'suspended', req, { reason: reasonText(req) });
           if (!err) suspended++;
         } else if (!c.metadata.flaggedForReview) {
-          verification.claims.update(c.id, (d) => { d.metadata.flaggedForReview = { at: Date.now(), reason: reasonText(req).slice(0, L.flaggedReason) }; });
+          verification.claims.flagForReview(c.id, { at: Date.now(), reason: reasonText(req).slice(0, L.flaggedReason) });
           verEvent('review.requested', { claimId: c.id, subjectId: c.subjectId, orgId: c.organisationId, reason: 'authority cascade flag', actorKind: 'trust_safety' });
           flagged++;
         }
@@ -687,7 +675,7 @@ export function registerVerificationReview(ctx) {
     }
     for (const c of reads.claims.warnDue(now, now + 30 * 86_400_000)) {
       unit(() => {
-        verification.claims.update(c.id, (d) => { d.metadata.expiryWarned = now; });
+        verification.claims.markExpiryWarned(c.id, { at: now });
         if (c.subjectType === 'user') notify({ kind: 'org_user', id: c.subjectId }, 'verification', `A verification claim expires soon — reconfirm before ${new Date(c.validUntil).toDateString()}.`, c.id);
       });
       changed++;

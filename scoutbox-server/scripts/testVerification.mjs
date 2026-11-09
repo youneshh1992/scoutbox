@@ -1,7 +1,8 @@
-// Verification claims (repositories/verification.mjs, migration 0023): the STRICT tables, the typers' refusals, typed
-// writes returning frozen records, evidence linking to its claim, the database's uniqueness rules (one open identity
-// claim per user, one open dispute per claim), units of work, the boot bootstrap that turns verified organisations into
-// claims exactly once, and fixtures. Temporary databases only; nothing touches DATA_DIR. Run with: npm test
+// Verification claims (repositories/verification.mjs, migration 0023): the STRICT tables, a create that must read back
+// as written, the named acts and the states that guard them (a claim moves only along CLAIM_TRANSITIONS from the status
+// its caller decided on), evidence linking to its claim, the database's uniqueness rules (one open identity claim per
+// user, one open dispute per claim), the reference keys, units of work, the boot bootstrap that turns verified
+// organisations into claims exactly once, and fixtures. Temporary databases only; nothing touches DATA_DIR. Run with: npm test
 
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -12,7 +13,7 @@ import { NOW, TTL, tempDir } from './coreIdentityTestFixtures.mjs';
 import { saveFixture, ORG, SCOUT } from './recruitmentTestFixtures.mjs';
 import {
   VERIFICATION_MIGRATION as MIGRATION, VERIFICATION_TABLES as TABLES, VERIFICATION_COLLECTIONS as COLLECTIONS,
-  typeClaim, typeEvidence, eventDetail,
+  eventDetail,
 } from '../repositories/verification.mjs';
 import { bootstrapVerification, mintToken, consumeToken, peekToken } from '../domains/verification/claims/shared.mjs';
 
@@ -69,43 +70,94 @@ test('[schema] 0023 is registered after 0022 and creates the eighteen STRICT tab
   s.close(); rm(dir);
 });
 
-// ------------------------------------------------------------- typing
-test('[typing] the typers refuse junk with the record and field named — unknown fields and metadata keys, codes outside the vocabulary, a code twice, a wrong-typed value', () => {
-  assert.equal(typeClaim(claim()).ok, true);
-  assert.match(typeClaim(claim({ sneaky: 1 })).reason, /vclm-1 carries field\(s\) this build does not store: sneaky/);
-  assert.match(typeClaim(claim({ metadata: { issueDate: '2026-01-01' } })).reason, /metadata carries field\(s\)[^:]*: issueDate/);
-  assert.match(typeClaim(claim({ reviewReasons: ['MADE_UP'] })).reason, /reviewReasons holds/);
-  assert.match(typeClaim(claim({ riskFlags: ['FREE_EMAIL_PROVIDER', 'FREE_EMAIL_PROVIDER'] })).reason, /names a code twice/);
-  assert.match(typeClaim(claim({ status: 'approved' })).reason, /status must be one of/);
-  assert.match(typeClaim(claim({ metadata: { requestedStart: '2026-01-01' } })).reason, /requestedStart must be an integer/);
-  assert.match(typeClaim(claim({ metadata: { registry: { provider: 'x', result: 'match' } } })).reason, /registry\.checkedAt is required/);
-  const t = typeClaim(claim({ metadata: { requestedStart: null, declaredName: 'M' } }));
-  assert.deepEqual(t.record.metadata, { declaredName: 'M' }, 'a sparse metadata object keeps only the keys it holds');
-  assert.match(typeEvidence(evidence({ meta: { anything: 1 } })).reason, /meta carries field/);
-  assert.match(typeEvidence(evidence({ mime: 'image/svg+xml' })).reason, /mime must be one of/);
+// ------------------------------------------------------------- creates
+test('[create] a record the columns cannot hold is refused with the record and field named, and nothing is written: unknown fields and metadata keys, codes outside the vocabulary, a code twice, a wrong-typed value', () => {
+  const dir = tempDir('s10a-create'); saveFixture(dir);
+  const s = serverOpen(dir);
+  try {
+    refused(() => s.repo.claims.create(claim({ sneaky: 1 })), /VERIFICATION_INPUT_INVALID: ver_claims vclm-1 sneaky: is not stored as written/);
+    refused(() => s.repo.claims.create(claim({ metadata: { issueDate: '2026-01-01' } })), /vclm-1 metadata\.issueDate: is not stored as written/);
+    refused(() => s.repo.claims.create(claim({ reviewReasons: ['MADE_UP'] })), /vclm-1 reviewReasons\[0\]: CHECK constraint failed/);
+    refused(() => s.repo.claims.create(claim({ riskFlags: ['FREE_EMAIL_PROVIDER', 'FREE_EMAIL_PROVIDER'] })), /vclm-1 riskFlags\[1\]: UNIQUE constraint failed/);
+    refused(() => s.repo.claims.create(claim({ status: 'approved' })), /vclm-1 row: CHECK constraint failed/);
+    refused(() => s.repo.claims.create(claim({ metadata: { requestedStart: '2026-01-01' } })), /vclm-1 row: cannot store TEXT value in INTEGER column/);
+    refused(() => s.repo.claims.create(claim({ current: 'yes' })), /vclm-1 row: /, 'a boolean column takes true or false');
+    refused(() => s.repo.claims.create(claim({ metadata: { registry: { provider: 'x', result: 'match' } } })), /vclm-1 row: NOT NULL constraint failed: ver_claims\.registry_checked_at|vclm-1 row: CHECK/);
+    refused(() => s.repo.claims.create(claim({ metadata: 'free text' })), /vclm-1 metadata: must be an object/);
+    refused(() => s.repo.evidence.create(evidence({ meta: { anything: 1 } })), /vevd-1 meta\.anything: is not stored as written/);
+    refused(() => s.repo.evidence.create(evidence({ mime: 'image/svg+xml' })), /vevd-1 row: CHECK constraint failed/);
+    refused(() => s.repo.evidence.create(evidence({ claimIds: ['vclm-missing'] })), /vevd-1 claimIds\[0\]: FOREIGN KEY constraint failed/, 'evidence for a claim that is not there');
+    assert.deepEqual(s.repo.counts(), Object.fromEntries(COLLECTIONS.map((n) => [n, 0])), 'nothing was written');
+    const c = s.repo.claims.create(claim({ metadata: { requestedStart: null, declaredName: 'M' } }));
+    assert.deepEqual(c.metadata, { declaredName: 'M' }, 'a sparse metadata object keeps only the keys it holds');
+  } finally { s.close(); rm(dir); }
 });
 
 // ------------------------------------------------------------- writes and reads
-test('[writes] create/update write the whole record and return a fresh frozen copy; identity changes, duplicates and nested updates are refused; evidence for a claim links at once', () => {
+test('[acts] a claim moves only along CLAIM_TRANSITIONS from the status its caller decided on; the risk flags only gain codes; every other act is guarded by the state it leaves', () => {
   const dir = tempDir('s10a-writes'); saveFixture(dir);
   const s = serverOpen(dir);
+  const C = s.repo.claims;
   try {
-    const c = s.repo.claims.create(claim());
+    const c = C.create(claim());
     assert.ok(Object.isFrozen(c) && Object.isFrozen(c.metadata), 'deep-frozen');
     assert.throws(() => { c.status = 'verified'; }, TypeError);
-    refused(() => s.repo.claims.create(claim()), /already exists/, 'duplicate id');
-    refused(() => s.repo.claims.update('vclm-1', (d) => { d.subjectId = 'usr-x'; }), /subjectId cannot change/, 'identity change');
-    refused(() => s.repo.claims.update('vclm-1', () => { s.repo.claims.update('vclm-1', () => {}); }), /already being updated/, 'nested update');
-    refused(() => s.repo.claims.update('vclm-1', (d) => { d.metadata.color = 'red'; }), /metadata carries field/, 'unknown metadata key');
+    refused(() => C.create(claim()), /VERIFICATION_DUPLICATE: ver_claims vclm-1 already exists/, 'duplicate id');
+    assert.equal(typeof C.update, 'undefined', 'no whole-record update');
     const ev = s.repo.evidence.create(evidence({ claimIds: ['vclm-1'] }));
     assert.deepEqual(ev.claimIds, ['vclm-1']);
-    assert.deepEqual(s.repo.claims.byId('vclm-1').evidenceIds, ['vevd-1'], 'the claim lists the evidence filed for it');
-    const next = s.repo.claims.update('vclm-1', (d) => { d.riskFlags.push('DUPLICATE_EVIDENCE_HASH'); d.metadata.workEmail = 'm@eastport.example'; d.metadata.domainControl = 'passed'; d.status = 'pending'; });
-    assert.equal(next.status, 'pending'); assert.deepEqual(next.riskFlags, ['DUPLICATE_EVIDENCE_HASH']); assert.equal(next.metadata.workEmail, 'm@eastport.example');
+    assert.deepEqual(C.byId('vclm-1').evidenceIds, ['vevd-1'], 'the claim lists the evidence filed for it');
+    C.recordWorkEmail('vclm-1', { workEmail: 'm@eastport.example', domainCoveredByOrg: true });
+    assert.deepEqual([C.byId('vclm-1').metadata.domainControl, C.byId('vclm-1').metadata.domainCoveredByOrg], ['passed', true]);
+    refused(() => C.move('vclm-1', { from: 'collecting_evidence', to: 'verified', set: { updatedAt: NOW } }), /VERIFICATION_STATE_CONFLICT: ver_claims vclm-1 cannot move to verified from collecting_evidence/, 'no jump to verified');
+    refused(() => C.move('vclm-1', { from: 'pending', to: 'automated_checks_passed' }), /cannot move to automated_checks_passed from pending/, 'a stale from');
+    refused(() => C.move('vclm-1', { from: 'collecting_evidence', to: 'pending', set: { subjectId: 'usr-x' } }), /subjectId is not a field this act sets/, 'identity change');
+    refused(() => C.move('vclm-1', { from: 'collecting_evidence', to: 'pending', metadata: { color: 'red' } }), /color is not a field this act sets/, 'unknown metadata key');
+    C.move('vclm-1', { from: 'collecting_evidence', to: 'pending', set: { updatedAt: NOW } });
+    const next = C.move('vclm-1', { from: 'pending', to: 'requires_human_review', addRiskFlags: ['DUPLICATE_EVIDENCE_HASH'], reviewReasons: ['DISPUTED_CLAIM'], addReviewReasons: ['NO_AUTHORITATIVE_SOURCE'] });
+    assert.equal(next.status, 'requires_human_review'); assert.deepEqual(next.riskFlags, ['DUPLICATE_EVIDENCE_HASH']); assert.deepEqual(next.reviewReasons, ['DISPUTED_CLAIM', 'NO_AUTHORITATIVE_SOURCE']);
+    assert.deepEqual(C.addRiskFlags('vclm-1', { codes: ['DUPLICATE_EVIDENCE_HASH', 'FREE_EMAIL_PROVIDER'] }).riskFlags, ['DUPLICATE_EVIDENCE_HASH', 'FREE_EMAIL_PROVIDER'], 'a flag already held is not added twice');
+    const v = C.move('vclm-1', { from: 'requires_human_review', to: 'verified', set: { verificationMethod: 'scoutbox_manual_review', verifiedAt: NOW, verifiedBy: { kind: 'trust_safety', id: 'admin' }, authorityType: 'trust_safety', authorityId: 'admin' } });
+    assert.deepEqual([v.status, v.verifiedBy, v.authorityType], ['verified', { kind: 'trust_safety', id: 'admin' }, 'trust_safety']);
+    C.flagForReview('vclm-1', { at: NOW, reason: 'cascade' });
+    refused(() => C.flagForReview('vclm-1', { at: NOW, reason: 'again' }), /already flagged/, 'flagged once');
+    C.closePeriod('vclm-1', { until: NOW + 5, at: NOW });
+    assert.deepEqual([C.byId('vclm-1').current, C.byId('vclm-1').validUntil], [false, NOW + 5], 'the period closes');
+    refused(() => C.closePeriod('vclm-1', { until: NOW, at: NOW }), /is not a current verified claim/, 'closed once');
+    refused(() => C.move('vclm-missing', { from: 'pending', to: 'rejected' }), /VERIFICATION_NOT_FOUND/);
     assert.deepEqual(s.repo.reads.claims.byPair('vpair-1').map((x) => x.id), ['vclm-1']);
     assert.deepEqual(s.repo.reads.claims.forOrgStaff(ORG.id).map((x) => x.id), ['vclm-1']);
     assert.equal(s.repo.reads.evidence.digestSeen('f'.repeat(64)), false);
     assert.equal(typeof s.repo.reads.claims.create, 'undefined', 'the reads carry no writes');
+    assert.equal(typeof s.repo.reads.claims.move, 'undefined');
+    s.repo.disputes.create(dispute());
+    s.repo.disputes.resolve('vdsp-1', { at: NOW, by: { id: 'admin', name: 'Trust & Safety', attribution: 'shared_admin_key' }, resolution: 'dismiss: fine' });
+    refused(() => s.repo.disputes.resolve('vdsp-1', { at: NOW, by: { id: 'admin', name: 'T&S', attribution: 'shared_admin_key' }, resolution: 'again' }), /ver_disputes vdsp-1 is already resolved/, 'resolved once');
+    const grant = { id: 'vadm-1', orgId: ORG.id, userId: SCOUT.userId, level: 'verification_admin', status: 'active', invitedBy: 'trust_safety', createdAt: NOW, acceptedAt: NOW, revokedAt: null, revokedBy: null };
+    s.repo.admins.create(grant);
+    assert.equal(s.repo.admins.revoke('vadm-1', { at: NOW, by: SCOUT.userId }).status, 'revoked');
+    refused(() => s.repo.admins.revoke('vadm-1', { at: NOW, by: SCOUT.userId }), /ver_admins vadm-1 is not active/, 'revoked once');
+  } finally { s.close(); rm(dir); }
+});
+
+test('[references] a reference cites a claim of its own coach at its own organisation, and a new version supersedes a reference of the same player, coach and organisation', () => {
+  const dir = tempDir('s10a-refs'); saveFixture(dir);
+  const s = serverOpen(dir);
+  try {
+    s.repo.claims.create(claim({ status: 'verified', verificationMethod: 'organisation_admin_confirmation', verifiedAt: NOW }));
+    const ref = (over = {}) => ({
+      id: 'vref-1', version: 1, supersedesId: null, playerId: 'pl-1', playerName: 'Kola', coachUserId: SCOUT.userId, coachName: SCOUT.name, orgId: ORG.id, orgName: ORG.name, roleAtTime: 'Coach',
+      provenanceSnapshot: { claimId: 'vclm-1', claimType: 'CLUB_AFFILIATION', status: 'verified', method: 'organisation_admin_confirmation', verifiedAt: NOW, snapshotAt: NOW },
+      relationship: 'coach', capacity: '', fromYear: null, toYear: null, structured: { strengths: '', development: '', summary: 'Reliable.' },
+      status: 'active', withdrawnAt: null, withdrawReason: null, createdAt: NOW, ...over,
+    });
+    refused(() => s.repo.references.create(ref({ orgId: 'org-other' })), /FOREIGN KEY constraint failed/, 'a provenance claim at another organisation');
+    s.repo.references.create(ref());
+    refused(() => s.repo.references.create(ref({ id: 'vref-2', version: 2, supersedesId: 'vref-1', playerId: 'pl-2' })), /FOREIGN KEY constraint failed/, 'a new version for another player');
+    refused(() => s.repo.references.create(ref({ id: 'vref-2', version: 1, supersedesId: 'vref-1' })), /CHECK constraint failed/, 'a superseding reference is not version 1');
+    s.repo.references.supersede('vref-1');
+    assert.equal(s.repo.references.create(ref({ id: 'vref-2', version: 2, supersedesId: 'vref-1' })).supersedesId, 'vref-1');
+    refused(() => s.repo.references.withdraw('vref-1', { at: NOW, reason: 'x' }), /ver_references vref-1 is not active/, 'a superseded reference is not withdrawn');
   } finally { s.close(); rm(dir); }
 });
 
@@ -116,7 +168,8 @@ test('[rules] the database keeps the code\'s uniqueness rules: one open identity
     s.repo.claims.create(claim({ id: 'vclm-id-1', claimType: 'PERSON_IDENTITY', organisationId: null, metadata: {} }));
     assert.equal(s.repo.reads.claims.hasOpenIdentity(SCOUT.userId), true);
     refused(() => s.repo.claims.create(claim({ id: 'vclm-id-2', claimType: 'PERSON_IDENTITY', organisationId: null, metadata: {} })), /UNIQUE/, 'second open identity claim');
-    s.repo.claims.update('vclm-id-1', (d) => { d.status = 'rejected'; });
+    s.repo.claims.move('vclm-id-1', { from: 'collecting_evidence', to: 'pending' });
+    s.repo.claims.move('vclm-id-1', { from: 'pending', to: 'rejected', set: { updatedAt: NOW } });
     s.repo.claims.create(claim({ id: 'vclm-id-2', claimType: 'PERSON_IDENTITY', organisationId: null, metadata: {} }));
     s.repo.claims.create(claim());
     s.repo.disputes.create(dispute());
@@ -168,15 +221,20 @@ test('[tokens and events] tokens are hashed rows consumed once through the repos
     const row = s.store.sqlite.prepare('SELECT * FROM ver_tokens').get();
     assert.ok(row.token_hash.length === 64 && !row.token_hash.includes(secret) && row.email === 'm@eastport.example');
     assert.equal(peekToken(s.repo.tokens, { purpose: 'work_email', secret }).token.usedAt, null, 'peek does not consume');
-    assert.ok(consumeToken(s.repo.tokens, { purpose: 'work_email', secret, subjectId: SCOUT.userId }).token.usedAt);
+    const used = consumeToken(s.repo.tokens, { purpose: 'work_email', secret, subjectId: SCOUT.userId }).token;
+    assert.ok(used.usedAt);
     assert.equal(consumeToken(s.repo.tokens, { purpose: 'work_email', secret }).error, 'TOKEN_ALREADY_USED');
+    refused(() => s.repo.tokens.use(used.id, { at: NOW }), /ver_tokens .* is already used/, 'a token is spent once');
+    mintToken(s.repo.tokens, nextId, { purpose: 'work_email', email: 'm@eastport.example', subjectKind: 'org_user', subjectId: SCOUT.userId, orgId: ORG.id });
+    assert.equal(s.repo.tokens.recordFailedAttempts(SCOUT.userId, 'work_email'), 1, 'a wrong code counts against the open token only');
+    assert.equal(s.repo.reads.tokens.failedAttempts(SCOUT.userId, 'work_email'), 1);
   } finally { s.close(); rm(dir); }
   assert.equal(eventDetail({ status: 'pending' }, { status: 'verified', method: 'organisation_admin_confirmation' }), 'status: pending → verified; method: organisation_admin_confirmation');
   assert.equal(eventDetail(null, { rootRequest: 'vroot-1', checks: { emailSyntax: 'passed' } }), 'rootRequest: vroot-1; checks: emailSyntax=passed');
   assert.equal(eventDetail(null, null), null);
 });
 
-test('[fixtures] a record written through the repository is typed (junk refused naming the field, nothing written), a dangling reference is refused by its key, and the records read back as written', () => {
+test('[fixtures] a record written through the repository must read back as written (junk refused naming the field, nothing written), a dangling reference is refused by its key, and the records read back as written', () => {
   const dir = tempDir('s10a-fix');
   refused(() => saveFixture(dir, { verClaims: [claim()], verDisputes: [dispute({ claimId: 'vclm-missing' })] }), /FOREIGN KEY constraint failed/, 'missing claim');
   refused(() => saveFixture(tempDir('s10a-fix-junk'), { verClaims: [claim({ metadata: { issueDate: '2026' } })] }), /VERIFICATION_INPUT_INVALID[\s\S]*issueDate/, 'junk metadata');
@@ -187,8 +245,10 @@ test('[fixtures] a record written through the repository is typed (junk refused 
   saveFixture(dir2, supplied);
   try {
     const back = readRecords(dir2);
-    assert.deepEqual(plain(back.verClaims), plain([typeClaim(claim({ evidenceIds: ['vevd-1'] })).record]));
-    assert.deepEqual(plain(back.verEvidence), plain([typeEvidence(supplied.verEvidence[0]).record]));
+    // A record reads back as written; nulls and empty sparse objects say nothing and come back as absent keys.
+    const sparse = (r) => JSON.parse(JSON.stringify(r, (k, v) => (v === null ? undefined : v)));
+    assert.deepEqual(sparse(back.verClaims), sparse([claim({ evidenceIds: ['vevd-1'] })]));
+    assert.deepEqual(sparse(back.verEvidence), sparse(supplied.verEvidence));
     assert.equal(back.verDisputes.length, 1); assert.deepEqual(back.orgVerifiedDomains.map((d) => d.domain), ['eastport.example']);
   } finally { rm(dir2); }
 });

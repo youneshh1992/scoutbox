@@ -17,7 +17,7 @@ export function registerTransitions(ctx) {
     notify, notifyAction, ledgerAppend, findPlayer, isAdult,
     orgCanSee, emitWebhook, players, unit, users, transitionsVouches,
   } = ctx;
-  if (typeof transitionsVouches?.transitionCases?.update !== 'function' || typeof unit !== 'function') throw new TypeError('registerTransitions needs the transitions repository and unit from the data layer');
+  if (typeof transitionsVouches?.transitionCases?.grant !== 'function' || typeof unit !== 'function') throw new TypeError('registerTransitions needs the transitions repository and unit from the data layer');
   const { transitionCases } = transitionsVouches;
 
   // ------------------------------------------------------------ input
@@ -157,7 +157,7 @@ export function registerTransitions(ctx) {
     const staff = firstStaff(org.id);
     // The grant, its history entry and the club's notification commit together.
     unit(() => {
-      transitionCases.update(t.id, (d) => { d.recipients.push(r); d.history.push(entry(actor, 'recipient_added', { orgId: org.id })); });
+      transitionCases.grant(t.id, { recipient: r }, { history: [entry(actor, 'recipient_added', { orgId: org.id })] });
       if (staff) notify({ kind: 'org_user', id: staff.id }, 'transition', `📦 A player has shared a transition evidence pack with ${org.name}. Open Transitions to review it.`, t.id);
     });
     emitWebhook?.(org.id, 'transition.granted', { transitionId: t.id });
@@ -173,7 +173,7 @@ export function registerTransitions(ctx) {
     let stored;
     // The revocation, its history entry and the club's acknowledgement request commit together.
     unit(() => {
-      stored = transitionCases.update(t.id, (d) => { d.recipients[i].revokedAt = Date.now(); d.history.push(entry(actor, 'recipient_revoked', { orgId: r.orgId })); });
+      stored = transitionCases.revokeGrant(t.id, { ord: i, at: Date.now() }, { history: [entry(actor, 'recipient_revoked', { orgId: r.orgId })] });
       if (staff) {
         notifyAction({ kind: 'org_user', id: staff.id }, 'transition',
           `A transition evidence pack shared with ${r.orgName} was withdrawn. Platform access has ended; anything your staff already downloaded is outside the platform and cannot be remotely erased — please delete local copies.`,
@@ -186,12 +186,7 @@ export function registerTransitions(ctx) {
 
   function withdrawCase(req, res, t, actor) {
     if (t.status !== 'open') return res.status(409).json({ error: 'CASE_CLOSED', status: t.status });
-    const stored = unit(() => transitionCases.update(t.id, (d) => {
-      const now = Date.now();
-      for (const r of d.recipients) if (!r.revokedAt) r.revokedAt = now;
-      d.status = 'withdrawn';
-      d.history.push(entry(actor, 'withdrawn'));
-    }));
+    const stored = unit(() => transitionCases.withdraw(t.id, { at: Date.now() }, { history: [entry(actor, 'withdrawn')] }));
     res.json({ transition: caseView(stored) });
   }
 
@@ -201,14 +196,10 @@ export function registerTransitions(ctx) {
     const note = optText(res, req.body?.note, 'note', L.placementNote); if (note === undefined) return;
     const org = byId.org(orgId);
     if (!org) return res.status(404).json({ error: 'ORG_NOT_FOUND' });
-    const stored = unit(() => transitionCases.update(t.id, (d) => {
-      const now = Date.now();
-      d.status = 'placed';
-      d.placement = { orgId: org.id, orgName: clip(org.name), at: now, note };
-      d.followUp = { dueAt: now + FOLLOW_UP_DAYS * DAY, notifiedAt: null }; // placement check-in
-      for (const r of d.recipients) if (!r.revokedAt && r.orgId !== org.id) r.revokedAt = now;
-      d.history.push(entry(actor, 'placed', { orgId: org.id }));
-    }));
+    const now = Date.now();
+    const stored = unit(() => transitionCases.place(t.id, {
+      placement: { orgId: org.id, orgName: clip(org.name), at: now, note }, followUpDueAt: now + FOLLOW_UP_DAYS * DAY, at: now, // the placement check-in
+    }, { history: [entry(actor, 'placed', { orgId: org.id })] }));
     res.json({ transition: caseView(stored), note: 'Case closed by placement — its history stays. Your registered level changes only through a signing or an audited level review, never automatically.' });
   }
 
@@ -257,7 +248,7 @@ export function registerTransitions(ctx) {
     if (i < 0 || !orgCanSee(req.org, player)) return res.status(403).json({ error: 'TRANSITION_ACCESS_REVOKED', message: 'This pack is not (or no longer) shared with your club.' });
     // The grant's last view and the ledger row commit together.
     unit(() => {
-      transitionCases.update(t.id, (d) => { d.recipients[i].viewedAt = Date.now(); });
+      transitionCases.recordView(t.id, { ord: i, at: Date.now() });
       ledgerAppend({ type: 'transition_pack_view', playerId: player.id, orgId: req.org.id, orgName: req.org.name, userId: req.orgUser.id, scoutName: req.orgUser.name });
     });
     res.json({ transitionId: t.id, playerName: t.playerName, note: t.note, pack: packView(player, t.pack) });
@@ -288,13 +279,13 @@ export function registerTransitions(ctx) {
     let changed = 0;
     const each = (t, work) => { try { unit(work); changed++; } catch (e) { console.error(`transition sweep ${t.id}: ${e?.code ?? e?.message ?? e}`); } };
     for (const t of transitionCases.expiredBy(now)) {
-      each(t, () => transitionCases.update(t.id, (d) => { d.status = 'expired'; d.history.push(entry(SYSTEM, 'expired')); }));
+      each(t, () => transitionCases.expire(t.id, {}, { history: [entry(SYSTEM, 'expired')] }));
     }
     for (const t of transitionCases.followUpsDue(now)) {
       const p = findPlayer(t.playerId);
       const audience = p && !isAdult(p) && p.guardianId ? { kind: 'guardian', id: p.guardianId } : { kind: 'player', id: t.playerId };
       each(t, () => {
-        transitionCases.update(t.id, (d) => { d.followUp.notifiedAt = now; });
+        transitionCases.markFollowUpNotified(t.id, { at: now });
         notify(audience, 'transition', `How is the placement at ${t.placement?.orgName} going? A quick check-in is due on the transition case.`, t.id);
       });
     }

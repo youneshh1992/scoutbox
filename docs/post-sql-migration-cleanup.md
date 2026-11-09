@@ -138,13 +138,25 @@ The rules are likely well under half of the production lines.
    acts guard `AGENT_TRANSITIONS` and `CLIENT_TRANSITIONS` in SQL; its `create` still types from the field specs, so it
    grew (934 → 994 lines) and belongs with the "validators but no draft updates" pass. Left in these modules: the two
    `compliancePolicies` edits (reviewer revocation, policy publication) and `users.update` on ending a membership.
+   **Verification and transitions done too (9 Nov):** the 37 draft edits in the claim routes (`claims/index.mjs`,
+   `organisations.mjs`, `review.mjs`, the token helpers), `transitions.mjs`, the vouch routes in `server.mjs` and the
+   vouch withdrawal in `scouting/passport.mjs` became named acts. `verification.mjs` and `transitionsVouches.mjs` have
+   no JavaScript validator: a create must read back as written. A claim's status moves only along `CLAIM_TRANSITIONS`
+   (now in the repository), from the status its caller judged, guarded in SQL; the domain's `transitionChanges` works
+   out a move's effects and the old `patch(draft)` callbacks became named corrections. A token is used once, a dispute
+   resolved once, a case leaves `open` once, a vouch code is spent once. Composite keys: a reference cites a claim of
+   its own coach at its own organisation, and a new version supersedes a reference of the same player, coach and
+   organisation. CHECKs now hold the required fields of the nullable groups the typers used to check (a registry
+   result's time, a placement's instant, a withdrawal's reason). Size: `transitionsVouches.mjs` went from 391 to 346
+   lines (29k → 26k characters); `verification.mjs` grew (663 → 723 lines, 59k → 65k characters), since its 13 record
+   kinds trade one generic update for about 25 guarded acts. The spec-to-columns mapping is shared in `writes.mjs`.
    **Follow-up:** `offerIntegrity` (`offer.mjs`) still checks shapes the schema now rules out (unknown statuses, duplicate
    or missing revisions). Trim it once the batteries that test it on in-memory records have been looked at.
-   **Still to do (9 Nov):** about 165 draft edits remain in domain code, across ~22 repositories; ~28 repositories
-   still have JavaScript validators. In order:
+   **Still to do (9 Nov):** about 110 draft edits remain in domain code (by `grep`); 23 repositories still export
+   JavaScript validators. In order:
    1. ~~**Trials and trial requests**~~ (done, above).
    2. ~~**Agent transactions, compliance and core**~~ (done, below; the wiring of their cycle is still step 3).
-   3. **Verification** (claims, `transitionsVouches.mjs`, ~17 edits) and **Box Cam sessions** (`boxCam.mjs`, ~10).
+   3. ~~**Verification**~~ (claims and `transitionsVouches.mjs`, done above), then **Box Cam sessions** (`boxCam.mjs`, ~10).
    4. **Then decide whether to stop.** The identity long tail (`identity.mjs`, `users.mjs`, `orgs.mjs` and others,
       ~60 edits, mostly 1–7 single-field edits per repository) carries little state-machine risk: convert a repository
       when it is next worked on. The repositories with validators but no draft updates (`integrations`,

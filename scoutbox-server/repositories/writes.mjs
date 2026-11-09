@@ -52,7 +52,33 @@ export function writeChecks(prefix) {
     if (typeof r.id !== 'string' || !r.id) throw invalid(`${table}: a record needs an id`);
     if (exists(r.id)) throw refusal('DUPLICATE', `${table} ${r.id} already exists`);
   };
-  return { refusal, invalid, rowStep, listOf, readsBackAsWritten, newRecord };
+  /**
+   * A record's columns from its field spec (repositories/fieldSpecs.mjs): a group fills all its columns (absent ones
+   * NULL, or the field's `def` with `defaults`), a boolean is 0 or 1, and any other value is bound as given for the
+   * column to judge. An object where a single value goes is refused (the binding cannot take it). With `only`, just the
+   * fields given are mapped, and each must be one of those named.
+   */
+  const columnsOf = (table, id, spec, fields, { only = null, defaults = false } = {}) => {
+    const cols = {};
+    const put = (f, v, at) => {
+      if (f.group) {
+        if (v !== undefined && v !== null && !isPlainObject(v)) throw invalid(`${table} ${id} ${at}: must be an object (got ${describe(v)})`);
+        for (const g of f.group) put(g, v?.[g.k], `${at}.${g.k}`);
+        return;
+      }
+      if (v !== null && typeof v === 'object') throw invalid(`${table} ${id} ${at}: must be a single value (got ${describe(v)})`);
+      cols[f.c] = v === undefined || v === null ? (defaults && f.def !== undefined ? f.def : null) : f.t === 'bool' && typeof v === 'boolean' ? (v ? 1 : 0) : v;
+    };
+    if (only) {
+      for (const [k, v] of Object.entries(fields)) {
+        const f = spec.find((x) => x.k === k);
+        if (!f || !only.has(k)) throw invalid(`${table} ${id}: ${k} is not a field this act sets`);
+        put(f, v, k);
+      }
+    } else for (const f of spec) put(f, fields?.[f.k], f.k);
+    return cols;
+  };
+  return { refusal, invalid, rowStep, listOf, readsBackAsWritten, newRecord, columnsOf };
 }
 
 export function writeKit(sqlite, prefix) {

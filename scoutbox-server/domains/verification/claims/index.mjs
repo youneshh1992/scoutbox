@@ -6,7 +6,7 @@
 // routing, adult-only representation, the grassroots radius, or any other standing rule.
 import crypto from 'node:crypto';
 import {
-  bootstrapVerification, applyTransition, effectiveStatus,
+  bootstrapVerification, transitionChanges, effectiveStatus,
   toPublicVerificationProfile, hasVerLevel, verLevelFor, orgCanAttest,
   orgVerificationStatus, mintToken, consumeToken, peekToken, useToken,
   evidenceFileProblem, claimProvenanceLabel,
@@ -80,27 +80,30 @@ export function registerM14(ctx) {
     return null;
   }
 
-  // -------- guarded transition: one call site shape for every status change. `claim` is a claim or its id;
-  // `patch(draft)` applies further changes in the same write. Returns null on success or an error code.
-  function transition(claim, to, opts, req = null, patch = null) {
+  // -------- guarded transition: one call site shape for every status change. `claim` is a claim or its id; `also`
+  // carries what the same move records besides its own effects: `set` (corrected fields: role, period, currency,
+  // authority), `metadata` (display, registry), `reviewReasons` (replaced), `addReviewReasons`, `addRiskFlags`.
+  // Returns null on success or an error code.
+  function transition(claim, to, opts, req = null, also = {}) {
     const id = typeof claim === 'string' ? claim : claim.id;
-    let err = null; let before = null; let after = null;
+    let err = null;
     // The one-open-claim rules (one identity claim per user; one current affiliation per user, organisation and type):
     // a claim may not return to an open or verified state while the person has opened another in the meantime.
     const clash = openClash(id, to);
     if (clash) return clash;
     verification.atomically(() => {
-      after = verification.claims.update(id, (draft) => {
-        before = draft.status;
-        err = applyTransition(draft, to, opts);
-        if (!err && patch) patch(draft);
+      const current = reads.claims.byId(id);
+      const judged = transitionChanges(current, to, opts);
+      if (judged.error) { err = judged.error; return; }
+      const after = verification.claims.move(id, {
+        from: current.status, to, set: { ...judged.changes, ...also.set }, metadata: also.metadata,
+        reviewReasons: also.reviewReasons, addReviewReasons: also.addReviewReasons, addRiskFlags: also.addRiskFlags,
       });
-      if (err) return;
       verEvent(opts.eventType ?? `claim.${to}`, {
         claimId: id, subjectId: after.subjectId, orgId: after.organisationId,
         actorKind: opts.actorKind, actorId: opts.actorId, actorName: opts.actorName,
         attribution: opts.attribution ?? null,
-        before: { status: before }, after: { status: to, method: after.verificationMethod }, reason: opts.reason ?? null,
+        before: { status: current.status }, after: { status: to, method: after.verificationMethod }, reason: opts.reason ?? null,
       }, req);
     });
     if (err) return err;

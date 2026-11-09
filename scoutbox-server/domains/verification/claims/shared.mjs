@@ -19,7 +19,7 @@ import { isExpiredAt, readInstant } from '../../../temporal.mjs';
 // ------------------------------------------------------------- vocabularies
 // One definition each, in the repository that stores them (repositories/verification.mjs); re-exported here.
 import {
-  CLAIM_TYPES, CLAIM_STATES, METHODS, REVIEW_REASONS, EVIDENCE_TYPES, EVIDENCE_VISIBILITY, VER_LEVELS, VERIFICATION_LIMITS,
+  CLAIM_TYPES, CLAIM_STATES, CLAIM_TRANSITIONS, METHODS, REVIEW_REASONS, EVIDENCE_TYPES, EVIDENCE_VISIBILITY, VER_LEVELS, VERIFICATION_LIMITS,
 } from '../../../repositories/verification.mjs';
 export { CLAIM_TYPES, CLAIM_STATES, METHODS, REVIEW_REASONS, EVIDENCE_TYPES, EVIDENCE_VISIBILITY, VER_LEVELS };
 
@@ -37,57 +37,48 @@ export const AUTHORITATIVE_METHODS = new Set([
 ]);
 
 // ---------------------------------------------------------- state machine
-// One map; applyTransition() is the ONLY way verification code changes a status.
-export const VALID_TRANSITIONS = {
-  unverified: ['collecting_evidence', 'pending'],
-  collecting_evidence: ['pending', 'unverified'],
-  pending: ['automated_checks_passed', 'requires_human_review', 'rejected', 'collecting_evidence'],
-  automated_checks_passed: ['verified', 'requires_human_review', 'rejected', 'collecting_evidence'],
-  requires_human_review: ['verified', 'rejected', 'collecting_evidence', 'suspended'],
-  verified: ['expired', 'suspended', 'revoked', 'disputed', 'superseded'],
-  expired: ['pending'],                       // reconfirmation restarts the pipeline
-  suspended: ['verified', 'revoked'],         // reinstate or revoke — T&S / policy only
-  disputed: ['verified', 'suspended', 'revoked'],
-  rejected: [],                               // terminal: resubmission = NEW claim (supersedesClaimId)
-  revoked: ['verified'],                      // reinstate where policy permits (T&S only, audited)
-  superseded: [],
-};
+// One map (the repository guards every move by it in SQL); transitionChanges() judges a move and works out its effects.
+export const VALID_TRANSITIONS = CLAIM_TRANSITIONS;
 
 export function canTransition(from, to) {
   return (VALID_TRANSITIONS[from] ?? []).includes(to);
 }
 
-/** Validate + apply one transition. Returns null on success or an error code.
- *  Never mutates on failure. Mutation is additive: prior state lands in the
- *  claim history and the caller's verEvent — history is never rewritten. */
-export function applyTransition(claim, to, { actorKind, actorId, method, reason, now = Date.now() } = {}) {
-  if (!CLAIM_STATES.includes(to)) return 'UNKNOWN_STATE';
-  if (claim.status === to) return 'ALREADY_IN_STATE';
-  if (!canTransition(claim.status, to)) return 'ILLEGAL_TRANSITION';
+/** Judge one transition of `claim` to `to`: `{ error }`, or `{ changes }`, the claim fields the move sets besides its
+ *  status. Never mutates. The prior state lands in the caller's verEvent — history is never rewritten. */
+export function transitionChanges(claim, to, { actorKind, actorId, method, reason, now = Date.now() } = {}) {
+  if (!CLAIM_STATES.includes(to)) return { error: 'UNKNOWN_STATE' };
+  if (claim.status === to) return { error: 'ALREADY_IN_STATE' };
+  if (!canTransition(claim.status, to)) return { error: 'ILLEGAL_TRANSITION' };
   if (to === 'verified') {
     const m = method ?? claim.verificationMethod;
-    if (!m || !AUTHORITATIVE_METHODS.has(m)) return 'METHOD_NOT_AUTHORITATIVE';
+    if (!m || !AUTHORITATIVE_METHODS.has(m)) return { error: 'METHOD_NOT_AUTHORITATIVE' };
     if (m === 'official_domain_email' && !['ORGANISATION_DOMAIN'].includes(claim.claimType)) {
       // Domain control alone never equals employment/identity/org identity.
-      return 'DOMAIN_CONTROL_INSUFFICIENT';
+      return { error: 'DOMAIN_CONTROL_INSUFFICIENT' };
     }
   }
-  if (['revoked', 'suspended', 'rejected'].includes(to) && !reason) return 'REASON_REQUIRED';
+  if (['revoked', 'suspended', 'rejected'].includes(to) && !reason) return { error: 'REASON_REQUIRED' };
   const why = reason ? String(reason).slice(0, VERIFICATION_LIMITS.reason) : reason;
-  claim.status = to;
-  claim.updatedAt = now;
+  const changes = { updatedAt: now };
   if (to === 'verified') {
-    claim.verificationMethod = method ?? claim.verificationMethod;
-    claim.verifiedAt = claim.verifiedAt ?? now;
-    claim.verifiedBy = { kind: actorKind ?? 'system', id: actorId ?? null };
-    claim.suspendedAt = null;
-    claim.disputedAt = null;
+    Object.assign(changes, {
+      verificationMethod: method ?? claim.verificationMethod, verifiedAt: claim.verifiedAt ?? now,
+      verifiedBy: { kind: actorKind ?? 'system', id: actorId ?? null }, suspendedAt: null, disputedAt: null,
+    });
   }
-  if (to === 'revoked') { claim.revokedAt = now; claim.revokedBy = { kind: actorKind, id: actorId ?? null }; claim.revocationReason = why; claim.current = false; }
-  if (to === 'suspended') { claim.suspendedAt = now; claim.suspendReason = why; }
-  if (to === 'disputed') claim.disputedAt = now;
-  if (to === 'expired') claim.expiredAt = now;
-  if (to === 'superseded') claim.current = false;
+  if (to === 'revoked') Object.assign(changes, { revokedAt: now, revokedBy: { kind: actorKind, id: actorId ?? null }, revocationReason: why, current: false });
+  if (to === 'suspended') Object.assign(changes, { suspendedAt: now, suspendReason: why });
+  if (to === 'disputed') changes.disputedAt = now;
+  if (to === 'expired') changes.expiredAt = now;
+  if (to === 'superseded') changes.current = false;
+  return { changes };
+}
+/** transitionChanges applied to a plain claim object: null on success or an error code; never mutates on failure. */
+export function applyTransition(claim, to, opts = {}) {
+  const t = transitionChanges(claim, to, opts);
+  if (t.error) return t.error;
+  Object.assign(claim, t.changes, { status: to });
   return null;
 }
 
@@ -292,7 +283,7 @@ export function peekToken(store, { purpose, secret, email = null, subjectId = nu
   return { token: t };
 }
 /** Mark a peeked token used (single use). Returns the stored token. */
-export const useToken = (store, token) => store.update(token.id, (t) => { t.usedAt = Date.now(); });
+export const useToken = (store, token) => store.use(token.id, { at: Date.now() });
 /** Single-use consumption with exact failure codes. Marks used on SUCCESS only. */
 export function consumeToken(store, { purpose, secret, email = null, subjectId = null }) {
   const out = peekToken(store, { purpose, secret, email, subjectId });
@@ -305,7 +296,7 @@ export function arrayTokenStore(list = []) {
     rows: list,
     create: (row) => { list.push({ ...row }); return row; },
     byHash: (hash) => list.find((t) => t.hash === hash) ?? null,
-    update: (id, change) => { const t = list.find((x) => x.id === id); change(t); return t; },
+    use: (id, { at }) => { const t = list.find((x) => x.id === id); t.usedAt = at; return t; },
   };
 }
 

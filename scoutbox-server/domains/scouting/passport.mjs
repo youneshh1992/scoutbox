@@ -403,7 +403,7 @@ export function registerPassport(ctx) {
     if (!v) return res.status(404).json({ error: 'VOUCH_NOT_FOUND' });
     if (v.withdrawn) return res.status(409).json({ error: 'ALREADY_WITHDRAWN' });
     const reason = textOrRefuse(res, req.body?.reason, 'reason', 200); if (reason === undefined) return;
-    const stored = unit(() => transitionsVouches.vouches.update(v.id, (d) => { d.withdrawn = { at: Date.now(), by: 'admin', reason: reason?.trim() || 'withdrawn by Trust & Safety' }; }));
+    const stored = unit(() => transitionsVouches.vouches.withdraw(v.id, { at: Date.now(), by: 'admin', reason: reason?.trim() || 'withdrawn by Trust & Safety' }));
     broadcast('players', { playerId: v.playerId });
     res.json({ withdrawn: { at: stored.withdrawn.at, by: stored.withdrawn.by, reason: stored.withdrawn.reason }, note: 'The record is kept for history; it no longer appears on any profile view.' });
   });

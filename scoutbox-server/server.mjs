@@ -4250,15 +4250,13 @@ app.post('/vouch/submit', (req, res) => {
   const player = findPlayer(vouch.playerId);
   // The published reference (the code cleared: single use) and both notifications commit together.
   unit(() => {
-    transitionsVouches.vouches.update(vouch.id, (d) => {
-      d.text = text.trim().slice(0, VL.text);
-      d.seasons = seasons?.trim() ? seasons.trim().slice(0, VL.seasons) : null;
+    transitionsVouches.vouches.publish(vouch.id, {
+      text: text.trim().slice(0, VL.text),
+      seasons: seasons?.trim() ? seasons.trim().slice(0, VL.seasons) : null,
       // A reference carries its declared relationship to the player —
       // "my son", "I run their agency" etc. must be visible, not discoverable.
-      d.conflictOfInterest = conflictOfInterest?.trim() ? conflictOfInterest.trim().slice(0, VL.conflictOfInterest) : null;
-      d.status = 'published';
-      d.publishedAt = Date.now();
-      d.codeHash = null; // single use
+      conflictOfInterest: conflictOfInterest?.trim() ? conflictOfInterest.trim().slice(0, VL.conflictOfInterest) : null,
+      at: Date.now(),
     });
     notify({ kind: 'player', id: vouch.playerId }, 'vouch', `⭐ ${vouch.coachName} published a coach reference on your profile.`, vouch.id);
     if (player?.guardianId) notify({ kind: 'guardian', id: player.guardianId }, 'vouch', `${vouch.coachName} published a coach reference on ${player.name}'s profile.`, vouch.id);
@@ -4366,7 +4364,7 @@ adminRouter.get('/vouches', (req, res) => {
 adminRouter.post('/vouches/:id/revoke', (req, res) => {
   const vouch = verificationReads.vouches.byId(req.params.id);
   if (!vouch) return res.status(404).json({ error: 'VOUCH_NOT_FOUND' });
-  unit(() => transitionsVouches.vouches.update(vouch.id, (d) => { d.status = 'revoked'; d.codeHash = null; }));
+  unit(() => transitionsVouches.vouches.revoke(vouch.id));
   broadcast('players', { playerId: vouch.playerId });
   res.json({ revoked: true });
 });
