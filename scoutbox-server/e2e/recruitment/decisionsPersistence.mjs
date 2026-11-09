@@ -198,12 +198,12 @@ section('3 — corrupt formal rows are named and omitted; duplicate heads are co
     formalRow({ id: 'rdec-bad-actor', by: null, supersedes: null, supersededById: 'x1', createdAt: T0 + 3 }),
     formalRow({ id: 'rdec-bad-code', reasonCodes: ['race'], supersedes: null, supersededById: 'x1', createdAt: T0 + 5 }),
   ];
-  // A fixture goes through the repository's validation, which REFUSES an entry that is not a record (positions named)
-  // or a chain pointer naming a decision that does not exist (ids named), with nothing written. The corrupt rows the
+  // A fixture goes through the repository, which REFUSES an entry that is not a record or a chain pointer naming a
+  // decision that does not exist (ids named), with nothing written. The corrupt rows the
   // tables can carry (every row defect but the dangling chain pointer) are stored and omitted on read, below.
   {
-    // A fixture is written through the decisions repository's create, one unit of work: a record it cannot type is
-    // refused by its id and field, and nothing of the fixture is written (only the first installation's organisation
+    // A fixture is written through the decisions repository's create, one unit of work: a record the columns cannot hold
+    // is refused by its id and the part, and nothing of the fixture is written (only the first installation's organisation
     // and player, which a new directory imports on its own, are there: the yardstick for "nothing was written").
     const rowIds = (d) => JSON.stringify(Object.fromEntries(Object.entries(d).map(([k, rows]) => [k, rows.map((r) => r?.id ?? JSON.stringify(r))])));
     const { orgs, players, guardians } = baseDb();
@@ -217,9 +217,11 @@ section('3 — corrupt formal rows are named and omitted; duplicate heads are co
       ok(!!err && pattern.test(refusal), `${label}: the write is REFUSED and the refusal names the entry (${refusal.slice(0, 160)}…)`);
       ok(rowIds(readRecords(D)) === FRESH, `${label}: nothing was written — nothing deleted, nothing repaired`);
     };
-    for (const [alien, what] of [[null, 'null'], ['string', 'a string'], [42, 'a number']]) await refused(`an alien entry (${what})`, [alien], new RegExp(`RECRUITMENT_CASES_INPUT_INVALID: roomDecisions is not an object \\(${what}\\)`));
-    for (const [r, field] of unstorable.map((r, i) => [r, ['outcome', 'outcome', 'createdAt', 'reasonCodes', 'evidenceRefs', 'rev'][i]])) await refused(`a corrupt row the typed columns cannot hold (${r.id}.${field})`, [r], new RegExp(`RECRUITMENT_CASES_INPUT_INVALID[\\s\\S]*${r.id}\\.${field}`));
-    await refused('two corrupt rows whose chain pointer names a decision that does not exist', bad, /DECISION_CHAIN_BROKEN[\s\S]*rdec-bad-actor \(room case-x\) names x1 \(supersededById\): no such decision/);
+    for (const [alien, what] of [[null, 'null'], ['string', 'string'], [42, 'number']]) await refused(`an alien entry (${what})`, [alien], new RegExp(`RECRUITMENT_CASES_INPUT_INVALID: room_decisions: a record must be an object \\(got ${what}\\)`));
+    // What each column says of the value it cannot hold.
+    const why = { outcome: 'row: CHECK constraint failed: outcome', createdAt: 'row: cannot store TEXT value in INTEGER column room_decisions\\.created_at', reasonCodes: 'reasonCodes: must be a list', evidenceRefs: 'evidenceRefs: must be a list', rev: 'row: CHECK constraint failed: rev' };
+    for (const [r, field] of unstorable.map((r, i) => [r, ['outcome', 'outcome', 'createdAt', 'reasonCodes', 'evidenceRefs', 'rev'][i]])) await refused(`a corrupt row the typed columns cannot hold (${r.id}.${field})`, [r], new RegExp(`RECRUITMENT_CASES_INPUT_INVALID: room_decisions ${r.id} ${why[field]}`));
+    await refused('two corrupt rows whose chain pointer names a decision that does not exist', bad, /RECRUITMENT_CASES_INPUT_INVALID: room_decisions rdec-bad-actor markSuperseded: FOREIGN KEY constraint failed/);
   }
   // The two storable defects, each row superseded by the real head, are stored and judged on read.
   for (const r of bad) r.supersededById = 'rdec-formal-2';

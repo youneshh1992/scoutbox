@@ -117,6 +117,11 @@ The rules are likely well under half of the production lines.
    **Contacts done too (9 Nov):** the repository has no JavaScript validator left (895 → 832 lines, 75k → 63k
    characters); acts share one `act(id, input, bookkeeping)` shape, and a whole-record create must read back as
    written.
+   **Recruitment cases done too (9 Nov):** the case and its four Room tables have no JavaScript validator (the
+   repository went from 1,222 to 1,121 lines and from 100k to 84k characters); the draft edits in eight route files
+   became 28 named acts. A Room's status moves only along `ROOM_TRANSITIONS` (plus the lifecycle's resume out of
+   `on_hold`); a decision's snapshot and chain and a comment's reply are composite keys. The shared write kit
+   (`repositories/writes.mjs`) now serves contacts and offers too.
    **Follow-up:** `offerIntegrity` (`offer.mjs`) still checks shapes the schema now rules out (unknown statuses, duplicate
    or missing revisions). Trim it once the batteries that test it on in-memory records have been looked at.
 3. **Wiring (item 2)** after the pilot, since row-level repositories change what each domain needs.

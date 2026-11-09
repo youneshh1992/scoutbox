@@ -53,7 +53,7 @@ export function registerIntegration(ctx) {
     findPlayer, isAdult, isBlocked, orgCanSee, checkEligibility, distanceBand,
     agent, compliance, rateLimit,
     agentCore, unit, // an opportunity share is a row of its agreement, written by agreements.update in a unit
-    recruitmentCases, // the handoff is part of its case, written by cases.update
+    recruitmentCases, // the handoff is part of its case, written by the case's handoff acts
     recruitmentReads,
     transactionReads,
   } = ctx;
@@ -63,7 +63,8 @@ export function registerIntegration(ctx) {
   if (typeof recruitmentReads?.contacts?.forAgent !== 'function') throw new TypeError('registerIntegration needs recruitmentReads (contacts) from the data layer');
   const { cases } = recruitmentCases;
   /** A case history entry in the one shape every case writer uses. */
-  const handoffHistory = (d, at, action, by, detail) => d.history.push({ id: nextId('aud'), at, byKind: 'org', byId: by.userId ?? null, byName: by.name ?? null, action, detail });
+  /** The bookkeeping of a handoff act: its one case history entry. */
+  const handoffHistory = (at, action, by, detail) => ({ history: [{ id: nextId('aud'), at, byKind: 'org', byId: by.userId ?? null, byName: by.name ?? null, action, detail }] });
 
   const now = () => Date.now();
 
@@ -705,10 +706,7 @@ export function registerIntegration(ctx) {
       keys: { invite: key ? { key } : null },
       rev: 1, revAt: at,
     };
-    cases.update(kase.id, (d) => {
-      d.transactionHandoff = h;
-      handoffHistory(d, at, 'transaction_handoff_invited', h.invitedBy, { handoffId: h.id, represented: h.representedAtInvitation });
-    });
+    cases.inviteHandoff(kase.id, { handoff: h }, handoffHistory(at, 'transaction_handoff_invited', h.invitedBy, { handoffId: h.id, represented: h.representedAtInvitation }));
     broadcast('transaction_handoff_invited', { orgId: kase.orgId, roomId: kase.id, handoffId: h.id });
     // The agent hears, because they are the one who can open the workspace. The
     // player hears too, because a club has moved from thinking to acting about
@@ -739,14 +737,7 @@ export function registerIntegration(ctx) {
     // The other half of the invite/withdraw loop, on the same club budget.
     if (limitedOr429(res, 'transaction_handoff', kase.orgId)) return;
     const at = now();
-    const fresh = cases.update(kase.id, (d) => {
-      const x = d.transactionHandoff;
-      x.status = 'withdrawn';
-      x.withdrawnAt = at;
-      x.rev = (x.rev ?? 1) + 1;
-      x.revAt = at;
-      handoffHistory(d, at, 'transaction_handoff_withdrawn', { userId: req.orgUser.id, name: req.orgUser.name }, { handoffId: h.id });
-    });
+    const fresh = cases.withdrawHandoff(kase.id, { at }, handoffHistory(at, 'transaction_handoff_withdrawn', { userId: req.orgUser.id, name: req.orgUser.name }, { handoffId: h.id }));
     broadcast('transaction_handoff_withdrawn', { orgId: kase.orgId, roomId: kase.id, handoffId: h.id });
     if (h.invitedAgentUserId) {
       notify({ kind: 'org_user', id: h.invitedAgentUserId }, 'representation_transaction',
@@ -810,15 +801,7 @@ export function registerIntegration(ctx) {
     // a general licence to open a workspace citing this club.
     if (h.invitedAgencyOrgId && h.invitedAgencyOrgId !== agencyOrgId) return 'HANDOFF_NOT_ADDRESSED';
     if (h.invitedAgentUserId && h.invitedAgentUserId !== agentUserId) return 'HANDOFF_NOT_ADDRESSED';
-    cases.update(kase.id, (d) => {
-      const x = d.transactionHandoff;
-      x.status = 'accepted';
-      x.acceptedAt = at;
-      x.transactionId = transactionId;
-      x.rev = (x.rev ?? 1) + 1;
-      x.revAt = at;
-      handoffHistory(d, at, 'transaction_handoff_accepted', { userId: agentUserId, name: null }, { handoffId: h.id });
-    });
+    cases.acceptHandoff(kase.id, { at, transactionId }, handoffHistory(at, 'transaction_handoff_accepted', { userId: agentUserId, name: null }, { handoffId: h.id }));
     return null;
   }
 

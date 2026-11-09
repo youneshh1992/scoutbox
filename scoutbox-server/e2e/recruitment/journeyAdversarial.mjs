@@ -23,7 +23,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import { DATA_MIGRATIONS } from '../../repositories/index.mjs';
-import { openLayer, readRecords } from '../../scripts/dataLayerFixture.mjs';
+import { openLayer, readRecords, plantCase, legacyMoves } from '../../scripts/dataLayerFixture.mjs';
 import { ROOM_STATUSES, ROOM_TRANSITIONS, TERMINAL_ROOM_STATUSES, STATUS_EVIDENCE_REQUIRED } from '../../domains/recruitment/rooms/shared.mjs';
 import {
   currentContactForCase, currentTrialForCase, currentOfferForCase, currentSigningForOffer, currentDecisionForCase, currentAssessmentForCase,
@@ -950,10 +950,10 @@ section('R — corrupt current pointers and unknown states fail closed');
   // No offer operation re-points the current revision, so the plant is raw SQL: the pointer is a key into the offer's
   // own revisions, and the commit refuses it (planted in its own save, like R2); the Offer reads as before.
   let gone = null; const goneRefused = await offline((db, L) => { const o = db.recruitmentOffers.find((x) => x.id === K.OID); gone = o ?? null; L.sqlite.prepare("UPDATE recruitment_offers SET current_revision_id = 'rofr-gone' WHERE id = ?").run(K.OID); });
-  // The room status is a CHECKed column — an unknown word is refused at the save, naming the
-  // case (planted in its own save, like R1 and R2); the case reads as before.
-  let r4Status = null; const unknownRefused = await offline((db, { layer }) => {
-    const k = db.recruitmentCases.find((x) => x.id === globalThis.__B.R4); r4Status = k?.room?.status ?? null; if (k) layer.recruitmentCases.cases.update(k.id, (c) => { c.room.status = 'SIGNEDX'; });
+  // The room status is a CHECKed column — no act writes an unknown word, so the plant is raw SQL, and the column
+  // refuses it (planted in its own save, like R1 and R2); the case reads as before.
+  let r4Status = null; const unknownRefused = await offline((db, L) => {
+    const k = db.recruitmentCases.find((x) => x.id === globalThis.__B.R4); r4Status = k?.room?.status ?? null; if (k) L.sqlite.prepare("UPDATE recruitment_cases SET room_status = 'SIGNEDX' WHERE id = ?").run(k.id);
   });
   const jK = await jb(K.RID);
   neg(gone && goneRefused && /FOREIGN KEY constraint failed/.test(goneRefused.message) && jK.resources.offerId === K.OID && jK.classification !== 'integrity_error', `R1 an Offer whose current-revision pointer names a missing revision cannot be stored: the commit refuses it; the case reads as before (${String(goneRefused?.message ?? 'no refusal').slice(0, 100)}…)`);
@@ -962,7 +962,7 @@ section('R — corrupt current pointers and unknown states fail closed');
   const jN = await jb(Hh.R5);
   neg(bogusPkg === null || (bogus && /SIGNINGS_INPUT_INVALID/.test(bogus.message) && bogus.message.includes(bogusPkg) && bogus.message.includes('status must be one of') && jN.classification !== 'integrity_error'), `R2 an unknown status word cannot be stored: the save refuses it, naming the package; the package reads as before (${bogusPkg ?? 'no package'}: ${String(bogus?.message ?? 'no refusal').slice(0, 80)}…)`);
   const j4 = await jb(globalThis.__B.R4);
-  neg(unknownRefused && /RECRUITMENT_CASES_INPUT_INVALID/.test(unknownRefused.message) && unknownRefused.message.includes(`${globalThis.__B.R4}.room.status must be one of`) && j4.classification !== 'integrity_error', `R3 an unknown lifecycle word cannot be stored: the save refuses it, naming the case; the case reads as before (${String(unknownRefused?.message ?? 'no refusal').slice(0, 80)}…)`);
+  neg(unknownRefused && /CHECK constraint failed: room_status IS NULL OR room_status IN/.test(unknownRefused.message) && j4.classification !== 'integrity_error', `R3 an unknown lifecycle word cannot be stored: the column refuses it; the case reads as before (${String(unknownRefused?.message ?? 'no refusal').slice(0, 80)}…)`);
   const verdict = canTransitionRecruitmentCase({ id: globalThis.__B.R4, room: { status: 'SIGNEDX' }, history: [] }, 'startReview', { role: 'recruitment_admin' });
   neg(!verdict.ok && verdict.error === 'LIFECYCLE_STATE_UNKNOWN', `R3b the lifecycle refuses to move an unknown state (${verdict.error})`);
   ok(r4Status === 'archived' && (await jb(globalThis.__B.R4)).classification !== 'integrity_error', 'R4 the store was never put wrong: the case still reads sound at its own status');
@@ -976,12 +976,10 @@ section('S — partial legacy / canonical mixes: nothing invented');
   await offline((db, L) => { for (const o of db.recruitmentOffers.filter((x) => x.caseId === S1)) removeOffer(L, o.id); });
   const S2 = globalThis.__C.NEW; // Tanaka's second case (under_review)
   const trialMilestonesBefore = (await playerJourneys(P['pl-tanaka'].token)).items.filter((x) => x.club.id === 'org-eastport').reduce((n, x) => n + x.journey.timeline.filter((e) => /^trial_/.test(e.kind)).length, 0);
-  await offline((db, { layer }) => {
-    const plant = (id, chain, extraLast = {}) => layer.recruitmentCases.cases.update(id, (k) => {
-      let prev = k.room.status; let tt = Math.max(Date.now(), ...(k.history ?? []).map((h) => Number(h.at) || 0));
-      for (const to of chain) { tt += H; k.history.push({ id: `hist-p81-${Math.random().toString(36).slice(2, 8)}`, at: tt, action: 'room_status_changed', byKind: 'org', byId: 'legacy', byName: 'Legacy', detail: { from: prev, to, ...(to === chain[chain.length - 1] ? extraLast : {}) } }); prev = to; }
-      k.room.status = chain[chain.length - 1]; k.room.rev = (k.room.rev ?? 1) + chain.length;
-    });
+  await offline((db, L) => {
+    const { layer } = L;
+    // No act jumps a status or writes a legacy entry, so the plant is SQL (plantCase).
+    const plant = (id, chain, extraLast = {}) => plantCase(L, id, legacyMoves(layer.recruitmentCases.cases.byId(id), chain, { prefix: 'hist-p81', extraLast, withReasons: false }));
     // S1: legacy contacted + a canonical completed Trial (a Trial row that names the case, with an accepted request).
     const k1 = plant(S1, ['contacted', 'trial_requested', 'trial_scheduled', 'trial_completed'], { trialId: 'trial-p81-s1' });
     const now = Date.now();
@@ -1081,7 +1079,7 @@ section('V — idempotency: a key is never a cross-stage or post-authority capab
   const RID = I.RID;
   if ((await stage(RID)) !== 'contact_planned') { /* the Alvarez case is at trial stage now; use a fresh case */ }
   const pid = 'pl-imani'; const R = await reviewed(maria.token, pid);
-  await offline((db, L) => { L.layer.recruitmentCases.cases.update(R, (k) => { k.room.status = 'under_review'; k.history = k.history.filter((h) => !String(h.id).startsWith('hist-p81')); }); removeTrial(L, 'trial-p81-s1'); removeRequest(L, 'req-p81-s1'); });
+  await offline((db, L) => { plantCase(L, R, { status: 'under_review', dropHistory: (id) => id.startsWith('hist-p81') }); removeTrial(L, 'trial-p81-s1'); removeRequest(L, 'req-p81-s1'); });
   await lifecycle(R, 'planContact');
   const d = await j('POST', `/org/rooms/${R}/contacts`, { subject: 'Interest', body: 'Talk?', clientKey: key() }, maria.token);
   const k1 = key();

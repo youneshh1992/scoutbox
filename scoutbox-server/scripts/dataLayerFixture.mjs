@@ -33,6 +33,35 @@ export function openLayer(dir, { seed = {}, now = Date.now, nextId = null, warn 
 }
 
 /**
+ * Plant a case state no act writes (a legacy status jump, a dangling link, a pruned history), with SQL, for a battery
+ * on an open layer `L` (`openLayer`): `status`, `stage`, `rev` and `signingId` set as given, `history` entries appended,
+ * and the entries whose id `dropHistory(id)` holds removed. Returns the case as stored. Test databases only.
+ */
+export function plantCase(L, id, { status, stage, rev, signingId, history = [], dropHistory = null } = {}) {
+  const cols = Object.entries({ room_status: status, stage, room_rev: rev, links_signing_id: signingId }).filter(([, v]) => v !== undefined);
+  if (cols.length) L.sqlite.prepare(`UPDATE recruitment_cases SET ${cols.map(([c]) => `${c} = ?`).join(', ')} WHERE id = ?`).run(...cols.map(([, v]) => v), id);
+  if (dropHistory) for (const { id: hid } of L.sqlite.prepare('SELECT id FROM case_history WHERE case_id = ?').all(id)) if (dropHistory(hid)) L.sqlite.prepare('DELETE FROM case_history WHERE case_id = ? AND id = ?').run(id, hid);
+  const insert = L.sqlite.prepare('INSERT INTO case_history (case_id, position, id, at, action, by_kind, by_id, by_name, detail_text, detail_json) VALUES (?, (SELECT COALESCE(MAX(position) + 1, 0) FROM case_history WHERE case_id = ?), ?, ?, ?, ?, ?, ?, ?, ?)');
+  for (const h of history) insert.run(id, id, h.id, h.at, h.action, h.byKind ?? null, h.byId ?? null, h.byName ?? null, typeof h.detail === 'string' ? h.detail : null, h.detail && typeof h.detail === 'object' ? JSON.stringify(h.detail) : null);
+  return L.layer.recruitmentCases.cases.byId(id);
+}
+
+/**
+ * The plant of a legacy status chain on case `k`: the moves through `chain` as `room_status_changed` entries an hour
+ * apart (after the case's newest entry), the last one carrying `extraLast`, and the status and rev they leave. Spread
+ * into `plantCase`.
+ */
+export function legacyMoves(k, chain, { prefix, byName = 'Legacy', extraLast = {}, withReasons = true } = {}) {
+  let prev = k.room.status; let at = Math.max(Date.now(), ...k.history.map((h) => Number(h.at) || 0));
+  const history = chain.map((to, i) => {
+    at += 3_600_000;
+    const h = { id: `${prefix}-${Math.random().toString(36).slice(2, 8)}`, at, action: 'room_status_changed', byKind: 'org', byId: 'legacy', byName, detail: { from: prev, to, ...(withReasons ? { reasonCodes: [] } : {}), ...(i === chain.length - 1 ? extraLast : {}) } };
+    prev = to; return h;
+  });
+  return { status: chain[chain.length - 1], rev: (k.room.rev ?? 1) + chain.length, history };
+}
+
+/**
  * A session row with the token a test signs in with (only its hash is stored, as the sessions repository stores it).
  * `{ token, sid, kind, refId, userId?, via?, createdAt, expiresAt? }`.
  */
@@ -77,15 +106,19 @@ const WRITERS = {
   caseLinks: null, // see writeFixture: the cases' links, once their requests and trials exist
   roomComments: each((L, r) => L.recruitmentCases.comments.create(r)),
   roomSnapshots: each((L, r) => L.recruitmentCases.snapshots.create(r)),
-  // A decision chain as the Room routes write it: each row is created naming only the rows already written, then the
-  // remaining pointers are set by an update (a create naming a decision not yet there is refused).
+  // A decision chain as the Room routes write it: each row is created naming the decision it supersedes, which is
+  // already written, and is marked superseded once its successor exists (a key naming a decision not yet there is
+  // refused). A chain no route writes, a decision superseding a later one, is set with SQL.
   roomDecisions: (L, records) => {
     const D = L.recruitmentCases.decisions; const made = new Set();
     for (const r of records) {
       if (!r || typeof r !== 'object') { D.create(r); continue; } // junk: refused by the repository, naming it
-      D.create({ ...r, supersedes: made.has(r.supersedes) ? r.supersedes : null, supersededById: made.has(r.supersededById) ? r.supersededById : null }); made.add(r.id);
+      D.create({ ...r, supersedes: made.has(r.supersedes) ? r.supersedes : null, supersededById: null }); made.add(r.id);
     }
-    for (const r of records) if ((r.supersedes ?? null) !== null || (r.supersededById ?? null) !== null) D.update(r.id, (d) => { d.supersedes = r.supersedes ?? null; d.supersededById = r.supersededById ?? null; });
+    for (const r of records) {
+      if ((r.supersedes ?? null) !== null && !D.byId(r.id).supersedes) L.sqlite.prepare('UPDATE room_decisions SET supersedes_id = ? WHERE id = ?').run(r.supersedes, r.id);
+      if ((r.supersededById ?? null) !== null) D.markSuperseded(r.id, { by: r.supersededById });
+    }
   },
   roomEvidenceState: each((L, r) => L.recruitmentCases.evidenceStates.create(r)),
   recruitmentContacts: each((L, r) => L.recruitmentContactsOffers.contacts.create(r)),
@@ -233,7 +266,12 @@ export function writeFixture(dir, collections = {}, { now = Date.now(), idCounte
       for (const name of [...ORDER, ...Object.keys(writers).filter((n) => !ORDER.includes(n))]) {
         if (name === 'orgs' || name === 'players' || name === 'guardians') continue;
         if (name === 'caseLinks') {
-          if (W.recruitmentCases === WRITERS.recruitmentCases) for (const c of collections.recruitmentCases ?? []) if (c.links?.requestIds?.length || c.links?.trialIds?.length) L.layer.recruitmentCases.cases.update(c.id, (d) => { d.links = c.links; });
+          if (W.recruitmentCases === WRITERS.recruitmentCases) {
+            for (const c of collections.recruitmentCases ?? []) {
+              for (const requestId of c.links?.requestIds ?? []) L.layer.recruitmentCases.cases.link(c.id, { requestId });
+              for (const trialId of c.links?.trialIds ?? []) L.layer.recruitmentCases.cases.link(c.id, { trialId });
+            }
+          }
           continue;
         }
         const records = collections[name];

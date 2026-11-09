@@ -61,7 +61,7 @@ export function registerSigning(rawCtx) {
   const ctx = { ...rawCtx, ...buildShared(rawCtx) };
   const {
     orgRouter, playerRouter, guardianRouter, adminRouter, nextId, notify, broadcast, findPlayer, isBlocked,
-    rateLimit, isLead, audit, orgCanSee, storage, ledgerAppend, billing = null, refreshJourneyBadges = null, isAdult = null,
+    rateLimit, isLead, auditEntry, orgCanSee, storage, ledgerAppend, billing = null, refreshJourneyBadges = null, isAdult = null,
     agent = null, integration = null, evidence = null, faults = null,
     // `afterCommit` defers a side effect until COMMIT returned.
     players, unit, afterCommit,
@@ -79,7 +79,7 @@ export function registerSigning(rawCtx) {
   /** A case of this organisation, or null. */
   const caseOfOrg = (id, orgId) => { const k = recruitmentReads.cases.byId(id); return k && k.orgId === orgId ? k : null; };
   /** A case history entry is an explicit write of its case (never an in-place push on the read-only view). */
-  const caseAudit = (kase, ...args) => ctx.recruitmentCases.cases.update(kase.id, (d) => audit(d, ...args));
+  const caseAudit = (kase, ...entry) => ctx.recruitmentCases.cases.recordAct(kase.id, { history: [auditEntry(...entry)] });
   if (typeof players?.update !== 'function' || typeof unit !== 'function' || typeof afterCommit !== 'function') throw new TypeError('registerSigning needs the identity repository (players), unit and afterCommit from the data layer');
   if (typeof signingsFollowUps?.signingPackages?.insert !== 'function' || typeof signingsFollowUps?.signings?.record !== 'function') throw new TypeError('registerSigning needs the signings/follow-ups repository (S8d) from the data layer');
   const sp = signingsFollowUps.signingPackages; const sg = signingsFollowUps.signings;
@@ -679,10 +679,7 @@ export function registerSigning(rawCtx) {
         if (faults?.shouldFail?.('signing.complete.after_lifecycle')) throw new Error('simulated failure after the lifecycle moved (development fault layer)');
         if (key) p = addKey(p, 'complete', { key, fp, signingId: signing.id, at });
         p = hist(p, 'signing_completed', by, { revisionId: rev.id, signingId: signing.id, sha256: rev.document.sha256 }, at);
-        ctx.recruitmentCases.cases.update(kase.id, (d) => {
-          d.links.signingId = signing.id;
-          audit(d, 'org', req.orgUser.id, req.orgUser.name, 'signing_completed', { signingPackageId: p.id, signingId: signing.id, to: moved.to });
-        });
+        ctx.recruitmentCases.cases.link(kase.id, { signingId: signing.id }, { history: [auditEntry('org', req.orgUser.id, req.orgUser.name, 'signing_completed', { signingPackageId: p.id, signingId: signing.id, to: moved.to })] });
         p = touch(p, req, at);
         if (faults?.shouldFail?.('signing.complete.at_commit')) throw new Error('simulated failure at the commit of the completion unit (development fault layer)');
         return p;

@@ -3,29 +3,31 @@
  * snapshots, room decisions and room evidence states.
  *
  * Every field is a typed column with the vocabulary CHECKs of the domain rules (domains/recruitment/rooms/shared.mjs,
- * domains/recruitment/lifecycle/decision.mjs, m13/shared.mjs, m27/integration.mjs). A record the columns cannot hold, an
- * unknown field at any level included, is refused with its id at a repository write (the unit rolls back). An
- * `undefined` field is an absent one; an absent field reads back as null, an absent list as empty. A case's history has
- * one entry shape (`{ id, at, byKind, byId, byName, action, detail }`), and a decision's `snapshot` is read from the
- * room_snapshots row it names (it is that row, never a second copy). The idempotency keys are columns of their owner
- * (a draft's create key, a decision's finalize and draft keys, a handoff's invite key).
+ * domains/recruitment/lifecycle/decision.mjs, m13/shared.mjs, m27/integration.mjs). A case's history has one entry shape
+ * (`{ id, at, byKind, byId, byName, action, detail }`), and a decision's `snapshot` is read from the room_snapshots row
+ * it names (it is that row, never a second copy). The idempotency keys are columns of their owner (a draft's create key,
+ * a decision's finalize and draft keys, a handoff's invite key).
  *
- * `update` hands the caller a plain copy, types the result whole, writes the record's rows at once and returns it read
- * back. An update of a record from inside its own update is refused (the outer write would overwrite the inner one).
+ * Writes (repositories/writes.mjs). A record is created whole and must read back as written (an unknown field, or a
+ * value a column would coerce, is refused). It then changes only through named acts, each an UPDATE or INSERT of the
+ * rows it concerns: a case through `moveRoom`, `addTask`, `startDraft`, `inviteHandoff`, `addScenario` and the rest, a
+ * comment through `edit` and `remove`, a decision through `markSuperseded`, `recordLifecycle` and `bump`, an evidence
+ * state through `review`. History is only appended. A Room moves only along `ROOM_TRANSITIONS`, an approval and a
+ * handoff only out of their open state, and a plain case's stage is the only stage written directly.
  *
  * References. org_id → orgs and the staff ids (owner, lead scout, decision maker, assignee, comment author) →
- * org_users, RESTRICT. Every room row's room_id → recruitment_cases RESTRICT; a decision's snapshot_id →
- * room_snapshots RESTRICT. case_request_links → recruitment_requests and case_trial_links → trials RESTRICT. Player
- * ids: no key, tolerant and counted (Q8a in docs/decisions.md). The decision chain (supersedes / superseded by) and a
- * decision's snapshot must stay inside the decision's room, checked at every write. The children cascade with their
- * owner.
+ * org_users, RESTRICT. Every room row's room_id → recruitment_cases RESTRICT. The pointers inside a room are composite
+ * keys `(room_id, …)` into the same room's rows: a decision's snapshot, its chain (supersedes / superseded by) and a
+ * comment's reply. case_request_links → recruitment_requests and case_trial_links → trials RESTRICT. Player ids: no
+ * key, tolerant and counted (Q8a in docs/decisions.md). The children cascade with their owner.
  *
  * Refusals name tables, fields and ids, never a name, a note, a body or a message.
  */
 import { transaction, migrationApplied, newestHistory, childRowsOf } from './database.mjs';
 import { pageOf } from '../domains/platform/paging.mjs';
-import { describe, isPlainObject, nonEmpty, ids } from './recruitment.mjs';
-import { ROOM_STATUSES, ROOM_PRIORITIES, SOURCE_CONTEXTS, TASK_STATES, LINKED_RESOURCE_TYPES, EVIDENCE_REVIEW_STATES, RECOMMENDATIONS, LIMITS, CASE_STAGES, CASE_PRIORITIES, CASE_DECISION_OUTCOMES, CASE_APPROVAL_STATES } from '../domains/recruitment/rooms/shared.mjs';
+import { isPlainObject } from './recruitment.mjs';
+import { writeChecks, writeKit } from './writes.mjs';
+import { ROOM_STATUSES, ROOM_PRIORITIES, ROOM_TRANSITIONS, SOURCE_CONTEXTS, TASK_STATES, LINKED_RESOURCE_TYPES, EVIDENCE_REVIEW_STATES, RECOMMENDATIONS, LIMITS, CASE_STAGES, CASE_PRIORITIES, CASE_DECISION_OUTCOMES, CASE_APPROVAL_STATES } from '../domains/recruitment/rooms/shared.mjs';
 import { DECISION_OUTCOMES, DECISION_KINDS, DECISION_STATES, EVIDENCE_REF_KINDS, DECISION_LIMITS } from '../domains/recruitment/lifecycle/decision.mjs';
 import { CURRENCIES, BUDGET_LINE_KINDS, BUDGET_SCHEDULES } from '../m13/shared.mjs';
 import { HANDOFF_STATUSES } from '../m27/integration.mjs';
@@ -36,8 +38,7 @@ export const CASE_TABLES = Object.freeze(['recruitment_cases', 'case_room_tags',
 export const ROOM_TABLES = Object.freeze(['room_comments', 'room_comment_mentions', 'room_snapshots', 'room_snapshot_source_refs', 'room_decisions', 'room_decision_reason_codes', 'room_decision_evidence_refs', 'room_decision_assessment_ids', 'room_evidence_states']);
 export const RECRUITMENT_CASES_TABLES = Object.freeze([...CASE_TABLES, ...ROOM_TABLES]);
 export const recruitmentCasesLive = (sqlite) => migrationApplied(sqlite, RECRUITMENT_CASES_MIGRATION);
-const refusal = (code, message, extra = {}) => Object.assign(new Error(`${code}: ${message}`), { code, ...extra });
-const clone = (v) => (v === undefined ? undefined : JSON.parse(JSON.stringify(v)));
+const { rowStep, listOf, readsBackAsWritten, newRecord } = writeChecks('RECRUITMENT_CASES');
 
 // ------------------------------------------------------------------ vocabulary
 /** Who a case history entry names: a club user (`org` or `org_user`), a family member, the platform, an agent. */
@@ -343,6 +344,8 @@ CREATE TABLE room_comments (
   deleted_at INTEGER,
   deleted_by_user_id TEXT,
   deleted_by_name TEXT,
+  UNIQUE (room_id, id),
+  FOREIGN KEY (room_id, reply_to_id) REFERENCES room_comments(room_id, id) ON DELETE RESTRICT,
   CHECK (deleted_at IS NOT NULL OR (deleted_by_user_id IS NULL AND deleted_by_name IS NULL))
 ) STRICT;
 CREATE INDEX room_comments_room_created ON room_comments (room_id, created_at);
@@ -369,6 +372,7 @@ CREATE TABLE room_snapshots (
   source_passport_version INTEGER,
   source_passport_revision TEXT,
   note TEXT,
+  UNIQUE (room_id, id),
   CHECK ((trust_hash IS NULL) = (trust_component_levels_json IS NULL))
 ) STRICT;
 CREATE INDEX room_snapshots_room_at ON room_snapshots (room_id, at);
@@ -406,7 +410,7 @@ CREATE TABLE room_decisions (
   assessments_submitted INTEGER,
   assessments_withheld INTEGER,
   assessment_verdicts_json TEXT ${jsonObject('assessment_verdicts_json')},
-  snapshot_id TEXT REFERENCES room_snapshots(id) ON DELETE RESTRICT,
+  snapshot_id TEXT,
   finalize_key TEXT ${maxLen('finalize_key', KEY_MAX)},
   finalize_fp TEXT,
   draft_key TEXT ${maxLen('draft_key', KEY_MAX)},
@@ -419,6 +423,10 @@ CREATE TABLE room_decisions (
   lifecycle_reason TEXT,
   lifecycle_at INTEGER,
   policy_version INTEGER,
+  UNIQUE (room_id, id),
+  FOREIGN KEY (room_id, snapshot_id) REFERENCES room_snapshots(room_id, id) ON DELETE RESTRICT,
+  FOREIGN KEY (room_id, supersedes_id) REFERENCES room_decisions(room_id, id) ON DELETE RESTRICT,
+  FOREIGN KEY (room_id, superseded_by_id) REFERENCES room_decisions(room_id, id) ON DELETE RESTRICT,
   CHECK ((finalize_key IS NULL) = (finalize_fp IS NULL)),
   CHECK ((draft_key IS NULL) = (draft_fp IS NULL)),
   CHECK ((assessments_submitted IS NULL) = (assessment_verdicts_json IS NULL)),
@@ -463,349 +471,125 @@ CREATE TABLE room_evidence_states (
 ) STRICT;
 `;
 
-// ------------------------------------------------------------------ typing (the one place a value is judged)
-const isInt = (v) => Number.isSafeInteger(v);
-const isStr = (v) => typeof v === 'string';
-const absent = (v) => v === undefined || v === null;
-const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
-class Bad extends Error {}
-const fail = (label, field, what) => { throw new Bad(`${label}.${field} ${what}`); };
-function onlyKeys(v, keys, label, field) {
-  if (!isPlainObject(v)) fail(label, field, `must be an object (got ${describe(v)})`);
-  for (const k of Object.keys(v)) if (v[k] !== undefined && !keys.includes(k)) fail(label, `${field}.${k}`, 'is not a field this table stores');
-  return v;
-}
-const str = (v, label, field, { max = null, required = false } = {}) => {
-  if (absent(v)) { if (required) fail(label, field, 'is required'); return null; }
-  if (!isStr(v)) fail(label, field, `must be text or null (got ${describe(v)})`);
-  if (required && v.length === 0) fail(label, field, 'must not be empty');
-  if (max !== null && v.length > max) fail(label, field, `exceeds ${max} characters`);
-  return v;
-};
-const int = (v, label, field, { required = false, min = null } = {}) => {
-  if (absent(v)) { if (required) fail(label, field, 'is required'); return null; }
-  if (!isInt(v)) fail(label, field, `must be an integer or null (got ${describe(v)})`);
-  if (min !== null && v < min) fail(label, field, `must be at least ${min}`);
-  return v;
-};
-const num = (v, label, field) => { if (absent(v)) return null; if (typeof v !== 'number' || !Number.isFinite(v)) fail(label, field, `must be a finite number (got ${describe(v)})`); return v; };
-const flag = (v, label, field, { required = false } = {}) => {
-  if (absent(v)) { if (required) fail(label, field, 'is required'); return null; }
-  if (typeof v !== 'boolean') fail(label, field, `must be true or false (got ${describe(v)})`);
-  return v;
-};
-const oneOf = (v, allowed, label, field, { required = true } = {}) => {
-  if (absent(v) && !required) return null;
-  if (!allowed.includes(v)) fail(label, field, `must be one of ${allowed.join('|')} (got ${isStr(v) && v.length <= 40 ? JSON.stringify(v) : describe(v)})`);
-  return v;
-};
-const dayOf = (v, label, field, { required = false } = {}) => {
-  if (absent(v)) { if (required) fail(label, field, 'is required'); return null; }
-  if (!isStr(v) || !DAY_RE.test(v)) fail(label, field, 'must be a YYYY-MM-DD day or null');
-  return v;
-};
-/** A due date or a deadline: a `YYYY-MM-DD` day, an instant in ms, or nothing. */
-const dayOrInstant = (v, label, field) => {
-  if (absent(v)) return null;
-  if ((isStr(v) && DAY_RE.test(v)) || isInt(v)) return v;
-  return fail(label, field, 'must be a YYYY-MM-DD day, an instant in ms, or null');
-};
-const list = (v, label, field) => { if (absent(v)) return []; if (!Array.isArray(v)) fail(label, field, `must be a list (got ${describe(v)})`); return v; };
-const obj = (v, keys, label, field) => (absent(v) ? null : onlyKeys(v, keys, label, field));
-const unique = (items, keyOf, label, field) => { const seen = new Set(); for (const x of items) { const k = keyOf(x); if (seen.has(k)) fail(label, field, `repeats ${k}`); seen.add(k); } };
-const strList = (v, label, field, { max = null } = {}) => list(v, label, field).map((x, i) => str(x, label, `${field}[${i}]`, { required: true, max }));
-/** A plain JSON object (an evidence reference's metadata, a history entry's detail, a trust component map). */
-const jsonObj = (v, label, field, { values = null } = {}) => {
-  if (absent(v)) return null;
-  if (!isPlainObject(v)) fail(label, field, `must be an object or null (got ${describe(v)})`);
-  if (values) for (const [k, x] of Object.entries(v)) if (x !== undefined && !values(x)) fail(label, `${field}.${k}`, 'has a value of the wrong kind');
-  return clone(v);
-};
-const person = (v, label, field, extra = []) => { const x = obj(v, ['userId', 'name', ...extra], label, field); return x ? { userId: str(x.userId, label, `${field}.userId`), name: str(x.name, label, `${field}.name`), ...Object.fromEntries(extra.map((k) => [k, str(x[k], label, `${field}.${k}`)])) } : null; };
-/** A room's provenance reference: what it was opened or reopened from (a brief and its version, a Second Look item, a watchlist). */
-const sourceRef = (v, label, field) => { const x = obj(v, ['id', 'version'], label, field); return x ? { id: str(x.id, label, `${field}.id`, { required: true }), version: int(x.version, label, `${field}.version`) } : null; };
-const evidenceRefs = (v, label, field) => list(v, label, field).map((r, i) => { const L = `${label} ${field}[${i}]`; onlyKeys(r, ['kind', 'id', 'meta'], L, 'entry'); return { kind: oneOf(r.kind, EVIDENCE_REF_KINDS, L, 'kind'), id: str(r.id, L, 'id', { required: true }), meta: jsonObj(r.meta, L, 'meta') }; });
-const keyPair = (v, label, field) => { const x = obj(v, ['key', 'fp'], label, field); return x ? { key: str(x.key, label, `${field}.key`, { required: true, max: KEY_MAX }), fp: str(x.fp, label, `${field}.fp`, { required: true }) } : null; };
-const codes = (v, label, field) => strList(v, label, field, { max: CODE_MAX });
-const typed = (fn) => (raw, at) => {
-  try {
-    if (!isPlainObject(raw)) return { ok: false, reason: `${at} is not an object (${describe(raw)})` };
-    if (!nonEmpty(raw.id)) return { ok: false, reason: `${at}.id must be a non-empty string` };
-    return { ok: true, record: fn(raw, `${at} ${raw.id}`) };
-  } catch (e) { if (e instanceof Bad) return { ok: false, reason: e.message }; throw e; }
-};
-
-const CASE_KEYS = ['id', 'orgId', 'playerId', 'playerName', 'vacancyId', 'ownerUserId', 'ownerName', 'stage', 'priority', 'deadline', 'restricted', 'assignments', 'tasks', 'approvals', 'decision', 'links', 'createdAt', 'history', 'room', 'decisionDraft', 'transactionHandoff', 'budget', 'subjectRemovedAt'];
-const ROOM_KEYS = ['status', 'priority', 'tags', 'leadScoutUserId', 'sourceContext', 'sourceRef', 'openedBy', 'updatedAt', 'archivedAt', 'closedAt', 'rev', 'revAt', 'revBy', 'reopened'];
-
-function typeRoom(v, L) {
-  const r = obj(v, ROOM_KEYS, L, 'room');
-  if (!r) return null;
-  const tags = strList(r.tags, L, 'room.tags', { max: LIMITS.tagLength });
-  unique(tags, (t) => t, L, 'room.tags');
-  const ro = obj(r.reopened, ['by', 'at', 'from', 'reasonCodes', 'sourceContext', 'sourceRef'], L, 'room.reopened');
-  return {
-    status: oneOf(r.status, ROOM_STATUSES, L, 'room.status'), priority: oneOf(r.priority, ROOM_PRIORITIES, L, 'room.priority'), tags,
-    leadScoutUserId: str(r.leadScoutUserId, L, 'room.leadScoutUserId'), sourceContext: oneOf(r.sourceContext, SOURCE_CONTEXTS, L, 'room.sourceContext', { required: false }),
-    sourceRef: sourceRef(r.sourceRef, L, 'room.sourceRef'), openedBy: person(r.openedBy, L, 'room.openedBy'),
-    updatedAt: int(r.updatedAt, L, 'room.updatedAt', { required: true }), archivedAt: int(r.archivedAt, L, 'room.archivedAt'), closedAt: int(r.closedAt, L, 'room.closedAt'),
-    rev: int(r.rev, L, 'room.rev', { required: true, min: 0 }), revAt: int(r.revAt, L, 'room.revAt'), revBy: person(r.revBy, L, 'room.revBy'),
-    reopened: ro ? { by: person(ro.by, L, 'room.reopened.by'), at: int(ro.at, L, 'room.reopened.at', { required: true }), from: oneOf(ro.from, ROOM_STATUSES, L, 'room.reopened.from', { required: false }), reasonCodes: codes(ro.reasonCodes, L, 'room.reopened.reasonCodes'), sourceContext: oneOf(ro.sourceContext, SOURCE_CONTEXTS, L, 'room.reopened.sourceContext', { required: false }), sourceRef: sourceRef(ro.sourceRef, L, 'room.reopened.sourceRef') } : null,
-  };
-}
-function typeHistory(v, L) {
-  const history = list(v, L, 'history').map((h, i) => {
-    const HL = `${L} history[${i}]`;
-    onlyKeys(h, ['id', 'at', 'byKind', 'byId', 'byName', 'action', 'detail'], HL, 'entry');
-    if (!absent(h.detail) && !isStr(h.detail) && !isPlainObject(h.detail)) fail(HL, 'detail', 'must be text, an object or null');
-    return { id: str(h.id, HL, 'id', { required: true }), at: int(h.at, HL, 'at', { required: true }), byKind: oneOf(h.byKind, CASE_ACTOR_KINDS, HL, 'byKind', { required: false }), byId: str(h.byId, HL, 'byId'), byName: str(h.byName, HL, 'byName'), action: str(h.action, HL, 'action', { required: true, max: TEXT.action }), detail: absent(h.detail) ? null : clone(h.detail) };
-  });
-  unique(history, (h) => h.id, L, 'history');
-  return history;
-}
-function typeDraft(v, L) {
-  const d = obj(v, ['id', 'outcome', 'reasonCodes', 'note', 'evidenceRefs', 'by', 'createdAt', 'updatedAt', 'updatedBy', 'rev', 'revAt', 'keys'], L, 'decisionDraft');
-  if (!d) return null;
-  const k = obj(d.keys, ['create'], L, 'decisionDraft.keys');
-  return {
-    id: str(d.id, L, 'decisionDraft.id', { required: true }), outcome: oneOf(d.outcome, DECISION_OUTCOMES, L, 'decisionDraft.outcome', { required: false }),
-    reasonCodes: codes(d.reasonCodes, L, 'decisionDraft.reasonCodes'), note: str(d.note, L, 'decisionDraft.note', { max: DECISION_LIMITS.note }),
-    evidenceRefs: evidenceRefs(d.evidenceRefs, L, 'decisionDraft.evidenceRefs'), by: person(d.by, L, 'decisionDraft.by', ['role']),
-    createdAt: int(d.createdAt, L, 'decisionDraft.createdAt', { required: true }), updatedAt: int(d.updatedAt, L, 'decisionDraft.updatedAt', { required: true }), updatedBy: person(d.updatedBy, L, 'decisionDraft.updatedBy', ['role']),
-    rev: int(d.rev, L, 'decisionDraft.rev', { required: true, min: 1 }), revAt: int(d.revAt, L, 'decisionDraft.revAt'),
-    keys: { create: k ? keyPair(k.create, L, 'decisionDraft.keys.create') : null },
-  };
-}
-function typeHandoff(v, L, caseId) {
-  const h = obj(v, ['id', 'caseId', 'orgId', 'playerId', 'status', 'invitedAt', 'invitedBy', 'acceptedAt', 'withdrawnAt', 'transactionId', 'representedAtInvitation', 'invitedAgencyOrgId', 'invitedAgentUserId', 'keys', 'rev', 'revAt'], L, 'transactionHandoff');
-  if (!h) return null;
-  if (h.caseId !== caseId) fail(L, 'transactionHandoff.caseId', 'must name the case it is on');
-  const by = obj(h.invitedBy, ['kind', 'userId', 'name'], L, 'transactionHandoff.invitedBy');
-  if (by) oneOf(by.kind, ['org'], L, 'transactionHandoff.invitedBy.kind');
-  const k = obj(h.keys, ['invite'], L, 'transactionHandoff.keys');
-  const inv = k ? obj(k.invite, ['key'], L, 'transactionHandoff.keys.invite') : null;
-  return {
-    id: str(h.id, L, 'transactionHandoff.id', { required: true }), caseId, orgId: str(h.orgId, L, 'transactionHandoff.orgId', { required: true }), playerId: str(h.playerId, L, 'transactionHandoff.playerId', { required: true }),
-    status: oneOf(h.status, HANDOFF_STORED, L, 'transactionHandoff.status'), invitedAt: int(h.invitedAt, L, 'transactionHandoff.invitedAt', { required: true }),
-    invitedBy: by ? { kind: 'org', userId: str(by.userId, L, 'transactionHandoff.invitedBy.userId'), name: str(by.name, L, 'transactionHandoff.invitedBy.name') } : null,
-    acceptedAt: int(h.acceptedAt, L, 'transactionHandoff.acceptedAt'), withdrawnAt: int(h.withdrawnAt, L, 'transactionHandoff.withdrawnAt'), transactionId: str(h.transactionId, L, 'transactionHandoff.transactionId'),
-    representedAtInvitation: flag(h.representedAtInvitation, L, 'transactionHandoff.representedAtInvitation', { required: true }),
-    invitedAgencyOrgId: str(h.invitedAgencyOrgId, L, 'transactionHandoff.invitedAgencyOrgId'), invitedAgentUserId: str(h.invitedAgentUserId, L, 'transactionHandoff.invitedAgentUserId'),
-    keys: { invite: inv ? { key: str(inv.key, L, 'transactionHandoff.keys.invite.key', { required: true, max: KEY_MAX }) } : null },
-    rev: int(h.rev, L, 'transactionHandoff.rev', { required: true, min: 1 }), revAt: int(h.revAt, L, 'transactionHandoff.revAt'),
-  };
-}
-function typeBudget(v, L) {
-  const bud = obj(v, ['scenarios'], L, 'budget');
-  if (!bud) return null;
-  const scenarios = list(bud.scenarios, L, 'budget.scenarios').map((s, i) => {
-    const SL = `${L} budget.scenarios[${i}]`;
-    onlyKeys(s, ['id', 'version', 'label', 'currency', 'termMonths', 'lines', 'fxAssumptions', 'approval', 'actuals', 'createdBy', 'createdAt', 'updatedAt'], SL, 'scenario');
-    const lines = list(s.lines, SL, 'lines').map((l, j) => {
-      const LL = `${SL} lines[${j}]`; onlyKeys(l, ['id', 'kind', 'label', 'amountMinor', 'currency', 'schedule', 'confirmed', 'conditional'], LL, 'line');
-      const c = obj(l.conditional, ['assumption'], LL, 'conditional');
-      return { id: str(l.id, LL, 'id', { required: true }), kind: oneOf(l.kind, BUDGET_LINE_KINDS, LL, 'kind'), label: str(l.label, LL, 'label', { required: true, max: TEXT.label }), amountMinor: int(l.amountMinor, LL, 'amountMinor', { required: true, min: 0 }), currency: oneOf(l.currency, CURRENCIES, LL, 'currency'), schedule: oneOf(l.schedule, BUDGET_SCHEDULES, LL, 'schedule'), confirmed: flag(l.confirmed, LL, 'confirmed', { required: true }), conditional: c ? { assumption: str(c.assumption, LL, 'conditional.assumption', { required: true, max: TEXT.assumption }) } : null };
-    });
-    unique(lines, (l) => l.id, SL, 'lines');
-    const fxAssumptions = list(s.fxAssumptions, SL, 'fxAssumptions').map((a, j) => {
-      const AL = `${SL} fxAssumptions[${j}]`; onlyKeys(a, ['from', 'to', 'rate', 'source', 'date', 'manual'], AL, 'assumption');
-      return { from: oneOf(a.from, CURRENCIES, AL, 'from'), to: oneOf(a.to, CURRENCIES, AL, 'to'), rate: str(a.rate, AL, 'rate', { required: true, max: TEXT.fxRate }), source: str(a.source, AL, 'source', { max: TEXT.source }), date: dayOf(a.date, AL, 'date', { required: true }), manual: flag(a.manual, AL, 'manual', { required: true }) };
-    });
-    const ap = obj(s.approval, ['by', 'byUserId', 'at', 'version', 'superseded'], SL, 'approval');
-    const actuals = list(s.actuals, SL, 'actuals').map((a, j) => {
-      const AL = `${SL} actuals[${j}]`; onlyKeys(a, ['id', 'lineId', 'amountMinor', 'at', 'recordedBy'], AL, 'actual');
-      return { id: str(a.id, AL, 'id', { required: true }), lineId: str(a.lineId, AL, 'lineId', { required: true }), amountMinor: int(a.amountMinor, AL, 'amountMinor', { required: true }), at: int(a.at, AL, 'at', { required: true }), recordedBy: str(a.recordedBy, AL, 'recordedBy') };
-    });
-    return {
-      id: str(s.id, SL, 'id', { required: true }), version: int(s.version, SL, 'version', { required: true, min: 1 }), label: str(s.label, SL, 'label', { required: true, max: TEXT.label }),
-      currency: oneOf(s.currency, CURRENCIES, SL, 'currency'), termMonths: int(s.termMonths, SL, 'termMonths', { required: true, min: 1 }), lines, fxAssumptions,
-      approval: ap ? { by: str(ap.by, SL, 'approval.by'), byUserId: str(ap.byUserId, SL, 'approval.byUserId'), at: int(ap.at, SL, 'approval.at', { required: true }), version: int(ap.version, SL, 'approval.version', { required: true }), superseded: flag(ap.superseded, SL, 'approval.superseded', { required: true }) } : null,
-      actuals, createdBy: str(s.createdBy, SL, 'createdBy'), createdAt: int(s.createdAt, SL, 'createdAt', { required: true }), updatedAt: int(s.updatedAt, SL, 'updatedAt', { required: true }),
-    };
-  });
-  unique(scenarios, (s) => s.id, L, 'budget.scenarios');
-  // An empty budget is no budget: a case gains one with its first scenario and never loses a scenario.
-  return scenarios.length ? { scenarios } : null;
-}
-
-/** A case, typed. */
-export const typeCase = typed((raw, L) => {
-  onlyKeys(raw, CASE_KEYS, L, 'record');
-  const assignments = list(raw.assignments, L, 'assignments').map((a, i) => {
-    const AL = `${L} assignments[${i}]`; onlyKeys(a, ['id', 'userId', 'name', 'task', 'dueAt', 'status', 'createdAt'], AL, 'entry');
-    return { id: str(a.id, AL, 'id', { required: true }), userId: str(a.userId, AL, 'userId', { required: true }), name: str(a.name, AL, 'name'), task: str(a.task, AL, 'task', { required: true, max: TEXT.task }), dueAt: dayOrInstant(a.dueAt, AL, 'dueAt'), status: oneOf(a.status, TASK_STATES, AL, 'status'), createdAt: int(a.createdAt, AL, 'createdAt', { required: true }) };
-  });
-  unique(assignments, (a) => a.id, L, 'assignments');
-  const tasks = list(raw.tasks, L, 'tasks').map((t, i) => {
-    const TL = `${L} tasks[${i}]`; onlyKeys(t, ['id', 'title', 'description', 'dueAt', 'assigneeUserId', 'assigneeName', 'status', 'linkedResourceType', 'linkedResourceId', 'createdBy', 'createdAt', 'completedAt', 'completedBy'], TL, 'entry');
-    return { id: str(t.id, TL, 'id', { required: true }), title: str(t.title, TL, 'title', { required: true, max: TEXT.title }), description: str(t.description, TL, 'description', { max: LIMITS.taskDescription }), dueAt: dayOrInstant(t.dueAt, TL, 'dueAt'), assigneeUserId: str(t.assigneeUserId, TL, 'assigneeUserId'), assigneeName: str(t.assigneeName, TL, 'assigneeName'), status: oneOf(t.status, TASK_STATES, TL, 'status'), linkedResourceType: oneOf(t.linkedResourceType, LINKED_RESOURCE_TYPES, TL, 'linkedResourceType', { required: false }), linkedResourceId: str(t.linkedResourceId, TL, 'linkedResourceId'), createdBy: person(t.createdBy, TL, 'createdBy'), createdAt: int(t.createdAt, TL, 'createdAt', { required: true }), completedAt: int(t.completedAt, TL, 'completedAt'), completedBy: str(t.completedBy, TL, 'completedBy') };
-  });
-  unique(tasks, (t) => t.id, L, 'tasks');
-  const approvals = list(raw.approvals, L, 'approvals').map((a, i) => {
-    const AL = `${L} approvals[${i}]`; onlyKeys(a, ['id', 'decision', 'requestedBy', 'status', 'requestedAt', 'resolvedBy'], AL, 'entry');
-    const d = obj(a.decision, ['outcome', 'reasons'], AL, 'decision'); if (!d) fail(AL, 'decision', 'is required');
-    const rb = obj(a.resolvedBy, ['userId', 'name', 'at'], AL, 'resolvedBy');
-    const status = oneOf(a.status, CASE_APPROVAL_STATES, AL, 'status');
-    if ((status === 'pending') !== !rb) fail(AL, 'resolvedBy', 'is set exactly when the approval is resolved');
-    return { id: str(a.id, AL, 'id', { required: true }), decision: { outcome: oneOf(d.outcome, CASE_DECISION_OUTCOMES, AL, 'decision.outcome'), reasons: str(d.reasons, AL, 'decision.reasons', { max: TEXT.reasons }) }, requestedBy: person(a.requestedBy, AL, 'requestedBy'), status, requestedAt: int(a.requestedAt, AL, 'requestedAt', { required: true }), resolvedBy: rb ? { userId: str(rb.userId, AL, 'resolvedBy.userId'), name: str(rb.name, AL, 'resolvedBy.name'), at: int(rb.at, AL, 'resolvedBy.at', { required: true }) } : null };
-  });
-  unique(approvals, (a) => a.id, L, 'approvals');
-  const dec = obj(raw.decision, ['outcome', 'reasons', 'byUserId', 'byName', 'approvedBy', 'at'], L, 'decision');
-  const lk = obj(raw.links, ['requestIds', 'trialIds', 'signingId'], L, 'links') ?? {};
-  const links = { requestIds: strList(lk.requestIds, L, 'links.requestIds'), trialIds: strList(lk.trialIds, L, 'links.trialIds'), signingId: str(lk.signingId, L, 'links.signingId') };
-  unique(links.requestIds, (x) => x, L, 'links.requestIds'); unique(links.trialIds, (x) => x, L, 'links.trialIds');
-  return {
-    id: raw.id, orgId: str(raw.orgId, L, 'orgId', { required: true }), playerId: str(raw.playerId, L, 'playerId', { required: true }), playerName: str(raw.playerName, L, 'playerName'),
-    vacancyId: str(raw.vacancyId, L, 'vacancyId'), ownerUserId: str(raw.ownerUserId, L, 'ownerUserId', { required: true }), ownerName: str(raw.ownerName, L, 'ownerName'),
-    stage: oneOf(raw.stage, CASE_STAGES, L, 'stage'), priority: oneOf(raw.priority, CASE_PRIORITIES, L, 'priority'), deadline: dayOrInstant(raw.deadline, L, 'deadline'),
-    restricted: flag(raw.restricted, L, 'restricted') ?? false, assignments, tasks, approvals,
-    decision: dec ? { outcome: oneOf(dec.outcome, CASE_DECISION_OUTCOMES, L, 'decision.outcome'), reasons: str(dec.reasons, L, 'decision.reasons', { max: TEXT.reasons }), byUserId: str(dec.byUserId, L, 'decision.byUserId'), byName: str(dec.byName, L, 'decision.byName'), approvedBy: str(dec.approvedBy, L, 'decision.approvedBy'), at: int(dec.at, L, 'decision.at', { required: true }) } : null,
-    links, createdAt: int(raw.createdAt, L, 'createdAt', { required: true }), history: typeHistory(raw.history, L), room: typeRoom(raw.room, L),
-    decisionDraft: typeDraft(raw.decisionDraft, L), transactionHandoff: typeHandoff(raw.transactionHandoff, L, raw.id), budget: typeBudget(raw.budget, L), subjectRemovedAt: int(raw.subjectRemovedAt, L, 'subjectRemovedAt'),
-  };
-});
-
-export const typeComment = typed((raw, L) => {
-  onlyKeys(raw, ['id', 'roomId', 'orgId', 'authorId', 'authorName', 'body', 'replyToId', 'mentions', 'createdAt', 'editedAt', 'editCount', 'deletedAt', 'deletedBy'], L, 'record');
-  const mentions = strList(raw.mentions, L, 'mentions'); unique(mentions, (m) => m, L, 'mentions');
-  const deletedAt = int(raw.deletedAt, L, 'deletedAt'); const deletedBy = person(raw.deletedBy, L, 'deletedBy');
-  if (deletedBy && deletedAt === null) fail(L, 'deletedBy', 'is only stored on a deleted comment');
-  return { id: raw.id, roomId: str(raw.roomId, L, 'roomId', { required: true }), orgId: str(raw.orgId, L, 'orgId', { required: true }), authorId: str(raw.authorId, L, 'authorId', { required: true }), authorName: str(raw.authorName, L, 'authorName'), body: str(raw.body, L, 'body', { required: true, max: LIMITS.commentBody }), replyToId: str(raw.replyToId, L, 'replyToId'), mentions, createdAt: int(raw.createdAt, L, 'createdAt', { required: true }), editedAt: int(raw.editedAt, L, 'editedAt'), editCount: int(raw.editCount, L, 'editCount', { min: 0 }) ?? 0, deletedAt, deletedBy };
-});
-
-function typeTrust(v, L, field) {
-  const t = obj(v, ['score', 'band', 'policyVersion', 'componentLevels', 'hash'], L, field);
-  return t ? { score: num(t.score, L, `${field}.score`), band: str(t.band, L, `${field}.band`), policyVersion: int(t.policyVersion, L, `${field}.policyVersion`), componentLevels: jsonObj(t.componentLevels, L, `${field}.componentLevels`, { values: isStr }) ?? {}, hash: str(t.hash, L, `${field}.hash`, { required: true }) } : null;
-}
-function typeSourceRefs(v, L, field) {
-  const s = obj(v, ['passportVersion', 'passportRevision', 'evidenceIds', 'assessmentIds', 'combineResults', 'trialIds'], L, field) ?? {};
-  return { passportVersion: int(s.passportVersion, L, `${field}.passportVersion`), passportRevision: str(s.passportRevision, L, `${field}.passportRevision`), evidenceIds: strList(s.evidenceIds, L, `${field}.evidenceIds`), assessmentIds: strList(s.assessmentIds, L, `${field}.assessmentIds`), combineResults: strList(s.combineResults, L, `${field}.combineResults`), trialIds: strList(s.trialIds, L, `${field}.trialIds`) };
-}
-export const typeSnapshot = typed((raw, L) => {
-  onlyKeys(raw, ['id', 'roomId', 'orgId', 'playerId', 'at', 'trigger', 'trust', 'sourceRefs', 'note'], L, 'record');
-  return { id: raw.id, roomId: str(raw.roomId, L, 'roomId', { required: true }), orgId: str(raw.orgId, L, 'orgId', { required: true }), playerId: str(raw.playerId, L, 'playerId', { required: true }), at: int(raw.at, L, 'at', { required: true }), trigger: str(raw.trigger, L, 'trigger', { required: true, max: TEXT.trigger }), trust: typeTrust(raw.trust, L, 'trust'), sourceRefs: typeSourceRefs(raw.sourceRefs, L, 'sourceRefs'), note: str(raw.note, L, 'note') };
-});
-
-const DECISION_KEYS = ['id', 'roomId', 'orgId', 'playerId', 'kind', 'state', 'outcome', 'recommendation', 'reasonCodes', 'note', 'by', 'createdAt', 'finalizedAt', 'trigger', 'clientKey', 'supersedes', 'supersededById', 'supersession', 'rev', 'revAt', 'evidenceRefs', 'assessmentSummary', 'snapshot', 'keys', 'draftId', 'lifecycle', 'policyVersion'];
-export const typeDecision = typed((raw, L) => {
-  onlyKeys(raw, DECISION_KEYS, L, 'record');
-  const sp = obj(raw.supersession, ['of', 'reason'], L, 'supersession');
-  const as = obj(raw.assessmentSummary, ['submitted', 'withheld', 'verdicts', 'assessmentIds'], L, 'assessmentSummary');
-  const sn = obj(raw.snapshot, ['at', 'trust', 'sourceRefs', 'snapshotId'], L, 'snapshot');
-  const k = obj(raw.keys, ['finalize', 'draft'], L, 'keys') ?? {};
-  const lc = obj(raw.lifecycle, ['action', 'from', 'to', 'applied', 'reason', 'at'], L, 'lifecycle');
-  return {
-    id: raw.id, roomId: str(raw.roomId, L, 'roomId', { required: true }), orgId: str(raw.orgId, L, 'orgId', { required: true }), playerId: str(raw.playerId, L, 'playerId', { required: true }),
-    kind: oneOf(raw.kind, DECISION_KINDS, L, 'kind', { required: false }), state: oneOf(raw.state, DECISION_STATES, L, 'state', { required: false }), outcome: oneOf(raw.outcome, DECISION_OUTCOMES, L, 'outcome', { required: false }),
-    recommendation: oneOf(raw.recommendation, RECOMMENDATIONS, L, 'recommendation'), reasonCodes: codes(raw.reasonCodes, L, 'reasonCodes'), note: str(raw.note, L, 'note', { max: DECISION_LIMITS.note }),
-    by: person(raw.by, L, 'by', ['role']), createdAt: int(raw.createdAt, L, 'createdAt', { required: true }), finalizedAt: int(raw.finalizedAt, L, 'finalizedAt'),
-    trigger: str(raw.trigger, L, 'trigger', { max: TEXT.trigger }), clientKey: str(raw.clientKey, L, 'clientKey', { max: KEY_MAX }),
-    supersedes: str(raw.supersedes, L, 'supersedes'), supersededById: str(raw.supersededById, L, 'supersededById'),
-    supersession: sp ? { of: str(sp.of, L, 'supersession.of', { required: true }), reason: str(sp.reason, L, 'supersession.reason', { required: true, max: DECISION_LIMITS.supersessionReason }) } : null,
-    rev: int(raw.rev, L, 'rev', { min: 1 }), revAt: int(raw.revAt, L, 'revAt'), evidenceRefs: evidenceRefs(raw.evidenceRefs, L, 'evidenceRefs'),
-    assessmentSummary: as ? { submitted: int(as.submitted, L, 'assessmentSummary.submitted', { required: true, min: 0 }), withheld: int(as.withheld, L, 'assessmentSummary.withheld', { min: 0 }) ?? 0, verdicts: jsonObj(as.verdicts, L, 'assessmentSummary.verdicts', { values: isInt }) ?? {}, assessmentIds: strList(as.assessmentIds, L, 'assessmentSummary.assessmentIds') } : null,
-    // The decision's snapshot IS the room_snapshots row it names: only the id is stored, and the row is read back with it.
-    snapshot: sn ? { snapshotId: str(sn.snapshotId, L, 'snapshot.snapshotId', { required: true }) } : null,
-    keys: { finalize: keyPair(k.finalize, L, 'keys.finalize'), draft: keyPair(k.draft, L, 'keys.draft') },
-    draftId: str(raw.draftId, L, 'draftId'),
-    lifecycle: lc ? { action: str(lc.action, L, 'lifecycle.action'), from: oneOf(lc.from, ROOM_STATUSES, L, 'lifecycle.from', { required: false }), to: oneOf(lc.to, ROOM_STATUSES, L, 'lifecycle.to', { required: false }), applied: flag(lc.applied, L, 'lifecycle.applied', { required: true }), reason: str(lc.reason, L, 'lifecycle.reason'), at: int(lc.at, L, 'lifecycle.at') } : null,
-    policyVersion: int(raw.policyVersion, L, 'policyVersion'),
-  };
-});
-
-export const typeEvidenceState = typed((raw, L) => {
-  onlyKeys(raw, ['id', 'roomId', 'orgId', 'evidenceId', 'state', 'note', 'byId', 'byName', 'at'], L, 'record');
-  return { id: raw.id, roomId: str(raw.roomId, L, 'roomId', { required: true }), orgId: str(raw.orgId, L, 'orgId', { required: true }), evidenceId: str(raw.evidenceId, L, 'evidenceId', { required: true }), state: oneOf(raw.state, EVIDENCE_REVIEW_STATES, L, 'state'), note: str(raw.note, L, 'note', { max: TEXT.evidenceNote }), byId: str(raw.byId, L, 'byId'), byName: str(raw.byName, L, 'byName'), at: int(raw.at, L, 'at', { required: true }) };
-});
-const TYPERS = { recruitmentCases: typeCase, roomComments: typeComment, roomSnapshots: typeSnapshot, roomDecisions: typeDecision, roomEvidenceState: typeEvidenceState };
 
 // ------------------------------------------------------------------ rows
+// The encoders take a record as the routes build it (or a fixture writes it); an absent field is NULL, and the
+// columns' CHECKs and keys judge the values.
+const isStr = (v) => typeof v === 'string';
+const isInt = (v) => Number.isSafeInteger(v);
+const n = (v) => (v === undefined ? null : v);
 const b = (v) => (v === null || v === undefined ? null : v ? 1 : 0);
+const json = (v) => (v === null || v === undefined ? null : JSON.stringify(v));
+/** A due date or a deadline: a `YYYY-MM-DD` day in `_day`, an instant in ms in `_at`. */
 const dueRow = (p, v) => ({ [`${p}_day`]: isStr(v) ? v : null, [`${p}_at`]: isInt(v) ? v : null });
 const dueOut = (row, p) => row[`${p}_day`] ?? row[`${p}_at`];
 const personRow = (p, v, extra = []) => ({ [`${p}_user_id`]: v?.userId ?? null, [`${p}_name`]: v?.name ?? null, ...Object.fromEntries(extra.map((k) => [`${p}_${k}`, v?.[k] ?? null])) });
 const personOut = (row, p, extra = []) => (row[`${p}_user_id`] === null && row[`${p}_name`] === null && extra.every((k) => row[`${p}_${k}`] === null) ? null : { userId: row[`${p}_user_id`], name: row[`${p}_name`], ...Object.fromEntries(extra.map((k) => [k, row[`${p}_${k}`]])) });
 const jsonOut = (v) => (v === null ? null : JSON.parse(v));
+const keyCols = (p, k) => ({ [`${p}_key`]: k?.key ?? null, [`${p}_fp`]: k?.fp ?? null });
+const sourceRefCols = (p, r) => ({ [`${p}_id`]: r?.id ?? null, [`${p}_version`]: r?.version ?? null });
 
-const caseRow = (c) => {
-  const r = c.room; const ro = r?.reopened ?? null;
+/** The Room's reopen facet: who reopened it, from where, why and from what source. */
+const reopenedCols = (ro) => ({
+  room_reopened_at: ro?.at ?? null, ...personRow('room_reopened_by', ro?.by), room_reopened_from: ro?.from ?? null,
+  room_reopened_reason_codes_json: ro ? JSON.stringify(ro.reasonCodes ?? []) : null,
+  room_reopened_source_context: ro?.sourceContext ?? null, ...sourceRefCols('room_reopened_source_ref', ro?.sourceRef),
+});
+/** The Room facet's columns (its tags are rows). */
+const roomCols = (r) => ({
+  room_status: r?.status ?? null, room_priority: r?.priority ?? null, room_lead_scout_user_id: r?.leadScoutUserId ?? null, room_source_context: r?.sourceContext ?? null,
+  ...sourceRefCols('room_source_ref', r?.sourceRef), ...personRow('room_opened_by', r?.openedBy),
+  room_updated_at: r?.updatedAt ?? null, room_archived_at: r?.archivedAt ?? null, room_closed_at: r?.closedAt ?? null,
+  room_rev: r?.rev ?? null, room_rev_at: r?.revAt ?? null, ...personRow('room_rev_by', r?.revBy),
+  ...reopenedCols(r?.reopened),
+});
+/** The case's sign-off decision (not a Room decision). */
+const caseDecisionCols = (d) => ({ decision_outcome: d?.outcome ?? null, decision_reasons: d?.reasons ?? null, decision_by_user_id: d?.byUserId ?? null, decision_by_name: d?.byName ?? null, decision_approved_by_name: d?.approvedBy ?? null, decision_at: d?.at ?? null });
+const caseRow = (c) => ({
+  id: n(c.id), org_id: n(c.orgId), player_id: n(c.playerId), player_name: n(c.playerName), vacancy_id: n(c.vacancyId), owner_user_id: n(c.ownerUserId), owner_name: n(c.ownerName),
+  stage: n(c.stage), priority: n(c.priority), ...dueRow('deadline', c.deadline), restricted: b(c.restricted) ?? 0,
+  ...caseDecisionCols(c.decision), links_signing_id: c.links?.signingId ?? null, created_at: n(c.createdAt), subject_removed_at: n(c.subjectRemovedAt),
+  ...roomCols(c.room),
+});
+const assignmentRow = (caseId, a, position) => ({ case_id: caseId, position, id: n(a.id), user_id: n(a.userId), user_name: n(a.name), task: n(a.task), ...dueRow('due', a.dueAt), status: n(a.status), created_at: n(a.createdAt) });
+const taskRow = (caseId, t, position) => ({
+  case_id: caseId, position, id: n(t.id), title: n(t.title), description: n(t.description), ...dueRow('due', t.dueAt), assignee_user_id: n(t.assigneeUserId), assignee_name: n(t.assigneeName),
+  status: n(t.status), linked_resource_type: n(t.linkedResourceType), linked_resource_id: n(t.linkedResourceId), ...personRow('created_by', t.createdBy), created_at: n(t.createdAt), completed_at: n(t.completedAt), completed_by_name: n(t.completedBy),
+});
+const resolvedCols = (r) => ({ resolved_by_user_id: r?.userId ?? null, resolved_by_name: r?.name ?? null, resolved_at: r?.at ?? null });
+const approvalRow = (caseId, a, position) => ({ case_id: caseId, position, id: n(a.id), decision_outcome: a.decision?.outcome ?? null, decision_reasons: a.decision?.reasons ?? null, ...personRow('requested_by', a.requestedBy), status: n(a.status), requested_at: n(a.requestedAt), ...resolvedCols(a.resolvedBy) });
+const historyRow = (caseId, h, position) => ({ case_id: caseId, position, id: n(h.id), at: n(h.at), action: n(h.action), by_kind: n(h.byKind), by_id: n(h.byId), by_name: n(h.byName), detail_text: isStr(h.detail) ? h.detail : null, detail_json: isPlainObject(h.detail) ? JSON.stringify(h.detail) : null });
+const draftRow = (caseId, d) => ({ case_id: caseId, id: n(d.id), outcome: n(d.outcome), note: n(d.note), ...personRow('by', d.by, ['role']), created_at: n(d.createdAt), updated_at: n(d.updatedAt), ...personRow('updated_by', d.updatedBy, ['role']), rev: n(d.rev), rev_at: n(d.revAt), ...keyCols('create', d.keys?.create) });
+const codeRow = (owner, ownerId, code, position) => ({ [owner]: ownerId, position, code });
+const refRow = (owner, ownerId, r, position) => ({ [owner]: ownerId, position, kind: n(r.kind), ref_id: n(r.id), meta_json: json(r.meta) });
+const handoffRow = (caseId, h) => ({
+  case_id: caseId, id: n(h.id), org_id: n(h.orgId), player_id: n(h.playerId), status: n(h.status), invited_at: n(h.invitedAt), invited_by_user_id: h.invitedBy?.userId ?? null, invited_by_name: h.invitedBy?.name ?? null,
+  accepted_at: n(h.acceptedAt), withdrawn_at: n(h.withdrawnAt), transaction_id: n(h.transactionId), represented_at_invitation: b(h.representedAtInvitation), invited_agency_org_id: n(h.invitedAgencyOrgId), invited_agent_user_id: n(h.invitedAgentUserId),
+  invite_key: h.keys?.invite?.key ?? null, rev: n(h.rev), rev_at: n(h.revAt),
+});
+const approvalCols = (a) => ({ approval_by_name: a?.by ?? null, approval_by_user_id: a?.byUserId ?? null, approval_at: a?.at ?? null, approval_version: a?.version ?? null, approval_superseded: b(a?.superseded) });
+const scenarioRow = (caseId, s, position) => ({ case_id: caseId, position, id: n(s.id), version: n(s.version), label: n(s.label), currency: n(s.currency), term_months: n(s.termMonths), created_by_name: n(s.createdBy), created_at: n(s.createdAt), updated_at: n(s.updatedAt), ...approvalCols(s.approval) });
+const lineRow = (caseId, scenarioId, l, position) => ({ case_id: caseId, scenario_id: scenarioId, position, id: n(l.id), kind: n(l.kind), label: n(l.label), amount_minor: n(l.amountMinor), currency: n(l.currency), schedule: n(l.schedule), confirmed: b(l.confirmed), conditional_assumption: l.conditional?.assumption ?? null });
+const fxRow = (caseId, scenarioId, a, position) => ({ case_id: caseId, scenario_id: scenarioId, position, from_currency: n(a.from), to_currency: n(a.to), rate: n(a.rate), source: n(a.source), date: n(a.date), manual: b(a.manual) });
+const actualRow = (caseId, scenarioId, a, position) => ({ case_id: caseId, scenario_id: scenarioId, position, id: n(a.id), line_id: n(a.lineId), amount_minor: n(a.amountMinor), at: n(a.at), recorded_by_name: n(a.recordedBy) });
+const commentRow = (c) => ({ id: n(c.id), room_id: n(c.roomId), org_id: n(c.orgId), author_user_id: n(c.authorId), author_name: n(c.authorName), body: n(c.body), reply_to_id: n(c.replyToId), created_at: n(c.createdAt), edited_at: n(c.editedAt), edit_count: n(c.editCount) ?? 0, deleted_at: n(c.deletedAt), ...personRow('deleted_by', c.deletedBy) });
+const snapshotRow = (s) => ({
+  id: n(s.id), room_id: n(s.roomId), org_id: n(s.orgId), player_id: n(s.playerId), at: n(s.at), trigger: n(s.trigger),
+  trust_score: s.trust?.score ?? null, trust_band: s.trust?.band ?? null, trust_policy_version: s.trust?.policyVersion ?? null, trust_component_levels_json: s.trust ? JSON.stringify(s.trust.componentLevels ?? {}) : null, trust_hash: s.trust?.hash ?? null,
+  source_passport_version: s.sourceRefs?.passportVersion ?? null, source_passport_revision: s.sourceRefs?.passportRevision ?? null, note: n(s.note),
+});
+const lifecycleCols = (l) => ({ lifecycle_action: l?.action ?? null, lifecycle_from: l?.from ?? null, lifecycle_to: l?.to ?? null, lifecycle_applied: b(l?.applied), lifecycle_reason: l?.reason ?? null, lifecycle_at: l?.at ?? null });
+const decisionRow = (d) => {
+  const as = d.assessmentSummary;
   return {
-    id: c.id, org_id: c.orgId, player_id: c.playerId, player_name: c.playerName, vacancy_id: c.vacancyId, owner_user_id: c.ownerUserId, owner_name: c.ownerName,
-    stage: c.stage, priority: c.priority, ...dueRow('deadline', c.deadline), restricted: b(c.restricted),
-    decision_outcome: c.decision?.outcome ?? null, decision_reasons: c.decision?.reasons ?? null, decision_by_user_id: c.decision?.byUserId ?? null, decision_by_name: c.decision?.byName ?? null, decision_approved_by_name: c.decision?.approvedBy ?? null, decision_at: c.decision?.at ?? null,
-    links_signing_id: c.links.signingId, created_at: c.createdAt, subject_removed_at: c.subjectRemovedAt,
-    room_status: r?.status ?? null, room_priority: r?.priority ?? null, room_lead_scout_user_id: r?.leadScoutUserId ?? null, room_source_context: r?.sourceContext ?? null,
-    room_source_ref_id: r?.sourceRef?.id ?? null, room_source_ref_version: r?.sourceRef?.version ?? null, ...personRow('room_opened_by', r?.openedBy),
-    room_updated_at: r?.updatedAt ?? null, room_archived_at: r?.archivedAt ?? null, room_closed_at: r?.closedAt ?? null,
-    room_rev: r?.rev ?? null, room_rev_at: r?.revAt ?? null, ...personRow('room_rev_by', r?.revBy),
-    room_reopened_at: ro?.at ?? null, ...personRow('room_reopened_by', ro?.by), room_reopened_from: ro?.from ?? null, room_reopened_reason_codes_json: ro ? JSON.stringify(ro.reasonCodes) : null,
-    room_reopened_source_context: ro?.sourceContext ?? null, room_reopened_source_ref_id: ro?.sourceRef?.id ?? null, room_reopened_source_ref_version: ro?.sourceRef?.version ?? null,
+    id: n(d.id), room_id: n(d.roomId), org_id: n(d.orgId), player_id: n(d.playerId), kind: n(d.kind), state: n(d.state), outcome: n(d.outcome), recommendation: n(d.recommendation), note: n(d.note), ...personRow('by', d.by, ['role']),
+    created_at: n(d.createdAt), finalized_at: n(d.finalizedAt), trigger: n(d.trigger), client_key: n(d.clientKey), supersedes_id: n(d.supersedes), superseded_by_id: n(d.supersededById),
+    supersession_of_id: d.supersession?.of ?? null, supersession_reason: d.supersession?.reason ?? null, rev: n(d.rev), rev_at: n(d.revAt),
+    assessments_submitted: as?.submitted ?? null, assessments_withheld: as ? (as.withheld ?? 0) : null, assessment_verdicts_json: as ? JSON.stringify(as.verdicts ?? {}) : null,
+    snapshot_id: d.snapshot?.snapshotId ?? null, ...keyCols('finalize', d.keys?.finalize), ...keyCols('draft', d.keys?.draft), draft_id: n(d.draftId),
+    ...lifecycleCols(d.lifecycle), policy_version: n(d.policyVersion),
   };
 };
-const draftRow = (caseId, d) => ({ case_id: caseId, id: d.id, outcome: d.outcome, note: d.note, ...personRow('by', d.by, ['role']), created_at: d.createdAt, updated_at: d.updatedAt, ...personRow('updated_by', d.updatedBy, ['role']), rev: d.rev, rev_at: d.revAt, create_key: d.keys.create?.key ?? null, create_fp: d.keys.create?.fp ?? null });
-const handoffRow = (caseId, h) => ({ case_id: caseId, id: h.id, org_id: h.orgId, player_id: h.playerId, status: h.status, invited_at: h.invitedAt, invited_by_user_id: h.invitedBy?.userId ?? null, invited_by_name: h.invitedBy?.name ?? null, accepted_at: h.acceptedAt, withdrawn_at: h.withdrawnAt, transaction_id: h.transactionId, represented_at_invitation: b(h.representedAtInvitation), invited_agency_org_id: h.invitedAgencyOrgId, invited_agent_user_id: h.invitedAgentUserId, invite_key: h.keys.invite?.key ?? null, rev: h.rev, rev_at: h.revAt });
-const commentRow = (c) => ({ id: c.id, room_id: c.roomId, org_id: c.orgId, author_user_id: c.authorId, author_name: c.authorName, body: c.body, reply_to_id: c.replyToId, created_at: c.createdAt, edited_at: c.editedAt, edit_count: c.editCount, deleted_at: c.deletedAt, ...personRow('deleted_by', c.deletedBy) });
-const snapshotRow = (s) => ({ id: s.id, room_id: s.roomId, org_id: s.orgId, player_id: s.playerId, at: s.at, trigger: s.trigger, trust_score: s.trust?.score ?? null, trust_band: s.trust?.band ?? null, trust_policy_version: s.trust?.policyVersion ?? null, trust_component_levels_json: s.trust ? JSON.stringify(s.trust.componentLevels) : null, trust_hash: s.trust?.hash ?? null, source_passport_version: s.sourceRefs.passportVersion ?? null, source_passport_revision: s.sourceRefs.passportRevision ?? null, note: s.note });
-const decisionRow = (d) => ({
-  id: d.id, room_id: d.roomId, org_id: d.orgId, player_id: d.playerId, kind: d.kind, state: d.state, outcome: d.outcome, recommendation: d.recommendation, note: d.note, ...personRow('by', d.by, ['role']),
-  created_at: d.createdAt, finalized_at: d.finalizedAt, trigger: d.trigger, client_key: d.clientKey, supersedes_id: d.supersedes, superseded_by_id: d.supersededById,
-  supersession_of_id: d.supersession?.of ?? null, supersession_reason: d.supersession?.reason ?? null, rev: d.rev, rev_at: d.revAt,
-  assessments_submitted: d.assessmentSummary?.submitted ?? null, assessments_withheld: d.assessmentSummary?.withheld ?? null, assessment_verdicts_json: d.assessmentSummary ? JSON.stringify(d.assessmentSummary.verdicts) : null,
-  snapshot_id: d.snapshot?.snapshotId ?? null, finalize_key: d.keys.finalize?.key ?? null, finalize_fp: d.keys.finalize?.fp ?? null, draft_key: d.keys.draft?.key ?? null, draft_fp: d.keys.draft?.fp ?? null, draft_id: d.draftId,
-  lifecycle_action: d.lifecycle?.action ?? null, lifecycle_from: d.lifecycle?.from ?? null, lifecycle_to: d.lifecycle?.to ?? null, lifecycle_applied: b(d.lifecycle?.applied), lifecycle_reason: d.lifecycle?.reason ?? null, lifecycle_at: d.lifecycle?.at ?? null, policy_version: d.policyVersion,
-});
-const evidenceRow = (e) => ({ id: e.id, room_id: e.roomId, org_id: e.orgId, evidence_id: e.evidenceId, state: e.state, note: e.note, by_user_id: e.byId, by_name: e.byName, at: e.at });
+const evidenceRow = (e) => ({ id: n(e.id), room_id: n(e.roomId), org_id: n(e.orgId), evidence_id: n(e.evidenceId), state: n(e.state), note: n(e.note), by_user_id: n(e.byId), by_name: n(e.byName), at: n(e.at) });
 
-const SAMPLE_CASE = { id: 'x', links: { signingId: null } };
-const SAMPLE_DECISION = { id: 'x', keys: { finalize: null, draft: null } };
 const COLS = {
-  recruitment_cases: Object.keys(caseRow(SAMPLE_CASE)),
+  recruitment_cases: Object.keys(caseRow({})),
   case_room_tags: ['case_id', 'position', 'tag'],
-  case_assignments: ['case_id', 'position', 'id', 'user_id', 'user_name', 'task', 'due_day', 'due_at', 'status', 'created_at'],
-  case_tasks: ['case_id', 'position', 'id', 'title', 'description', 'due_day', 'due_at', 'assignee_user_id', 'assignee_name', 'status', 'linked_resource_type', 'linked_resource_id', 'created_by_user_id', 'created_by_name', 'created_at', 'completed_at', 'completed_by_name'],
-  case_approvals: ['case_id', 'position', 'id', 'decision_outcome', 'decision_reasons', 'requested_by_user_id', 'requested_by_name', 'status', 'requested_at', 'resolved_by_user_id', 'resolved_by_name', 'resolved_at'],
-  case_history: ['case_id', 'position', 'id', 'at', 'action', 'by_kind', 'by_id', 'by_name', 'detail_text', 'detail_json'],
+  case_assignments: Object.keys(assignmentRow('x', {}, 0)),
+  case_tasks: Object.keys(taskRow('x', {}, 0)),
+  case_approvals: Object.keys(approvalRow('x', {}, 0)),
+  case_history: Object.keys(historyRow('x', {}, 0)),
   case_request_links: ['case_id', 'position', 'request_id'],
   case_trial_links: ['case_id', 'position', 'trial_id'],
-  case_decision_drafts: Object.keys(draftRow('x', { keys: { create: null } })),
-  case_decision_draft_reason_codes: ['case_id', 'position', 'code'],
-  case_decision_draft_evidence_refs: ['case_id', 'position', 'kind', 'ref_id', 'meta_json'],
-  case_transaction_handoffs: Object.keys(handoffRow('x', { keys: { invite: null } })),
-  case_budget_scenarios: ['case_id', 'position', 'id', 'version', 'label', 'currency', 'term_months', 'created_by_name', 'created_at', 'updated_at', 'approval_by_name', 'approval_by_user_id', 'approval_at', 'approval_version', 'approval_superseded'],
-  case_budget_lines: ['case_id', 'scenario_id', 'position', 'id', 'kind', 'label', 'amount_minor', 'currency', 'schedule', 'confirmed', 'conditional_assumption'],
-  case_budget_fx_assumptions: ['case_id', 'scenario_id', 'position', 'from_currency', 'to_currency', 'rate', 'source', 'date', 'manual'],
-  case_budget_actuals: ['case_id', 'scenario_id', 'position', 'id', 'line_id', 'amount_minor', 'at', 'recorded_by_name'],
+  case_decision_drafts: Object.keys(draftRow('x', {})),
+  case_decision_draft_reason_codes: Object.keys(codeRow('case_id', 'x', 'c', 0)),
+  case_decision_draft_evidence_refs: Object.keys(refRow('case_id', 'x', {}, 0)),
+  case_transaction_handoffs: Object.keys(handoffRow('x', {})),
+  case_budget_scenarios: Object.keys(scenarioRow('x', {}, 0)),
+  case_budget_lines: Object.keys(lineRow('x', 's', {}, 0)),
+  case_budget_fx_assumptions: Object.keys(fxRow('x', 's', {}, 0)),
+  case_budget_actuals: Object.keys(actualRow('x', 's', {}, 0)),
   room_comments: Object.keys(commentRow({})),
   room_comment_mentions: ['comment_id', 'position', 'user_id'],
-  room_snapshots: Object.keys(snapshotRow({ sourceRefs: {} })),
+  room_snapshots: Object.keys(snapshotRow({})),
   room_snapshot_source_refs: ['snapshot_id', 'kind', 'position', 'ref_id'],
-  room_decisions: Object.keys(decisionRow(SAMPLE_DECISION)),
-  room_decision_reason_codes: ['decision_id', 'position', 'code'],
-  room_decision_evidence_refs: ['decision_id', 'position', 'kind', 'ref_id', 'meta_json'],
+  room_decisions: Object.keys(decisionRow({})),
+  room_decision_reason_codes: Object.keys(codeRow('decision_id', 'x', 'c', 0)),
+  room_decision_evidence_refs: Object.keys(refRow('decision_id', 'x', {}, 0)),
   room_decision_assessment_ids: ['decision_id', 'position', 'assessment_id'],
   room_evidence_states: Object.keys(evidenceRow({})),
 };
-/** The case's child tables, in delete order (a grandchild before its parent; the links included). */
-const CASE_CHILDREN = ['case_room_tags', 'case_assignments', 'case_tasks', 'case_approvals', 'case_history', 'case_request_links', 'case_trial_links', 'case_decision_draft_reason_codes', 'case_decision_draft_evidence_refs', 'case_decision_drafts', 'case_transaction_handoffs', 'case_budget_lines', 'case_budget_fx_assumptions', 'case_budget_actuals', 'case_budget_scenarios'];
-const LINK_TABLES = ['case_request_links', 'case_trial_links'];
 const PARENT = { recruitmentCases: 'recruitment_cases', roomComments: 'room_comments', roomSnapshots: 'room_snapshots', roomDecisions: 'room_decisions', roomEvidenceState: 'room_evidence_states' };
-const ROOM_CHILDREN = { room_comments: [['room_comment_mentions', 'comment_id']], room_snapshots: [['room_snapshot_source_refs', 'snapshot_id']], room_decisions: [['room_decision_reason_codes', 'decision_id'], ['room_decision_evidence_refs', 'decision_id'], ['room_decision_assessment_ids', 'decision_id']], room_evidence_states: [] };
+const SOURCE_REF_LISTS = [['evidence', 'evidenceIds'], ['assessment', 'assessmentIds'], ['combine', 'combineResults'], ['trial', 'trialIds']];
 
 // ------------------------------------------------------------------ statements and the record readers
 const stmtCache = new WeakMap();
 function statements(sqlite) {
   let s = stmtCache.get(sqlite); if (s && s.preparedBy === sqlite.prepare) return s;
-  const insert = (table, { upsert = false } = {}) => {
-    const cols = COLS[table];
-    const tail = upsert ? ` ON CONFLICT(id) DO UPDATE SET ${cols.filter((c) => c !== 'id').map((c) => `${c} = excluded.${c}`).join(', ')}` : '';
-    return sqlite.prepare(`INSERT INTO ${table} (${cols.join(', ')}) VALUES (${cols.map((c) => `@${c}`).join(', ')})${tail}`);
-  };
+  const insert = (table) => { const cols = COLS[table]; return sqlite.prepare(`INSERT INTO ${table} (${cols.join(', ')}) VALUES (${cols.map((c) => `@${c}`).join(', ')})`); };
   const byCase = (t, order = 'position') => sqlite.prepare(`SELECT * FROM ${t} WHERE case_id = ?${order ? ` ORDER BY ${order}` : ''}`);
   s = {
-    ins: Object.fromEntries(Object.keys(COLS).map((t) => [t, insert(t, { upsert: Object.values(PARENT).includes(t) })])),
-    caseChildDel: Object.fromEntries(CASE_CHILDREN.map((t) => [t, sqlite.prepare(`DELETE FROM ${t} WHERE case_id = ?`)])),
-    roomChildDel: Object.fromEntries(Object.values(ROOM_CHILDREN).flat().map(([t, col]) => [t, sqlite.prepare(`DELETE FROM ${t} WHERE ${col} = ?`)])),
-    del: Object.fromEntries(Object.values(PARENT).map((t) => [t, sqlite.prepare(`DELETE FROM ${t} WHERE id = ?`)])),
+    ins: Object.fromEntries(Object.keys(COLS).map((t) => [t, insert(t)])),
     byId: Object.fromEntries(Object.values(PARENT).map((t) => [t, sqlite.prepare(`SELECT * FROM ${t} WHERE id = ?`)])),
     all: Object.fromEntries(Object.values(PARENT).map((t) => [t, sqlite.prepare(`SELECT * FROM ${t} ORDER BY rowid`)])),
     of: Object.fromEntries(['case_room_tags', 'case_assignments', 'case_tasks', 'case_approvals', 'case_history', 'case_request_links', 'case_trial_links', 'case_decision_draft_reason_codes', 'case_decision_draft_evidence_refs', 'case_budget_scenarios'].map((t) => [t, byCase(t)])),
@@ -814,9 +598,6 @@ function statements(sqlite) {
     mentionsOf: sqlite.prepare('SELECT user_id FROM room_comment_mentions WHERE comment_id = ? ORDER BY position'),
     sourceRefsOf: sqlite.prepare('SELECT kind, ref_id FROM room_snapshot_source_refs WHERE snapshot_id = ? ORDER BY kind, position'),
     decisionChild: Object.fromEntries(['room_decision_reason_codes', 'room_decision_evidence_refs', 'room_decision_assessment_ids'].map((t) => [t, sqlite.prepare(`SELECT * FROM ${t} WHERE decision_id = ? ORDER BY position`)])),
-    org: sqlite.prepare('SELECT 1 FROM orgs WHERE id = ?'), user: sqlite.prepare('SELECT 1 FROM org_users WHERE id = ?'),
-    request: sqlite.prepare('SELECT 1 FROM recruitment_requests WHERE id = ?'), trial: sqlite.prepare('SELECT 1 FROM trials WHERE id = ?'),
-    ids: (table) => sqlite.prepare(`SELECT id FROM ${table} ORDER BY rowid`).all().map((r) => r.id),
     preparedBy: sqlite.prepare,
   };
   stmtCache.set(sqlite, s); return s;
@@ -851,52 +632,59 @@ function batchDecisionStatements(sqlite, st, rows) {
   };
 }
 
-/** Write a typed case whole: the row upserted (its rowid, and so its insertion order, kept), every child replaced. `links: false` leaves the link rows to `writeCaseLinks`. */
-function writeCase(st, c, { links = true } = {}) {
-  st.ins.recruitment_cases.run(caseRow(c));
-  for (const t of CASE_CHILDREN) if (links || !LINK_TABLES.includes(t)) st.caseChildDel[t].run(c.id);
-  const I = st.ins; const id = c.id;
-  (c.room?.tags ?? []).forEach((tag, i) => I.case_room_tags.run({ case_id: id, position: i, tag }));
-  c.assignments.forEach((a, i) => I.case_assignments.run({ case_id: id, position: i, id: a.id, user_id: a.userId, user_name: a.name, task: a.task, ...dueRow('due', a.dueAt), status: a.status, created_at: a.createdAt }));
-  c.tasks.forEach((t, i) => I.case_tasks.run({ case_id: id, position: i, id: t.id, title: t.title, description: t.description, ...dueRow('due', t.dueAt), assignee_user_id: t.assigneeUserId, assignee_name: t.assigneeName, status: t.status, linked_resource_type: t.linkedResourceType, linked_resource_id: t.linkedResourceId, ...personRow('created_by', t.createdBy), created_at: t.createdAt, completed_at: t.completedAt, completed_by_name: t.completedBy }));
-  c.approvals.forEach((a, i) => I.case_approvals.run({ case_id: id, position: i, id: a.id, decision_outcome: a.decision.outcome, decision_reasons: a.decision.reasons, ...personRow('requested_by', a.requestedBy), status: a.status, requested_at: a.requestedAt, resolved_by_user_id: a.resolvedBy?.userId ?? null, resolved_by_name: a.resolvedBy?.name ?? null, resolved_at: a.resolvedBy?.at ?? null }));
-  c.history.forEach((h, i) => I.case_history.run({ case_id: id, position: i, id: h.id, at: h.at, action: h.action, by_kind: h.byKind, by_id: h.byId, by_name: h.byName, detail_text: isStr(h.detail) ? h.detail : null, detail_json: isPlainObject(h.detail) ? JSON.stringify(h.detail) : null }));
-  if (links) writeCaseLinks(st, c);
-  if (c.decisionDraft) {
-    const d = c.decisionDraft; I.case_decision_drafts.run(draftRow(id, d));
-    d.reasonCodes.forEach((code, i) => I.case_decision_draft_reason_codes.run({ case_id: id, position: i, code }));
-    d.evidenceRefs.forEach((r, i) => I.case_decision_draft_evidence_refs.run({ case_id: id, position: i, kind: r.kind, ref_id: r.id, meta_json: r.meta === null ? null : JSON.stringify(r.meta) }));
-  }
-  if (c.transactionHandoff) I.case_transaction_handoffs.run(handoffRow(id, c.transactionHandoff));
-  (c.budget?.scenarios ?? []).forEach((s, i) => {
-    I.case_budget_scenarios.run({ case_id: id, position: i, id: s.id, version: s.version, label: s.label, currency: s.currency, term_months: s.termMonths, created_by_name: s.createdBy, created_at: s.createdAt, updated_at: s.updatedAt, approval_by_name: s.approval?.by ?? null, approval_by_user_id: s.approval?.byUserId ?? null, approval_at: s.approval?.at ?? null, approval_version: s.approval?.version ?? null, approval_superseded: b(s.approval?.superseded) });
-    s.lines.forEach((l, j) => I.case_budget_lines.run({ case_id: id, scenario_id: s.id, position: j, id: l.id, kind: l.kind, label: l.label, amount_minor: l.amountMinor, currency: l.currency, schedule: l.schedule, confirmed: b(l.confirmed), conditional_assumption: l.conditional?.assumption ?? null }));
-    s.fxAssumptions.forEach((a, j) => I.case_budget_fx_assumptions.run({ case_id: id, scenario_id: s.id, position: j, from_currency: a.from, to_currency: a.to, rate: a.rate, source: a.source, date: a.date, manual: b(a.manual) }));
-    s.actuals.forEach((a, j) => I.case_budget_actuals.run({ case_id: id, scenario_id: s.id, position: j, id: a.id, line_id: a.lineId, amount_minor: a.amountMinor, at: a.at, recorded_by_name: a.recordedBy }));
-  });
+
+/** A case's ordered children, inserted at `position` from 0. */
+const caseChildren = (st, id, step, list) => ({
+  tags: (tags) => list('room.tags', tags).forEach((tag, i) => step(`room tag ${i}`, () => st.ins.case_room_tags.run({ case_id: id, position: i, tag }))),
+  draft: (d) => {
+    step('decision draft', () => st.ins.case_decision_drafts.run(draftRow(id, d)));
+    list('decisionDraft.reasonCodes', d.reasonCodes).forEach((code, i) => step(`decision draft reason ${i}`, () => st.ins.case_decision_draft_reason_codes.run(codeRow('case_id', id, code, i))));
+    list('decisionDraft.evidenceRefs', d.evidenceRefs, { objects: true }).forEach((r, i) => step(`decision draft evidence ${i}`, () => st.ins.case_decision_draft_evidence_refs.run(refRow('case_id', id, r, i))));
+  },
+  scenario: (s, position) => {
+    step(`budget scenario ${s.id}`, () => st.ins.case_budget_scenarios.run(scenarioRow(id, s, position)));
+    list(`budget scenario ${s.id} lines`, s.lines, { objects: true }).forEach((l, j) => step(`budget scenario ${s.id} line ${l.id}`, () => st.ins.case_budget_lines.run(lineRow(id, s.id, l, j))));
+    list(`budget scenario ${s.id} fxAssumptions`, s.fxAssumptions, { objects: true }).forEach((a, j) => step(`budget scenario ${s.id} fx ${j}`, () => st.ins.case_budget_fx_assumptions.run(fxRow(id, s.id, a, j))));
+    list(`budget scenario ${s.id} actuals`, s.actuals, { objects: true }).forEach((a, j) => step(`budget scenario ${s.id} actual ${a.id}`, () => st.ins.case_budget_actuals.run(actualRow(id, s.id, a, j))));
+  },
+});
+/** A whole case, inserted with its children. */
+function insertCase(st, c) {
+  const id = c.id;
+  const step = (part, fn) => rowStep('recruitment_cases', id, part, fn);
+  const list = (field, v, opts) => listOf('recruitment_cases', id, field, v, opts);
+  const children = caseChildren(st, id, step, list);
+  step('row', () => st.ins.recruitment_cases.run(caseRow(c)));
+  children.tags(c.room?.tags);
+  list('assignments', c.assignments, { objects: true }).forEach((a, i) => step(`assignment ${a.id}`, () => st.ins.case_assignments.run(assignmentRow(id, a, i))));
+  list('tasks', c.tasks, { objects: true }).forEach((t, i) => step(`task ${t.id}`, () => st.ins.case_tasks.run(taskRow(id, t, i))));
+  list('approvals', c.approvals, { objects: true }).forEach((a, i) => step(`approval ${a.id}`, () => st.ins.case_approvals.run(approvalRow(id, a, i))));
+  list('history', c.history, { objects: true }).forEach((h, i) => step(`history ${h.id}`, () => st.ins.case_history.run(historyRow(id, h, i))));
+  list('links.requestIds', c.links?.requestIds).forEach((r, i) => step(`request link ${r}`, () => st.ins.case_request_links.run({ case_id: id, position: i, request_id: r })));
+  list('links.trialIds', c.links?.trialIds).forEach((t, i) => step(`trial link ${t}`, () => st.ins.case_trial_links.run({ case_id: id, position: i, trial_id: t })));
+  if (c.decisionDraft) children.draft(c.decisionDraft);
+  if (c.transactionHandoff) step('transaction handoff', () => st.ins.case_transaction_handoffs.run(handoffRow(id, c.transactionHandoff)));
+  list('budget.scenarios', c.budget?.scenarios, { objects: true }).forEach((s, i) => children.scenario(s, i));
 }
-function writeCaseLinks(st, c) {
-  for (const t of LINK_TABLES) st.caseChildDel[t].run(c.id);
-  c.links.requestIds.forEach((r, i) => st.ins.case_request_links.run({ case_id: c.id, position: i, request_id: r }));
-  c.links.trialIds.forEach((t, i) => st.ins.case_trial_links.run({ case_id: c.id, position: i, trial_id: t }));
-}
-function writeRoomRow(st, name, r) {
+/** A whole room comment, snapshot, decision or evidence state, inserted with its children. */
+function insertRoomRow(st, name, r) {
   const table = PARENT[name];
-  for (const [t] of ROOM_CHILDREN[table]) st.roomChildDel[t].run(r.id);
-  if (name === 'roomComments') { st.ins.room_comments.run(commentRow(r)); r.mentions.forEach((u, i) => st.ins.room_comment_mentions.run({ comment_id: r.id, position: i, user_id: u })); return; }
-  if (name === 'roomSnapshots') {
-    st.ins.room_snapshots.run(snapshotRow(r));
-    for (const [kind, key] of [['evidence', 'evidenceIds'], ['assessment', 'assessmentIds'], ['combine', 'combineResults'], ['trial', 'trialIds']]) r.sourceRefs[key].forEach((ref, i) => st.ins.room_snapshot_source_refs.run({ snapshot_id: r.id, kind, position: i, ref_id: ref }));
-    return;
+  const step = (part, fn) => rowStep(table, r.id, part, fn);
+  const list = (field, v, opts) => listOf(table, r.id, field, v, opts);
+  if (name === 'roomComments') {
+    step('row', () => st.ins.room_comments.run(commentRow(r)));
+    list('mentions', r.mentions).forEach((u, i) => step(`mention ${i}`, () => st.ins.room_comment_mentions.run({ comment_id: r.id, position: i, user_id: u })));
+  } else if (name === 'roomSnapshots') {
+    step('row', () => st.ins.room_snapshots.run(snapshotRow(r)));
+    for (const [kind, key] of SOURCE_REF_LISTS) list(`sourceRefs.${key}`, r.sourceRefs?.[key]).forEach((ref, i) => step(`source ref ${kind} ${i}`, () => st.ins.room_snapshot_source_refs.run({ snapshot_id: r.id, kind, position: i, ref_id: ref })));
+  } else if (name === 'roomDecisions') {
+    step('row', () => st.ins.room_decisions.run(decisionRow(r)));
+    list('reasonCodes', r.reasonCodes).forEach((code, i) => step(`reason ${i}`, () => st.ins.room_decision_reason_codes.run(codeRow('decision_id', r.id, code, i))));
+    list('evidenceRefs', r.evidenceRefs, { objects: true }).forEach((e, i) => step(`evidence ref ${i}`, () => st.ins.room_decision_evidence_refs.run(refRow('decision_id', r.id, e, i))));
+    list('assessmentSummary.assessmentIds', r.assessmentSummary?.assessmentIds).forEach((a, i) => step(`assessment ${i}`, () => st.ins.room_decision_assessment_ids.run({ decision_id: r.id, position: i, assessment_id: a })));
+  } else {
+    step('row', () => st.ins.room_evidence_states.run(evidenceRow(r)));
   }
-  if (name === 'roomDecisions') {
-    st.ins.room_decisions.run(decisionRow(r));
-    r.reasonCodes.forEach((code, i) => st.ins.room_decision_reason_codes.run({ decision_id: r.id, position: i, code }));
-    r.evidenceRefs.forEach((e, i) => st.ins.room_decision_evidence_refs.run({ decision_id: r.id, position: i, kind: e.kind, ref_id: e.id, meta_json: e.meta === null ? null : JSON.stringify(e.meta) }));
-    (r.assessmentSummary?.assessmentIds ?? []).forEach((a, i) => st.ins.room_decision_assessment_ids.run({ decision_id: r.id, position: i, assessment_id: a }));
-    return;
-  }
-  st.ins.room_evidence_states.run(evidenceRow(r));
 }
 
 const historyOut = (h) => ({ id: h.id, at: h.at, byKind: h.by_kind, byId: h.by_id, byName: h.by_name, action: h.action, detail: h.detail_json !== null ? JSON.parse(h.detail_json) : h.detail_text });
@@ -970,34 +758,6 @@ export const readRoomSnapshots = (sqlite) => readAll(sqlite, 'roomSnapshots');
 export const readRoomDecisions = (sqlite) => readAll(sqlite, 'roomDecisions');
 export const readRoomEvidenceStates = (sqlite) => readAll(sqlite, 'roomEvidenceState');
 
-// ------------------------------------------------------------------ references, judged in code so a refusal names ids
-/** The cross-record rules no key can state: a decision's snapshot and its chain stay inside its room. */
-function decisionRefsProblems(d, { decisionRoom, snapshotRoom }) {
-  const out = [];
-  if (d.snapshot && snapshotRoom(d.snapshot.snapshotId) !== d.roomId) out.push(`room_decisions ${d.id} names snapshot ${d.snapshot.snapshotId}, which is not a snapshot of room ${d.roomId}`);
-  for (const [k, v] of [['supersedes', d.supersedes], ['supersededById', d.supersededById]]) {
-    if (v === null) continue;
-    const room = decisionRoom(v);
-    if (room === undefined) out.push(`room_decisions ${d.id} (room ${d.roomId}) names ${v} (${k}): no such decision`);
-    else if (room !== d.roomId) out.push(`room_decisions ${d.id} (room ${d.roomId}) names ${v} (${k}) of room ${room}`);
-  }
-  return out;
-}
-/** The organisation, staff, request and trial each record names (RESTRICT keys), named with ids before the engine would refuse anonymously. */
-function referenceProblems(st, name, r) {
-  const out = [];
-  const table = PARENT[name];
-  if (!st.org.get(r.orgId)) out.push(`${table} ${r.id} → orgs ${r.orgId}`);
-  const users = name === 'recruitmentCases' ? [r.ownerUserId, r.room?.leadScoutUserId, r.decision?.byUserId, ...r.assignments.map((a) => a.userId)] : name === 'roomComments' ? [r.authorId] : [];
-  for (const u of users) if (u && !st.user.get(u)) out.push(`${table} ${r.id} → org_users ${u}`);
-  if (name === 'recruitmentCases') {
-    if (r.transactionHandoff && !st.org.get(r.transactionHandoff.orgId)) out.push(`case_transaction_handoffs ${r.id} → orgs ${r.transactionHandoff.orgId}`);
-    for (const q of r.links.requestIds) if (!st.request.get(q)) out.push(`case_request_links ${r.id} → recruitment_requests ${q}`);
-    for (const t of r.links.trialIds) if (!st.trial.get(t)) out.push(`case_trial_links ${r.id} → trials ${t}`);
-  }
-  return out;
-}
-
 /** The counts of the admin report: rows naming a player that is not in the players table, and rows naming a retained record (Q8a: counted, never refused). */
 const PLAYER_COUNT_TABLES = { recruitmentCases: 'recruitment_cases', roomSnapshots: 'room_snapshots', roomDecisions: 'room_decisions', caseTransactionHandoffs: 'case_transaction_handoffs' };
 export function unresolvedPlayerReferences(sqlite) {
@@ -1019,6 +779,10 @@ export const RECRUITMENT_CASES_RECORDS = {
 
 // ------------------------------------------------------------------ the repository
 const deepFreeze = (v) => { if (v !== null && typeof v === 'object' && !Object.isFrozen(v)) { Object.freeze(v); for (const k of Object.keys(v)) deepFreeze(v[k]); } return v; };
+/** Only the fields given: `undefined` leaves a column as it is. */
+const given = (cols) => Object.fromEntries(Object.entries(cols).filter(([, v]) => v !== undefined));
+/** The Room statuses a move into `to` may start from. */
+const leadingTo = (to) => Object.keys(ROOM_TRANSITIONS).filter((x) => ROOM_TRANSITIONS[x].includes(to));
 /**
  * `createRecruitmentCasesRepository({ sqlite, unit, now, log })`. Every operation joins the open unit of work (a
  * failure poisons it), the caller's open raw transaction, or runs a transaction of its own; it writes its rows and
@@ -1043,50 +807,163 @@ export function createRecruitmentCasesRepository({ sqlite, unit = null, now = Da
   const inList = (name, col) => (values) => { const want = [...new Set((values ?? []).filter((v) => typeof v === 'string'))]; if (!want.length) return []; return decodeAll(name, sqlite.prepare(`SELECT * FROM ${PARENT[name]} WHERE ${col} IN (${want.map(() => '?').join(',')}) ORDER BY rowid`).all(...want)); };
   const list = (name, sql) => { const stmt = sqlite.prepare(sql); return (...args) => decodeAll(name, stmt.all(...args)); };
   const count = (sql) => { const stmt = sqlite.prepare(sql); return (...args) => stmt.get(...args).n; };
-  const typedOr = (name, raw) => { const t = TYPERS[name](raw, name); if (!t.ok) throw refusal('RECRUITMENT_CASES_INPUT_INVALID', t.reason); return t.record; };
-  const IMMUTABLE = { recruitmentCases: ['id', 'orgId', 'playerId', 'createdAt'], roomComments: ['id', 'roomId', 'orgId', 'authorId', 'createdAt'], roomSnapshots: ['id', 'roomId'], roomDecisions: ['id', 'roomId', 'orgId', 'playerId', 'createdAt'], roomEvidenceState: ['id', 'roomId', 'orgId', 'evidenceId'] };
-  const check = (name, r) => {
-    const problems = referenceProblems(st, name, r);
-    let code = 'RECRUITMENT_CASES_REFERENCE_MISSING';
-    if (name !== 'recruitmentCases' && !exists('recruitmentCases', r.roomId)) { problems.push(`${PARENT[name]} ${r.id} → case ${r.roomId}`); code = 'ROOM_CASE_MISSING'; }
-    if (name === 'roomDecisions') {
-      const chain = decisionRefsProblems(r, { decisionRoom: (x) => (x === r.id ? r.roomId : find('roomDecisions', x)?.roomId), snapshotRoom: (x) => find('roomSnapshots', x)?.roomId });
-      if (chain.length) { problems.push(...chain); code = 'DECISION_CHAIN_BROKEN'; }
-    }
-    if (name === 'roomEvidenceState' && sqlite.prepare('SELECT 1 FROM room_evidence_states WHERE room_id = ? AND evidence_id = ? AND id <> ?').get(r.roomId, r.evidenceId, r.id)) problems.push(`room_evidence_states ${r.id}: room ${r.roomId} already reviews evidence ${r.evidenceId}`);
-    if (problems.length) throw refusal(code, `${PARENT[name]} ${r.id}: ${ids(problems)}`);
-  };
-  const write = (name, r) => { check(name, r); if (name === 'recruitmentCases') writeCase(st, r); else writeRoomRow(st, name, r); };
-  const editing = new Set();
 
-  /** `create(record)`: a new record, typed whole; an existing id is refused. */
-  const create = (name) => (raw) => operation(() => {
-    const r = typedOr(name, raw);
-    if (exists(name, r.id)) throw refusal('RECRUITMENT_CASES_DUPLICATE', `${PARENT[name]} ${r.id} already exists`);
-    write(name, r); return find(name, r.id);
+  // ---- writes: a record is created whole, then changes only through named acts on its own rows.
+  const { refusal, q, sqlIn, guarded, nextPosition } = writeKit(sqlite, 'RECRUITMENT_CASES');
+  const must = (name, id) => { const r = find(name, id); if (!r) throw refusal('NOT_FOUND', `${PARENT[name]} ${id} is not a record of the repository`); return r; };
+  const WRITES = new Set();
+  const writes = (o) => { for (const k of Object.keys(o)) WRITES.add(k); return o; };
+  /** `create(record)`: a new record, whole. An existing id is refused, and the stored record must read back as written. */
+  const create = (name) => (r) => operation(() => {
+    const table = PARENT[name];
+    newRecord(table, (id) => exists(name, id), r);
+    if (name === 'recruitmentCases') insertCase(st, r); else insertRoomRow(st, name, r);
+    const stored = must(name, r.id); readsBackAsWritten(table, r.id, r, stored); return stored;
   });
+
+  const CASE = 'recruitment_cases';
+  const ROOM = 'room_status IS NOT NULL';
+  const noRoom = (id) => `recruitment_cases ${id} has no Room`;
+  const childrenOf = (id) => caseChildren(st, id, (part, fn) => rowStep(CASE, id, part, fn), (field, v, opts) => listOf(CASE, id, field, v, opts));
+  /** Append one ordered child row: `encode(position)` at the owner's next position. */
+  const appendTo = (table, id, encode, scope = {}) => st.ins[table].run(encode(nextPosition(table, 'case_id', id, scope)));
+  /** An act that inserts a sub-record checks it reads back as written, as a create does. */
+  const storedAs = (id, written, path, pick) => (stored) => readsBackAsWritten(CASE, id, written, pick(stored), path);
   /**
-   * `update(id, change)`: `change` receives a plain copy of the stored record and edits it (or returns a replacement);
-   * the result is typed whole and written at once. The identifiers and the creation instant cannot change.
+   * The bookkeeping an act leaves on its case: the Room's last-activity instant (`touch`), its rev bump (`bump`, by
+   * `revBy`, `{ id, name }`), and its history entries, which are only ever appended.
    */
-  const update = (name) => (id, change) => operation(() => {
-    if (typeof change !== 'function') throw new TypeError(`${name}.update(id, change) needs a function that edits the copy it is given`);
-    const key = `${name}:${id}`;
-    if (editing.has(key)) throw new Error(`${PARENT[name]} ${id} is already being updated: an update inside its own update would be overwritten by the outer one; make the second change after the first returns`);
-    const before = find(name, id);
-    if (!before) throw refusal('RECRUITMENT_CASES_NOT_FOUND', `${PARENT[name]} ${id} is not a record of the repository`);
-    editing.add(key);
-    let returned; const draft = clone(before);
-    try { returned = change(draft); } finally { editing.delete(key); }
-    const next = typedOr(name, returned === undefined ? draft : returned);
-    for (const k of IMMUTABLE[name]) if (next[k] !== before[k]) throw refusal('RECRUITMENT_CASES_INPUT_INVALID', `${PARENT[name]} ${id}: ${k} cannot change`);
-    write(name, next); return find(name, id);
-  });
-  const ops = (name, { updatable = true } = {}) => ({ create: create(name), ...(updatable ? { update: update(name) } : {}), byId: (id) => find(name, id) });
-  const forRoom = (name) => list(name, `SELECT * FROM ${PARENT[name]} WHERE room_id = ? ORDER BY rowid`);
+  const applyAct = (id, { at = null, revBy = null, touch = false, bump = false, history = [] } = {}) => {
+    if (touch) guarded(CASE, { id }, ROOM, { room_updated_at: at }, noRoom(id));
+    if (bump) guarded(CASE, { id }, ROOM, { room_rev_at: at, ...personRow('room_rev_by', revBy && { userId: revBy.id ?? null, name: revBy.name ?? null }) }, noRoom(id), { set: 'room_rev = room_rev + 1' });
+    for (const h of listOf(CASE, id, 'history', history, { objects: true })) rowStep(CASE, id, `history ${h.id}`, () => appendTo('case_history', id, (p) => historyRow(id, h, p)));
+  };
+  /**
+   * Named acts on a case, each `act(id, input, bookkeeping)`: the act's own writes, then its bookkeeping, in one
+   * operation; it returns the stored case. `recordAct(id, bookkeeping)` is the bookkeeping alone (an activity entry, or
+   * the second half of an act whose case move came in between).
+   */
+  const caseActs = (defs) => {
+    const run = (name, id, fn, bookkeeping) => operation(() => {
+      if (!exists('recruitmentCases', id)) throw refusal('NOT_FOUND', `recruitment_cases ${id} is not a record of the repository`);
+      const check = rowStep(CASE, id, name, fn); applyAct(id, bookkeeping);
+      const stored = must('recruitmentCases', id); if (typeof check === 'function') check(stored); return stored;
+    });
+    return writes({
+      ...Object.fromEntries(Object.entries(defs).map(([name, fn]) => [name, (id, input = {}, bookkeeping = {}) => run(name, id, () => fn(id, input), bookkeeping)])),
+      recordAct: (id, bookkeeping = {}) => run('recordAct', id, () => {}, bookkeeping),
+    });
+  };
+  /** Named acts on one room row, each `act(id, input)`; it returns the stored row. */
+  const rowActs = (name, defs) => writes(Object.fromEntries(Object.entries(defs).map(([act, fn]) => [act, (id, input = {}) => operation(() => {
+    if (!exists(name, id)) throw refusal('NOT_FOUND', `${PARENT[name]} ${id} is not a record of the repository`);
+    rowStep(PARENT[name], id, act, () => fn(id, input)); return must(name, id);
+  })])));
+
+  const caseWrites = {
+    create: create('recruitmentCases'),
+    ...caseActs({
+      /** Give a plain case its Room facet: a Room adopts the club's open case rather than open a second one. */
+      openRoom: (id, { room, stage }) => {
+        guarded(CASE, { id }, 'room_status IS NULL', { ...roomCols(room), stage }, `recruitment_cases ${id} already has a Room`);
+        childrenOf(id).tags(room.tags);
+        return storedAs(id, room, 'room', (c) => c.room);
+      },
+      /**
+       * Move the Room to `to`, only from a status `ROOM_TRANSITIONS` leads from, or with `resume` only from `on_hold` (the
+       * lifecycle's resume is its own edge): the status, the stage derived from it, the filing instants, the last
+       * activity and the rev, together. `reopened` and `sourceContext` record a reopen.
+       */
+      moveRoom: (id, { to, stage, archivedAt, closedAt, at, by = null, reopened, sourceContext, resume = false }) => guarded(CASE, { id }, resume ? "room_status = 'on_hold'" : sqlIn('room_status', leadingTo(to)), given({
+        room_status: to, stage, room_archived_at: archivedAt, room_closed_at: closedAt, room_updated_at: at,
+        room_rev_at: at, ...personRow('room_rev_by', by && { userId: by.id ?? null, name: by.name ?? null }),
+        ...(reopened === undefined ? {} : reopenedCols(reopened)), room_source_context: sourceContext,
+      }), `recruitment_cases ${id} cannot move to ${to} from where it is`, { set: 'room_rev = room_rev + 1' }),
+      /** The Room's settings: priority, tags, lead scout, owner, restriction and deadline (an absent one stays). */
+      editRoom: (id, { priority, tags, leadScoutUserId, owner, restricted, deadline }) => {
+        guarded(CASE, { id }, ROOM, given({
+          room_priority: priority, room_lead_scout_user_id: leadScoutUserId, owner_user_id: owner?.id, owner_name: owner && (owner.name ?? null),
+          restricted: restricted === undefined ? undefined : b(restricted), ...(deadline === undefined ? {} : dueRow('deadline', deadline)),
+        }), noRoom(id));
+        if (tags !== undefined) { q('DELETE FROM case_room_tags WHERE case_id = ?').run(id); childrenOf(id).tags(tags); }
+      },
+      addAssignment: (id, { assignment: a }) => { appendTo('case_assignments', id, (p) => assignmentRow(id, a, p)); return storedAs(id, a, `assignment ${a.id}`, (c) => c.assignments.find((x) => x.id === a.id)); },
+      addTask: (id, { task: t }) => { appendTo('case_tasks', id, (p) => taskRow(id, t, p)); return storedAs(id, t, `task ${t.id}`, (c) => c.tasks.find((x) => x.id === t.id)); },
+      /** A task's status (with its completion) or assignee; `assignee: null` unassigns it. */
+      updateTask: (id, { taskId, status, completedAt, completedBy, assignee }) => guarded('case_tasks', { case_id: id, id: taskId }, null, given({
+        status, completed_at: completedAt, completed_by_name: completedBy,
+        assignee_user_id: assignee === undefined ? undefined : assignee?.id ?? null, assignee_name: assignee === undefined ? undefined : assignee?.name ?? null,
+      }), `case_tasks ${taskId} is not a task of recruitment_cases ${id}`),
+      /** Link a request, a trial (each once) or the signing. */
+      link: (id, { requestId, trialId, signingId }) => {
+        const once = (table, col, value) => q(`INSERT INTO ${table} (case_id, position, ${col}) SELECT @case_id, @position, @value WHERE NOT EXISTS (SELECT 1 FROM ${table} WHERE case_id = @case_id AND ${col} = @value)`)
+          .run({ case_id: id, position: nextPosition(table, 'case_id', id), value });
+        if (requestId !== undefined) once('case_request_links', 'request_id', requestId);
+        if (trialId !== undefined) once('case_trial_links', 'trial_id', trialId);
+        if (signingId !== undefined) q('UPDATE recruitment_cases SET links_signing_id = ? WHERE id = ?').run(signingId, id);
+      },
+      requestApproval: (id, { approval: a }) => { appendTo('case_approvals', id, (p) => approvalRow(id, a, p)); return storedAs(id, a, `approval ${a.id}`, (c) => c.approvals.find((x) => x.id === a.id)); },
+      /** Approve or reject a pending approval; `by` is `{ userId, name, at }`. */
+      resolveApproval: (id, { approvalId, status, by }) => guarded('case_approvals', { case_id: id, id: approvalId }, "status = 'pending'", { status, ...resolvedCols(by) }, `case_approvals ${approvalId} of recruitment_cases ${id} is not pending`),
+      /** The case's sign-off decision. */
+      recordDecision: (id, { decision }) => { q(`UPDATE recruitment_cases SET ${Object.keys(caseDecisionCols(null)).map((c) => `${c} = @${c}`).join(', ')} WHERE id = @id`).run({ ...caseDecisionCols(decision), id }); return storedAs(id, decision, 'decision', (c) => c.decision); },
+      /** A plain case's stage. A Room's stage follows its status (`moveRoom`) and is never written alone. */
+      setStage: (id, { stage }) => guarded(CASE, { id }, 'room_status IS NULL', { stage }, `recruitment_cases ${id} has a Room; its stage follows the Room's status`),
+      startDraft: (id, { draft }) => {
+        if (st.draftOf.get(id)) throw refusal('STATE_CONFLICT', `recruitment_cases ${id} already has a decision draft`);
+        childrenOf(id).draft(draft);
+        return storedAs(id, draft, 'decisionDraft', (c) => c.decisionDraft);
+      },
+      /** Change the draft's content (an absent field stays) and move its rev. */
+      editDraft: (id, { outcome, reasonCodes, note, evidenceRefs, at, by }) => {
+        guarded('case_decision_drafts', { case_id: id }, null, { ...given({ outcome, note }), updated_at: at, ...personRow('updated_by', by, ['role']), rev_at: at }, `recruitment_cases ${id} has no decision draft`, { set: 'rev = rev + 1' });
+        const step = (part, fn) => rowStep(CASE, id, part, fn); const L = (field, v, opts) => listOf(CASE, id, field, v, opts);
+        if (reasonCodes !== undefined) {
+          q('DELETE FROM case_decision_draft_reason_codes WHERE case_id = ?').run(id);
+          L('decisionDraft.reasonCodes', reasonCodes).forEach((code, i) => step(`decision draft reason ${i}`, () => st.ins.case_decision_draft_reason_codes.run(codeRow('case_id', id, code, i))));
+        }
+        if (evidenceRefs !== undefined) {
+          q('DELETE FROM case_decision_draft_evidence_refs WHERE case_id = ?').run(id);
+          L('decisionDraft.evidenceRefs', evidenceRefs, { objects: true }).forEach((r, i) => step(`decision draft evidence ${i}`, () => st.ins.case_decision_draft_evidence_refs.run(refRow('case_id', id, r, i))));
+        }
+      },
+      /** The draft goes: discarded, or become a formal decision. */
+      discardDraft: (id) => { if (q('DELETE FROM case_decision_drafts WHERE case_id = ?').run(id).changes !== 1) throw refusal('STATE_CONFLICT', `recruitment_cases ${id} has no decision draft`); },
+      /** Invite a transaction workspace. It replaces a withdrawn or lapsed invitation, never an accepted one. */
+      inviteHandoff: (id, { handoff: h }) => {
+        const current = st.handoffOf.get(id);
+        if (current?.status === 'accepted') throw refusal('STATE_CONFLICT', `recruitment_cases ${id} has an accepted transaction handoff`);
+        if (current) q('DELETE FROM case_transaction_handoffs WHERE case_id = ?').run(id);
+        st.ins.case_transaction_handoffs.run(handoffRow(id, h));
+        return storedAs(id, h, 'transactionHandoff', (c) => c.transactionHandoff);
+      },
+      withdrawHandoff: (id, { at }) => guarded('case_transaction_handoffs', { case_id: id }, "status = 'invited'", { status: 'withdrawn', withdrawn_at: at, rev_at: at }, `recruitment_cases ${id} has no open transaction handoff`, { set: 'rev = rev + 1' }),
+      /** The invitation taken up by the transaction it opened. */
+      acceptHandoff: (id, { at, transactionId }) => guarded('case_transaction_handoffs', { case_id: id }, "status = 'invited'", { status: 'accepted', accepted_at: at, transaction_id: transactionId, rev_at: at }, `recruitment_cases ${id} has no open transaction handoff`, { set: 'rev = rev + 1' }),
+      addScenario: (id, { scenario: s }) => { childrenOf(id).scenario(s, nextPosition('case_budget_scenarios', 'case_id', id)); return storedAs(id, s, `budget scenario ${s.id}`, (c) => c.budget?.scenarios.find((x) => x.id === s.id)); },
+      /** A new version of a scenario (an absent field stays; `lines` and `fxAssumptions` replace the lists). An approval of an earlier version is kept, marked superseded. */
+      editScenario: (id, { scenarioId, label, termMonths, lines, fxAssumptions, at }) => {
+        guarded('case_budget_scenarios', { case_id: id, id: scenarioId }, null, { ...given({ label, term_months: termMonths }), updated_at: at }, `case_budget_scenarios ${scenarioId} is not a scenario of recruitment_cases ${id}`,
+          { set: 'version = version + 1, approval_superseded = CASE WHEN approval_at IS NULL THEN NULL ELSE 1 END' });
+        const step = (part, fn) => rowStep(CASE, id, part, fn); const L = (field, v) => listOf(CASE, id, field, v, { objects: true });
+        if (lines !== undefined) {
+          q('DELETE FROM case_budget_lines WHERE case_id = ? AND scenario_id = ?').run(id, scenarioId);
+          L(`budget scenario ${scenarioId} lines`, lines).forEach((l, j) => step(`budget scenario ${scenarioId} line ${l.id}`, () => st.ins.case_budget_lines.run(lineRow(id, scenarioId, l, j))));
+        }
+        if (fxAssumptions !== undefined) {
+          q('DELETE FROM case_budget_fx_assumptions WHERE case_id = ? AND scenario_id = ?').run(id, scenarioId);
+          L(`budget scenario ${scenarioId} fxAssumptions`, fxAssumptions).forEach((a, j) => step(`budget scenario ${scenarioId} fx ${j}`, () => st.ins.case_budget_fx_assumptions.run(fxRow(id, scenarioId, a, j))));
+        }
+      },
+      /** A lead's approval of the scenario's current version. */
+      approveScenario: (id, { scenarioId, by, byUserId, at }) => guarded('case_budget_scenarios', { case_id: id, id: scenarioId }, null, { approval_by_name: by, approval_by_user_id: byUserId, approval_at: at, approval_superseded: 0 }, `case_budget_scenarios ${scenarioId} is not a scenario of recruitment_cases ${id}`, { set: 'approval_version = version' }),
+      recordActual: (id, { scenarioId, actual: a }) => appendTo('case_budget_actuals', id, (p) => actualRow(id, scenarioId, a, p), { scenario_id: scenarioId }),
+    }),
+  };
 
   const cases = {
-    ...ops('recruitmentCases'),
+    ...caseWrites,
+    byId: (id) => find('recruitmentCases', id),
     forOrg: list('recruitmentCases', 'SELECT * FROM recruitment_cases WHERE org_id = ? ORDER BY rowid'),
     forPlayer: list('recruitmentCases', 'SELECT * FROM recruitment_cases WHERE player_id = ? ORDER BY rowid'),
     forOrgPlayer: list('recruitmentCases', 'SELECT * FROM recruitment_cases WHERE org_id = ? AND player_id = ? ORDER BY rowid'),
@@ -1180,10 +1057,29 @@ export function createRecruitmentCasesRepository({ sqlite, unit = null, now = Da
     }
     return pageOf(decodeAll('recruitmentCases', kept), limit, key);
   }
-  const comments = { ...ops('roomComments'), forRoom: forRoom('roomComments') };
-  const snapshots = { ...ops('roomSnapshots', { updatable: false }), forRoom: forRoom('roomSnapshots') };
+  const forRoom = (name) => list(name, `SELECT * FROM ${PARENT[name]} WHERE room_id = ? ORDER BY rowid`);
+  const rowReads = (name) => ({ byId: (id) => find(name, id), forRoom: forRoom(name) });
+  const comments = {
+    create: create('roomComments'),
+    ...rowActs('roomComments', {
+      /** A new body for a comment that is not deleted. */
+      edit: (id, { body, at }) => guarded('room_comments', { id }, 'deleted_at IS NULL', { body, edited_at: at }, `room_comments ${id} is deleted`, { set: 'edit_count = edit_count + 1' }),
+      /** A tombstone: the thread keeps its shape and the trail its attribution; `by` is `{ userId, name }`. */
+      remove: (id, { at, by }) => guarded('room_comments', { id }, null, { deleted_at: at, ...personRow('deleted_by', by) }, `room_comments ${id} is not there`),
+    }),
+    ...rowReads('roomComments'),
+  };
+  const snapshots = { create: create('roomSnapshots'), ...rowReads('roomSnapshots') };
   const decisions = {
-    ...ops('roomDecisions'), forRoom: forRoom('roomDecisions'),
+    create: create('roomDecisions'),
+    ...rowActs('roomDecisions', {
+      /** The decision that replaced this one; a decision is superseded once. */
+      markSuperseded: (id, { by }) => guarded('room_decisions', { id }, 'superseded_by_id IS NULL', { superseded_by_id: by }, `room_decisions ${id} is already superseded`),
+      /** The case move a formal decision asked for, once the move has been tried. */
+      recordLifecycle: (id, { lifecycle }) => guarded('room_decisions', { id }, null, lifecycleCols(lifecycle), `room_decisions ${id} is not there`),
+      bump: (id, { at }) => guarded('room_decisions', { id }, null, { rev_at: at }, `room_decisions ${id} is not there`, { set: 'rev = COALESCE(rev, 1) + 1' }),
+    }),
+    ...rowReads('roomDecisions'),
     /** The decisions of several Rooms (a player's journeys), in insertion order. */
     forRooms: inList('roomDecisions', 'room_id'),
     forOrgPlayer: list('roomDecisions', 'SELECT * FROM room_decisions WHERE org_id = ? AND player_id = ? ORDER BY rowid'),
@@ -1191,8 +1087,15 @@ export function createRecruitmentCasesRepository({ sqlite, unit = null, now = Da
     /** The ids of the organisation's Rooms that hold any decision (a Set; nothing decoded). */
     roomIdsForOrg: (orgId) => new Set(sqlite.prepare('SELECT DISTINCT d.room_id FROM room_decisions d JOIN recruitment_cases c ON c.id = d.room_id WHERE c.org_id = ?').all(orgId).map((r) => r.room_id)),
   };
-  const evidenceStates = { ...ops('roomEvidenceState'), forRoom: forRoom('roomEvidenceState') };
-  const WRITES = new Set(['create', 'update']);
+  const evidenceStates = {
+    create: create('roomEvidenceState'),
+    ...rowActs('roomEvidenceState', {
+      /** A new review of the evidence by the Room. */
+      review: (id, { state, note, byId, byName, at }) => guarded('room_evidence_states', { id }, null, { state, note, by_user_id: byId, by_name: byName, at }, `room_evidence_states ${id} is not there`),
+    }),
+    ...rowReads('roomEvidenceState'),
+  };
+  WRITES.add('create');
   const readOnly = (o) => Object.freeze(Object.fromEntries(Object.entries(o).filter(([k]) => !WRITES.has(k))));
   const counters = Object.fromEntries(RECRUITMENT_CASES_COLLECTIONS.map((n) => [n, sqlite.prepare(`SELECT COUNT(*) AS n FROM ${PARENT[n]}`)]));
 
@@ -1202,11 +1105,7 @@ export function createRecruitmentCasesRepository({ sqlite, unit = null, now = Da
     reads: Object.freeze({ cases: readOnly(cases), comments: readOnly(comments), snapshots: readOnly(snapshots), decisions: readOnly(decisions), evidenceStates: readOnly(evidenceStates) }),
     /** The deletion unit: a deleted player's cases keep their ids, states and history and lose the name. */
     redactPlayer(playerId, at) {
-      return operation(() => {
-        let n = 0;
-        for (const c of sqlite.prepare('SELECT id FROM recruitment_cases WHERE player_id = ? ORDER BY rowid').all(playerId)) { update('recruitmentCases')(c.id, (d) => { d.playerName = null; d.subjectRemovedAt = at; }); n += 1; }
-        return n;
-      });
+      return operation(() => sqlite.prepare('UPDATE recruitment_cases SET player_name = NULL, subject_removed_at = ? WHERE player_id = ?').run(at, playerId).changes);
     },
     /** Check migration 0016 is recorded; there is nothing to load. */
     attach() {

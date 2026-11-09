@@ -19,7 +19,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import { DATA_MIGRATIONS } from '../../repositories/index.mjs';
-import { openLayer } from '../../scripts/dataLayerFixture.mjs';
+import { openLayer, plantCase, legacyMoves } from '../../scripts/dataLayerFixture.mjs';
 import { ROOM_STATUSES, TERMINAL_ROOM_STATUSES } from '../../domains/recruitment/rooms/shared.mjs';
 import {
   JOURNEY_STAGES, PIPELINE_STAGES, canonicalStageFor, completedStagesFor, nextActionFor, NEXT_ACTION_CODES, NEXT_ACTIONS,
@@ -154,7 +154,7 @@ async function j(method, url, body, token, extra = {}) {
 async function offline(mutate) {
   await down(server);
   const L = openLayer(DATA_DIR);
-  try { L.unit(() => mutate(L.layer)); } finally { L.close(); }
+  try { L.unit(() => mutate(L.layer, L)); } finally { L.close(); }
   server = await boot();
 }
 const login = async (orgId, scoutName, role, platform) => (await j('POST', '/auth/org/login', { orgId, scoutName, role, ...(platform ? { platform } : {}) })).body;
@@ -448,21 +448,18 @@ const L = {};
   L.offer = await reviewed(maria.token, 'pl-kim');
   L.signed = await reviewed(maria.token, 'pl-tanaka');
   L.broken = await reviewed(maria.token, 'pl-alvarez');
-  const plant = (layer, id, chain, extraLast = {}, edit = () => {}) => layer.recruitmentCases.cases.update(id, (k) => {
-    let prev = k.room.status; let t = Math.max(Date.now(), ...(k.history ?? []).map((h) => Number(h.at) || 0));
-    for (const to of chain) { t += H; k.history.push({ id: `hist-p8-${Math.random().toString(36).slice(2, 8)}`, at: t, action: 'room_status_changed', byKind: 'org', byId: 'legacy', byName: 'Legacy Scout', detail: { from: prev, to, reasonCodes: [] , ...(to === chain[chain.length - 1] ? extraLast : {}) } }); prev = to; }
-    k.room.status = chain[chain.length - 1];
-    k.stage = chain[chain.length - 1] === 'signed' ? 'closed' : 'review';
-    k.room.rev = (k.room.rev ?? 1) + chain.length;
-    edit(k);
-  });
-  await offline((layer) => {
-    plant(layer, L.contacted, ['contacted']);
-    plant(layer, L.trial, ['contacted', 'trial_requested', 'trial_scheduled', 'trial_completed']);
-    plant(layer, L.offer, ['offer_consideration', 'offer_made']);
+  // No act jumps a status or writes a legacy entry, so the plant is SQL (plantCase).
+  const plant = (D, id, chain, extraLast = {}, edit = {}) => {
+    const moves = legacyMoves(D.layer.recruitmentCases.cases.byId(id), chain, { prefix: 'hist-p8', byName: 'Legacy Scout', extraLast });
+    return plantCase(D, id, { ...moves, stage: moves.status === 'signed' ? 'closed' : 'review', ...edit });
+  };
+  await offline((layer, D) => {
+    plant(D, L.contacted, ['contacted']);
+    plant(D, L.trial, ['contacted', 'trial_requested', 'trial_scheduled', 'trial_completed']);
+    plant(D, L.offer, ['offer_consideration', 'offer_made']);
     layer.signingsFollowUps.signings.record({ id: 'sign-p8-legacy', orgId: 'org-eastport', playerId: 'pl-tanaka', ts: Date.now() - DAY, method: 'LEGACY_RECORDED', contract: null, scoutUserId: 'legacy', scoutName: 'Legacy Scout', insideAttributionWindow: false });
-    plant(layer, L.signed, ['offer_consideration', 'offer_made', 'signed'], {}, (k) => { k.links.signingId = 'sign-p8-legacy'; });
-    plant(layer, L.broken, ['contacted'], { contactId: 'rct-gone', trigger: 'contact:rct-gone' });
+    plant(D, L.signed, ['offer_consideration', 'offer_made', 'signed'], {}, { signingId: 'sign-p8-legacy' });
+    plant(D, L.broken, ['contacted'], { contactId: 'rct-gone', trigger: 'contact:rct-gone' });
   });
   await relogin();
   let b = await jb(L.contacted);
@@ -648,8 +645,9 @@ section('Z — the boundaries, read from the source: one writer per truth, no au
   const strip = (s) => s.replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, '');
   const files = (dir) => readdirSync(path.join(ROOT, dir)).filter((f) => f.endsWith('.mjs')).map((f) => `${dir}/${f}`);
   const serverFiles = ['server.mjs', 'seed.mjs', 'domain.mjs', ...['m12', 'm13', 'domains/development/boxcam', 'domains/discovery', 'domains/discovery/matching', 'm20', 'domains/development/hub', 'domains/development/boxcam/cv', 'm27', 'domains/platform', 'domains/recruitment/rooms', 'domains/recruitment/lifecycle', 'domains/recruitment/offers', 'domains/recruitment/signings', 'domains/scouting', 'domains/verification', 'domains/verification/claims', 'domains/verification/passport', 'domains/verification/trust', 'domains/agents/core', 'domains/agents/compliance', 'domains/agents/transactions'].flatMap(files)];
-  const statusWriters = serverFiles.filter((f) => /\.room\.status\s*=[^=]/.test(strip(src(f))));
-  neg(statusWriters.length === 1 && statusWriters[0] === 'domains/recruitment/rooms/rooms.mjs', `Z1 exactly one file assigns room.status on a live case: ${statusWriters.join(', ')}`);
+  // A Room's status is written by one act (cases.moveRoom); nothing assigns it on a record.
+  const statusWriters = serverFiles.filter((f) => /\.moveRoom\(|\.room\.status\s*=[^=]/.test(strip(src(f))));
+  neg(statusWriters.length === 1 && statusWriters[0] === 'domains/recruitment/rooms/rooms.mjs', `Z1 exactly one file writes room.status on a live case: ${statusWriters.join(', ')}`);
   const stageWriters = serverFiles.filter((f) => /(?:kase|room|c|k)\.stage\s*=[^=]/.test(strip(src(f))));
   neg(stageWriters.every((f) => ['domains/recruitment/rooms/rooms.mjs', 'domains/scouting/scouting.mjs'].includes(f)), `Z2 case.stage is written only by the ONE writer and the room-guarded M12 routes: ${stageWriters.join(', ')}`);
   // The column is written through the identity repository (`players.update(id, { contractStatus: 'under_contract' })`), never assigned on the record, and only by the signings domain.

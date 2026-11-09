@@ -27,10 +27,11 @@ export function buildShared(ctx) {
     return { total: list.length, limit, offset, items: list.slice(offset, offset + limit) };
   };
 
-  // Append-only audit trail on important records.
-  const audit = (record, byKind, byId, byName, action, detail = null) => {
+  // Append-only audit trail on important records: one entry, or the entry pushed onto a record draft.
+  const auditEntry = (byKind, byId, byName, action, detail = null) => ({ id: nextId('aud'), at: Date.now(), byKind, byId, byName, action, detail });
+  const audit = (record, ...entry) => {
     record.history ??= [];
-    record.history.push({ id: nextId('aud'), at: Date.now(), byKind, byId, byName, action, detail });
+    record.history.push(auditEntry(...entry));
   };
 
   // The player-or-guardian actor pattern: many of these flows accept either the
@@ -96,7 +97,7 @@ export function buildShared(ctx) {
   };
 
   return {
-    isLead, requireLead, orgCanSee, paginate, audit, guardianOwnsChild, dueAtOrRefuse,
+    isLead, requireLead, orgCanSee, paginate, audit, auditEntry, guardianOwnsChild, dueAtOrRefuse,
     EVIDENCE_TIERS, freshness, activeAffiliation, checkEligibility,
     distanceBand, isAdult, haversineKm,
   };

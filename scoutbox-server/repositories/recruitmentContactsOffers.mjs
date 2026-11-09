@@ -6,10 +6,10 @@
  * (domains/recruitment/lifecycle/contact.mjs, domains/recruitment/offers/offer.mjs). The idempotency keys are columns
  * of their owner (`create_key`, `send_key`, …) and the offer's per-act key lists are the rows of `offer_keys`.
  *
- * Writes. A contact is created and updated whole, typed in JavaScript (an unknown field at any level is refused). An
- * offer is created whole and then changes only through named acts (`editDraft`, `issueRevision`, `recordResponse`, …),
- * each an UPDATE or INSERT of the rows it concerns; its columns and keys are the only judge of its values, and a
- * revision moves only along `OFFER_REVISION_TRANSITIONS`. Either way a refusal names the record and the unit rolls back.
+ * Writes (repositories/writes.mjs). A contact or an offer is created whole and must read back as written, then changes
+ * only through named acts (`recordDelivery`, `issueRevision`, `recordResponse`, …), each an UPDATE or INSERT of the rows
+ * it concerns. The columns and keys are the only judge of the values; a contact moves only along `CONTACT_TRANSITIONS`
+ * and a revision along `OFFER_REVISION_TRANSITIONS`. A refusal names the record and the unit rolls back.
  *
  * References. `org_id` → orgs and `case_id` → recruitment_cases (RESTRICT). A contact's `request_id` →
  * recruitment_requests is DEFERRABLE INITIALLY DEFERRED (checked at COMMIT): a send writes its contact before the
@@ -22,7 +22,7 @@
  * Refusals name tables, fields and ids, never a subject, a body, a note, a message or a name.
  */
 import { transaction, migrationApplied, newestHistory, childRowsOf } from './database.mjs';
-import { isPlainObject } from './recruitment.mjs';
+import { writeChecks, writeKit } from './writes.mjs';
 import { CONTACT_STATUSES, CONTACT_TRANSITIONS, CONTACT_ACTIONS, CONTACT_CHANNELS, CONTACT_MODES, CONTACT_LIMITS, RESPONSE_KINDS } from '../domains/recruitment/lifecycle/contact.mjs';
 import { OFFER_STATUSES, OFFER_REVISION_TRANSITIONS, OFFER_TYPES, OFFER_LIMITS, OFFER_RESPONSE_TYPES, OFFER_RESPONSE_ACTORS } from '../domains/recruitment/offers/offer.mjs';
 
@@ -311,43 +311,7 @@ CREATE INDEX offer_keys_key ON offer_keys (offer_id, act, key);
 
 // ------------------------------------------------------------------ refusals
 const refusal = (code, message, extra = {}) => Object.assign(new Error(`${code}: ${message}`), { code, ...extra });
-const nonEmpty = (v) => typeof v === 'string' && v.length > 0;
-const describe = (v) => (v === null ? 'null' : Array.isArray(v) ? 'an array' : typeof v === 'object' ? 'an object' : typeof v);
-const SQLITE_CONSTRAINT = 19;
-/** A constraint failure while writing a record's rows, as a refusal naming the record and the part that broke it. */
-function rowStep(table, id, part, fn) {
-  try { return fn(); } catch (e) {
-    if (e?.code !== 'ERR_SQLITE_ERROR' || (e.errcode & 0xff) !== SQLITE_CONSTRAINT) throw e;
-    throw refusal('CONTACTS_OFFERS_INPUT_INVALID', `${table} ${id} ${part}: ${e.message}`);
-  }
-}
-/** A record's child list: absent is empty; anything but a list is refused, naming the record. */
-function listOf(table, id, field, v) {
-  if (v === undefined || v === null) return [];
-  if (!Array.isArray(v)) throw refusal('CONTACTS_OFFERS_INPUT_INVALID', `${table} ${id} ${field}: must be a list (got ${describe(v)})`);
-  return v;
-}
-/**
- * A created record must read back as it was written. A field the tables have no column for, at any depth, or a value a
- * column coerced, is refused rather than silently lost. Absent and null written values say nothing and are skipped.
- */
-function readsBackAsWritten(table, id, written, stored, path = '') {
-  if (written === undefined || written === null) return;
-  const lost = () => refusal('CONTACTS_OFFERS_INPUT_INVALID', `${table} ${id} ${path || 'record'}: is not stored as written`);
-  if (Array.isArray(written)) {
-    if (!Array.isArray(stored) || stored.length !== written.length) throw lost();
-    written.forEach((v, i) => readsBackAsWritten(table, id, v, stored[i], `${path}[${i}]`));
-  } else if (typeof written === 'object') {
-    if (!isPlainObject(stored)) throw lost();
-    for (const [k, v] of Object.entries(written)) readsBackAsWritten(table, id, v, stored[k], path ? `${path}.${k}` : k);
-  } else if (written !== stored) throw lost();
-}
-/** A whole record handed to `create`: an object with an id, not yet stored. */
-function newRecord(table, existing, r) {
-  if (!isPlainObject(r)) throw refusal('CONTACTS_OFFERS_INPUT_INVALID', `${table}: a record must be an object (got ${describe(r)})`);
-  if (!nonEmpty(r.id)) throw refusal('CONTACTS_OFFERS_INPUT_INVALID', `${table}: a record needs an id`);
-  if (existing.get(r.id)) throw refusal('CONTACTS_OFFERS_DUPLICATE', `${table} ${r.id} already exists`);
-}
+const { rowStep, listOf, readsBackAsWritten, newRecord } = writeChecks('CONTACTS_OFFERS');
 
 // ------------------------------------------------------------------ rows
 // The encoders take a record as the routes build it (or a fixture writes it); an absent field is NULL, and the
@@ -636,25 +600,17 @@ export function createRecruitmentContactsOffersRepository({ sqlite, unit = null,
   const counters = { recruitmentContacts: countOf('recruitment_contacts'), recruitmentOffers: countOf('recruitment_offers') };
 
   // ---- writes: a record is created whole, then changes only through named acts on its own rows.
-  const sqlCache = new Map();
-  const q = (sql) => { let s = sqlCache.get(sql); if (!s) sqlCache.set(sql, (s = sqlite.prepare(sql))); return s; };
-  const assign = (cols) => Object.keys(cols).map((c) => `${c} = @${c}`).join(', ');
+  const { q, assign, sqlIn, guarded: guardedWhere, nextPosition: positionIn } = writeKit(sqlite, 'CONTACTS_OFFERS');
   const CONTACT = { table: 'recruitment_contacts', name: 'recruitmentContacts', owner: 'contact_id', history: (id, h, i) => st.chist.run(contactHistoryRow(id, h, i)), historyTable: 'contact_history', lifecycleCols: contactLifecycleCols };
   const OFFER = { table: 'recruitment_offers', name: 'recruitmentOffers', owner: 'offer_id', history: (id, h, i) => st.ohist.run(offerHistoryRow(id, h, i)), historyTable: 'offer_history', lifecycleCols };
-  const nextPosition = (table, owner, id, act = null) => (act === null
-    ? q(`SELECT COALESCE(MAX(position) + 1, 0) AS p FROM ${table} WHERE ${owner} = ?`).get(id)
-    : q(`SELECT COALESCE(MAX(position) + 1, 0) AS p FROM ${table} WHERE ${owner} = ? AND act = ?`).get(id, act)).p;
+  const nextPosition = (table, owner, id, act = null) => positionIn(table, owner, id, act === null ? {} : { act });
   const setRow = (k, id, cols) => q(`UPDATE ${k.table} SET ${assign(cols)} WHERE id = @id`).run({ ...cols, id });
   const stamp = (prefix, a) => ({ [`${prefix}_user_id`]: a?.id ?? null, [`${prefix}_name`]: a?.name ?? null, [`${prefix}_role`]: a?.role ?? null });
   /**
    * Update one row only while its status is one of `from`. A row anywhere else means a route's gate let through a move
    * it should have refused: the unit rolls back.
    */
-  const guarded = (table, keys, from, cols, what) => {
-    const r = q(`UPDATE ${table} SET ${assign(cols)} WHERE ${Object.keys(keys).map((c) => `${c} = @key_${c}`).join(' AND ')} AND status IN (${from.map((x) => `'${x}'`).join(', ')})`)
-      .run({ ...cols, ...Object.fromEntries(Object.entries(keys).map(([c, v]) => [`key_${c}`, v])) });
-    if (r.changes !== 1) throw refusal('CONTACTS_OFFERS_STATE_CONFLICT', what);
-  };
+  const guarded = (table, keys, from, cols, what) => guardedWhere(table, keys, sqlIn('status', from), cols, what);
   const leadingTo = (transitions, to) => Object.keys(transitions).filter((x) => transitions[x].includes(to));
   /** A contact moves into `to` only from a status `CONTACT_TRANSITIONS` leads from. */
   const moveContact = (id, to, cols = {}) => guarded('recruitment_contacts', { id }, leadingTo(CONTACT_TRANSITIONS, to), { status: to, ...cols }, `recruitment_contacts ${id} cannot move to ${to} from where it is`);
@@ -703,7 +659,7 @@ export function createRecruitmentContactsOffersRepository({ sqlite, unit = null,
   const contactHistoryFrom = (orgId, actions) => ({ from: 'contact_history h JOIN recruitment_contacts c ON c.id = h.contact_id', where: `c.org_id = ? AND h.action IN (${actions.map(() => '?').join(', ') || 'NULL'})`, params: [orgId, ...actions] });
   const contacts = {
     /** A new contact, whole: a club's draft or external record, or a fixture's record. An existing id is refused. */
-    create: (c) => operation(() => { newRecord('recruitment_contacts', st.contactById, c); insertContact(st, c); return created('recruitment_contacts', 'recruitmentContacts', c); }),
+    create: (c) => operation(() => { newRecord('recruitment_contacts', (id) => !!st.contactById.get(id), c); insertContact(st, c); return created('recruitment_contacts', 'recruitmentContacts', c); }),
     ...actsOn(CONTACT, {
       /** Change the words or the mode of a contact that has not been delivered. */
       editDraft: (id, { subject, body, contactMode }) => guarded('recruitment_contacts', { id }, CONTACT_ACTIONS.edit.from, { subject: subject ?? null, body: body ?? null, contact_mode: contactMode }, `recruitment_contacts ${id} is not an editable draft`),
@@ -746,7 +702,7 @@ export function createRecruitmentContactsOffersRepository({ sqlite, unit = null,
   };
   const offers = {
     /** A new offer, whole: the club's first draft, or a fixture's record. An existing id is refused. */
-    create: (o) => operation(() => { newRecord('recruitment_offers', st.offerById, o); insertOffer(sqlite, st, o); return created('recruitment_offers', 'recruitmentOffers', o); }),
+    create: (o) => operation(() => { newRecord('recruitment_offers', (id) => !!st.offerById.get(id), o); insertOffer(sqlite, st, o); return created('recruitment_offers', 'recruitmentOffers', o); }),
     ...actsOn(OFFER, {
       /**
        * Change a DRAFT revision's content (`documents` undefined keeps them). There is no other write of a revision's

@@ -27,7 +27,7 @@ import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 const SCHEMA_VERSION = Number(DATA_MIGRATIONS.map((m) => m.id).sort().at(-1).slice(0, 4)); // the latest table migration's number
 import { DatabaseSync } from 'node:sqlite';
-import { openLayer, readRecords } from '../../scripts/dataLayerFixture.mjs';
+import { openLayer, readRecords, plantCase, legacyMoves } from '../../scripts/dataLayerFixture.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SERVER = path.join(HERE, '..', '..', 'server.mjs');
@@ -82,7 +82,7 @@ ok(S.up, `boot 1 on an empty store (schema ${SCHEMA_VERSION})`);
 // The table-migration ledger (id and time applied), read beside the running server.
 const ledger = () => { const sq = new DatabaseSync(path.join(DATA, 'scoutbox.db'), { readOnly: true }); try { return JSON.stringify(sq.prepare('SELECT id, applied_at FROM data_migrations ORDER BY id').all()); } finally { sq.close(); } };
 // With the server stopped, plant state through the repositories in one unit of work (`work` gets the data layer).
-const plantOn = (work) => { const L = openLayer(DATA); try { return L.unit(() => work(L.layer)); } finally { L.close(); } };
+const plantOn = (work) => { const L = openLayer(DATA); try { return L.unit(() => work(L.layer, L)); } finally { L.close(); } };
 const LEDGER1 = ledger();
 let maria; let kola;
 const login = async () => {
@@ -192,17 +192,16 @@ section('3 — legacy and corrupt cases across five restarts: untouched, never r
   const mk = async (playerId) => { const rr = await S.j('POST', '/org/rooms', { playerId, sourceContext: 'search' }, maria.token); const id = rr.status === 201 ? rr.body.room.roomId : rr.body?.existingRoomId; await lifecycle(id, 'startReview'); return id; };
   const LEG = await mk('pl-okafor'); const BAD = await mk('pl-svensson'); const LSIGN = await mk('pl-tanaka');
   let db = await S.stop();
-  const plant = (layer, id, chain, extraLast = {}, edit = () => {}) => layer.recruitmentCases.cases.update(id, (k) => {
-    let prev = k.room.status; let tt = Math.max(Date.now(), ...(k.history ?? []).map((h) => Number(h.at) || 0));
-    for (const to of chain) { tt += H; k.history.push({ id: `hist-p8p-${Math.random().toString(36).slice(2, 8)}`, at: tt, action: 'room_status_changed', byKind: 'org', byId: 'legacy', byName: 'Legacy', detail: { from: prev, to, reasonCodes: [], ...(to === chain[chain.length - 1] ? extraLast : {}) } }); prev = to; }
-    k.room.status = chain[chain.length - 1]; k.stage = chain[chain.length - 1] === 'signed' ? 'closed' : 'review'; k.room.rev = (k.room.rev ?? 1) + chain.length;
-    edit(k);
-  });
-  plantOn((layer) => {
-    plant(layer, LEG, ['contacted', 'trial_requested', 'trial_scheduled', 'trial_completed']);
-    plant(layer, BAD, ['contacted'], { contactId: 'rct-missing', trigger: 'contact:rct-missing' });
+  // No act jumps a status or writes a legacy entry, so the plant is SQL (plantCase).
+  const plant = (L, id, chain, extraLast = {}, edit = {}) => {
+    const moves = legacyMoves(L.layer.recruitmentCases.cases.byId(id), chain, { prefix: 'hist-p8p', extraLast });
+    return plantCase(L, id, { ...moves, stage: moves.status === 'signed' ? 'closed' : 'review', ...edit });
+  };
+  plantOn((layer, L) => {
+    plant(L, LEG, ['contacted', 'trial_requested', 'trial_scheduled', 'trial_completed']);
+    plant(L, BAD, ['contacted'], { contactId: 'rct-missing', trigger: 'contact:rct-missing' });
     layer.signingsFollowUps.signings.record({ id: 'sign-p8p-legacy', orgId: 'org-eastport', playerId: 'pl-tanaka', ts: Date.now() - DAY, method: 'LEGACY_RECORDED', contract: null, scoutUserId: 'legacy', scoutName: 'Legacy', insideAttributionWindow: false });
-    plant(layer, LSIGN, ['offer_consideration', 'offer_made', 'signed'], {}, (k) => { k.links.signingId = 'sign-p8p-legacy'; });
+    plant(L, LSIGN, ['offer_consideration', 'offer_made', 'signed'], {}, { signingId: 'sign-p8p-legacy' });
   });
   db = readRecords(DATA); // what the plant wrote: the restarts below must leave it exactly so
   const snapshot = (kase) => JSON.stringify({ status: kase.room.status, stage: kase.stage, rev: kase.room.rev, history: kase.history.length, links: kase.links });
@@ -251,9 +250,7 @@ section('5 — stale pointers, cross-case, legacy mixes, a signed mismatch, key 
   const SP = await mk('pl-martin'); await lifecycle(SP, 'startReview');
   let db = await S.stop();
   {
-    const advance = (k) => { let tt = Math.max(Date.now(), ...(k.history ?? []).map((h) => Number(h.at) || 0));
-      for (const to of ['contacted', 'trial_requested', 'trial_scheduled', 'trial_completed', 'offer_consideration', 'offer_made']) { tt += H; k.history.push({ id: `hist-p81p-${Math.random().toString(36).slice(2, 8)}`, at: tt, action: 'room_status_changed', byKind: 'org', byId: 'legacy', byName: 'Legacy', detail: { from: k.room.status, to, reasonCodes: [] } }); k.room.status = to; }
-      k.room.rev = (k.room.rev ?? 1) + 6; };
+    const advance = (L) => plantCase(L, SP, legacyMoves(L.layer.recruitmentCases.cases.byId(SP), ['contacted', 'trial_requested', 'trial_scheduled', 'trial_completed', 'offer_consideration', 'offer_made'], { prefix: 'hist-p81p' }));
     // A REAL Offer (Kola's, cloned) re-homed on this case with its current-revision pointer stale: every field is sound,
     // only the pointer is behind — it names revision 1 while revision 2 is out. (A pointer naming a revision the Offer
     // does not hold at all is a row the tables cannot hold; that write is REFUSED, naming the row.)
@@ -263,10 +260,10 @@ section('5 — stale pointers, cross-case, legacy mixes, a signed mismatch, key 
     const rev1 = { ...r0, id: 'rofr-p81p-1', revisionNumber: 1, status: 'ISSUED', documents: [], response: null, respondedAt: null, supersedesRevisionId: null, supersededByRevisionId: null, supersededAt: null, recipientSnapshot: r0.recipientSnapshot ? { ...r0.recipientSnapshot, playerId: 'pl-martin' } : null };
     Object.assign(clone, { id: 'rof-p81p-stale', caseId: SP, playerId: 'pl-martin', status: 'ISSUED', responses: [], readReceipts: [], history: [], agentShare: null, lifecycle: null, keys: { create: null, issue: [], withdraw: [], revise: [] }, revisions: [rev1, { ...rev1, id: 'rofr-p81p-2', revisionNumber: 2 }], currentRevisionId: 'rofr-missing' });
     const onDisk = JSON.stringify(readRecords(DATA).recruitmentOffers);
-    let refused = null; try { plantOn((layer) => { layer.recruitmentCases.cases.update(SP, advance); layer.recruitmentContactsOffers.offers.create(clone); }); } catch (e) { refused = e; }
+    let refused = null; try { plantOn((layer, L) => { advance(L); layer.recruitmentContactsOffers.offers.create(clone); }); } catch (e) { refused = e; }
     neg(!!refused && /recruitment_offers rof-p81p-stale currentRevisionId: rofr-missing is not a revision of this offer/.test(refused.message) && JSON.stringify(readRecords(DATA).recruitmentOffers) === onDisk, `5.2 a pointer at a revision the Offer does not hold cannot be stored: the write refuses it, naming the row (${String(refused?.message ?? 'no refusal').slice(0, 100)})`);
     clone.currentRevisionId = 'rofr-p81p-1';
-    plantOn((layer) => { layer.recruitmentCases.cases.update(SP, advance); layer.recruitmentContactsOffers.offers.create(clone); });
+    plantOn((layer, L) => { advance(L); layer.recruitmentContactsOffers.offers.create(clone); });
   }
   S = await bootOn(DATA, PORT); ok(S.up, '5.2 booted on the planted store'); await login();
   const spFps = [];
@@ -294,11 +291,7 @@ section('5 — stale pointers, cross-case, legacy mixes, a signed mismatch, key 
   const sm = await S.j('POST', `/org/rooms/${MIX}/contacts/${dm.body.contact.id}/send`, { expectedRev: dm.body.contact.rev, clientKey: key() }, maria.token);
   ok(sm.status === 200, '5.4 a canonical Contact delivered on the second case');
   db = await S.stop();
-  plantOn((layer) => layer.recruitmentCases.cases.update(MIX, (k) => {
-    let tt = Math.max(Date.now(), ...(k.history ?? []).map((h) => Number(h.at) || 0));
-    for (const to of ['trial_requested', 'trial_scheduled', 'trial_completed']) { tt += H; k.history.push({ id: `hist-p81p-${Math.random().toString(36).slice(2, 8)}`, at: tt, action: 'room_status_changed', byKind: 'org', byId: 'legacy', byName: 'Legacy', detail: { from: k.room.status, to, reasonCodes: [] } }); k.room.status = to; }
-    k.room.rev = (k.room.rev ?? 1) + 3;
-  }));
+  plantOn((layer, L) => plantCase(L, MIX, legacyMoves(layer.recruitmentCases.cases.byId(MIX), ['trial_requested', 'trial_scheduled', 'trial_completed'], { prefix: 'hist-p81p' })));
   S = await bootOn(DATA, PORT); ok(S.up, '5.4 booted'); await login();
   const okafor = (await S.j('POST', '/auth/player/login', { playerId: 'pl-okafor' })).body;
   const mixJ = await journey(MIX);
@@ -311,11 +304,7 @@ section('5 — stale pointers, cross-case, legacy mixes, a signed mismatch, key 
   // 5.5 a signed mismatch: a case at `signed` whose link names a missing row is integrity_error and stays so; the player is never told signed by it.
   const SM = await mk('pl-imani'); await lifecycle(SM, 'startReview');
   db = await S.stop();
-  plantOn((layer) => layer.recruitmentCases.cases.update(SM, (k) => {
-    let tt = Math.max(Date.now(), ...(k.history ?? []).map((h) => Number(h.at) || 0));
-    for (const to of ['offer_consideration', 'offer_made', 'signed']) { tt += H; k.history.push({ id: `hist-p81p-${Math.random().toString(36).slice(2, 8)}`, at: tt, action: 'room_status_changed', byKind: 'org', byId: 'legacy', byName: 'Legacy', detail: { from: k.room.status, to, reasonCodes: [] } }); k.room.status = to; }
-    k.room.rev = (k.room.rev ?? 1) + 3; k.stage = 'closed'; k.links ??= {}; k.links.signingId = 'sign-p81p-missing';
-  }));
+  plantOn((layer, L) => plantCase(L, SM, { ...legacyMoves(layer.recruitmentCases.cases.byId(SM), ['offer_consideration', 'offer_made', 'signed'], { prefix: 'hist-p81p' }), stage: 'closed', signingId: 'sign-p81p-missing' }));
   S = await bootOn(DATA, PORT); ok(S.up, '5.5 booted'); await login();
   const imani = (await S.j('POST', '/auth/player/login', { playerId: 'pl-imani' })).body;
   const smJ = await journey(SM);

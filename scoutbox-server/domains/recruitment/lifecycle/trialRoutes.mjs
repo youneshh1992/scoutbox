@@ -54,7 +54,7 @@ import {
 export function registerTrial(ctx) {
   const {
     guardians, orgRouter, playerRouter, guardianRouter, nextId, notify, broadcast, findPlayer, isBlocked, isAdult,
-    rateLimit, isLead, moderateOrRefuse, issueRecruitmentRequest, audit, orgCanSee, guardianManagedOnly,
+    rateLimit, isLead, moderateOrRefuse, issueRecruitmentRequest, auditEntry, orgCanSee, guardianManagedOnly,
     combineOrgMaySeeResults, testProviderEnabled = false, recruitment, unit,
     recruitmentReads,
     scoutingReads, // the assessments
@@ -64,7 +64,7 @@ export function registerTrial(ctx) {
   if (typeof unit !== 'function' || !recruitment?.trials) throw new TypeError('registerTrial needs the recruitment repository and unit from the data layer');
   const { trials } = recruitment;
   const { cases } = ctx.recruitmentCases; // the case's links and history are explicit writes in the same unit
-  const caseAudit = (kase, ...args) => cases.update(kase.id, (d) => audit(d, ...args));
+  const caseAudit = (kase, ...entry) => cases.recordAct(kase.id, { history: [auditEntry(...entry)] });
 
   /**
    * ONE clock per request. In a test deployment (SCOUTBOX_TEST_CLOCK=1) a
@@ -398,10 +398,7 @@ export function registerTrial(ctx) {
       // The case link, the recipient snapshot and the client key are part of the one create.
       workflow: { caseId: room.id, recipient, keys: { invite: key.key ? { key: key.key, fp } : null } },
     });
-    cases.update(room.id, (d) => {
-      if (!d.links.requestIds.includes(request.id)) d.links.requestIds.push(request.id);
-      audit(d, 'org', req.orgUser.id, req.orgUser.name, 'room_trial_invited', { requestId: request.id, recipientType: recipient.type, slotCount: inv.slots.length });
-    });
+    cases.link(room.id, { requestId: request.id }, { history: [auditEntry('org', req.orgUser.id, req.orgUser.name, 'room_trial_invited', { requestId: request.id, recipientType: recipient.type, slotCount: inv.slots.length })] });
 
     moved = advanceCase({ req, room, action: 'planTrial', at, trigger: `trial:invite:${request.id}`, keyDetail: { requestId: request.id } });
     return request;
@@ -831,10 +828,7 @@ export function registerTrial(ctx) {
     recruitment.requests.update(request.id, (d) => { d.trialId = trial.id; }); // in the respond route's unit
     const room = recruitmentReads.cases.byId(request.caseId);
     if (!room) return null;
-    cases.update(room.id, (d) => {
-      if (!d.links.trialIds.includes(trial.id)) d.links.trialIds.push(trial.id);
-      audit(d, actor.kind, actor.id, actor.name, 'room_trial_accepted', { trialId: trial.id, requestId: request.id, recipientType: actor.kind, scheduled: trial.workflowState === 'scheduled' });
-    });
+    cases.link(room.id, { trialId: trial.id }, { history: [auditEntry(actor.kind, actor.id, actor.name, 'room_trial_accepted', { trialId: trial.id, requestId: request.id, recipientType: actor.kind, scheduled: trial.workflowState === 'scheduled' })] });
     let moved = { applied: false, reason: 'not_scheduled', at };
     if (trial.workflowState === 'scheduled') {
       moved = advanceCase({ room, action: 'confirmTrial', at, trigger: `trial:accept:${trial.id}`, actor, keyDetail: { trialId: trial.id } });

@@ -53,7 +53,7 @@ export function registerOffers(rawCtx) {
   const ctx = { ...rawCtx, ...buildShared(rawCtx) };
   const {
     guardians, orgRouter, playerRouter, guardianRouter, nextId, notify, broadcast, findPlayer, isBlocked,
-    rateLimit, isLead, moderateOrRefuse, audit, orgCanSee, isAdult, storage,
+    rateLimit, isLead, moderateOrRefuse, auditEntry, orgCanSee, isAdult, storage,
     agent = null, integration = null, transactions = null, faults = null,
     // Every Offer write is an explicit repository operation (offers.create / update) inside `unit`.
     recruitmentContactsOffers, unit, afterCommit,
@@ -63,7 +63,7 @@ export function registerOffers(rawCtx) {
   /** A vault record by id, or null. */
   const vaultRecord = (id) => (typeof id === 'string' ? verificationReads?.evidence.byId(id) ?? null : null);
   /** A case history entry is an explicit write of its case (never an in-place push on the read-only view). */
-  const caseAudit = (kase, ...args) => ctx.recruitmentCases.cases.update(kase.id, (d) => audit(d, ...args));
+  const caseAudit = (kase, ...entry) => ctx.recruitmentCases.cases.recordAct(kase.id, { history: [auditEntry(...entry)] });
   if (typeof unit !== 'function' || typeof afterCommit !== 'function' || !recruitmentContactsOffers?.offers) throw new TypeError('registerOffers needs the contacts/offers repository, unit and afterCommit from the data layer');
   const offers = recruitmentContactsOffers.offers;
   /** A case of this organisation, or null. */

@@ -38,7 +38,7 @@ import { RATE_LIMIT_POLICY } from '../../domains/platform/rateLimit.mjs';
 import { DATA_MIGRATIONS } from '../../repositories/index.mjs';
 
 const SCHEMA_VERSION = Number(DATA_MIGRATIONS.map((m) => m.id).sort().at(-1).slice(0, 4)); // the latest table migration's number
-import { openLayer, readRecords } from '../../scripts/dataLayerFixture.mjs';
+import { openLayer, readRecords, plantCase } from '../../scripts/dataLayerFixture.mjs';
 
 const PORT = 6200 + Math.floor(Math.random() * 200);
 const BASE = `http://localhost:${PORT}`;
@@ -606,7 +606,7 @@ section('L — legacy rows in the store: read-side defence, signed invariant, re
     try {
       L.unit(() => {
         const { recruitmentCases: C, recruitment: Rq, signingsFollowUps: S } = L.layer;
-        C.cases.update(MID, (c) => { c.room.status = 'signed'; });
+        plantCase(L, MID, { status: 'signed' }); // no act jumps a case to signed: the plant is SQL
         for (const c of planted.cases) C.cases.create(c);
         for (const g of planted.signings) S.signings.record(g);
         for (const q of planted.requests) Rq.requests.create(q);

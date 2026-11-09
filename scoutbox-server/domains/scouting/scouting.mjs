@@ -26,7 +26,7 @@ export function registerScouting(ctx) {
   const {
     byId, players, scoutingReads, users, nextId, notify, ledgerAppend, broadcast, findPlayer,
     orgRouter, playerRouter, guardianRouter,
-    orgCanSee, paginate, audit, isLead, requireLead, moderateOrRefuse, isAdult,
+    orgCanSee, paginate, audit, auditEntry, isLead, requireLead, moderateOrRefuse, isAdult,
     playerViewForOrg, revokeOrgUserAccess, guardianOwnsChild,
     recruitmentCases, dueAtOrRefuse,
     scoutingAssessments, unit,
@@ -507,6 +507,8 @@ export function registerScouting(ctx) {
     return c.ownerUserId === req.orgUser.id || c.assignments.some((a) => a.userId === req.orgUser.id) || isLead(req.orgUser);
   }
   function caseView(c) { return c; } // history is intentionally included: it is append-only
+  /** The bookkeeping of a case act by the club user on the request: one history entry. */
+  const byStaff = (req, action, detail = null) => ({ history: [auditEntry('org', req.orgUser.id, req.orgUser.name, action, detail)] });
 
   orgRouter.get('/cases', (req, res) => {
     // Newest first, paged by cursor ({ items, nextCursor }; domains/platform/paging.mjs). The access rule (caseAccess)
@@ -563,7 +565,7 @@ export function registerScouting(ctx) {
     const dueAt = dueAtOrRefuse(res, req.body?.dueAt);
     if (dueAt === undefined) return;
     const asg = { id: nextId('asg'), userId: u.id, name: u.name, task: String(req.body?.task ?? 'Scout this player').slice(0, 200), dueAt, status: 'open', createdAt: Date.now() };
-    cases.update(c.id, (d) => { d.assignments.push(asg); audit(d, 'org', req.orgUser.id, req.orgUser.name, 'assigned', `${u.name}: ${asg.task}`); });
+    cases.addAssignment(c.id, { assignment: asg }, byStaff(req, 'assigned', `${u.name}: ${asg.task}`));
     notify({ kind: 'org_user', id: u.id }, 'case', `📌 ${req.orgUser.name} assigned you: ${asg.task} (${c.playerName}).`, c.id);
     res.status(201).json({ assignment: asg });
   });
@@ -579,7 +581,7 @@ export function registerScouting(ctx) {
     if (dueAt === undefined) return;
     const t = { id: nextId('tsk'), title: String(req.body?.title ?? '').slice(0, 200), dueAt, assigneeUserId: assigneeRaw, status: 'open', createdAt: Date.now() };
     if (!t.title) return res.status(400).json({ error: 'TITLE_REQUIRED' });
-    cases.update(c.id, (d) => { d.tasks.push(t); });
+    cases.addTask(c.id, { task: t });
     res.status(201).json({ task: t });
   });
 
@@ -587,12 +589,7 @@ export function registerScouting(ctx) {
     const c = findCase(req, res);
     if (!c) return;
     if (!c.tasks.some((x) => x.id === req.params.tid)) return res.status(404).json({ error: 'TASK_NOT_FOUND' });
-    const fresh = cases.update(c.id, (d) => {
-      const t = d.tasks.find((x) => x.id === req.params.tid);
-      t.status = 'done';
-      t.completedAt = Date.now();
-      t.completedBy = req.orgUser.name;
-    });
+    const fresh = cases.updateTask(c.id, { taskId: req.params.tid, status: 'done', completedAt: Date.now(), completedBy: req.orgUser.name });
     res.json({ task: fresh.tasks.find((x) => x.id === req.params.tid) });
   });
 
@@ -626,10 +623,7 @@ export function registerScouting(ctx) {
     const { stage, reason } = req.body ?? {};
     if (!stages.includes(stage)) return res.status(400).json({ error: 'STAGE_INVALID', allowed: stages });
     if (stage === 'closed' && !c.decision) return res.status(409).json({ error: 'DECISION_REQUIRED', message: 'Close a case through a recorded decision — no silent drops.' });
-    const fresh = cases.update(c.id, (d) => {
-      audit(d, 'org', req.orgUser.id, req.orgUser.name, 'stage', `${d.stage} → ${stage}${reason ? `: ${reason}` : ''}`);
-      d.stage = stage;
-    });
+    const fresh = cases.setStage(c.id, { stage }, byStaff(req, 'stage', `${c.stage} → ${stage}${reason ? `: ${reason}` : ''}`));
     res.json({ case: caseView(fresh) });
   });
 
@@ -645,16 +639,15 @@ export function registerScouting(ctx) {
     const needsApproval = req.org.level !== 'grassroots' && outcome === 'sign' && !isLead(req.orgUser);
     if (needsApproval) {
       const appr = { id: nextId('apr'), decision: { outcome, reasons: String(reasons).slice(0, 500) }, requestedBy: { userId: req.orgUser.id, name: req.orgUser.name }, status: 'pending', requestedAt: Date.now(), resolvedBy: null };
-      cases.update(c.id, (d) => { d.approvals.push(appr); audit(d, 'org', req.orgUser.id, req.orgUser.name, 'approval_requested', outcome); });
+      cases.requestApproval(c.id, { approval: appr }, byStaff(req, 'approval_requested', outcome));
       return res.status(202).json({ approval: appr, note: 'A sign decision needs a recruitment lead’s approval.' });
     }
-    const fresh = cases.update(c.id, (d) => {
-      d.decision = { outcome, reasons: String(reasons).slice(0, 500), byUserId: req.orgUser.id, byName: req.orgUser.name, at: Date.now() };
+    const fresh = unit(() => {
+      cases.recordDecision(c.id, { decision: { outcome, reasons: String(reasons).slice(0, 500), byUserId: req.orgUser.id, byName: req.orgUser.name, approvedBy: null, at: Date.now() } }, byStaff(req, 'decision', outcome));
       // Recording the decision is the point of this route; moving the case
       // is not. On a Room the stage is derived from the lifecycle status, so
       // writing it here would desync the two. The decision stands either way.
-      if (!d.room) d.stage = 'decision';
-      audit(d, 'org', req.orgUser.id, req.orgUser.name, 'decision', outcome);
+      return c.room ? cases.byId(c.id) : cases.setStage(c.id, { stage: 'decision' });
     });
     res.json({ case: caseView(fresh) });
   });
@@ -666,15 +659,14 @@ export function registerScouting(ctx) {
     const appr = c.approvals.find((x) => x.id === req.params.aid);
     if (!appr || appr.status !== 'pending') return res.status(404).json({ error: 'APPROVAL_NOT_FOUND' });
     const approve = !!req.body?.approve;
-    const fresh = cases.update(c.id, (d) => {
-      const a = d.approvals.find((x) => x.id === appr.id);
-      a.status = approve ? 'approved' : 'rejected';
-      a.resolvedBy = { userId: req.orgUser.id, name: req.orgUser.name, at: Date.now() };
+    const at = Date.now();
+    const fresh = unit(() => {
+      let after = cases.resolveApproval(c.id, { approvalId: appr.id, status: approve ? 'approved' : 'rejected', by: { userId: req.orgUser.id, name: req.orgUser.name, at } }, byStaff(req, approve ? 'approved' : 'rejected', appr.decision.outcome));
       if (approve) {
-        d.decision = { ...a.decision, byUserId: a.requestedBy.userId, byName: a.requestedBy.name, approvedBy: req.orgUser.name, at: Date.now() };
-        if (!d.room) d.stage = 'decision'; // derived on a Room — see the decision route
+        after = cases.recordDecision(c.id, { decision: { ...appr.decision, byUserId: appr.requestedBy.userId, byName: appr.requestedBy.name, approvedBy: req.orgUser.name, at } });
+        if (!c.room) after = cases.setStage(c.id, { stage: 'decision' }); // derived on a Room — see the decision route
       }
-      audit(d, 'org', req.orgUser.id, req.orgUser.name, approve ? 'approved' : 'rejected', a.decision.outcome);
+      return after;
     });
     notify({ kind: 'org_user', id: appr.requestedBy.userId }, 'case', `${approve ? '✅ approved' : '❌ rejected'}: your ${appr.decision.outcome} decision on ${c.playerName}.`, c.id);
     res.json({ case: caseView(fresh) });
@@ -691,12 +683,7 @@ export function registerScouting(ctx) {
     if (trialId && !(trial && trial.playerId === c.playerId)) return res.status(404).json({ error: 'TRIAL_NOT_FOUND' });
     const signing = signingId ? reads.signings.byId(signingId) : null;
     if (signingId && !(signing && signing.orgId === req.org.id && signing.playerId === c.playerId)) return res.status(404).json({ error: 'SIGNING_NOT_FOUND' });
-    const fresh = cases.update(c.id, (d) => {
-      if (requestId && !d.links.requestIds.includes(requestId)) d.links.requestIds.push(requestId);
-      if (trialId && !d.links.trialIds.includes(trialId)) d.links.trialIds.push(trialId);
-      if (signingId) d.links.signingId = signingId;
-      audit(d, 'org', req.orgUser.id, req.orgUser.name, 'linked', JSON.stringify({ requestId, trialId, signingId }));
-    });
+    const fresh = cases.link(c.id, { requestId: requestId || undefined, trialId: trialId || undefined, signingId: signingId || undefined }, byStaff(req, 'linked', JSON.stringify({ requestId, trialId, signingId })));
     res.json({ case: caseView(fresh) });
   });
 

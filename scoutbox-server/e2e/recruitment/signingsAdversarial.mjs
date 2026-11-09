@@ -25,7 +25,7 @@ import { mkdtempSync, existsSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { openLayer, readRecords } from '../../scripts/dataLayerFixture.mjs';
+import { openLayer, readRecords, plantCase } from '../../scripts/dataLayerFixture.mjs';
 import { RATE_LIMIT_POLICY } from '../../domains/platform/rateLimit.mjs';
 import { isAdult } from '../../domain.mjs';
 import { signingIntegrity, signingConsistency, signingCorrupt, SIGNING_CORRUPTION, effectiveStatus, canCompleteParty, completionGate, requiredPartiesFor, canStart } from '../../domains/recruitment/signings/signing.mjs';
@@ -794,12 +794,13 @@ section('W — legacy: the direct route defers to the canonical workflow; a sign
   neg(expect(await j('POST', '/org/players/pl-alvarez/signing', { note: 'legacy' }, maria.token), 409, 'SIGNING_CANONICAL_REQUIRED'), 'W2 and one with a live package');
   const F = globalThis.__F;
   let heldStatus = null; // the status to put back (a case row has no field for it)
-  await offline((db, L) => { L.layer.recruitmentCases.cases.update(F.RID, (k) => { heldStatus = k.room.status; k.room.status = 'signed'; }); });
+  // No act jumps a case to signed beside a live package, so the plant is SQL (plantCase).
+  await offline((db, L) => { heldStatus = L.layer.recruitmentCases.cases.byId(F.RID).room.status; plantCase(L, F.RID, { status: 'signed' }); });
   await relogin();
   const room = await sRoom(F.RID, maria.token);
   neg(room.status === 200 && room.body.packages.find((p) => p.id === F.SID)?.integrity.includes('LIVE_SIGNING_CASE_NOT_AT_OFFER_ACCEPTED') && room.body.legacySigning === null && (await signings(maria.token)).every((s) => s.signingPackageId !== F.SID), 'W3 a case edited to signed with a live package and no row: the surface names the contradiction, reports no legacy signing, writes nothing');
   neg(expect(await pSign(F.SID, { revisionId: F.SREV, documentSha256: SHA_A, clientKey: key() }, P['pl-alvarez'].token), 409, 'SIGNING_LIFECYCLE_CONFLICT') || expect(await pSign(F.SID, { revisionId: F.SREV, documentSha256: SHA_A, clientKey: key() }, P['pl-alvarez'].token), 409, 'SIGNING_PARTY_ALREADY_COMPLETED'), 'W4 nobody can sign into a case that claims to be signed');
-  await offline((db, L) => { L.layer.recruitmentCases.cases.update(F.RID, (k) => { k.room.status = heldStatus; }); });
+  await offline((db, L) => { plantCase(L, F.RID, { status: heldStatus }); });
   await relogin();
   ok((await sRoom(F.RID, maria.token)).body.packages.find((p) => p.id === F.SID)?.integrity.length === 0, 'W5 restored: consistent');
 }

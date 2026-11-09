@@ -1,6 +1,6 @@
 // Recruitment cases, room comments, room snapshots, room decisions and room evidence states
-// (repositories/recruitmentCases.mjs, migration 0016): the typed tables, typed writes and refusals, SQL reads that match a
-// table scan, read-only records, units of work, and the deletion unit's redaction. Player references are counted, never
+// (repositories/recruitmentCases.mjs, migration 0016): the typed tables, whole creates and named acts and their refusals,
+// SQL reads that match a table scan, read-only records, units of work, and the deletion unit's redaction. Player references are counted, never
 // refused (Q8a, docs/decisions.md). Temporary databases only; nothing touches DATA_DIR. Run with: npm test
 import assert from 'node:assert/strict';
 import { checkHistoryFeed } from './historyFeedCheck.mjs';
@@ -33,9 +33,15 @@ const caseDump = (s) => JSON.stringify(TABLES.map((t) => s.prepare(`SELECT * FRO
 const ddlOf = (s, t) => s.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?").get(t)?.sql ?? null;
 const col = (s, sql, ...p) => { const r = s.prepare(sql).get(...p); return r ? Object.values({ ...r })[0] : undefined; };
 const fkOf = (s, t) => s.prepare(`PRAGMA foreign_key_list(${t})`).all().map((r) => `${r.from}->${r.table} ${r.on_delete}`);
-const TYPERS = { recruitmentCases: rc.typeCase, roomComments: rc.typeComment, roomSnapshots: rc.typeSnapshot, roomDecisions: rc.typeDecision, roomEvidenceState: rc.typeEvidenceState };
-/** The typed expectation of a writer's literal: what every read returns (a decision's snapshot is read back from its row). */
-const typed = (name, raw) => { const t = TYPERS[name](persisted(raw), name); assert.ok(t.ok, t.reason); return plain(t.record); };
+/** A stored record holds every value its writer's literal gave (an absent or null one says nothing). */
+const storedAs = (stored, written, at) => {
+  if (written === undefined || written === null) return;
+  if (Array.isArray(written)) { assert.ok(Array.isArray(stored) && stored.length === written.length, `${at}: a list of ${written.length}`); written.forEach((v, i) => storedAs(stored[i], v, `${at}[${i}]`)); return; }
+  if (typeof written === 'object') { assert.ok(stored && typeof stored === 'object', `${at}: an object`); for (const [k, v] of Object.entries(written)) storedAs(stored[k], v, `${at}.${k}`); return; }
+  assert.equal(stored, written, at);
+};
+/** Act bookkeeping for the suite: one history entry. */
+const entry = (id, action, detail = null) => ({ history: [hist(id, NOW, action, detail)] });
 const S8A = () => ({ requests: [acceptedRequest(p4bInvitation(), 'trial-1'), minorInvitation(), legacyTrialRequest()], trials: [scheduledTrial()] });
 const fixtureCollections = (over = {}) => ({ notifications: [], dispatches: [], ...S8A(), ...S8B_FIX(), ...over });
 const file = (tag, over = {}) => saveFixture(tempDir(`s8b-${tag}`), fixtureCollections(over));
@@ -73,10 +79,13 @@ test('[schema] migration 0016 is registered between 0015 and 0017 and creates th
   F.close(); rm(d);
 });
 
-test('[fixtures][typed] every writer shape — the room case (the facet with its reopen and tags, both task literals, assignments, the draft and its key, the handoff and its key, the budget with its lines, FX and actuals), the M12 case with its approval and sign-off, a bare M12 case, the deleted player\'s case, a comment with its edit and tombstone, a snapshot with and without trust, the recommendation and the formal decision, an evidence state — is written through the repository and reads back as the typed record, in insertion order; the decision\'s snapshot is the row it names', () => {
+test('[fixtures][typed] every writer shape — the room case (the facet with its reopen and tags, both task literals, assignments, the draft and its key, the handoff and its key, the budget with its lines, FX and actuals), the M12 case with its approval and sign-off, a bare M12 case, the deleted player\'s case, a comment with its edit and tombstone, a snapshot with and without trust, the recommendation and the formal decision, an evidence state — is written through the repository and reads back as written, in insertion order; the decision\'s snapshot is the row it names', () => {
   const d = file('typed'); const back = readRecords(d);
   const fix = S8B_FIX();
-  for (const n of COLLECTIONS) assert.deepEqual(plain(back[n]), fix[n].map((r) => typed(n, r)).map((r) => (n === 'roomDecisions' && r.snapshot ? { ...r, snapshot: back[n].find((x) => x.id === r.id).snapshot } : r)), `${n} reads back typed`);
+  for (const n of COLLECTIONS) {
+    assert.deepEqual(back[n].map((r) => r.id), fix[n].map((r) => r.id), `${n} in insertion order`);
+    fix[n].forEach((r, i) => storedAs(plain(back[n][i]), persisted(r), `${n} ${r.id}`));
+  }
   const fin = back.roomDecisions.find((x) => x.id === 'rdec-2');
   assert.deepEqual(plain(fin.snapshot), { at: TC.decided, trust: trustedSnapshot().trust, sourceRefs: trustedSnapshot().sourceRefs, snapshotId: 'rsnap-2' }, 'the formal decision reads its snapshot from rsnap-2');
   withRo(d, (r) => {
@@ -97,44 +106,108 @@ test('[fixtures][typed] every writer shape — the room case (the facet with its
   rm(d);
 });
 
-test('[fixtures][typed] a write STOPS with the ids on a record the tables cannot hold — nothing written: an unknown field (top level and nested), a status outside the vocabulary, an off-type value, a due date that is neither a day nor an instant, a duplicate id, a duplicate link, the M27 `by` history literal, a room row naming no case, a link naming no request, a decision chain crossing rooms, a decision citing another room\'s snapshot', () => {
+test('[fixtures][typed] a write STOPS with the ids on a record the tables cannot hold — nothing written: an unknown field (top level and nested), a status outside the vocabulary, an off-type value, a due date that is neither a day nor an instant, a duplicate id, the M27 `by` history literal, a room row naming no case, a link naming no request, a decision chain crossing rooms, a decision citing another room\'s snapshot', () => {
   const fix = S8B_FIX();
   const withCase = (over) => ({ recruitmentCases: [roomCase(over), ...fix.recruitmentCases.slice(1)] });
-  refusedSave('unknown', withCase({ legacyFlag: true }), /case-1\.record\.legacyFlag is not a field this table stores/);
-  refusedSave('nested unknown', withCase({ room: { ...roomCase().room, colour: 'red' } }), /case-1\.room\.colour is not a field this table stores/);
-  refusedSave('vocabulary', withCase({ room: { ...roomCase().room, status: 'shortlist' } }), /case-1\.room\.status must be one of/);
-  refusedSave('off-type', withCase({ createdAt: 'yesterday' }), /case-1\.createdAt must be an integer/);
-  refusedSave('due date', withCase({ tasks: [{ ...roomCase().tasks[0], dueAt: 'soon' }] }), /tasks\[0\]\.dueAt must be a YYYY-MM-DD day, an instant in ms, or null/);
-  refusedSave('duplicate id', { recruitmentCases: [...fix.recruitmentCases, m12Case()] }, /RECRUITMENT_CASES_DUPLICATE[\s\S]*case-2 already exists/);
-  refusedSave('duplicate link', withCase({ links: { requestIds: ['req-p4b'], trialIds: ['trial-1', 'trial-1'], signingId: null } }), /case-1\.links\.trialIds repeats trial-1/);
-  refusedSave('m27 history literal', withCase({ history: [{ id: 'aud-x', at: TC.decided, action: 'transaction_handoff_invited', by: { kind: 'org', userId: SCOUT.userId, name: SCOUT.name }, detail: null }] }), /history\[0\]\.entry\.by is not a field this table stores/);
-  refusedSave('room case', { roomComments: [...fix.roomComments, comment({ id: 'rcmt-9', roomId: 'case-nowhere' })] }, /ROOM_CASE_MISSING[\s\S]*room_comments rcmt-9 → case case-nowhere/);
-  refusedSave('link', withCase({ links: { requestIds: ['req-nowhere'], trialIds: ['trial-1'], signingId: null } }), /RECRUITMENT_CASES_REFERENCE_MISSING[\s\S]*case_request_links case-1 → recruitment_requests req-nowhere/);
+  refusedSave('unknown', withCase({ legacyFlag: true }), /RECRUITMENT_CASES_INPUT_INVALID: recruitment_cases case-1 legacyFlag: is not stored as written/);
+  refusedSave('nested unknown', withCase({ room: { ...roomCase().room, colour: 'red' } }), /recruitment_cases case-1 room\.colour: is not stored as written/);
+  refusedSave('vocabulary', withCase({ room: { ...roomCase().room, status: 'shortlist' } }), /recruitment_cases case-1 row: CHECK constraint failed: room_status IS NULL OR room_status IN/);
+  refusedSave('off-type', withCase({ createdAt: 'yesterday' }), /recruitment_cases case-1 row: cannot store TEXT value in INTEGER column recruitment_cases\.created_at/);
+  refusedSave('due date', withCase({ tasks: [{ ...roomCase().tasks[0], dueAt: 'soon' }] }), /recruitment_cases case-1 task tsk-[\w-]+: CHECK constraint failed: due_day/);
+  refusedSave('duplicate id', { recruitmentCases: [...fix.recruitmentCases, m12Case()] }, /RECRUITMENT_CASES_DUPLICATE: recruitment_cases case-2 already exists/);
+  refusedSave('m27 history literal', withCase({ history: [{ id: 'aud-x', at: TC.decided, action: 'transaction_handoff_invited', by: { kind: 'org', userId: SCOUT.userId, name: SCOUT.name }, detail: null }] }), /recruitment_cases case-1 history\[0\]\.by: is not stored as written/);
+  refusedSave('room case', { roomComments: [...fix.roomComments, comment({ id: 'rcmt-9', roomId: 'case-nowhere' })] }, /room_comments rcmt-9 row: FOREIGN KEY constraint failed/);
+  refusedSave('link', withCase({ links: { requestIds: ['req-nowhere'], trialIds: ['trial-1'], signingId: null } }), /recruitment_cases case-1 link: FOREIGN KEY constraint failed/);
   const other = m12Case({ id: 'case-other', playerId: 'pl-adult', links: { requestIds: [], trialIds: [], signingId: null }, history: [], approvals: [], decision: null });
-  refusedSave('chain', { recruitmentCases: [...fix.recruitmentCases, other], roomDecisions: [recommendation({ roomId: 'case-other', snapshot: null }), formalDecision()] }, /DECISION_CHAIN_BROKEN[\s\S]*rdec-2 \(room case-1\) names rdec-1 \(supersedes\) of room case-other/);
-  refusedSave('snapshot room', { recruitmentCases: [...fix.recruitmentCases, other], roomSnapshots: [snapshot({ roomId: 'case-other' }), trustedSnapshot()] }, /DECISION_CHAIN_BROKEN[\s\S]*rdec-1 names snapshot rsnap-1, which is not a snapshot of room case-1/);
+  refusedSave('chain', { recruitmentCases: [...fix.recruitmentCases, other], roomDecisions: [recommendation({ roomId: 'case-other', snapshot: null }), formalDecision()] }, /room_decisions rdec-2 row: FOREIGN KEY constraint failed/);
+  refusedSave('snapshot room', { recruitmentCases: [...fix.recruitmentCases, other], roomSnapshots: [snapshot({ roomId: 'case-other' }), trustedSnapshot()] }, /room_decisions rdec-1 row: FOREIGN KEY constraint failed/);
 });
 
-test('[repository] explicit writes: there is no db.* view (reading or assigning one of the five throws, naming the repository) and every record a query returns is read-only (an in-place edit throws); create and update write rows at once and return fresh read-only records; update hands a plain copy, refuses an identifier change and an update inside its own update; a refused write changes nothing', () => {
+test('[repository] explicit writes: every record a query returns is read-only (an in-place edit throws); create writes rows at once and returns a fresh read-only record that must read back as written; a case changes only through named acts, each writing its own rows with its history appended and returning the fresh record; a refused write changes nothing', () => {
   const d = file('repo'); const L = serverOpen(d); const R = L.repo;
   const held = R.cases.byId('case-1');
   assert.throws(() => { held.stage = 'closed'; }, /read only|Cannot assign/, 'a field');
   assert.throws(() => { held.history.push(hist('aud-x', NOW, 'x')); }, /not extensible|read only|Cannot add/, 'a nested push');
-  const fresh = R.cases.update('case-1', (c) => { c.room.tags.push('fast'); c.history.push(hist('aud-c1-9', NOW, 'room_tag_changed', { count: 3 })); });
+  const fresh = R.cases.editRoom('case-1', { tags: ['watch', 'u18', 'fast'] }, entry('aud-c1-9', 'room_tag_changed', { count: 3 }));
   assert.deepEqual(plain(fresh.room.tags), ['watch', 'u18', 'fast']); assert.equal(held.room.tags.length, 2, 'the held record is the old version');
+  assert.deepEqual(plain(fresh.history.slice(0, -1)), plain(held.history), 'history is appended to, never rewritten');
   withRo(d, (r) => { assert.equal(col(r, "SELECT count(*) FROM case_room_tags WHERE case_id = 'case-1'"), 3, 'the row is written at once'); assert.equal(col(r, "SELECT action FROM case_history WHERE id = 'aud-c1-9'"), 'room_tag_changed'); });
-  refused(() => R.cases.update('case-1', (c) => { c.playerId = 'pl-other'; }), /playerId cannot change/);
-  refused(() => R.cases.update('case-1', () => { R.cases.update('case-1', () => {}); }), /already being updated/);
   const before = withRo(d, caseDump);
-  refused(() => R.cases.update('case-1', (c) => { c.room.status = 'somewhere'; }), /RECRUITMENT_CASES_INPUT_INVALID[\s\S]*room\.status must be one of/);
-  refused(() => R.comments.create(comment({ id: 'rcmt-9', roomId: 'case-nowhere' })), /ROOM_CASE_MISSING/);
+  const move = { stage: 'trial', at: NOW, by: { id: SCOUT.userId, name: SCOUT.name } };
+  refused(() => R.cases.moveRoom('case-1', { ...move, to: 'signed' }), /RECRUITMENT_CASES_STATE_CONFLICT: recruitment_cases case-1 cannot move to signed from where it is/);
+  refused(() => R.cases.moveRoom('case-1', { ...move, to: 'somewhere' }), /cannot move to somewhere/);
+  refused(() => R.cases.setStage('case-1', { stage: 'trial' }), /case-1 has a Room; its stage follows the Room's status/);
+  refused(() => R.cases.openRoom('case-1', { room: roomCase().room, stage: 'trial' }), /case-1 already has a Room/);
+  refused(() => R.cases.startDraft('case-1', { draft: roomCase().decisionDraft }), /case-1 already has a decision draft/);
+  refused(() => R.cases.addTask('case-1', { task: { ...roomCase().tasks[0], id: 'tsk-new', colour: 'red' } }), /recruitment_cases case-1 task tsk-new\.colour: is not stored as written/);
+  refused(() => R.cases.recordAct('case-1', entry('aud-c1-9', 'again')), /case-1 history aud-c1-9: UNIQUE constraint failed/);
+  refused(() => R.cases.recordAct('case-nowhere', entry('aud-n', 'x')), /RECRUITMENT_CASES_NOT_FOUND: recruitment_cases case-nowhere/);
+  refused(() => R.comments.create(comment({ id: 'rcmt-9', roomId: 'case-nowhere' })), /room_comments rcmt-9 row: FOREIGN KEY constraint failed/);
+  refused(() => R.comments.create(comment({ id: 'rcmt-9', replyToId: 'rcmt-nowhere' })), /room_comments rcmt-9 row: FOREIGN KEY constraint failed/);
   refused(() => R.comments.create(comment()), /RECRUITMENT_CASES_DUPLICATE/);
-  refused(() => R.evidenceStates.create(evidenceState({ id: 'rev-2' })), /already reviews evidence ev-1/);
-  refused(() => R.cases.create(m12Case({ id: 'case-9', ownerUserId: 'usr-nobody' })), /RECRUITMENT_CASES_REFERENCE_MISSING[\s\S]*org_users usr-nobody/);
+  refused(() => R.comments.edit('rcmt-3', { body: 'Back again', at: NOW }), /room_comments rcmt-3 is deleted/);
+  refused(() => R.evidenceStates.create(evidenceState({ id: 'rev-2' })), /UNIQUE constraint failed: room_evidence_states\.room_id, room_evidence_states\.evidence_id/);
+  refused(() => R.decisions.markSuperseded('rdec-1', { by: 'rdec-2' }), /room_decisions rdec-1 is already superseded/);
+  refused(() => R.cases.create(m12Case({ id: 'case-9', ownerUserId: 'usr-nobody' })), /recruitment_cases case-9 row: FOREIGN KEY constraint failed/);
+  refused(() => R.cases.create(m12Case({ id: 'case-9', links: { requestIds: [], trialIds: ['trial-1', 'trial-1'], signingId: null } })), /recruitment_cases case-9 trial link trial-1: UNIQUE constraint failed/);
   assert.equal(withRo(d, caseDump), before, 'nothing was written by a refused operation');
   const c9 = R.cases.create(m12Case({ id: 'case-9', links: { requestIds: [], trialIds: [], signingId: null }, history: [] }));
   assert.equal(c9.id, 'case-9'); assert.ok(R.cases.byId('case-9'));
   assert.throws(() => { c9.priority = 'high'; }, /read only|Cannot assign/, 'a returned record is read-only');
+  L.close(); rm(d);
+});
+
+test('[repository] the acts of a case: tasks, assignments, approvals and the sign-off decision, a plain case\'s stage, links once each, the Room\'s move with its rev, the decision draft, the transaction handoff and the budget; an approval, a handoff and a draft change only out of their open state', () => {
+  const d = file('acts'); const L = serverOpen(d); const R = L.repo;
+  const by = { id: SCOUT.userId, name: SCOUT.name };
+  // a plain case
+  const task = { id: 'tsk-9', title: 'Watch the replay', dueAt: '2026-11-30', assigneeUserId: null, status: 'open', createdAt: NOW };
+  let c = R.cases.addTask('case-2', { task });
+  storedAs(plain(c.tasks.at(-1)), task, 'the task');
+  c = R.cases.updateTask('case-2', { taskId: 'tsk-9', status: 'done', completedAt: NOW, completedBy: SCOUT.name });
+  assert.equal(c.tasks.at(-1).status, 'done'); assert.equal(c.tasks.at(-1).completedBy, SCOUT.name);
+  refused(() => R.cases.updateTask('case-2', { taskId: 'tsk-nowhere', status: 'done' }), /case_tasks tsk-nowhere is not a task of recruitment_cases case-2/);
+  const appr = { id: 'apr-9', decision: { outcome: 'sign', reasons: 'Ready.' }, requestedBy: { userId: SCOUT.userId, name: SCOUT.name }, status: 'pending', requestedAt: NOW, resolvedBy: null };
+  R.cases.requestApproval('case-2', { approval: appr }, entry('aud-a9', 'approval_requested', 'sign'));
+  c = R.cases.resolveApproval('case-2', { approvalId: 'apr-9', status: 'approved', by: { userId: SCOUT.userId, name: SCOUT.name, at: NOW } });
+  assert.deepEqual(plain(c.approvals.at(-1).resolvedBy), { userId: SCOUT.userId, name: SCOUT.name, at: NOW });
+  refused(() => R.cases.resolveApproval('case-2', { approvalId: 'apr-9', status: 'rejected', by: { userId: SCOUT.userId, name: SCOUT.name, at: NOW } }), /case_approvals apr-9 of recruitment_cases case-2 is not pending/);
+  c = R.cases.recordDecision('case-2', { decision: { outcome: 'sign', reasons: 'Ready.', byUserId: SCOUT.userId, byName: SCOUT.name, approvedBy: SCOUT.name, at: NOW } });
+  assert.equal(c.decision.approvedBy, SCOUT.name);
+  assert.equal(R.cases.setStage('case-2', { stage: 'decision' }).stage, 'decision');
+  R.cases.link('case-2', { trialId: 'trial-1' }); c = R.cases.link('case-2', { trialId: 'trial-1', signingId: 'sgn-9' });
+  assert.equal(c.links.trialIds.filter((t) => t === 'trial-1').length, 1, 'a link is written once'); assert.equal(c.links.signingId, 'sgn-9');
+  // the Room
+  const room = R.cases.byId('case-1');
+  c = R.cases.moveRoom('case-1', { to: 'trial_scheduled', stage: 'trial', at: NOW, by }, entry('aud-m9', 'room_status_changed'));
+  assert.equal(c.room.status, 'trial_scheduled'); assert.equal(c.room.rev, room.room.rev + 1); assert.deepEqual(plain(c.room.revBy), { userId: SCOUT.userId, name: SCOUT.name }); assert.equal(c.room.updatedAt, NOW);
+  c = R.cases.recordAct('case-1', { at: NOW + 1, touch: true, bump: true, revBy: by });
+  assert.equal(c.room.rev, room.room.rev + 2); assert.equal(c.room.updatedAt, NOW + 1);
+  refused(() => R.cases.recordAct('case-2', { at: NOW, touch: true }), /recruitment_cases case-2 has no Room/);
+  // the decision draft
+  c = R.cases.editDraft('case-1', { note: 'Changed.', reasonCodes: ['pace'], at: NOW, by: { userId: SCOUT.userId, name: SCOUT.name, role: SCOUT.role } });
+  assert.equal(c.decisionDraft.note, 'Changed.'); assert.deepEqual(plain(c.decisionDraft.reasonCodes), ['pace']); assert.equal(c.decisionDraft.rev, room.decisionDraft.rev + 1);
+  assert.equal(R.cases.discardDraft('case-1').decisionDraft, null);
+  refused(() => R.cases.discardDraft('case-1'), /case-1 has no decision draft/);
+  // the transaction handoff
+  c = R.cases.withdrawHandoff('case-1', { at: NOW });
+  assert.equal(c.transactionHandoff.status, 'withdrawn'); assert.equal(c.transactionHandoff.rev, room.transactionHandoff.rev + 1);
+  refused(() => R.cases.acceptHandoff('case-1', { at: NOW, transactionId: 'tx-9' }), /case-1 has no open transaction handoff/);
+  c = R.cases.inviteHandoff('case-1', { handoff: { ...room.transactionHandoff, id: 'hof-9', status: 'invited', rev: 1, keys: { invite: null } } });
+  assert.equal(c.transactionHandoff.id, 'hof-9');
+  c = R.cases.acceptHandoff('case-1', { at: NOW, transactionId: 'tx-9' });
+  assert.equal(c.transactionHandoff.status, 'accepted'); assert.equal(c.transactionHandoff.transactionId, 'tx-9');
+  refused(() => R.cases.inviteHandoff('case-1', { handoff: { ...room.transactionHandoff, id: 'hof-10' } }), /case-1 has an accepted transaction handoff/);
+  // the budget
+  const sc = room.budget.scenarios[0];
+  c = R.cases.approveScenario('case-1', { scenarioId: sc.id, by: SCOUT.name, byUserId: SCOUT.userId, at: NOW });
+  assert.equal(c.budget.scenarios[0].approval.version, sc.version); assert.equal(c.budget.scenarios[0].approval.superseded, false);
+  c = R.cases.editScenario('case-1', { scenarioId: sc.id, label: 'Revised', lines: [{ ...sc.lines[0], amountMinor: 1 }], at: NOW });
+  const edited = c.budget.scenarios[0];
+  assert.equal(edited.version, sc.version + 1); assert.equal(edited.label, 'Revised'); assert.equal(edited.lines.length, 1); assert.equal(edited.approval.superseded, true, 'an approval is of one version');
+  c = R.cases.recordActual('case-1', { scenarioId: sc.id, actual: { id: 'act-9', lineId: sc.lines[0].id, amountMinor: 5, at: NOW, recordedBy: SCOUT.name } });
+  assert.equal(c.budget.scenarios[0].actuals.at(-1).id, 'act-9');
+  refused(() => R.cases.recordActual('case-1', { scenarioId: 'scn-nowhere', actual: { id: 'act-10', lineId: 'x', amountMinor: 5, at: NOW } }), /FOREIGN KEY constraint failed/);
   L.close(); rm(d);
 });
 
@@ -169,7 +242,7 @@ test('[repository] SQL reads: byId and every list query of the five collections 
   const decs = all.roomDecisions;
   for (const v of values(decs, (r) => r.orgId)) check(`decisions.forOrg ${v}`, R.decisions.forOrg(v), decs.filter((r) => r.orgId === v));
   for (const r of decs) check('decisions.forOrgPlayer', R.decisions.forOrgPlayer(r.orgId, r.playerId), decs.filter((x) => x.orgId === r.orgId && x.playerId === r.playerId));
-  for (const n of ['cases', 'comments', 'snapshots', 'decisions', 'evidenceStates']) { assert.ok(Object.isFrozen(R.reads[n])); assert.equal(R.reads[n].byId, R[n].byId); assert.equal(R.reads[n].create, undefined); assert.equal(R.reads[n].update, undefined); }
+  for (const n of ['cases', 'comments', 'snapshots', 'decisions', 'evidenceStates']) { assert.ok(Object.isFrozen(R.reads[n])); assert.equal(R.reads[n].byId, R[n].byId); assert.equal(R.reads[n].create, undefined); assert.equal(R.reads[n].recordAct, undefined); assert.equal(R.reads[n].markSuperseded, undefined); }
   L.close(); rm(d);
 });
 
@@ -248,25 +321,25 @@ test('[repository] the per-viewer lists in SQL: over sixty varied cases, every v
   L.close(); rm(d);
 });
 
-test('[repository] decisions: an advisory recommendation and its supersession, a formal decision naming its snapshot (read back from the snapshot row, never a copy), a chain crossing rooms refused with DECISION_CHAIN_BROKEN', () => {
+test('[repository] decisions: an advisory recommendation and its supersession, a formal decision naming its snapshot (read back from the snapshot row, never a copy), a chain or a snapshot crossing rooms refused by the room\'s composite keys', () => {
   const d = file('dec'); const L = serverOpen(d); const R = L.repo;
   const snap = R.snapshots.create(snapshot({ id: 'rsnap-9', at: NOW, trigger: 'decision' }));
   const dec = R.decisions.create(recommendation({ id: 'rdec-9', createdAt: NOW, clientKey: null, supersedes: 'rdec-2', supersededById: null, snapshot: { at: snap.at, trust: snap.trust, sourceRefs: snap.sourceRefs, snapshotId: snap.id } }));
-  R.decisions.update('rdec-2', (x) => { x.supersededById = 'rdec-9'; });
+  R.decisions.markSuperseded('rdec-2', { by: 'rdec-9' });
   assert.deepEqual(plain(dec.snapshot), { at: snap.at, trust: null, sourceRefs: plain(snap.sourceRefs), snapshotId: 'rsnap-9' });
   withRo(d, (r) => { assert.equal(col(r, "SELECT superseded_by_id FROM room_decisions WHERE id = 'rdec-2'"), 'rdec-9'); assert.equal(col(r, "SELECT snapshot_id FROM room_decisions WHERE id = 'rdec-9'"), 'rsnap-9'); });
   R.cases.create(m12Case({ id: 'case-x', links: { requestIds: [], trialIds: [], signingId: null }, history: [] }));
-  refused(() => R.decisions.create(recommendation({ id: 'rdec-x', roomId: 'case-x', supersedes: 'rdec-9', supersededById: null, snapshot: null })), /DECISION_CHAIN_BROKEN[\s\S]*names rdec-9 \(supersedes\) of room case-1/);
-  refused(() => R.decisions.create(recommendation({ id: 'rdec-y', roomId: 'case-x', supersedes: null, supersededById: null, snapshot: { snapshotId: 'rsnap-9' } })), /not a snapshot of room case-x/);
+  refused(() => R.decisions.create(recommendation({ id: 'rdec-x', roomId: 'case-x', supersedes: 'rdec-9', supersededById: null, snapshot: null })), /room_decisions rdec-x row: FOREIGN KEY constraint failed/);
+  refused(() => R.decisions.create(recommendation({ id: 'rdec-y', roomId: 'case-x', supersedes: null, supersededById: null, snapshot: { snapshotId: 'rsnap-9' } })), /room_decisions rdec-y row: FOREIGN KEY constraint failed/);
   L.close(); rm(d);
 });
 
 test('[repository] a unit of work: case, comment and decision writes commit together; a unit that fails rolls the rows back while a read inside it sees its writes; the deletion unit\'s redaction keeps ids, states and history and loses the name', () => {
   const d = file('unit'); const L = serverOpen(d); const R = L.repo;
   const rows = withRo(d, caseDump); const before = JSON.stringify(R.exportAll());
-  refused(() => L.unit(() => { R.comments.create(comment({ id: 'rcmt-u' })); R.cases.update('case-1', (c) => { c.room.updatedAt = NOW; }); assert.ok(R.comments.byId('rcmt-u'), 'a read inside the unit sees its create'); assert.equal(R.cases.byId('case-1').room.updatedAt, NOW); throw new Error('synthetic unit failure'); }), /synthetic unit failure/);
+  refused(() => L.unit(() => { R.comments.create(comment({ id: 'rcmt-u' })); R.cases.recordAct('case-1', { at: NOW, touch: true }); assert.ok(R.comments.byId('rcmt-u'), 'a read inside the unit sees its create'); assert.equal(R.cases.byId('case-1').room.updatedAt, NOW); throw new Error('synthetic unit failure'); }), /synthetic unit failure/);
   assert.equal(withRo(d, caseDump), rows, 'no row changed'); assert.equal(JSON.stringify(R.exportAll()), before, 'a fresh read sees the rollback'); assert.equal(R.comments.byId('rcmt-u'), null);
-  L.unit(() => { R.comments.create(comment({ id: 'rcmt-u' })); R.cases.update('case-1', (c) => { c.history.push(hist('aud-u', NOW, 'room_comment_added', { commentId: 'rcmt-u', replyToId: null })); }); });
+  L.unit(() => { R.comments.create(comment({ id: 'rcmt-u' })); R.cases.recordAct('case-1', entry('aud-u', 'room_comment_added', { commentId: 'rcmt-u', replyToId: null })); });
   withRo(d, (r) => { assert.equal(col(r, "SELECT count(*) FROM room_comments WHERE id = 'rcmt-u'"), 1); assert.equal(col(r, "SELECT count(*) FROM case_history WHERE id = 'aud-u'"), 1); });
   assert.equal(R.redactPlayer('pl-adult', NOW + 5), 1);
   const red = R.cases.byId('case-1');

@@ -38,7 +38,7 @@ import {
 export function registerDecision(ctx) {
   const {
     orgRouter, nextId, notify, broadcast, findPlayer, isBlocked,
-    rateLimit, isLead, moderateOrRefuse, audit, testProviderEnabled = false,
+    rateLimit, isLead, moderateOrRefuse, auditEntry, testProviderEnabled = false,
     recruitmentCases, unit, // drafts, formal rows and the case move are explicit repository writes, one unit per act
     recruitmentReads, scoutingReads,
     boxCamReads, // a cited Box Cam session
@@ -53,6 +53,8 @@ export function registerDecision(ctx) {
   const roleFor = (req, room) => roomRole({ room, user: req.orgUser, isLead: isLead(req.orgUser) });
   const evidenceProvider = () => ctx.recruitmentEvidenceProvider ?? NULL_EVIDENCE_PROVIDER;
   const actor = (req) => ({ userId: req.orgUser.id, name: req.orgUser.name, role: req.orgUser.role ?? null });
+  /** The bookkeeping of a case act by the club user on the request: one history entry. */
+  const byStaff = (req, action, detail) => ({ history: [auditEntry('org', req.orgUser.id, req.orgUser.name, action, detail)] });
   const now = () => Date.now();
 
   // ------------------------------------------------------------- lookups
@@ -230,10 +232,7 @@ export function registerDecision(ctx) {
       by, createdAt: at, updatedAt: at, updatedBy: by, rev: 1, revAt: at,
       keys: { create: key.key ? { key: key.key, fp } : null },
     };
-    const fresh = cases.update(kase.id, (d) => {
-      d.decisionDraft = draft;
-      audit(d, 'org', req.orgUser.id, req.orgUser.name, 'room_decision_drafted', { draftId: draft.id, outcome: content.outcome, note: !!content.note });
-    });
+    const fresh = cases.startDraft(kase.id, { draft }, byStaff(req, 'room_decision_drafted', { draftId: draft.id, outcome: content.outcome, note: !!content.note }));
     res.status(201).json({ draft: draftView(fresh.decisionDraft) });
   });
 
@@ -255,16 +254,12 @@ export function registerDecision(ctx) {
     }
     if (content.provided.note && content.note && !moderateOrRefuse(res, content.note, { kind: 'recruitment_decision', orgId: req.org.id, userId: req.orgUser.id })) return;
     const at = now();
-    const fresh = cases.update(kase.id, (d) => {
-      const x = d.decisionDraft;
-      if (content.provided.outcome) x.outcome = content.outcome;
-      if (content.provided.reasonCodes) x.reasonCodes = content.reasonCodes;
-      if (content.provided.note) x.note = content.note;
-      if (refs) x.evidenceRefs = refs.refs;
-      x.updatedAt = at;
-      x.updatedBy = actor(req);
-      x.rev = (Number.isInteger(x.rev) ? x.rev : 1) + 1;
-      x.revAt = at;
+    const fresh = cases.editDraft(kase.id, {
+      outcome: content.provided.outcome ? content.outcome : undefined,
+      reasonCodes: content.provided.reasonCodes ? content.reasonCodes : undefined,
+      note: content.provided.note ? content.note : undefined,
+      evidenceRefs: refs ? refs.refs : undefined,
+      at, by: actor(req),
     });
     res.json({ draft: draftView(fresh.decisionDraft) });
   });
@@ -276,10 +271,7 @@ export function registerDecision(ctx) {
     const dr = kase.decisionDraft;
     if (!dr) return err(res, 'DECISION_NOT_FOUND', 'This case has no draft decision.');
     if (!revGate(req, res, dr)) return;
-    cases.update(kase.id, (d) => {
-      d.decisionDraft = null;
-      audit(d, 'org', req.orgUser.id, req.orgUser.name, 'room_decision_draft_discarded', { draftId: dr.id, outcome: dr.outcome ?? null });
-    });
+    cases.discardDraft(kase.id, {}, byStaff(req, 'room_decision_draft_discarded', { draftId: dr.id, outcome: dr.outcome ?? null }));
     res.json({ draft: null, discarded: { id: dr.id } });
   });
 
@@ -386,7 +378,7 @@ export function registerDecision(ctx) {
             lifecycle: null,
             policyVersion: DECISION_POLICY_VERSION,
           });
-          if (head) decisions.update(head.id, (h) => { h.supersededById = formal.id; });
+          if (head) decisions.markSuperseded(head.id, { by: formal.id });
           // The case, through the ONE validator, which now sees this row as the evidence a progress needs.
           let lc;
           if (from === LIFECYCLE_ACTIONS[map.action].to) {
@@ -398,12 +390,9 @@ export function registerDecision(ctx) {
             const moved = ctx.applyLifecycleTransition({ req, room: kase, to: verdict.to, reasonCodes: map.lifecycleReasons, trigger: `decision:finalize:${formal.id}`, statusDetail: { lifecycleAction: map.action, clientKey: null, policyVersion: RECRUITMENT_LIFECYCLE_POLICY_VERSION, decisionId: formal.id } });
             lc = { action: map.action, from: moved.from, to: moved.to, applied: true, at };
           }
-          const saved = decisions.update(formal.id, (d) => { d.lifecycle = lc; });
-          if (headFormal) decisions.update(headFormal.id, (h) => { h.rev = (Number.isInteger(h.rev) ? h.rev : 1) + 1; h.revAt = at; });
-          const after = cases.update(kase.id, (c) => {
-            c.decisionDraft = null;
-            audit(c, 'org', req.orgUser.id, req.orgUser.name, action, { decisionId: formal.id, outcome, supersedes: headFormal?.id ?? null, reasonCodes: content.reasonCodes, note: !!content.note, to: lc.applied ? lc.to : undefined });
-          });
+          const saved = decisions.recordLifecycle(formal.id, { lifecycle: lc });
+          if (headFormal) decisions.bump(headFormal.id, { at });
+          const after = cases.discardDraft(kase.id, {}, byStaff(req, action, { decisionId: formal.id, outcome, supersedes: headFormal?.id ?? null, reasonCodes: content.reasonCodes, note: !!content.note, to: lc.applied ? lc.to : undefined }));
           return { row: saved, lifecycle: lc, fresh: after };
         }));
       } catch (e) {
