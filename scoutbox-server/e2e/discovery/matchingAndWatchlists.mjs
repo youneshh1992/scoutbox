@@ -357,10 +357,13 @@ section('§7 — ordering is declared, deterministic, and never a ranking');
     'no ordering option is a match-quality ranking');
   abuse(51, DEFAULT_MATCH_SORT === 'recent_evidence',
     'the default ordering is the least suggestive useful one, not a quality order');
-  const src = read('scoutbox-server/domains/discovery/matching/index.mjs');
-  neg(/String\(a\.facts\.playerId\)\.localeCompare/.test(src) || /localeCompare\(String\(b\.facts\.playerId\)\)/.test(src),
+  // S14j: the orders are SQL keyset orders (matching/query.mjs); each ends on the player id.
+  const src = read('scoutbox-server/domains/discovery/matching/query.mjs');
+  neg(/order: \[lead, \['f\.player_id', 'ASC'\]\]/.test(src),
     'every comparator ends on the player id, so two reads of the same data return the same order');
-  neg(/preferredMet/.test(src) && !/sort[^\n]*preferredMet|preferredMet[^\n]*-\s*[ab]\./.test(src),
+  // The count is reported by the routes (matchView); the orders, in query.mjs, never mention it.
+  const routesSrc = read('scoutbox-server/domains/discovery/matching/index.mjs');
+  neg(/preferredMet/.test(routesSrc) && !/sort[^\n]*preferredMet|preferredMet[^\n]*-\s*[ab]\./.test(routesSrc) && !/preferred/i.test(src),
     'the preferred count is reported but is NEVER used as a sort key');
 }
 
@@ -388,16 +391,24 @@ section('§8 — the source itself carries no score, no ranking and no player su
   abuse(53, !/playerRouter|guardianRouter|publicRouter|tsRouter|adminRouter/.test(read('scoutbox-server/domains/discovery/matching/index.mjs')),
     'M19 registers nothing on a player, guardian, public, T&S or admin router — there is no player-facing surface to leak from');
   {
-    // Exactly one read of the player collection, inside the guarded scan.
-    // Anything else would be a path around playerViewForOrg.
-    const src = read('scoutbox-server/domains/discovery/matching/index.mjs').split('\n').filter((l) => !/^\s*(\*|\/\/)/.test(l)).join('\n');
-    // S14h: the players come from the identity repository's query (no db.players); still exactly one read.
-    const reads = [...src.matchAll(/\bplayers\.(list|scan|visibleCandidates|byId|byIds)\(|db\.players\b/g)].length;
-    abuse(54, reads === 1 && /for \(const player of players\.list\(\{ visibleTo: org \}/.test(src),
-      `the only read of the players is the single guarded scan (${reads} occurrence)`);
+    // Exactly one read of the players, inside the guarded query. Anything else would be a path around the visibility
+    // rule. S14j: the routes read no player record for matching at all; the one read is the shared match query's
+    // visibility condition (matching/query.mjs), and a club that may see nobody gets an empty query.
+    const strip = (f) => read(f).split('\n').filter((l) => !/^\s*(\*|\/\/)/.test(l)).join('\n');
+    const routes = strip('scoutbox-server/domains/discovery/matching/index.mjs');
+    const query = strip('scoutbox-server/domains/discovery/matching/query.mjs');
+    const routeReads = [...routes.matchAll(/\bplayers\.(list|scan|visibleCandidates|visibleWhere|byId|byIds)\(|db\.players\b/g)].length;
+    const queryReads = [...query.matchAll(/\bplayers\.(list|scan|visibleCandidates|visibleWhere|byId|byIds)\(|db\.players\b/g)].length;
+    abuse(54, routeReads === 0 && queryReads === 1 && /const visible = players\.visibleWhere\(org, at\);\s*if \(!visible\) return EMPTY_QUERY;/.test(query),
+      `the only read of the players is the single guarded query (${routeReads + queryReads} occurrence)`);
   }
-  abuse(55, /orgCanSee\(org, player\)/.test(read('scoutbox-server/domains/discovery/matching/index.mjs')) && /ctx\.m18MatchFacts\?\.\(player, org\)/.test(read('scoutbox-server/domains/discovery/matching/index.mjs')),
-    'authorization and the visibility projection both run BEFORE any criterion is evaluated');
+  {
+    // The visibility conditions are the query's first, and every criterion is a condition after them.
+    const query = read('scoutbox-server/domains/discovery/matching/query.mjs');
+    const repo = read('scoutbox-server/repositories/matchFacts.mjs');
+    abuse(55, /matchFacts\.query\(visible, \[\.\.\.required\.map/.test(query) && /const conds = \[visible\.sql, \.\.\.where/.test(repo),
+      'authorization and the visibility projection both run BEFORE any criterion is evaluated');
+  }
 }
 
 // ========================== §9 registry, preferences, limits, migration
@@ -661,15 +672,18 @@ section('§15 — ordering and paging are deterministic');
   const bogus = await j('POST', '/org/matching', q(ANY_AGE_C, { sort: 'best_match' }), maria.token);
   abuse(50, bogus.status === 200 && bogus.body.sort === DEFAULT_MATCH_SORT,
     'asking for an ordering called "best_match" quietly gets the declared default, because no such ordering exists');
-  const p1 = await j('POST', '/org/matching', q(ANY_AGE_C, { limit: 3, offset: 0 }), maria.token);
-  const p2 = await j('POST', '/org/matching', q(ANY_AGE_C, { limit: 3, offset: 3 }), maria.token);
-  expect(7, p1.body.items.length === 3 && p2.body.items.length > 0 && p1.body.total === p2.body.total
+  // S14j: matching pages by cursor (§4.3), so a page is one query and only its players are decoded.
+  const p1 = await j('POST', '/org/matching', q(ANY_AGE_C, { limit: 3 }), maria.token);
+  const p2 = await j('POST', '/org/matching', q(ANY_AGE_C, { limit: 3, cursor: p1.body.nextCursor }), maria.token);
+  expect(7, p1.body.items.length === 3 && typeof p1.body.nextCursor === 'string' && p2.body.items.length > 0 && p1.body.total === p2.body.total
     && !p1.body.items.some((a) => p2.body.items.some((b) => b.playerId === a.playerId)),
     'paging is stable: the total is the same and no player appears on two pages');
   const negOffset = await j('POST', '/org/matching', q(ANY_AGE_C, { offset: -50 }), maria.token);
-  neg(negOffset.status === 200 && negOffset.body.offset === 0, 'a negative offset is clamped, never used to read backwards');
+  neg(negOffset.status === 400 && negOffset.body.error === 'PAGE_OFFSET_UNSUPPORTED', 'an offset is refused (the list pages by cursor), never used to read backwards');
+  const forged = await j('POST', '/org/matching', q(ANY_AGE_C, { cursor: 'not-a-cursor' }), maria.token);
+  neg(forged.status === 400 && forged.body.error === 'PAGE_CURSOR_INVALID', 'a cursor this list did not hand out is refused');
   const hugeLimit = await j('POST', '/org/matching', q(ANY_AGE_C, { limit: 100000 }), maria.token);
-  neg(hugeLimit.body.limit <= 200, 'an enormous page size is clamped to the platform page limit');
+  neg(hugeLimit.status === 400 && hugeLimit.body.error === 'PAGE_LIMIT_INVALID', 'an enormous page size is refused (400), never served');
 }
 
 // ======================================= §16 watchlists: create and mode

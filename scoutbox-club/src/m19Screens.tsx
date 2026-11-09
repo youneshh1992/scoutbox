@@ -514,6 +514,7 @@ export function MatchingScreen({
     setMessage(null);
     setDetails([]);
     try {
+      // Matches page by cursor (S14j): this reads the first page; a "load more" (nextCursor) is needed.
       const out = await m19.match(session, source === 'brief'
         ? { briefId, sort: nextSort }
         : { criteria, sort: nextSort });
@@ -805,6 +806,7 @@ function WatchlistDetailView({
   useEffect(() => {
     let live = true;
     setErr(null);
+    // The members page by cursor (S14j): this reads the first page; a "load more" (nextCursor) is needed.
     m19.watchlist(session, watchlistId, { sort })
       // A refetch never overwrites a name the person is in the middle of typing.
       .then((d) => { if (live) { setData(d); if (!renaming) setName(d.watchlist.name); } })

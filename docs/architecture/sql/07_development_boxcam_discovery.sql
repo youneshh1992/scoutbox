@@ -814,6 +814,57 @@ CREATE TABLE watchlist_membership_events (
 CREATE INDEX watchlist_membership_events_watchlist_at ON watchlist_membership_events (watchlist_id, at, id);
 CREATE INDEX watchlist_membership_events_org_at ON watchlist_membership_events (org_id, at);
 
+-- =============================================================================
+-- S14j · the match facts (matching, the Dynamic Watchlists and Nobody Missed read these)
+-- IMPLEMENTED, migration 0040_match_facts REGISTERED (repositories/matchFacts.mjs, 8 Nov 2026).
+-- A DERIVED projection, never a source and never in a snapshot: one row per live player with what the players row
+-- cannot answer (the Passport-resolved position and availability, the evidence-confidence band, the newest evidence
+-- and footage instants, a coach reference, a confirmed club, the next time-only change), the secondary positions and
+-- the live production Combine results as child rows. Kept by triggers on every input table (matchFactsTriggersDdl in
+-- repositories/matchFacts.mjs: players, passport_prefs, passport_pref_positions, passport_career_entries, evidence,
+-- ver_references, ver_claims, ver_player_invites, combine_attempts, box_sessions, signings, outcome_reports,
+-- org_squad_members, representation_agreements, assessments, and an organisation's standing), which mark the player in
+-- player_match_facts_dirty; the server re-derives the marked players before every COMMIT and a minute sweep handles
+-- the time-only changes. The triggers are not repeated here (they span the other files' tables).
+-- =============================================================================
+
+CREATE TABLE player_match_facts (
+  player_id         TEXT PRIMARY KEY REFERENCES players(id) ON DELETE CASCADE,
+  name_key          TEXT NOT NULL CHECK (length(name_key) <= 120),
+  position          TEXT CHECK (position IS NULL OR position IN ('GK','CB','RB','LB','RWB','LWB','CDM','CM','CAM','RW','LW','ST','CF')),
+  availability      TEXT CHECK (availability IS NULL OR length(availability) BETWEEN 1 AND 40),
+  trust_band        TEXT CHECK (trust_band IS NULL OR trust_band IN ('limited_evidence','developing_evidence','established_evidence','strong_evidence','very_strong_evidence')),
+  last_evidence_at  INTEGER CHECK (last_evidence_at IS NULL OR last_evidence_at > 0),
+  last_footage_at   INTEGER CHECK (last_footage_at IS NULL OR last_footage_at > 0),
+  coach_reference   INTEGER NOT NULL CHECK (coach_reference IN (0, 1)),
+  club_confirmed    INTEGER NOT NULL CHECK (club_confirmed IN (0, 1)),
+  refresh_due_at    INTEGER,
+  refreshed_at      INTEGER NOT NULL
+) STRICT;
+CREATE INDEX player_match_facts_due ON player_match_facts (refresh_due_at) WHERE refresh_due_at IS NOT NULL;
+CREATE INDEX player_match_facts_recent ON player_match_facts (COALESCE(last_evidence_at, 0) DESC, player_id);
+CREATE INDEX player_match_facts_name ON player_match_facts (name_key, player_id);
+CREATE INDEX player_match_facts_band ON player_match_facts (COALESCE(CASE trust_band WHEN 'limited_evidence' THEN 0 WHEN 'developing_evidence' THEN 1 WHEN 'established_evidence' THEN 2 WHEN 'strong_evidence' THEN 3 WHEN 'very_strong_evidence' THEN 4 END, -1) DESC, player_id);
+CREATE INDEX player_match_facts_position ON player_match_facts (position, player_id);
+CREATE INDEX player_match_facts_availability ON player_match_facts (availability, player_id);
+CREATE TABLE player_match_fact_positions (
+  player_id         TEXT NOT NULL REFERENCES player_match_facts(player_id) ON DELETE CASCADE,
+  ord               INTEGER NOT NULL CHECK (ord >= 0 AND ord < 3),
+  code              TEXT NOT NULL CHECK (code IN ('GK','CB','RB','LB','RWB','LWB','CDM','CM','CAM','RW','LW','ST','CF')),
+  PRIMARY KEY (player_id, ord)
+) STRICT;
+CREATE INDEX player_match_fact_positions_code ON player_match_fact_positions (code, player_id);
+CREATE TABLE player_match_fact_combine (
+  player_id         TEXT NOT NULL REFERENCES player_match_facts(player_id) ON DELETE CASCADE,
+  protocol_id       TEXT NOT NULL CHECK (length(protocol_id) BETWEEN 1 AND 64),
+  best_value        REAL,
+  PRIMARY KEY (player_id, protocol_id)
+) STRICT;
+CREATE INDEX player_match_fact_combine_protocol ON player_match_fact_combine (protocol_id, player_id);
+CREATE TABLE player_match_facts_dirty (
+  player_id         TEXT PRIMARY KEY
+) STRICT;
+
 
 -- =============================================================================
 -- M21 — Development Hub

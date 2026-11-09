@@ -357,7 +357,8 @@ export interface NobodyMissedResult {
   items: NobodyMissedItem[];
   total: number;
   limit?: number;
-  offset?: number;
+  /** S14j: the candidates page by cursor; pass this back as `cursor` for the next page (null on the last). */
+  nextCursor?: string | null;
   coverage: EvaluationCoverage | null;
   sorts?: string[];
   sort?: string;
@@ -405,7 +406,7 @@ export interface M18Api {
   createBrief(s: Session, input: BriefInput): Promise<BriefSaveResult>;
   patchBrief(s: Session, id: string, input: BriefInput): Promise<BriefSaveResult>;
 
-  nobodyMissed(s: Session, params: { briefId: string; sort?: string; limit?: number; offset?: number }): Promise<NobodyMissedResult>;
+  nobodyMissed(s: Session, params: { briefId: string; sort?: string; limit?: number; cursor?: string }): Promise<NobodyMissedResult>;
   reviewCandidate(s: Session, input: { briefId: string; playerId: string }): Promise<{ review: NobodyMissedReview; note?: string }>;
   dismissCandidate(s: Session, input: { briefId: string; playerId: string; reason: string }): Promise<{ review: NobodyMissedReview; note?: string }>;
   addCandidateToRoom(s: Session, input: { briefId: string; playerId: string }): Promise<AddToRoomResult>;

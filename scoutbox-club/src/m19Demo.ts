@@ -321,7 +321,7 @@ const detailFor = (w: (typeof store)[number], sort = 'recent_evidence'): Watchli
     watchlist: { ...w },
     items: ordered,
     total: ordered.length,
-    offset: 0,
+    nextCursor: null,
     limit: 25,
     sort,
     summary: {
@@ -384,7 +384,7 @@ export const demoM19: M19Api = {
       value: {
         items,
         total: items.length,
-        offset: 0,
+        nextCursor: null,
         limit: 25,
         sort: input.sort ?? 'recent_evidence',
         ordering: `${input.sort ?? 'recent_evidence'},player_id`,

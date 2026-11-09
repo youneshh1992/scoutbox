@@ -977,10 +977,12 @@ export function createDiscoveryRepository({ sqlite, unit = null, now = Date.now,
       const next = typedOr(typeWatchlist, { ...clone(stored), lastCriteriaVersion: criteriaVersion, lastBriefVersion: briefVersion, lastReconciledAt: at }, 'dynamic_watchlists');
       const m = typeMembers(members, `dynamic_watchlists ${id}`); if (!m.ok) throw refusal('DISCOVERY_INPUT_INVALID', m.reason);
       const fresh = [];
+      const seen = new Set(); // S14j: membership is no longer capped, so the batch's own duplicates are found by key
       for (const [i, raw] of events.entries()) {
         const e = typedOr(typeMembershipEvent, raw, `dynamic_watchlists ${id} events[${i}]`);
         if (e.watchlistId !== id || e.orgId !== stored.orgId) throw refusal('DISCOVERY_INPUT_INVALID', `dynamic_watchlists ${id}: event ${e.id} names another watchlist or organisation`);
-        if (st.eventByFingerprint.get(e.fingerprint) || fresh.some((x) => x.fingerprint === e.fingerprint)) continue;
+        if (seen.has(e.fingerprint) || st.eventByFingerprint.get(e.fingerprint)) continue;
+        seen.add(e.fingerprint);
         fresh.push(e);
       }
       writeWatchlist(st, next, { known: stored.history.length, criteria: false });

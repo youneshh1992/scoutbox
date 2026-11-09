@@ -561,6 +561,7 @@ export function NobodyMissedScreen({
     if (!briefId) return;
     let live = true;
     setErr(null);
+    // The candidates page by cursor (S14j): this reads the first page; a "load more" (nextCursor) is needed.
     m18.nobodyMissed(session, { briefId, sort })
       .then((d) => { if (live) setData(d); })
       .catch((e) => { if (live) { setErr(errMessage(e)); setData(null); } });

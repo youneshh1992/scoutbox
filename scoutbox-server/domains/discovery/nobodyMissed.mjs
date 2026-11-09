@@ -13,23 +13,27 @@
 //
 // Hidden players never enter the candidate set. They are not matched and then
 // concealed — concealment after matching is how side channels are born.
-import { PROVIDERS } from '../development/boxcam/drills.mjs';
 import {
   validateRecruitmentBrief, explainBriefCriteria, playerMatchesBrief,
-  buildNobodyMissedCandidate, evaluationCoverageState, isMeaningfullyEvaluated,
+  buildNobodyMissedCandidate, evaluationCoverageState,
   BRIEF_STATUSES, canBriefTransition, EVALUATION_COVERAGE_POLICY_VERSION,
   COVERAGE_POLICY, EVALUATION_SIGNALS, NON_EVALUATION_SIGNALS,
-  NOBODY_MISSED_STATES, NM_DISMISSAL_REASONS, NM_SORTS, orderNobodyMissed,
+  NOBODY_MISSED_STATES, NM_DISMISSAL_REASONS, NM_SORTS,
   EVIDENCE_REQUIREMENTS, POSITIONS, TRUST_BANDS, LIMITS, clampPage, briefIsLiveOn,
 } from './shared.mjs';
+import { briefCriteriaToCanonical } from './matching/match.mjs';
+import { createMatchReads } from './matching/query.mjs';
+import { pageOf, sendPageError } from '../platform/paging.mjs';
 import { rateLimitedBody } from '../platform/rateLimit.mjs';
 import { guardRev, bumpRev, revMeta } from '../platform/concurrency.mjs';
 
 export function registerNobodyMissed(ctx) {
   const {
-    db, players, orgRouter, nextId, findPlayer, orgCanSee,
-    isLead, requireLead, playerViewForOrg, audit, vmetric, suppress, discovery, unit,
+    players, orgRouter, nextId, findPlayer, orgCanSee,
+    isLead, requireLead, audit, vmetric, suppress, discovery, unit, matchFacts,
   } = ctx;
+  if (typeof matchFacts?.query !== 'function') throw new TypeError('registerNobodyMissed needs the matchFacts repository (S14j)');
+  const { matchQuery, factsOfRows, readMatchPage, matchOrder, keyOfRow } = createMatchReads({ players, matchFacts });
   // S12c: briefs and reviews are rows of the discovery repository, written only through its operations.
   const dreads = ctx.discoveryReads;
   if (typeof dreads?.briefs?.forOrg !== 'function' || typeof discovery?.briefs?.create !== 'function') throw new TypeError('registerNobodyMissed needs the discovery repository and discoveryReads from the data layer');
@@ -43,103 +47,32 @@ export function registerNobodyMissed(ctx) {
   const SUPPRESS_MIN = 3;
 
   // ------------------------------------------------------------ match facts
+  // S14j: a candidate's facts are stored per player (repositories/matchFacts.mjs, kept by domains/discovery/
+  // matchFacts.mjs) and read through the match query (matching/query.mjs), the same reads matching uses.
+
 
   /**
-   * The lightweight per-player projection matching runs against. Only fields a
-   * brief can legitimately test, and only fields this organisation could
-   * already read — assembled from the existing org view, never a full Passport.
+   * Has this organisation meaningfully evaluated this player? The nine signals the coverage policy names
+   * (EVALUATION_SIGNALS; a profile view and a search impression are deliberately absent), since S14j the one
+   * definition, as SQL: the players this organisation has evaluated, one set per query (a Room, open or ended, is a
+   * case with a room; an open case is one without a room that is not closed; a deferral counts until it is due). The set is the organisation's own workflow, so it is built once
+   * and probed by id, never looked up per candidate. Each line names the same table and columns as the read it restates
+   * (the repositories' forOrgPlayer / has / isListedBy / isDeferred queries); keep the two together when either changes.
    */
-  function matchFacts(player, org) {
-    const view = playerViewForOrg(player, org);
-    if (!view) return null;
-    const prefs = ctx.verificationReads.passportPrefs.forPlayer(player.id); // S10b: null until the player saves preferences
-    const evidence = ctx.scoutingReads.evidence.currentForPlayer(player.id);
-    const recentFullMatch = evidence.some((e) => e.claimType === 'footage' && e.recordedAt > now() - 180 * 86_400_000);
-    // M19 needs the DATE, not only the 180-day boolean, so a club can write
-    // its own recency criterion ("within 90 days") instead of inheriting ours.
-    const lastFootageAt = evidence
-      .filter((e) => e.claimType === 'footage')
-      .reduce((m, e) => Math.max(m, e.recordedAt ?? 0), 0) || null;
-    const coachReference = ctx.verificationReads.references.hasActive(player.id)
-      || evidence.some((e) => e.verification?.status === 'coach_confirmed');
-    // Production-valid Combine only: a simulated result never becomes
-    // production recruitment eligibility.
-    // S12b: the player's verified production attempts and their bound sessions, read through SQL once.
-    const verifiedAttempts = [...ctx.boxCamReads.attempts.forPlayer(player.id)].reverse()
-      .filter((a) => a.combineState === 'combine_verified' && !PROVIDERS[a.provider]?.testOnly);
-    const boundSessions = new Map(ctx.boxCamReads.sessions.byIds(verifiedAttempts.map((a) => a.boxSessionId)).map((s) => [s.id, s]));
-    const liveAttempts = verifiedAttempts.filter((a) => boundSessions.get(a.boxSessionId)?.verificationState !== 'invalidated');
-    const combineProtocols = liveAttempts.map((a) => a.protocolId);
-    // M19 combine thresholds read the best production-valid measurement per
-    // protocol. Simulated and invalidated results are already excluded above,
-    // so a demo result can never satisfy a production threshold.
-    const combineMeasurements = {};
-    for (const a of liveAttempts) {
-      const v = Number(a.measuredValue);
-      if (!Number.isFinite(v)) continue;
-      combineMeasurements[a.protocolId] = combineMeasurements[a.protocolId] == null ? v : Math.max(combineMeasurements[a.protocolId], v);
-    }
-    const trust = ctx.trustSummaryFor?.(player) ?? null;
-    // M23-D2: this read `(db.squads ?? []).length >= 0 && …`. There is no
-    // `db.squads` anywhere in the product — squad membership is org_squad_members (S9c),
-    // per organisation — and `[].length >= 0` is true for every possible
-    // value, so the conjunct could never change the result. Removing it is
-    // behaviour-preserving and removes a production read of a store that does
-    // not exist, which is exactly the drift the store inventory now catches.
-    const clubConfirmed = reads.signings.forPlayer(player.id).length > 0;
-
-    return {
-      playerId: player.id,
-      name: view.name,
-      age: view.age ?? null,
-      position: prefs?.positions?.primary ?? view.position ?? null,
-      secondaryPositions: prefs?.positions?.secondary ?? [],
-      level: view.level ?? null,
-      foot: view.foot ?? null,
-      availability: prefs?.availability ?? view.availability ?? null,
-      distanceKm: view.distanceKm ?? null,
-      trustBand: trust?.band ?? null,
-      combineProtocols,
-      evidenceFlags: {
-        recent_full_match: recentFullMatch,
-        coach_reference: coachReference,
-        confirmed_current_club: clubConfirmed,
-        combine_verified: combineProtocols.length > 0,
-      },
-      lastEvidenceAt: evidence.reduce((m, e) => Math.max(m, e.recordedAt ?? 0), 0) || null,
-      lastFootageAt,
-      combineMeasurements,
-    };
-  }
-
-  /**
-   * Has this organisation meaningfully evaluated this player? Reads the nine
-   * signals the coverage policy names. A profile view and a search impression
-   * are deliberately absent — looking at somebody is not evaluating them.
-   */
-  function evaluationSignals(playerId, org) {
-    const cases = reads.cases.forOrgPlayer(org.id, playerId);
-    const rooms = cases.filter((c) => c.room);
-    const openRoom = rooms.find((c) => !['signed', 'withdrawn', 'archived', 'closed'].includes(c.room.status));
-    const endedRooms = rooms.filter((c) => ['signed', 'withdrawn', 'archived', 'closed'].includes(c.room.status));
-    const decisions = reads.decisions.forOrgPlayer(org.id, playerId);
-    const lastDecisionAt = decisions.reduce((m, d) => Math.max(m, d.createdAt ?? 0), 0) || null;
-    return {
-      room_open: !!openRoom,
-      room_decided: endedRooms.length > 0 || decisions.length > 0,
-      case_open: cases.some((c) => !c.room && c.stage !== 'closed'),
-      assessment_submitted: ctx.scoutingReads.assessments.forOrgPlayer(org.id, playerId).some((a) => a.state !== 'draft'),
-      trial: reads.trials.forOrgPlayer(org.id, playerId).length > 0,
-      signing: reads.signings.forOrgPlayer(org.id, playerId).length > 0,
-      shortlisted: ctx.safetyReads.ledger.isListedBy(org.id, playerId),
-      review_deferred: ctx.insightReads.reviewLater.isDeferred(org.id, playerId, now()), // S12d
-      // S9c: on the squad, or on the shadow list — either way the club has already considered the player.
-      squad: ctx.scoutingReads.squad.has(org.id, playerId) || ctx.scoutingReads.shadow.has(org.id, playerId),
-      lastDecisionAt,
-      openRoomId: openRoom?.id ?? null,
-    };
-  }
-  ctx.m18EvaluationSignals = evaluationSignals;
+  const evaluatedSql = (orgId, at) => ({
+    // NULLs are filtered out: one NULL in the set would make every NOT IN unknown, and hide every candidate.
+    sql: `p.id IN (SELECT player_id FROM (
+      SELECT player_id FROM recruitment_cases WHERE org_id = ? AND (room_status IS NOT NULL OR stage <> 'closed')
+      UNION SELECT player_id FROM room_decisions WHERE org_id = ?
+      UNION SELECT player_id FROM assessments WHERE org_id = ? AND state <> 'draft'
+      UNION SELECT player_id FROM trials WHERE org_id = ?
+      UNION SELECT player_id FROM signings WHERE org_id = ?
+      UNION SELECT player_id FROM ledger WHERE org_id = ? AND type = 'shortlist'
+      UNION SELECT player_id FROM review_later WHERE org_id = ? AND due_at > ?
+      UNION SELECT player_id FROM org_squad_members WHERE org_id = ?
+      UNION SELECT player_id FROM org_shadow_players WHERE org_id = ?) WHERE player_id IS NOT NULL)`,
+    args: [orgId, orgId, orgId, orgId, orgId, orgId, orgId, at, orgId, orgId],
+  });
 
   // ----------------------------------------------------------------- briefs
 
@@ -280,54 +213,40 @@ export function registerNobodyMissed(ctx) {
   // M18.2: the window rule lives in shared.mjs so its boundaries are testable.
   const briefIsLive = (b) => briefIsLiveOn(b);
 
-  /** The organisation's reviews for this brief, by player: one query per computation, not one per candidate. */
+  /** The organisation's reviews for this brief, by player: one query per page, not one per candidate. */
   const reviewsByPlayer = (orgId, briefId) => new Map(dreads.reviews.forBrief(orgId, briefId).map((r) => [r.playerId, r]));
 
   /**
-   * Compute the brief's candidate set. Gates first, always.
+   * The brief's sets, gates first, always (S14j: as SQL). Every query starts from the players this organisation may
+   * see (1-3: standing, visibility, blocks/minors/radius), then the club's own criteria (4), then this
+   * organisation's evaluation history (5). `eligible` and `evaluated` are counts; `candidates` is the query of the
+   * eligible players not yet evaluated and not dismissed or already added to a Room for this brief.
    */
-  function computeBrief(req, brief) {
+  function computeBrief(req, brief, at = now()) {
     const org = req.org;
-    const eligible = [];
-    const evaluatedIds = [];
-    const candidates = [];
-    let scanned = 0;
-    const reviewOf = reviewsByPlayer(org.id, brief.id);
-
-    for (const player of players.list({ visibleTo: org }, { limit: LIMITS.maxCandidateScan })) { // S14h: the SQL part of the visibility rule is the query's
-      if (++scanned > LIMITS.maxCandidateScan) break;
-      // 1-3: standing, visibility, blocks/minors/radius. A player who fails
-      // here never becomes a candidate at all.
-      if (!orgCanSee(org, player)) continue;
-      const facts = matchFacts(player, org);
-      if (!facts) continue;
-      // 4: the club's own explicit criteria.
-      const match = playerMatchesBrief(facts, brief.criteria);
-      if (!match.matched) continue;
-      eligible.push(facts.playerId);
-
-      // 5: this organisation's evaluation history.
-      const signals = evaluationSignals(player.id, org);
-      const evaluation = isMeaningfullyEvaluated(signals);
-      if (evaluation.evaluated) { evaluatedIds.push(facts.playerId); continue; }
-
-      const candidate = buildNobodyMissedCandidate({
-        facts, brief, match, evaluation, roomOpen: !!signals.openRoomId,
-      });
-      if (!candidate) continue;
-      const review = reviewOf.get(player.id) ?? null;
-      if (review && ['dismissed', 'added_to_room'].includes(review.state)) continue;
-      candidates.push({
-        ...candidate,
-        distanceKm: facts.distanceKm,
-        lastEvidenceAt: facts.lastEvidenceAt,
-        state: review?.state ?? 'open',
-        reviewedAt: review?.reviewedAt ?? null,
-      });
-    }
-
-    return { eligible, evaluatedIds, candidates };
+    const required = briefCriteriaToCanonical(brief.criteria).required;
+    const evaluated = evaluatedSql(org.id, at);
+    const closed = {
+      sql: "p.id IN (SELECT player_id FROM nobody_missed_reviews WHERE org_id = ? AND brief_id = ? AND state IN ('dismissed', 'added_to_room') AND player_id IS NOT NULL)",
+      args: [org.id, brief.id],
+    };
+    const eligible = matchQuery(org, required, at).count();
+    // Evaluated and closed players are the organisation's own (small) sets, so these counts are driven from them; the
+    // candidates are the eligible players in neither (counted only when a caller asks: the coverage does not).
+    const evaluatedCount = matchQuery(org, required, at, [evaluated]).count();
+    return {
+      eligible,
+      evaluated: evaluatedCount,
+      candidateCount: () => eligible - matchQuery(org, required, at, [{ sql: `(${evaluated.sql}) OR (${closed.sql})`, args: [...evaluated.args, ...closed.args] }]).count(),
+      candidates: matchQuery(org, required, at, [{ sql: `NOT (${evaluated.sql})`, args: evaluated.args }, { sql: `NOT (${closed.sql})`, args: closed.args }]),
+      at,
+    };
   }
+
+  /** The keyset order of a Nobody Missed sort (the shared match orders, plus "last reviewed"), ending on the player id. */
+  const nmOrder = (sort, req, brief, at) => matchOrder(sort, req.org, at, {
+    last_reviewed: ['COALESCE((SELECT nr.reviewed_at FROM nobody_missed_reviews nr WHERE nr.org_id = ? AND nr.brief_id = ? AND nr.player_id = p.id), 0)', 'ASC', [req.org.id, brief.id]],
+  });
 
   orgRouter.get('/nobody-missed', (req, res) => {
     const briefId = String(req.query.briefId ?? '');
@@ -340,19 +259,29 @@ export function registerNobodyMissed(ctx) {
         note: 'Only an active brief inside its date window produces candidates.',
       });
     }
-    const { eligible, evaluatedIds, candidates } = computeBrief(req, brief);
-    const coverage = evaluationCoverageState({
-      eligible: eligible.length, evaluated: evaluatedIds.length, suppressMin: SUPPRESS_MIN,
-    });
     const sort = NM_SORTS.includes(String(req.query.sort)) ? String(req.query.sort) : 'newest_evidence';
-    const ordered = orderNobodyMissed(candidates, sort);
-    const limit = clampPage(req.query.limit);
-    const offset = Math.max(0, Number(req.query.offset) || 0);
+    const at = now();
+    const { order, shape } = nmOrder(sort, req, brief, at);
+    let page;
+    try { page = readMatchPage(req.query, shape); } catch (e) { return sendPageError(res, e); }
+    const { eligible, evaluated, candidates, candidateCount } = computeBrief(req, brief, at);
+    const coverage = evaluationCoverageState({ eligible, evaluated, suppressMin: SUPPRESS_MIN });
+    // Only the page is decoded and explained; the reasons are the brief's own criteria, each met.
+    const { items, nextCursor } = pageOf(candidates.page(order, page), page.limit, keyOfRow);
+    const reviewOf = reviewsByPlayer(req.org.id, brief.id);
+    const cards = factsOfRows(items, req.org, at).map((facts) => {
+      // The explanation at the query's own instant, so it is the same test the query applied.
+      const card = buildNobodyMissedCandidate({ facts, brief, match: playerMatchesBrief(facts, brief.criteria, { now: at }), evaluation: { evaluated: false }, roomOpen: false });
+      if (!card) return null;
+      const review = reviewOf.get(facts.playerId) ?? null;
+      return { ...card, distanceKm: facts.distanceKm, lastEvidenceAt: facts.lastEvidenceAt, state: review?.state ?? 'open', reviewedAt: review?.reviewedAt ?? null };
+    }).filter(Boolean);
     res.json({
       brief: briefView(brief), live: true,
       briefVersion: brief.version,
-      items: ordered.slice(offset, offset + limit),
-      total: ordered.length, limit, offset,
+      items: cards,
+      nextCursor,
+      total: candidateCount(), limit: page.limit,
       coverage,
       sorts: NM_SORTS, sort,
       evaluationPolicy: {
@@ -461,10 +390,10 @@ export function registerNobodyMissed(ctx) {
   /** Organisation-private coverage across every live brief. */
   orgRouter.get('/evaluation-coverage', (req, res) => {
     const items = briefsFor(req.org.id).filter(briefIsLive).map((brief) => {
-      const { eligible, evaluatedIds } = computeBrief(req, brief);
+      const { eligible, evaluated } = computeBrief(req, brief);
       return {
         briefId: brief.id, title: brief.title, briefVersion: brief.version,
-        coverage: evaluationCoverageState({ eligible: eligible.length, evaluated: evaluatedIds.length, suppressMin: SUPPRESS_MIN }),
+        coverage: evaluationCoverageState({ eligible, evaluated, suppressMin: SUPPRESS_MIN }),
       };
     });
     res.json({
@@ -475,6 +404,5 @@ export function registerNobodyMissed(ctx) {
   });
 
   ctx.m18ComputeBrief = computeBrief;
-  ctx.m18MatchFacts = matchFacts;
   void NOBODY_MISSED_STATES; void isLead; void suppress;
 }

@@ -6,11 +6,14 @@
  *   organisation standing → authorization → visibility → blocks →
  *   minor/guardian/agency → grassroots radius → candidate facts → matching
  *
- * Matching is the LAST step. It reads `matchFacts`, which is built from
- * `playerViewForOrg` and returns null the moment the organisation may not see
- * the player. No route here reads the players for anything else, so there
- * is no path by which a criterion can be evaluated against a player the club
- * is not allowed to know exists — including through a count (§24).
+ * Matching is the LAST step. S14j: a match is one SQL query over the players
+ * the organisation may see (identity's `visibleWhere`: the whole visibility
+ * rule — standing, the under-18 wall, the Grassroots radius, the blocks)
+ * joined to their stored facts (repositories/matchFacts.mjs), with each
+ * required criterion as a condition (match.mjs `criterionSql`, beside its JS
+ * test). The visibility conditions come first in every query, so there is no
+ * path by which a criterion can be evaluated against a player the club is not
+ * allowed to know exists — including through a count (§24).
  */
 import {
   validateCriteria, criteriaVersion, describeCriteria, CRITERION_TYPES,
@@ -18,12 +21,12 @@ import {
   AVAILABILITY_VALUES,
 } from './criteria.mjs';
 import { matchPlayerToCriteria, briefCriteriaToCanonical } from './match.mjs';
+import { createMatchReads } from './query.mjs';
 import {
   WATCHLIST_MODES, WATCHLIST_STATUSES, WATCHLIST_SOURCES,
   reconcileMembership, transitionFingerprint, explainTransition,
   membershipSummary, membershipNotification, watchlistBlockedState,
 } from './watchlists.mjs';
-import { LIMITS, clampPage } from '../shared.mjs';
 import { guardRev, bumpRev, revMeta } from '../../platform/concurrency.mjs';
 import { readPage, pageOf, sendPageError } from '../../platform/paging.mjs';
 
@@ -34,9 +37,10 @@ export const DEFAULT_MATCH_SORT = 'recent_evidence';
 
 export function registerMatching(ctx) {
   const {
-    db, players, orgRouter, nextId, findPlayer, orgCanSee,
-    isLead, requireLead, audit, vmetric, notify, broadcast, discovery, unit,
+    players, orgRouter, nextId, findPlayer, orgCanSee,
+    isLead, requireLead, audit, vmetric, notify, broadcast, discovery, unit, matchFacts,
   } = ctx;
+  if (typeof matchFacts?.query !== 'function' || typeof players?.visibleWhere !== 'function') throw new TypeError('registerMatching needs the matchFacts repository and the players\' visibleWhere (S14j)');
   // S12c: watchlists and their membership transitions are rows of the discovery repository, written only through it.
   const dreads = ctx.discoveryReads;
   if (typeof dreads?.watchlists?.page !== 'function' || typeof discovery?.watchlists?.reconcile !== 'function') throw new TypeError('registerMatching needs the discovery repository and discoveryReads from the data layer');
@@ -48,27 +52,7 @@ export function registerMatching(ctx) {
 
   // ------------------------------------------------------ candidate universe
 
-  /**
-   * The visible candidate universe, in the mandated order. Returns the facts
-   * projection for every player this organisation may currently see — and
-   * nothing about anyone else, not even a count.
-   */
-  function visibleCandidates(req) {
-    const org = req.org;
-    const out = [];
-    let scanned = 0;
-    let truncated = false;
-    // S14h: the SQL part of the visibility rule (the under-18 wall, the grassroots box) is the query's; the exact rule
-    // stays here. The cap counts the players the query admits.
-    for (const player of players.list({ visibleTo: org }, { limit: LIMITS.maxCandidateScan + 1 })) {
-      if (++scanned > LIMITS.maxCandidateScan) { truncated = true; break; }
-      if (!orgCanSee(org, player)) continue;              // standing, blocks, minors, level
-      const facts = ctx.m18MatchFacts?.(player, org);      // the SAME projection Nobody Missed uses
-      if (!facts) continue;                                // visibility said no
-      out.push(facts);
-    }
-    return { candidates: out, truncated };
-  }
+  const { EMPTY_QUERY, matchQuery, factsOfRows, visibleFactsOf, matchOrder, keyOfRow, readMatchPage } = createMatchReads({ players, matchFacts });
 
   /** Resolve the criteria a request is asking about: a brief, or an explicit
    *  set. A brief's criteria are all required — that is what a brief means. */
@@ -87,22 +71,6 @@ export function registerMatching(ctx) {
     if (!v.ok) return { ok: false, status: 400, body: v };
     return { ok: true, criteria: v.criteria, brief: null };
   }
-
-  /** Deterministic ordering. Every comparator ends on the player id so two
-   *  reads of the same data return the same order (M18.2 rule). */
-  function orderMatches(rows, sort) {
-    const by = {
-      recent_evidence: (a, b) => (b.facts.lastEvidenceAt ?? 0) - (a.facts.lastEvidenceAt ?? 0),
-      name: (a, b) => String(a.facts.name ?? '').localeCompare(String(b.facts.name ?? '')),
-      age: (a, b) => (a.facts.age ?? 999) - (b.facts.age ?? 999),
-      evidence_confidence: (a, b) => bandIndex(b.facts.trustBand) - bandIndex(a.facts.trustBand),
-      distance: (a, b) => (a.facts.distanceKm ?? 1e9) - (b.facts.distanceKm ?? 1e9),
-    }[sort] ?? by_recent;
-    return rows.slice().sort((a, b) => by(a, b) || String(a.facts.playerId).localeCompare(String(b.facts.playerId)));
-  }
-  function by_recent(a, b) { return (b.facts.lastEvidenceAt ?? 0) - (a.facts.lastEvidenceAt ?? 0); }
-  const BANDS = ['limited_evidence', 'developing_evidence', 'established_evidence', 'strong_evidence', 'very_strong_evidence'];
-  const bandIndex = (b) => BANDS.indexOf(b);
 
   /** One match card. Only fields this organisation could already read. */
   function matchView(facts, result, org) {
@@ -124,22 +92,6 @@ export function registerMatching(ctx) {
       policyVersion: result.policyVersion,
       note: 'Matches the criteria your organisation wrote. ScoutBox does not rank or score these players.',
     };
-  }
-
-  /**
-   * Run the criteria over the visible universe. Returns matches only:
-   * a non-match is simply absent, and no field of theirs is assembled (§22).
-   */
-  function runMatching(req, criteria) {
-    const { candidates, truncated } = visibleCandidates(req);
-    const at = now();
-    const rows = [];
-    for (const facts of candidates) {
-      const result = matchPlayerToCriteria(facts, criteria, { now: at });
-      if (!result.matchesRequired) continue;
-      rows.push({ facts, result });
-    }
-    return { rows, truncated, evaluatedAt: at, consideredVisible: candidates.length };
   }
 
   // ------------------------------------------------------------- vocabulary
@@ -173,35 +125,35 @@ export function registerMatching(ctx) {
     if (sort === 'distance' && (req.org.level ?? 'pro') !== 'grassroots') {
       return res.status(400).json({ error: 'SORT_NOT_AVAILABLE', message: 'Distance ordering is only available where your organisation is authorised to see distance.' });
     }
-    const limit = clampPage(req.body?.limit);
-    const offset = Math.max(0, Number(req.body?.offset) || 0);
+    const at = now();
+    const { order, shape } = matchOrder(sort, req.org, at);
+    let page;
+    try { page = readMatchPage(req.body, shape); } catch (e) { return sendPageError(res, e); }
 
-    const { rows, truncated, evaluatedAt, consideredVisible } = runMatching(req, resolved.criteria);
-    const ordered = orderMatches(rows, sort);
-    const page = ordered.slice(offset, offset + limit);
+    // S14j: one query over every player this organisation can see; only the page is decoded and explained.
+    const query = matchQuery(req.org, resolved.criteria.required, at);
+    const { items, nextCursor } = pageOf(query.page(order, page), page.limit, keyOfRow);
+    const total = query.count();
 
     vmetric?.('matching_query_run');
     res.set('X-ScoutBox-Ordering', `${sort},player_id`);
     res.json({
-      items: page.map(({ facts, result }) => matchView(facts, result, req.org)),
+      items: factsOfRows(items, req.org, at).map((facts) => matchView(facts, matchPlayerToCriteria(facts, resolved.criteria, { now: at }), req.org)),
       // The total is over VISIBLE matches. There is deliberately no
       // "considered" figure that would reveal players this club cannot see.
-      total: ordered.length,
-      offset,
-      limit,
+      total,
+      nextCursor,
+      limit: page.limit,
       sort,
       ordering: `${sort},player_id`,
       criteria: describeCriteria(resolved.criteria),
       criteriaVersion: criteriaVersion(resolved.criteria),
       policyVersion: MATCH_POLICY_VERSION,
       briefId: resolved.brief?.id ?? null,
-      evaluatedAt,
-      truncated,
-      note: truncated
-        ? `Only the first ${LIMITS.maxCandidateScan} visible candidates were evaluated in this request.`
-        : 'Every player your organisation can currently see was evaluated against these criteria.',
+      evaluatedAt: at,
+      truncated: false,
+      note: 'Every player your organisation can currently see was evaluated against these criteria.',
       scoreNote: 'There is no match score. Required criteria decide the set; preferred criteria are counted, not scored.',
-      consideredVisibleNote: `${consideredVisible} visible candidates evaluated.`,
     });
   });
 
@@ -341,18 +293,14 @@ export function registerMatching(ctx) {
     const { criteria, brief } = effectiveCriteria(w);
     const blocked = watchlistBlockedState({ status: w.status, mode: w.mode, brief });
     if (!criteria || blocked.blocked) {
-      return { blocked, items: [], summary: membershipSummary({}), criteria: criteria ?? { required: [], preferred: [] } };
+      return { blocked, query: EMPTY_QUERY, total: 0, at: now(), summary: membershipSummary({}), criteria: criteria ?? { required: [], preferred: [] } };
     }
 
+    // S14j: the membership is the match query's ids (every visible player meeting every required criterion); facts
+    // are decoded only for the players who left and are still visible, to name the criterion they no longer meet.
     const at = now();
-    const { candidates } = visibleCandidates(req);
-    const rows = [];
-    const currentById = new Map();
-    for (const facts of candidates) {
-      const result = matchPlayerToCriteria(facts, criteria, { now: at });
-      currentById.set(facts.playerId, { facts, result });
-      if (result.matchesRequired) rows.push({ facts, result });
-    }
+    const query = matchQuery(req.org, criteria.required, at);
+    const current = query.ids();
 
     const cv = criteriaVersion(criteria);
     const briefVersion = brief?.version ?? null;
@@ -363,9 +311,10 @@ export function registerMatching(ctx) {
 
     const previous = last?.playerIds ?? null;
     const previousMatch = (playerId) => (last?.required.has(playerId) ? { required: last.required.get(playerId) } : null);
-    const current = rows.map((r) => r.facts.playerId).sort();
     const first = previous == null;
     const diff = reconcileMembership(previous ?? [], current);
+    // An entering player was not a member, so their explanation never reads a current evaluation; a leaver's does.
+    const currentById = new Map(visibleFactsOf(req.org, diff.left, at).map((facts) => [facts.playerId, { result: matchPlayerToCriteria(facts, criteria, { now: at }) }]));
 
     // S12c: an explicit upsert, in one unit — the membership derived now, the transitions not recorded before, the
     // reconciliation clock, and the grouped notification all commit together.
@@ -392,9 +341,9 @@ export function registerMatching(ctx) {
       // Only the required lines are kept, and only their met flags: enough to
       // name the criterion that flipped next time, without storing a player
       // record that would go stale or leak.
-      const members = rows
-        .map(({ facts, result }) => ({ playerId: facts.playerId, required: result.required.map((r) => ({ criterionId: r.criterionId, met: r.met })) }))
-        .sort((a, b) => (a.playerId < b.playerId ? -1 : a.playerId > b.playerId ? 1 : 0));
+      // A member meets every required criterion (that is what the query admitted), so its flags are all true; the
+      // ids are already in code-point order.
+      const members = current.map((playerId) => ({ playerId, required: criteria.required.map((c) => ({ criterionId: c.id, met: true })) }));
       unit(() => {
         const appended = discovery.watchlists.reconcile(w.id, {
           at, criteriaVersion: cv, briefVersion, members,
@@ -428,7 +377,9 @@ export function registerMatching(ctx) {
     return {
       blocked,
       criteria,
-      items: rows.map(({ facts, result }) => matchView(facts, result, req.org)),
+      query,
+      total: current.length,
+      at,
       diff,
       summary: membershipSummary(diff),
       evaluatedAt: at,
@@ -466,29 +417,22 @@ export function registerMatching(ctx) {
     const w = findWatchlist(req, res);
     if (!w) return;
     const sort = MATCH_SORTS.includes(req.query.sort) ? String(req.query.sort) : DEFAULT_MATCH_SORT;
+    const { order, shape } = matchOrder(sort, req.org, now());
+    let page;
+    try { page = readMatchPage(req.query, shape); } catch (e) { return sendPageError(res, e); }
     const r = reconcile(req, w);
     const fresh = dreads.watchlists.byId(w.id) ?? w; // the reconciliation clock this read recorded
-    const ordered = r.items.slice().sort((a, b) => {
-      const cmp = {
-        recent_evidence: () => 0,
-        name: () => String(a.name ?? '').localeCompare(String(b.name ?? '')),
-        age: () => (a.age ?? 999) - (b.age ?? 999),
-        evidence_confidence: () => bandIndex(b.trustBand) - bandIndex(a.trustBand),
-        distance: () => (a.distanceKm ?? 1e9) - (b.distanceKm ?? 1e9),
-      }[sort]?.() ?? 0;
-      return cmp || String(a.playerId).localeCompare(String(b.playerId));
-    });
-    const limit = clampPage(req.query.limit);
-    const offset = Math.max(0, Number(req.query.offset) || 0);
+    // S14j: the members page by cursor in SQL, in the declared order; only the page is decoded and explained.
+    const { items, nextCursor } = pageOf(r.query.page(order, page), page.limit, keyOfRow);
     res.set('X-ScoutBox-Ordering', `${sort},player_id`);
     res.json({
       watchlist: wlView(fresh, { blocked: r.blocked }),
-      items: ordered.slice(offset, offset + limit),
-      total: ordered.length,
-      offset,
-      limit,
+      items: factsOfRows(items, req.org, r.at).map((facts) => matchView(facts, matchPlayerToCriteria(facts, r.criteria, { now: r.at }), req.org)),
+      nextCursor,
+      total: r.total,
+      limit: page.limit,
       sort,
-      summary: lastChangeSummary(w, ordered.length),
+      summary: lastChangeSummary(w, r.total),
       evaluatedAt: r.evaluatedAt ?? null,
       refreshNote: 'Membership is derived when this page is read. ScoutBox does not recompute watchlists in the background in this build.',
     });
@@ -617,6 +561,5 @@ export function registerMatching(ctx) {
   });
 
   ctx.m19Reconcile = reconcile;
-  ctx.m19VisibleCandidates = visibleCandidates;
   void isLead; void requireLead;
 }

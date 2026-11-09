@@ -133,14 +133,17 @@ async function boot(dir) {
 }
 
 const quantile = (xs, q) => { const s = [...xs].sort((a, b) => a - b); return s[Math.min(s.length - 1, Math.floor(s.length * q))]; };
-async function timeRoute(S, label, route, token) {
+/** `spec` is a path (a GET) or `{ label, path, body }` (a POST of `body`, S14j's matching). */
+async function timeRoute(S, label, spec, token) {
+  const { path: route, body, label: shown = route } = typeof spec === 'string' ? { path: spec } : spec;
+  const call = () => S.get(route, token, body ? { method: 'POST', body: JSON.stringify(body) } : undefined);
   let last = null;
-  for (let i = 0; i < 5; i += 1) last = await S.get(route, token);
-  if (last.status !== 200) return { label, route, status: last.status, error: last.text.slice(0, 160) };
+  for (let i = 0; i < 5; i += 1) last = await call();
+  if (last.status !== 200) return { label, route: shown, status: last.status, error: last.text.slice(0, 160) };
   const xs = [];
-  const t1 = t0(); await S.get(route, token); const runs = since(t1) > 500 ? 5 : RUNS;
-  for (let i = 0; i < runs; i += 1) { const t = t0(); const r = await S.get(route, token); xs.push(since(t)); if (r.status !== 200) throw new Error(`${route}: ${r.status}`); }
-  return { label, route, status: 200, runs, p50: quantile(xs, 0.5), p95: quantile(xs, 0.95), bytes: Buffer.byteLength(last.text) };
+  const t1 = t0(); await call(); const runs = since(t1) > 500 ? 5 : RUNS;
+  for (let i = 0; i < runs; i += 1) { const t = t0(); const r = await call(); xs.push(since(t)); if (r.status !== 200) throw new Error(`${shown}: ${r.status}`); }
+  return { label, route: shown, status: 200, runs, p50: quantile(xs, 0.5), p95: quantile(xs, 0.95), bytes: Buffer.byteLength(last.text) };
 }
 
 // ------------------------------------------------------------------ run
@@ -191,7 +194,24 @@ if (process.env.PERF_BOOT_ONLY) { await S.stop(); if (!KEEP) fs.rmSync(dir, { re
 const room = async (token) => { const r = await S.get('/org/rooms?limit=1', token); return JSON.parse(r.text).items?.[0]?.roomId ?? null; };
 const busyRoom = await room(tokens.busy);
 const typicalRoom = await room(tokens.typical);
+// S14j: matching, a watchlist and Nobody Missed are SQL over the stored facts. A brief and a watchlist are created
+// through the routes (the busy club's user must be a lead for the brief; without one, its routes are skipped).
+const post = async (route, token, body, method = 'POST') => { const r = await S.get(route, token, { method, body: JSON.stringify(body) }); return { status: r.status, body: r.text ? JSON.parse(r.text) : null }; };
+const CM = { required: [{ type: 'position', operator: 'in', values: ['CM', 'CDM'] }], preferred: [] };
+const YOUNG = { required: [{ type: 'age', operator: 'between', values: [18, 24] }, { type: 'trust_band', operator: 'gte', value: 'developing_evidence' }], preferred: [{ type: 'foot', operator: 'in', values: ['Left'] }] };
+const wl = await post('/org/watchlists', tokens.busy, { name: 'Perf CM', mode: 'snapshot', criteria: CM });
+const brief = await post('/org/recruitment-briefs', tokens.busy, { title: 'Perf brief', positions: ['CM'], minAge: 18, maxAge: 30 });
+const briefId = brief.status === 201 ? brief.body.brief.id : null;
+if (briefId) await post(`/org/recruitment-briefs/${briefId}`, tokens.busy, { status: 'active', expectedRev: brief.body.brief.rev }, 'PATCH');
+else say(`  (no brief: ${brief.status} ${JSON.stringify(brief.body).slice(0, 120)})`);
+const MATCHING = (who) => [
+  { label: `POST /org/matching (CM, ${who})`, path: '/org/matching', body: { criteria: CM } },
+  { label: 'POST /org/matching (age, band, name)', path: '/org/matching', body: { criteria: YOUNG, sort: 'name' } },
+  { label: 'POST /org/matching (everyone)', path: '/org/matching', body: { criteria: { required: [], preferred: [] } } },
+];
 const ROUTES = [
+  ['busy club', tokens.busy, [...MATCHING('busy'), ...(wl.status === 201 ? [`/org/watchlists/${wl.body.watchlist.id}`] : []), ...(briefId ? [`/org/nobody-missed?briefId=${briefId}`, '/org/evaluation-coverage'] : [])]],
+  ...(tokens.grass ? [['grassroots', tokens.grass, MATCHING('grassroots').slice(0, 1)]] : []),
   ['busy club', tokens.busy, ['/org/rooms', '/org/rooms-funnel', '/org/rooms/needs-attention', '/org/rooms/summaries', '/org/cases', '/org/audit', '/org/requests', '/org/trials', '/org/recruitment-counts', '/org/followups', '/org/signings', '/org/recruitment-analytics', '/org/funnel', ...(busyRoom ? [`/org/rooms/${busyRoom}`, `/org/rooms/${busyRoom}/journey`, `/org/rooms/${busyRoom}/activity`, `/org/rooms/${busyRoom}/offers`, `/org/rooms/${busyRoom}/contacts`, `/org/rooms/${busyRoom}/trials`] : [])]],
   ['typical club', tokens.typical, ['/org/rooms', '/org/cases', '/org/audit', '/org/requests', '/org/recruitment-counts', '/org/recruitment-analytics', ...(typicalRoom ? [`/org/rooms/${typicalRoom}`, `/org/rooms/${typicalRoom}/journey`] : [])]],
   // S14i: the hot player reads (the directory, similar players, the deck, the feed, the fixtures, the rotation, benchmarks).
@@ -202,13 +222,13 @@ const ROUTES = [
   ['guardian', tokens.guardian, ['/guardian/inbox', '/guardian/trials', '/guardian/offers']],
 ];
 const results = [];
-for (const [who, token, routes] of ROUTES) for (const route of routes) if (!process.env.PERF_ONLY || route.includes(process.env.PERF_ONLY)) results.push({ who, ...(await timeRoute(S, who, route, token)) });
+for (const [who, token, routes] of ROUTES) for (const route of routes) if (!process.env.PERF_ONLY || (typeof route === 'string' ? route : route.path).includes(process.env.PERF_ONLY)) results.push({ who, ...(await timeRoute(S, who, route, token)) });
 
 say(`\nreads (${RUNS} sequential requests each, 5 for a route slower than 500 ms, after 5 warm-up; p50 / p95 / response size)`);
 for (const r of results) {
   if (r.status !== 200) { say(`  ${r.who.padEnd(14)} ${r.route.padEnd(44)} HTTP ${r.status} ${r.error}`); continue; }
   const flag = r.p50 >= 5 ? '  ✗ over 5 ms' : '';
-  say(`  ${r.who.padEnd(14)} ${r.route.replace(busyRoom ?? '\0', ':id').replace(typicalRoom ?? '\0', ':id').padEnd(44)} ${fmt(r.p50).padStart(9)} ${fmt(r.p95).padStart(9)} ${(r.bytes / 1000).toFixed(1).padStart(8)} kB${r.runs < RUNS ? ` (${r.runs} runs)` : ''}${flag}`);
+  say(`  ${r.who.padEnd(14)} ${r.route.replace(busyRoom ?? '\0', ':id').replace(typicalRoom ?? '\0', ':id').replace(/wl-[a-z0-9-]+/, ':id').replace(/brf-[a-z0-9-]+/, ':id').padEnd(44)} ${fmt(r.p50).padStart(9)} ${fmt(r.p95).padStart(9)} ${(r.bytes / 1000).toFixed(1).padStart(8)} kB${r.runs < RUNS ? ` (${r.runs} runs)` : ''}${flag}`);
 }
 
 // one write: a Room comment, and what it adds to the write-ahead log

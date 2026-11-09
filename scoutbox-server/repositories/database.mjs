@@ -56,11 +56,30 @@ export function runDataMigrations(sqlite, migrations, { now = Date.now(), log = 
   return { ran, applied: applied.size + ran.length, known: sorted.length };
 }
 
+/**
+ * S14j: work that must run inside every write transaction just before its COMMIT, on this connection: a derived
+ * projection bringing itself up to date with what the transaction wrote (the match facts re-derive the players their
+ * triggers marked). Runs in `transaction()` below and in the store's units of work and saves; a failure rolls the
+ * transaction back like any other. Not a save hook: it never decides what the domains write.
+ */
+const BEFORE_COMMIT = new WeakMap();
+export function onBeforeCommit(sqlite, fn) {
+  if (typeof fn !== 'function') throw new TypeError('onBeforeCommit needs a function');
+  const list = BEFORE_COMMIT.get(sqlite) ?? [];
+  list.push(fn);
+  BEFORE_COMMIT.set(sqlite, list);
+  return () => { const i = list.indexOf(fn); if (i >= 0) list.splice(i, 1); };
+}
+export function runBeforeCommit(sqlite) {
+  for (const fn of BEFORE_COMMIT.get(sqlite) ?? []) fn();
+}
+
 /** Run `fn` inside one transaction; rethrow after rolling back. */
 export function transaction(sqlite, fn) {
   sqlite.exec('BEGIN');
   try {
     const out = fn();
+    runBeforeCommit(sqlite);
     sqlite.exec('COMMIT');
     return out;
   } catch (err) {

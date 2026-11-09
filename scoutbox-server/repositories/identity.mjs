@@ -1034,6 +1034,12 @@ export function createIdentityRepositories({ sqlite, log = () => {}, unit = null
     /** The live players the organisation may see (see scanWhere: the whole visibility rule), with the further filters. */
     visibleCandidates: (org, filter = {}, opts = {}) => players.list({ ...filter, visibleTo: org }, opts),
     /**
+     * S14j: the whole visibility rule for `org` as SQL over `players p` (the wall, the Grassroots radius, the blocks),
+     * for a read that joins the players to another domain's rows (the match facts). `{ sql, args }`, or null when the
+     * organisation can see nobody (a Grassroots club without a ground).
+     */
+    visibleWhere: (org, at = now()) => scanWhere({ visibleTo: org }, at),
+    /**
      * One page of the organisation's player directory (S14i), in the directory's declared order (directoryOrder), with
      * the scan filters plus `text`. `page` is `{ limit, after }` from readPage(query, directoryCursorShape(org)).
      */

@@ -266,7 +266,7 @@ section('pure K/L/M — the trial projection is scheduling, and nothing adjacent
 section('pure §102/§103 — no new store, and no migration');
 {
   // Rewritten in S14a: these described the retired snapshot registry (schema 2308, the m280 step, required stores).
-  ok(DATA_MIGRATIONS.length === SCHEMA_VERSION, 'AN-p1 the schema is 39, the latest table migration (0039_retire_blob)');
+  ok(DATA_MIGRATIONS.length === SCHEMA_VERSION, 'AN-p1 the schema is 40, the latest table migration (0040_match_facts)');
   neg(!DATA_MIGRATIONS.some((m) => /disclosure|handoff|share/i.test(m.id)), 'AN-p3 no P5.6E migration exists at all (no disclosure, handoff or share table of its own; 0034_integrations is the enterprise API)');
   const p56e = ['agentOpportunityShares', 'representationDisclosures', 'transactionHandoffs', 'agentContacts', 'agentTrials'];
   neg(!p56e.some((s) => TABLE_BACKED.includes(s)), 'AN-p4 and none of the five stores P5.6E might have declared exists — the disclosure lives on the agreement, the share lives on the agreement, and the handoff lives on the case (§103)');

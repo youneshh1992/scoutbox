@@ -117,6 +117,7 @@ import { PLANS, ARCHETYPES } from './catalogue.mjs';
 import { IDENTITY_LIMITS, PLAYER_POSITIONS, PLAYER_FEET } from './repositories/identity.mjs';
 import { invoiceView } from './adapters.mjs';
 import { createLookups } from './domains/platform/lookups.mjs';
+import { createMatchFactsKeeper } from './domains/discovery/matchFacts.mjs';
 
 /**
  * M23 P5.7: a DATE_ONLY a client typed (open day, match day, friendly,
@@ -178,7 +179,7 @@ const dataLayer = attachDataLayer({
   sessionTtlMs: (Number(process.env.SESSION_TTL_DAYS) > 0 ? Number(process.env.SESSION_TTL_DAYS) : 30) * 24 * 3600 * 1000,
   log: (m) => { if (process.env.M13_QUIET_LOGS !== '1') console.log(m); },
 });
-const { users, sessions, orgs, players, guardians, identity, mediaDeletions, codes, notifications, dispatches, outbox, pushLog, pushTokens, channels, safetyAudit, recruitment, recruitmentCases, recruitmentContactsOffers, signingsFollowUps, scoutingEvidence, scoutingAssessments, clubSetup, opportunitiesCampaigns, verification, passport, transitionsVouches, agentCore, compliancePolicies, complianceRecords, agentTransactions, development, boxCam, discovery, insightCoverage, integrations, enterprise, groups, grassroots, operations } = dataLayer;
+const { users, sessions, orgs, players, guardians, identity, mediaDeletions, codes, notifications, dispatches, outbox, pushLog, pushTokens, channels, safetyAudit, recruitment, recruitmentCases, recruitmentContactsOffers, signingsFollowUps, scoutingEvidence, scoutingAssessments, clubSetup, opportunitiesCampaigns, verification, passport, transitionsVouches, agentCore, compliancePolicies, complianceRecords, agentTransactions, development, boxCam, discovery, insightCoverage, integrations, enterprise, groups, grassroots, operations, matchFacts } = dataLayer;
 // The recruitment domains read through SQL rather than db.* (§4.3 step 2): read-only query objects, handed to every
 // module context as `recruitmentReads` (contacts, offers, signingPackages, signings, followUps, outcomeReports, requests, trials,
 // cases, comments, snapshots, decisions, evidenceStates).
@@ -4837,6 +4838,7 @@ const m162Ctx = registerM162({
   nextId, persist, persistNow, notify, ledgerAppend, broadcast, safetyAudit,
   findPlayer, isBlocked, moderateOrRefuse,
   assemblePassport: m15Ctx.assemblePassport,
+  passportHistoryFor: m15Ctx.passportHistoryFor, // S14j: the trust band's history source reads the history alone
   testProviderEnabled: process.env.BOX_CAM_TEST_PROVIDER === '1',
 });
 
@@ -4883,6 +4885,7 @@ const m18Ctx = registerM18({
   rateLimit,
   db, byId, players, guardians, users, safetyReads, scoutingReads, verificationReads, agentReads, complianceReads, developmentReads, development, boxCamReads, discoveryReads, insightReads, grassrootsReads, recruitmentReads, app, orgRouter, playerRouter, guardianRouter, adminRouter,
   discovery, unit, // S12c: every brief, review, Second Look item and watchlist is an explicit repository write
+  matchFacts, // S14j: matching and Nobody Missed are queries over the stored facts
   combineProtocolIds: () => COMBINE_PROTOCOLS.map((p) => p.id), // a brief's Combine protocols are refused unless known (S12c)
   nextId, persist, persistNow, notify, ledgerAppend, broadcast, safetyAudit,
   findPlayer, isBlocked, moderateOrRefuse, playerViewForOrg,
@@ -4904,9 +4907,10 @@ const m18Ctx = registerM18({
 });
 
 // ------------------------------------------- M19 Explainable Matching
-// Registered AFTER M18 so it reuses the very same lightweight facts
-// projection (`m18MatchFacts`) and the canonical M17 Room bridge. There is
-// deliberately no second matching engine and no second Room-creation path.
+// Registered AFTER M18 so it reuses the very same match reads (S14j: the
+// stored facts, domains/discovery/matching/query.mjs) and the canonical M17
+// Room bridge. There is deliberately no second matching engine and no second
+// Room-creation path.
 const m19Ctx = {
   ...m18Ctx,
   recruitmentReads, // §4.3 step 2: contacts and offers are read through SQL
@@ -4916,6 +4920,18 @@ const m19Ctx = {
   combineProtocolIds: () => COMBINE_PROTOCOLS.map((p) => p.id),
 };
 registerMatching(m19Ctx);
+
+// S14j: the match facts. Triggers on their inputs mark a player; the keeper re-derives the marked players before every
+// COMMIT, so matching and Nobody Missed read current facts in SQL. Time-only changes (an expiry, an agreement's term,
+// adulthood) are the minute sweep's.
+const matchFactsKeeper = createMatchFactsKeeper({
+  ...m19Ctx, matchFacts, sqlite: store.sqlite,
+  trustSummaryFor: m162Ctx.trustSummaryFor,
+  testProviderEnabled: process.env.BOX_CAM_TEST_PROVIDER === '1',
+});
+matchFactsKeeper.start();
+m19Ctx.matchFactsKeeper = matchFactsKeeper;
+setInterval(() => { try { matchFactsKeeper.sweep(); } catch (err) { console.error(`match facts sweep failed: ${err?.message ?? err}`); } }, 60_000).unref();
 
 // ------------------------------------------ M20 Recruitment Analytics
 // Registered LAST, because it reads everything and owns nothing. There is no

@@ -385,6 +385,19 @@ section('T2/T4 — a real Combine Verified result strengthens Trust, and invalid
   const trustOf = async (tok) => (await j('GET', '/player/trust-profile', undefined, tok)).body.trust;
   const before = await trustOf(kola.token);
   ok(before.components.combine.coverageBp === 0, 'T2: Combine Confidence starts at zero');
+  // S14j: matching reads each player's evidence-confidence band from the stored match facts, re-derived before every
+  // COMMIT; the band a club's match card shows must be the band the Trust profile gives at that moment.
+  const matchedBand = async () => {
+    let cursor;
+    for (;;) {
+      const page = await j('POST', '/org/matching', { criteria: { required: [], preferred: [] }, sort: 'name', limit: 100, ...(cursor ? { cursor } : {}) }, maria.token);
+      const card = page.body.items.find((i) => i.playerId === 'pl-adeyemi');
+      if (card || !page.body.nextCursor) return card?.trustBand ?? null;
+      cursor = page.body.nextCursor;
+    }
+  };
+  const clubBand = async () => (await j('GET', '/org/players/pl-adeyemi/trust-profile', undefined, maria.token)).body.trust.band;
+  ok(await matchedBand() === await clubBand(), 'S14j: before the attempt, matching shows the band the Trust profile gives');
 
   // Run a genuine standardized attempt end-to-end through the M16.1 routes.
   const created = await j('POST', '/player/combine/attempts', { protocolId: 'combine-box-touch-60', provider: 'local_test' }, kola.token);
@@ -411,6 +424,7 @@ section('T2/T4 — a real Combine Verified result strengthens Trust, and invalid
   // say the contribution came from simulated evidence.
   neg(after.simulatedEvidenceIncluded === true, 'T2: the profile declares that simulated evidence was included (demo/test environment)');
   ok(after.strengths.some((s) => s.code === 'COMBINE_VERIFIED'), 'T2: a Combine strength signal is explained to the player');
+  ok(await matchedBand() === await clubBand(), 'S14j: a verified Combine result reaches matching as soon as it commits');
 
   // T4 — Trust & Safety invalidates the bound Box Cam session.
   await j('POST', `/player/box-cam/sessions/${boxSession.id}/dispute`, { reason: 'Camera fogged up.' }, kola.token);
@@ -422,11 +436,13 @@ section('T2/T4 — a real Combine Verified result strengthens Trust, and invalid
   neg(invalidated.score <= after.score, 'T4: the score falls only because evidence was removed');
   neg(invalidated.score >= before.score - 1, 'T4: removal is not a punitive penalty — the score returns toward the pre-evidence level, never below it');
   neg(!invalidated.gaps.some((g) => /fraud|cheat|dishonest|suspicious/i.test(g.text)), 'T4: no gap accuses the player after invalidation');
+  ok(await matchedBand() === await clubBand(), 'S14j: an invalidation reaches matching as soon as it commits');
 
   // Restore returns the contribution deterministically.
   await j('POST', `/admin/box-cam/sessions/${boxSession.id}/restore`, { reason: 'Re-review overturned.' }, undefined, A);
   const restored = await trustOf(kola.token);
   ok(restored.score === after.score && restored.components.combine.coverageBp === after.components.combine.coverageBp, 'T4: restoration returns the exact previous contribution');
+  ok(await matchedBand() === await clubBand(), 'S14j: a restoration reaches matching as soon as it commits');
 }
 
 // ============================== Passport separation (M15 invariant intact)

@@ -23,6 +23,9 @@
  */
 import { EVIDENCE_REQUIREMENTS, TRUST_BANDS } from '../shared.mjs';
 import { MATCH_POLICY_VERSION, criteriaVersion } from './criteria.mjs';
+import { ageOn, haversineKm } from '../../../domain.mjs';
+import { bornByForAge } from '../../../repositories/identity.mjs';
+import { bandRankExpr } from '../../../repositories/matchFacts.mjs';
 
 // Built on first use, never at module load: domains/discovery/shared.mjs imports this
 // module, so TRUST_BANDS may still be initialising while this file evaluates.
@@ -142,6 +145,101 @@ function evaluate(c, facts, { now = Date.now() } = {}) {
       // closed rather than treat an unknown test as satisfied.
       return { key: `unknown:${c.type}`, met: false, text: 'This criterion cannot be evaluated' };
   }
+}
+
+/**
+ * S14j: the SAME test as `evaluate`, as an SQL condition over a match query's row (`players p` joined to
+ * `player_match_facts f`, repositories/matchFacts.mjs), so a match set is a query instead of a loop. One case per
+ * criterion type, each the JS rule above restated; scripts/testMatchFacts.mjs runs both over generated facts and
+ * criteria and requires them to agree. Fail closed exactly as `evaluate` does: an unknown fact meets nothing.
+ * `org` decides what the club may know (distance only for a Grassroots club), `now` the instant of the read.
+ */
+/** A player's age on `now` in SQL (ageOn's rule: whole UTC years, one fewer before the birthday), or NULL. */
+export const AGE_SQL = (now) => {
+  const d = new Date(now);
+  return { sql: "(? - CAST(substr(p.birth_date, 1, 4) AS INTEGER) - (? < substr(p.birth_date, 6, 5)))", args: [d.getUTCFullYear(), `${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`] };
+};
+export const BAND_RANK_SQL = (col = 'f.trust_band') => bandRankExpr(col); // the facts' band index is on the same expression
+const LEVEL_RANK_SQL = `COALESCE(CASE p.level ${Object.entries(LEVEL_RANK).map(([l, i]) => `WHEN '${l}' THEN ${i}`).join(' ')} END, -1)`;
+const json = (vs) => JSON.stringify(vs);
+export function criterionSql(c, { now, org }) {
+  switch (c.type) {
+    case 'position': return c.primaryOnly
+      ? { sql: 'f.position IN (SELECT value FROM json_each(?))', args: [json(c.values)] }
+      // The players whose position or a secondary position is listed, as one indexed set probed by id.
+      : { sql: 'p.id IN (SELECT player_id FROM player_match_facts WHERE position IN (SELECT value FROM json_each(?)) UNION SELECT player_id FROM player_match_fact_positions WHERE code IN (SELECT value FROM json_each(?)))', args: [json(c.values), json(c.values)] };
+    case 'age': {
+      // ageOn's rule as day comparisons (temporal.mjs ageOnMs: N at 00:00 UTC on the birthday): age ≥ n exactly when the
+      // birth day is on or before n years before today, so no per-row function is called and the index can serve it.
+      const lo = c.operator === 'between' ? c.values[0] : (c.operator === 'gte' ? c.value : null);
+      const hi = c.operator === 'between' ? c.values[1] : (c.operator === 'lte' ? c.value : null);
+      return { sql: `p.birth_date IS NOT NULL${lo != null ? ' AND p.birth_date <= ?' : ''}${hi != null ? ' AND p.birth_date > ?' : ''}`, args: [...(lo != null ? [bornByForAge(lo, now)] : []), ...(hi != null ? [bornByForAge(hi + 1, now)] : [])] };
+    }
+    case 'geography':
+      // The distance exists only where the club may see it (views/playerViews.mjs: a Grassroots club's, in tenths).
+      if ((org?.level ?? null) !== 'grassroots' || !org.location) return { sql: '0', args: [] };
+      return { sql: 'distance_tenths(?, ?, p.lat, p.lng) IS NOT NULL AND distance_tenths(?, ?, p.lat, p.lng) / 10.0 <= ?', args: [org.location.lat, org.location.lng, org.location.lat, org.location.lng, c.value] };
+    case 'level':
+      if (c.operator === 'in') return { sql: 'p.level IN (SELECT value FROM json_each(?))', args: [json(c.values)] };
+      // An unknown level does not block (the M18 rule); a known one above the ceiling does.
+      return { sql: `${LEVEL_RANK_SQL} <= ?`, args: [LEVEL_RANK[c.value] ?? -1] };
+    case 'foot':
+      return { sql: "p.foot IS NOT NULL AND (lower_js(p.foot) IN (SELECT value FROM json_each(?)) OR lower_js(p.foot) = 'both')", args: [json(c.values.map((v) => String(v).toLowerCase()))] };
+    case 'availability': return { sql: 'f.availability = ?', args: [c.value] };
+    case 'evidence':
+      switch (c.value) {
+        case 'recent_full_match': return { sql: 'f.last_footage_at > ?', args: [now - 180 * 86_400_000] };
+        case 'coach_reference': return { sql: 'f.coach_reference = 1', args: [] };
+        case 'confirmed_current_club': return { sql: 'f.club_confirmed = 1', args: [] };
+        case 'combine_verified': return { sql: 'EXISTS (SELECT 1 FROM player_match_fact_combine mc WHERE mc.player_id = p.id)', args: [] };
+        default: return { sql: '0', args: [] };
+      }
+    case 'evidence_recency':
+      // floor((now - at) / day) <= days  ⇔  at > now - (days + 1) · day
+      return { sql: `${c.evidenceKind === 'any' ? 'f.last_evidence_at' : 'f.last_footage_at'} > ?`, args: [now - (c.value + 1) * 86_400_000] };
+    case 'trust_band': return { sql: `f.trust_band IS NOT NULL AND ${BAND_RANK_SQL()} >= ?`, args: [bandRank()[c.value] ?? TRUST_BANDS.length] };
+    case 'combine_result': return { sql: 'EXISTS (SELECT 1 FROM player_match_fact_combine mc WHERE mc.player_id = p.id AND mc.protocol_id = ?)', args: [c.value] };
+    case 'combine_measurement':
+      return { sql: `EXISTS (SELECT 1 FROM player_match_fact_combine mc WHERE mc.player_id = p.id AND mc.protocol_id = ? AND mc.best_value IS NOT NULL AND mc.best_value ${c.operator === 'gte' ? '>=' : '<='} ?)`, args: [c.protocol, c.value] };
+    default: return { sql: '0', args: [] };
+  }
+}
+
+/**
+ * The engine's facts for one row of a match query (repositories/matchFacts.mjs `query(...).page`) and its child rows
+ * (`childrenOf`): exactly the projection nobodyMissed.mjs assembled per player before S14j, the organisation's part
+ * (age, the Grassroots distance) worked out here as the org view does.
+ */
+export function factsOfRow(row, children, { org, now }) {
+  const age = ageOn(row.birth_date, now);
+  const combine = children?.combine ?? {};
+  const combineMeasurements = {};
+  for (const [protocol, best] of Object.entries(combine)) if (best !== null) combineMeasurements[protocol] = best;
+  const located = typeof row.lat === 'number' && typeof row.lng === 'number';
+  const distanceKm = (org?.level ?? null) === 'grassroots' && org.location && located
+    ? Math.round(haversineKm(org.location, { lat: row.lat, lng: row.lng }) * 10) / 10 : null;
+  return {
+    playerId: row.id,
+    name: row.name,
+    age: Number.isFinite(age) ? age : null,
+    position: row.f_position ?? null,
+    secondaryPositions: children?.secondary ?? [],
+    level: row.level ?? null,
+    foot: row.foot ?? null,
+    availability: row.f_availability ?? null,
+    distanceKm,
+    trustBand: row.f_trust_band ?? null,
+    combineProtocols: Object.keys(combine),
+    evidenceFlags: {
+      recent_full_match: !!row.f_last_footage_at && row.f_last_footage_at > now - 180 * 86_400_000,
+      coach_reference: row.f_coach_reference === 1,
+      confirmed_current_club: row.f_club_confirmed === 1,
+      combine_verified: Object.keys(combine).length > 0,
+    },
+    lastEvidenceAt: row.f_last_evidence_at ?? null,
+    lastFootageAt: row.f_last_footage_at ?? null,
+    combineMeasurements,
+  };
 }
 
 /**

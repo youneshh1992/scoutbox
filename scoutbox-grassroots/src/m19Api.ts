@@ -76,7 +76,8 @@ export interface MatchCard {
 export interface MatchResult {
   items: MatchCard[];
   total: number;
-  offset: number;
+  /** S14j: the list pages by cursor; pass this back as `cursor` for the next page (null on the last). */
+  nextCursor: string | null;
   limit: number;
   sort: string;
   ordering: string;
@@ -130,7 +131,8 @@ export interface WatchlistDetail {
   watchlist: Watchlist;
   items: MatchCard[];
   total: number;
-  offset: number;
+  /** S14j: the members page by cursor; pass this back as `cursor` for the next page (null on the last). */
+  nextCursor: string | null;
   limit: number;
   sort: string;
   summary: {
@@ -175,10 +177,10 @@ export type CriteriaSaveOutcome<T> =
 
 export interface M19Api {
   vocabulary(s: Session): Promise<MatchVocabulary>;
-  match(s: Session, input: { criteria?: CriteriaInput; briefId?: string; sort?: string; limit?: number; offset?: number }): Promise<CriteriaSaveOutcome<MatchResult>>;
+  match(s: Session, input: { criteria?: CriteriaInput; briefId?: string; sort?: string; limit?: number; cursor?: string }): Promise<CriteriaSaveOutcome<MatchResult>>;
   watchlists(s: Session, status?: string): Promise<{ items: Watchlist[]; total: number; note: string }>;
   createWatchlist(s: Session, input: { name: string; mode: WatchlistMode; criteria?: CriteriaInput; briefId?: string; sourceType?: string; notify?: boolean }): Promise<CriteriaSaveOutcome<Watchlist>>;
-  watchlist(s: Session, id: string, params?: { sort?: string; limit?: number; offset?: number }): Promise<WatchlistDetail>;
+  watchlist(s: Session, id: string, params?: { sort?: string; limit?: number; cursor?: string }): Promise<WatchlistDetail>;
   patchWatchlist(s: Session, id: string, input: Record<string, unknown> & { expectedRev: number }): Promise<CriteriaSaveOutcome<Watchlist>>;
   history(s: Session, id: string, params?: { cursor?: string; limit?: number }): Promise<WatchlistHistoryResult>;
   addToRoom(s: Session, id: string, playerId: string): Promise<{ roomId: string; existed: boolean; note: string }>;

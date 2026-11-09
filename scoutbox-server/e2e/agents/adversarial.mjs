@@ -286,7 +286,7 @@ section('W/pure — events, and the vocabulary that must not appear');
   neg(!names.some((n) => /signed_contract/.test(n)) && names.filter((n) => /signing/.test(n)).every((n) => /^signing_/.test(n) && EVENT_REGISTRY[n].audience === 'org_private') && !names.some((n) => /^(agent|representation|transaction).*sign/.test(n)), 'W2b nor an agent-domain signing event — the P7 signing_* events are the club\'s own, org_private');
   neg(!names.some((n) => /commission|fee_agreed/.test(n)), 'W2c nor a commission event');
   // Rewritten in S14a: it described the retired snapshot registry (2308). The schema is the latest table migration.
-  ok(DATA_MIGRATIONS.length === SCHEMA_VERSION, 'W3 the schema is 39, the latest table migration (0039_retire_blob)');
+  ok(DATA_MIGRATIONS.length === SCHEMA_VERSION, 'W3 the schema is 40, the latest table migration (0040_match_facts)');
 }
 
 // =================================================================== LIVE

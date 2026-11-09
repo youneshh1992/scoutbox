@@ -124,6 +124,7 @@ One copy of each rule, in `domains/recruitment/lifecycle/journeyModel.mjs`, used
   - "Add to Room" uses the M17 creator and is idempotent.
   - Since S12c the list of watchlists and a watchlist's history page (50 at a time, "continue from here"); the apps show the first page of the list for now. A `notify` that is not true or false, an unknown source type, a source reference that is not short text and an unknown status filter are refused, naming the field.
   - Opening a watchlist records its membership, the new transitions, the time and the notification together, or not at all.
+  - Since S14j matching and a watchlist's members cover every player the club can see (there is no 2,000-player cap), and both page by cursor: 50 at a time by default, at most 100, the next page from `nextCursor`, with `total` the number of matches. An `offset`, a page size over 100 or a cursor the list did not hand out is refused (400). The apps show the first page for now. Sorting by name ignores case and accents; a watchlist's "recent evidence" order is now the newest evidence first, as in matching (it was by player id).
 
   (M19)
 - Briefs, Nobody Missed and Second Look (M18), since S12c:
@@ -131,6 +132,8 @@ One copy of each rule, in `domains/recruitment/lifecycle/journeyModel.mjs`, used
   - A brief edit is checked whole before anything is saved: a refused criteria change no longer half-applies the status change sent with it.
   - Opening Second Look records new, resurfaced and expired items with the owner's notification together; opening it when nothing has changed saves nothing.
   - "Add to Room" from Nobody Missed, and "Reopen Room" from Second Look, save the Room and the review or item together.
+  - Since S14j Nobody Missed and the evaluation coverage cover every visible player too, and the Nobody Missed list pages by cursor like matching (50 by default, `nextCursor`, `total` the candidates).
+  - The facts these read (a player's Passport position and availability, evidence confidence, newest evidence and footage, coach reference, confirmed club, Combine results) are kept per player and brought up to date in the same save as the change that affects them. A change that happens through time alone (evidence expiring, an agent agreement ending, an 18th birthday) shows within a minute.
 
 ## Open questions and deferred work
 
@@ -139,8 +142,8 @@ One copy of each rule, in `domains/recruitment/lifecycle/journeyModel.mjs`, used
 - Lead authority comes from a role string typed at login. Fixing it is deferred to M25 (N-P81-1).
 - Free-text reasons travel in push/email bodies (N-P8-5).
 - Minor items recorded, not fixed: lockout keyed by identifier, revise-key replay honesty, unchecked task `linkedResourceId` (N-P81-5/6/7).
-- M19 has no scheduler: membership is correct as of the last read. A maintained projection for the linear scan is deferred.
-- Matching, Nobody Missed and watchlist membership still evaluate the visible players in code, at most the first 2,000 scanned (the response says when it was cut short). Moving that to SQL needs the facts projected across domains; deferred (migration.md §4.3).
+- M19 has no scheduler: a watchlist's membership (and its transitions and notification) is recorded when it is read.
+- A watchlist read compares its whole stored membership with the new one, so a watchlist with tens of thousands of members is slow to open (about 0.4 s at 20,000). Deferred (migration.md §4.3).
 
 ## Also worth knowing
 

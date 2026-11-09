@@ -52,7 +52,7 @@ A domain that is in tables but still loaded whole into memory is only part-way t
 
 ## 3. Status
 
-39 migrations are registered in `repositories/index.mjs` (`DATA_MIGRATIONS`). The next free id is `0040`. Each step
+40 migrations are registered in `repositories/index.mjs` (`DATA_MIGRATIONS`). The next free id is `0041`. Each step
 takes the next free id; the placeholder ids in `sqlite-schema.md` mean nothing.
 
 | Step | Domain | Migration | Repository | Status |
@@ -83,8 +83,8 @@ takes the next free id; the placeholder ids in `sqlite-schema.md` mean nothing.
 | S14g | organisations become explicit writes and SQL reads; the table re-typed (no `facets_json`, length and range CHECKs, a ground as both coordinates or neither, a federation registration as both parts or neither, `created_at` required; the password hash off the record) | `0004` (amended in place; `0021`, `0023`, `0026` no longer edit facets) | `orgs` | done |
 | S14h | players and guardians become explicit writes and SQL reads; the tables re-typed (no `facets_json`, lengths, ranges and vocabularies CHECKed, keys inside the domain RESTRICT, one primary link per player; `coGuardians` worked out, the external id's copied claim a review key) | `0005`, `0007` (amended in place; `0002` no longer creates identity shadows) | `identity` | done |
 | S14i | the hot player reads in SQL: the directory, the Film Room, the fixture graph and a role's candidates page by cursor; the feed, similar players, the rotation and the benchmarks read light rows or a `GROUP BY`; the whole visibility rule in SQL; profile completeness a column (`players.profile_signal`) | `0005`, `0007` (amended in place) | `identity` | done |
-| S14j | matching and Nobody Missed: the candidates' facts projected into a table kept by their writers (§4.6) | | | **next** |
-| S14 last | the save path, `db` and snapshot mode go (§4.6) | | | |
+| S14j | matching, the watchlists and Nobody Missed in SQL: each player's facts projected into `player_match_facts`, kept by triggers on its inputs and re-derived before every COMMIT; the 2,000-player cap gone; the lists paged by cursor | `0040` | `matchFacts` | done |
+| S14 last | the save path, `db` and snapshot mode go (§4.6) | | | **next** |
 
 Steps before S8 were staged (written at save) rather than explicit; S4a's identity writes are explicit since §4.3.1 (and
 its mirror gone since S14h), S6b's since S14b, S7d's since S14c, S7b's and S7c's since S14d, S7a's since S14e, S0's and
@@ -113,7 +113,7 @@ and the DDL, so these cannot drift, and include a `date` type for football dates
   lines and `Array.isArray` guards quietly see an empty collection. The repository answers indexed queries (`byId`,
   `forOrg`, `forPlayer`, counts…) with fresh deep-frozen records; a read inside a unit sees the unit's writes. Modules
   receive a per-domain reads object on their context (`recruitmentReads`, `scoutingReads`, `verificationReads`,
-  `agentReads`, `complianceReads`, `transactionReads`, `developmentReads`, `boxCamReads`, `discoveryReads`, `insightReads`, `integrationReads`, `enterpriseReads`, `groupReads`, `grassrootsReads`, `safetyReads`; S13e's few readers take the `operations` repository itself, the threads' the `channels` repository, the delivery centre the `dispatches` and `outboxPush` repositories, the feed and preferences the `notifications` repository, staff readers the `users` repository or `byId.user`, organisation readers the `orgs` repository or `byId.org`, and player and guardian readers the `players` and `guardians` repositories or `byId.player` / `byId.guardian`); pure projectors take `reads`. Sweeps are indexed predicates, admin figures are
+  `agentReads`, `complianceReads`, `transactionReads`, `developmentReads`, `boxCamReads`, `discoveryReads`, `insightReads`, `integrationReads`, `enterpriseReads`, `groupReads`, `grassrootsReads`, `safetyReads`; matching and Nobody Missed the `matchFacts` repository through `domains/discovery/matching/query.mjs`; S13e's few readers take the `operations` repository itself, the threads' the `channels` repository, the delivery centre the `dispatches` and `outboxPush` repositories, the feed and preferences the `notifications` repository, staff readers the `users` repository or `byId.user`, organisation readers the `orgs` repository or `byId.org`, and player and guardian readers the `players` and `guardians` repositories or `byId.player` / `byId.guardian`); pure projectors take `reads`. Sweeps are indexed predicates, admin figures are
   `GROUP BY`s. Lists decode their records' child rows in one batch (`childRowsOf` in `repositories/database.mjs`),
   never a query per record.
 - **Reads that write become sweeps or upserts.** A notice a read used to create comes from a sweep, its marker
@@ -174,11 +174,17 @@ separate risk; the script moves the fixtures' instants to today to measure the s
 - Transactions (S11c): a projection reads each transaction's consents, context and evaluation by id (a page's bindings and
   documents are one batch); the T&S stale-snapshot figure and the agency audit decode their records. Bounded by one
   agent's, one club's or the live transactions, not the player base.
-- Discovery (S12c): matching, Nobody Missed and a watchlist's membership still scan the visible players in code (at
-  most `LIMITS.maxCandidateScan`, 2,000, and the response says when it was cut short), building each player's facts from
-  several domains. This is the one discovery read that grows with the player base: moving it to SQL needs those facts
-  projected into a table. Second Look projects one club's ended Rooms. Opening a watchlist writes its reconciliation
-  clock every time (the screen shows "as of"), the membership only when it changed.
+- Discovery (S12c, S14j): matching, Nobody Missed, the evaluation coverage and a watchlist's membership are SQL over
+  every visible player joined to the stored facts (no cap), paged by cursor, decoding only the page. Each still counts
+  its whole match set for `total` (about 30 ms per count at 100k players, so matching is 40–70 ms and Nobody Missed,
+  which counts three times, about 100 ms); the default and name orders walk an index of the facts. A watchlist read
+  reads and compares its whole stored membership (about 0.4 s at 20,000 members): that needs the comparison in SQL.
+  Second Look projects one club's ended Rooms. Opening a watchlist writes its reconciliation clock every time (the
+  screen shows "as of"), the membership only when it changed.
+- Match facts (S14j): every write to an input re-derives its player before COMMIT (the trust band included, about
+  0.7 ms); an organisation's standing re-derives the players linked to it, bounded by that club's squad, invites,
+  signings, assessments and claims. A first installation, a snapshot import or a policy change derives every player at
+  boot, in one transaction (about 70 s at 100k players).
 - Insight and coverage (S12d): the exposure funnel, review queue and player bands are `GROUP BY`s over the 90-day
   window, but the queue then checks each player's live visibility in code, and the discovery rotation still reads every
   visible player (`players.visibleCandidates`, S14h). Bounded by one club's exposure, not the player base, except the
@@ -207,7 +213,7 @@ separate risk; the script moves the fixtures' instants to today to measure the s
   whole visibility rule, the blocks and the 50 km radius included, is the query's), and the feed reads the newest
   rows by index. Similar players, "more like this" and the discovery rotation still rank every visible player, but
   over light rows (the row's own columns, no lists), decoding only the winners; the benchmarks read the cohort's light
-  rows and one `GROUP BY` of drill bests. Matching and Nobody Missed still build each candidate's facts in code (S14j).
+  rows and one `GROUP BY` of drill bests. Matching and Nobody Missed read the stored facts in SQL since S14j.
   A deep directory page walks the index from its leading key (Academy+, or First Team Seeker for Grassroots). The
   Grassroots directory orders by distance, so each page sorts the players inside the club's radius. The Film Room
   pages by view count, which other scouts' views change, so a clip can move across a cursor while someone pages. The
@@ -351,9 +357,26 @@ Split in parts, like S12 and S13.
   feed reads the newest 40 of each kind. Junk refused: an unknown `ageGroup`, a `newDays` that is not a whole number
   from 1 (`400 FIELD_INVALID`); paging junk as everywhere. Founder decision (7 Nov): showing 50 at a time in the
   directory and the Film Room is fine until a frontend "load more" pass.
-- **S14j: matching and Nobody Missed.** Each candidate's facts (Passport, evidence, assessments, trust,
-  availability) are built in code from several domains for every visible player (capped at 2,000). They move to a
-  facts table kept by those domains' writers, so the candidate reads page in SQL.
+- **S14j (done, `0040`): matching and Nobody Missed.** Each player's facts (the Passport position and availability,
+  the evidence-confidence band, the newest evidence and footage, a coach reference, a confirmed club, the live
+  production Combine results) were built in code from several domains for every visible player on every read, capped
+  at 2,000. They are a derived projection now (`repositories/matchFacts.mjs`): `player_match_facts` with the
+  secondary positions and Combine results as child rows, and `player_match_facts_dirty`. Nobody writes it by hand:
+  triggers on every input table (`MATCH_FACT_INPUTS`; an organisation's verified, suspended or revoked standing
+  marks its linked players; an UPDATE marks only on a real change of a listed column) mark the player, and the
+  keeper (`domains/discovery/matchFacts.mjs`) re-derives the marked players before every COMMIT
+  (`onBeforeCommit` in `repositories/database.mjs`, run by `transaction()` and the store's units and saves; a failure
+  rolls the write back). `refresh_due_at` is the next instant time alone changes an input (evidence expiry, a claim's
+  `valid_until`, an agreement's term, adulthood); the minute sweep re-derives what is due (Founder decision, 8 Nov: a
+  minute is fine). A policy key in `meta` (the trust policy version and the simulated-evidence setting) rebuilds
+  every row at boot when it changes. The trust band's history source reads the Passport's club history alone
+  (`passportHistoryFor`), not the whole light Passport. Reads: each criterion has an SQL condition beside its JS test
+  (`criterionSql` in `matching/match.mjs`; `scripts/testMatchFacts.mjs` requires them to agree over generated facts
+  and criteria), joined to identity's `visibleWhere` (the whole visibility rule first); the nine evaluation signals
+  are one set of the club's own players. `POST /org/matching`, `GET /org/watchlists/:id` and `GET /org/nobody-missed`
+  page by cursor (`{ items, nextCursor, total }`; Founder decision, 8 Nov: match everyone, but page the lists); an
+  `offset` is refused (`400 PAGE_OFFSET_UNSUPPORTED`). The name order folds case and accents; a watchlist's
+  "recent evidence" order is the newest evidence first (it was the id). The apps read the first page.
 - **S14 last: the save path goes.** `persist()`, `persistNow()`, the debounced save, the save hooks,
   `repositories/memento.mjs`, `repositories/readonly.mjs` and `db` itself; then snapshot mode (`openStore(dir)`
   with whole-file `load`/`save`) and every domain's `*_SNAPSHOT`, with the suites setting up their data through the

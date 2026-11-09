@@ -73,11 +73,11 @@ export function registerPassportCore(ctx) {
   // ------------------------------------------------------ source assembly
   // Reads existing collections; writes nothing. `light` skips the timeline
   // for batch summaries (§62 — no full history for 100 players).
-  function assemble(player, { light = false } = {}) {
-    const pid = player.id;
-    const prefs = prefsFor(pid);
-    const now = Date.now();
-
+  /**
+   * The club-history inputs of one player (S14j: one definition, read by the Passport and by the trust band's
+   * history source, which needs nothing else of the Passport).
+   */
+  function historyInputs(pid) {
     // Club relationships: squad rows (invite-approved), accepted M14 squad
     // invitations, signings; plus self/guardian-submitted career entries.
     // S9c: the player's squad rows in one indexed query; a club's shadow list is not a relationship.
@@ -103,6 +103,17 @@ export function registerPassportCore(ctx) {
       return { id: s.id, orgId: s.orgId, orgName: s.orgName, ts: s.ts, endedAt: ended?.at ?? null, orgSuspended: !!orgOf(s.orgId)?.suspended };
     });
     const careerEntries = vreads.careerEntries.forPlayer(pid);
+    return { squads, signings, outcomes, signingRows, careerEntries };
+  }
+  /** A player's club history as the Passport shows it (clubHistory over historyInputs). */
+  const historyFor = (player) => { const { squads, careerEntries, signingRows } = historyInputs(player.id); return clubHistory({ affiliations: [], squads, careerEntries, signingRows }); };
+
+  function assemble(player, { light = false } = {}) {
+    const pid = player.id;
+    const prefs = prefsFor(pid);
+    const now = Date.now();
+
+    const { squads, signings, outcomes, signingRows, careerEntries } = historyInputs(pid);
 
     const trials = reads.trials.forPlayer(pid);
     const assessments = ctx.scoutingReads.assessments.forPlayer(pid)
@@ -258,6 +269,7 @@ export function registerPassportCore(ctx) {
     return full;
   }
   ctx.assemblePassport = assemble;
+  ctx.passportHistoryFor = historyFor;
   /**
    * The canonical Passport CONTENT revision for a player (M18.1). Exposed so a
    * decision snapshot can record which Passport truth the club was looking at

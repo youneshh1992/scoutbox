@@ -57,6 +57,7 @@ import * as m0036 from './migrations/0036_groups.mjs';
 import * as m0037 from './migrations/0037_grassroots.mjs';
 import * as m0038 from './migrations/0038_operations.mjs';
 import * as m0039 from './migrations/0039_retire_blob.mjs';
+import * as m0040 from './migrations/0040_match_facts.mjs';
 import { createRecruitmentRepository, RECRUITMENT_SNAPSHOT, RECRUITMENT_COLLECTIONS, RECRUITMENT_MIGRATION, assertRecruitmentConsistent, unresolvedPlayerReferences as unresolvedRecruitmentPlayers, retainedPlayerReferences as retainedRecruitmentPlayers } from './recruitment.mjs';
 import { createRecruitmentCasesRepository, RECRUITMENT_CASES_SNAPSHOT, RECRUITMENT_CASES_COLLECTIONS, RECRUITMENT_CASES_MIGRATION, unresolvedPlayerReferences as unresolvedCasePlayers, retainedPlayerReferences as retainedCasePlayers } from './recruitmentCases.mjs';
 import { createRecruitmentContactsOffersRepository, CONTACTS_OFFERS_SNAPSHOT, RECRUITMENT_CONTACTS_OFFERS_COLLECTIONS, RECRUITMENT_CONTACTS_OFFERS_MIGRATION, unresolvedPlayerReferences as unresolvedContactOfferPlayers, retainedPlayerReferences as retainedContactOfferPlayers } from './recruitmentContactsOffers.mjs';
@@ -79,6 +80,7 @@ import { createIntegrationsRepository, INTEGRATIONS_SNAPSHOT, INTEGRATIONS_COLLE
 import { createEnterpriseRepository, ENTERPRISE_SNAPSHOT, ENTERPRISE_COLLECTIONS } from './enterprise.mjs';
 import { createGroupsRepository, GROUPS_SNAPSHOT, GROUPS_COLLECTIONS } from './groups.mjs';
 import { createGrassrootsRepository, GRASSROOTS_SNAPSHOT, GRASSROOTS_COLLECTIONS } from './grassroots.mjs';
+import { createMatchFactsRepository } from './matchFacts.mjs';
 import { createOperationsRepository, OPERATIONS_SNAPSHOT, OPERATIONS_COLLECTIONS, OPERATIONS_SINGLETONS } from './operations.mjs';
 import { createTransitionsVouchesRepository, TRANSITIONS_SNAPSHOT, TRANSITIONS_COLLECTIONS, unresolvedPlayerReferences as unresolvedTransitionPlayers, retainedPlayerReferences as retainedTransitionPlayers } from './transitionsVouches.mjs';
 import { createOneTimeCodesRepository, EMAIL_CHALLENGES_TABLE, PAIRING_CODES_TABLE, ONE_TIME_CODES_MIGRATION, assertPairingCodesConsistent } from './oneTimeCodes.mjs';
@@ -88,7 +90,7 @@ import { createOutboxPushRepository, OUTBOX_PUSH_SNAPSHOT_TABLES, OUTBOX_PUSH_CO
 import { createChannelsRepository, CHANNELS_TABLE, CHANNELS_MIGRATION, assertChannelReferencesConsistent } from './channels.mjs';
 import { createSafetyAuditRepository, AUDIT_COLLECTIONS, SAFETY_AUDIT_SNAPSHOT, SAFETY_AUDIT_MIGRATION, assertIdvQueueGuardiansConsistent, unresolvedPlayerReferences, retainedPlayerReferences } from './safetyAudit.mjs';
 
-export const DATA_MIGRATIONS = Object.freeze([m0001, m0002, m0003, m0004, m0005, m0006, m0007, m0008, m0009, m0010, m0011, m0012, m0013, m0014, m0015, m0016, m0017, m0018, m0019, m0020, m0021, m0022, m0023, m0024, m0025, m0026, m0027, m0028, m0029, m0030, m0031, m0032, m0033, m0034, m0035, m0036, m0037, m0038, m0039]);
+export const DATA_MIGRATIONS = Object.freeze([m0001, m0002, m0003, m0004, m0005, m0006, m0007, m0008, m0009, m0010, m0011, m0012, m0013, m0014, m0015, m0016, m0017, m0018, m0019, m0020, m0021, m0022, m0023, m0024, m0025, m0026, m0027, m0028, m0029, m0030, m0031, m0032, m0033, m0034, m0035, m0036, m0037, m0038, m0039, m0040]);
 
 // Single-collection dispatchers, in snapshot-write order: organisations first
 // (staff reference them), then staff (sessions reference them), then
@@ -641,6 +643,10 @@ export function attachDataLayer({ db, seed = {}, store, nextId, sessionTtlMs, no
     retireCollection(db, name, 'recruitment');
   }
 
+  // S14j: the match facts are derived (kept by triggers on their inputs, re-derived before COMMIT by the builder the
+  // discovery domain registers); they have no collection and are never in a snapshot.
+  const matchFacts = createMatchFactsRepository({ sqlite, now });
+
   const channels = createChannelsRepository({ sqlite, log, now, unit: store.unit });
   const channelsBoot = channels.attach();
   retireCollection(db, CHANNELS_TABLE.name, 'channels');
@@ -652,6 +658,7 @@ export function attachDataLayer({ db, seed = {}, store, nextId, sessionTtlMs, no
   }
 
   return {
+    matchFacts,
     orgs,
     identity,
     players: identity.players,
@@ -743,6 +750,7 @@ export function attachDataLayer({ db, seed = {}, store, nextId, sessionTtlMs, no
         groups: { mode: 'live', rows: groups.counts(), pendingWrites: 0, writeMode: 'explicit: groups created, organisations invited, joining and leaving, templates shared and programmes added; grants created and revoked, and ended on departure when the owner no longer shares a group with any recipient (inside the route\'s unit of work when one is open)' },
         grassroots: { mode: 'live', rows: grassroots.counts(), pendingWrites: 0, writeMode: 'explicit: open days posted and deleted (a stamp; the row stays for the coverage assignments that name it), registrations made and answered once, a deleted player\'s name redacted; match days logged with their credited players; friendlies posted and answered once per club (inside the route\'s unit of work when one is open)', readMode: 'SQL: an organisation\'s open days and match days (paged), the friendlies board by date with a radius prefilter on the host club\'s location (paged), the no-ghosting count, the upcoming open days by club or area, counts; no mirror and no db.* view', typing: 'typed columns only: positions, registrations, credited players and responses as rows; calendar days checked; no JSON columns', references: 'player and guardian ids no foreign key (tolerant); organisations and staff RESTRICT; child rows cascade with their owner' },
         operations: { mode: 'live', rows: operations.counts(), pendingWrites: 0, writeMode: 'explicit: upload sessions opened, chunks recorded, finalised (with the media row), aborted, abandoned by the sweep and deleted with the player; saved searches created and deleted; one invoice issued per signing after it commits; provider callback ids remembered at once (the newest 5,000); injected failures added and used up (inside the route\'s unit of work when one is open)', readMode: 'SQL: a player\'s upload by id, an organisation\'s saved searches, the saved searches a new player could match (prefiltered by position, foot, country and availability), invoices by organisation and in all (paged), the demo reputation rows, the delivery centre\'s start; no mirror and no db.* view', typing: 'typed columns only: chunks received as rows, search filters as columns, invoice amounts in minor units; no JSON columns; plans and archetypes are constants (catalogue.mjs)', references: 'player ids no foreign key (sessions deleted with the player explicitly); organisations, staff and signings RESTRICT' },
+        matchFacts: { mode: 'derived', rows: matchFacts.counts(), writeMode: 'derived (S14j): triggers on every input table mark the player, and the builder re-derives the marked players before every COMMIT; time-only changes (evidence expiry, a claim\'s valid_until, an agent agreement\'s term, adulthood) are re-derived by the minute sweep; a policy change rebuilds every row at boot', readMode: 'SQL: matching, a watchlist\'s membership and page, Nobody Missed and the evaluation coverage are queries over the visible players joined to their facts, paged by cursor; only a page\'s players are decoded', typing: 'typed columns: the position vocabulary, the evidence-confidence bands, positive instants, booleans as 0/1; secondary positions and Combine results as child rows', references: 'player_id → players ON DELETE CASCADE (a projection of the row); the dirty markers carry no key' },
         safetyAudit: { mode: 'live', rows: safetyAudit.counts(), pendingWrites: safetyAudit.pending(), unresolvedPlayerReferences: unresolvedPlayerReferences(sqlite), retainedPlayerReferences: retainedPlayerReferences(sqlite), writeMode: 'explicit: a block with its ledger row, a report with its suspension blocks and frozen requests, a moderation hit with its automatic escalation, a report\'s resolution with the organisation\'s suspension, an ID check with the guardian\'s column, each in one unit of work; a lifted block is deleted (Q5); the source-change log keeps the newest 20,000 rows', references: 'organisations and staff are RESTRICT keys. The five player references (blocks, reports, org_notes, ledger, source_changes) carry no key (Q4): an id that resolves to no player is counted here, never refused. The ID-check queue names an existing guardian, checked on every write and on every snapshot (Q4b)' },
       },
       identity: { initState: identity.initState() },

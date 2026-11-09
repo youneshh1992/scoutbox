@@ -160,7 +160,9 @@ export function registerTrust(ctx) {
   /** Build the full Trust Profile for a player. `full` is an already-built
    *  light Passport assembly when the caller has one (batch reuse). */
   function buildFor(player, { full = null } = {}) {
-    const assembled = full ?? ctx.assemblePassport?.(player, { light: true }) ?? null;
+    // S14j: only the club history of the Passport is a trust source, so without an assembly at hand the history is
+    // read alone (passportHistoryFor: the Passport's own definition), not the whole light Passport.
+    const assembled = full ?? (ctx.passportHistoryFor ? { history: ctx.passportHistoryFor(player) } : null) ?? ctx.assemblePassport?.(player, { light: true }) ?? null;
     return calculateTrustScore({
       playerContext: { isAdult: isAdult(player) },
       identity: identitySource(player),

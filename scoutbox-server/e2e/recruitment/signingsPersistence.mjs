@@ -109,7 +109,7 @@ section('1 — the migration: fresh boot at schema 39 with the signing tables on
   const signingsBefore = JSON.stringify(db1.signings);
   openStore(DIR).save({ db: db1 });
   const s2 = await bootOn(DIR, PORT);
-  ok(s2.up && (await s2.j('GET', '/healthz')).body.schemaVersion === LATEST_SCHEMA, '1.5 the planted legacy file boots at schema 39');
+  ok(s2.up && (await s2.j('GET', '/healthz')).body.schemaVersion === LATEST_SCHEMA, '1.5 the planted legacy file boots at the latest schema');
   const m = (await s2.j('POST', '/auth/org/login', { orgId: 'org-eastport', scoutName: 'Maria Keane', role: 'Head of Recruitment' })).body;
   const room = await s2.j('GET', '/org/rooms/case-legacy-signed/signing', undefined, m.token);
   neg(room.status === 200 && room.body.packages.length === 0 && room.body.legacySigning?.id === 'sign-legacy-p7' && room.body.legacySigning.method === 'LEGACY_RECORDED', '1.6 the legacy signed case: no package fabricated; the legacy row reported as what it is');

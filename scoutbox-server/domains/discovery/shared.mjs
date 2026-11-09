@@ -804,7 +804,7 @@ export const LIMITS = {
   reviewActionsPerHour: 300,
   pageSize: 25,
   maxPageSize: 100,
-  maxCandidateScan: 2000,
+  // S14j: no candidate cap — matching and Nobody Missed are SQL over every visible player (matching/query.mjs).
 };
 
 export const clampPage = (n, fallback = LIMITS.pageSize) => {

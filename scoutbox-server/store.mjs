@@ -25,6 +25,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { readTableBacked, writeTableBacked, migrateForSnapshot, TABLE_BACKED } from './repositories/index.mjs';
 import { requireRuntime, CONTRACT } from './runtime.mjs';
+import { runBeforeCommit } from './repositories/database.mjs';
 
 let DatabaseSync = null;
 try {
@@ -162,6 +163,7 @@ export function openStore(dataDir, { tableBacked = null } = {}) {
     sqlite.exec('BEGIN IMMEDIATE');
     try {
       writeBody(snapshot, { asSnapshot });
+      runBeforeCommit(sqlite);
       sqlite.exec('COMMIT');
     } catch (err) {
       // A failure anywhere above — a flush, a table write, COMMIT itself — ends
@@ -276,6 +278,7 @@ export function openStore(dataDir, { tableBacked = null } = {}) {
       if (isThenable(result)) { observeStrayAsync(result); throw thenableRefusal(); }
       if (unit.failure) throw new Error(`the unit of work cannot commit: a nested (joined) unit failed inside it and its caller swallowed the error — ${String(unit.failure?.message ?? unit.failure).slice(0, 200)}`, { cause: unit.failure });
       writeBody(null, { asSnapshot: false });
+      runBeforeCommit(sqlite);
       sqlite.exec('COMMIT');
     } catch (err) {
       abort(states, err);
