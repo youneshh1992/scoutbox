@@ -148,7 +148,7 @@ export function registerM22Routes(ctx) {
     });
     if (!begun.ok) return fail(res, begun.error, { protocolId: begun.protocolId, activeSessions: begun.activeSessions });
 
-    boxCam.sessions.update(s.id, (d) => { d.cvProviderSessionId = begun.providerSessionId; });
+    boxCam.sessions.bindCvSession(s.id, { providerSessionId: begun.providerSessionId });
     vmetric('box_cam_cv_sessions_started');
     broadcast('box_cam_cv_session_started', { playerId: req.player.id, sessionId: s.id });
 

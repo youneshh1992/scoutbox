@@ -51,8 +51,9 @@ transaction documents are evidence records.
   `repositories/recruitmentCases.mjs`, `repositories/recruitmentContactsOffers.mjs`, `repositories/recruitment.mjs`;
   agent transactions, compliance records and the agent core: `repositories/agentTransactions.mjs`,
   `repositories/complianceRecords.mjs`, `repositories/agentCore.mjs`; verification claims and the records around them,
-  transition cases and coach references: `repositories/verification.mjs`, `repositories/transitionsVouches.mjs`; the
-  direction for the other domains). A record is created whole, then
+  transition cases and coach references: `repositories/verification.mjs`, `repositories/transitionsVouches.mjs`; Box
+  Cam sessions, the At-Home Combine and its CV results: `repositories/boxCam.mjs`; the direction for the other
+  domains). A record is created whole, then
   changes only through operations named after what happened (`moveRoom`, `recordDelivery`, `issueRevision`), each an
   `UPDATE` of named columns or an `INSERT` of new rows, called as `act(id, input, bookkeeping)`; the bookkeeping is the
   history entries, rev bump and change instant the act leaves, and `recordAct(id, bookkeeping)` is it alone. History is
@@ -65,7 +66,8 @@ transaction documents are evidence records.
   records is worked out on read, not stored twice (a document's or a review's `supersededBy` is the row naming it). The
   agent core still types a `create` from its field specs; its acts have no JavaScript copy of the columns. A
   verification claim's status moves only along `CLAIM_TRANSITIONS` and from the status its caller judged the move
-  from, so a stale decision is refused. The shared checks, the guarded update and the mapping of a field spec to
+  from, so a stale decision is refused. A Box Cam act is guarded by the state it moves from (a session's result is
+  worked out once, while it is recording; an attempt is measured once, while it is ready). The shared checks, the guarded update and the mapping of a field spec to
   columns are `repositories/writes.mjs`.
 - **Whole-record updates** (every other domain, for now): `create(record)` and `update(id, (draft) => …)`. The update
   hands the callback a plain copy, types the whole record, writes it at once, refuses unknown fields and returns the

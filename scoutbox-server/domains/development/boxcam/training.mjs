@@ -137,14 +137,14 @@ export function registerBoxTraining(ctx) {
     if (!a || a.orgId !== req.org.id) return res.status(404).json({ error: 'ASSIGNMENT_NOT_FOUND' });
     if (a.state === 'cancelled') return res.status(409).json({ error: 'ALREADY_CANCELLED' });
     const next = unit(() => {
-      const row = boxCam.assignments.update(a.id, (d) => { d.state = 'cancelled'; d.updatedAt = Date.now(); });
+      const row = boxCam.assignments.cancel(a.id, { at: Date.now() });
       ledgerAppend({ type: 'box_assignment_cancelled', playerId: a.playerId, orgId: req.org.id, orgName: req.org.name, userId: req.orgUser.id, scoutName: req.orgUser.name, detail: { assignmentId: a.id } });
       return row;
     });
     res.json({ assignment: assignmentView(next) });
   });
 
-  const accept = (a) => boxCam.assignments.update(a.id, (d) => { d.state = 'accepted'; d.updatedAt = Date.now(); });
+  const accept = (a) => boxCam.assignments.accept(a.id, { at: Date.now() });
   playerRouter.get('/box-cam/assignments', (req, res) => {
     res.json({ items: reads.assignments.forPlayer(req.player.id).map(assignmentView) });
   });
@@ -182,7 +182,7 @@ export function registerBoxTraining(ctx) {
     } else if (a.state === 'assigned' || a.state === 'accepted') {
       next = session.verifiedActiveMs > 0 ? 'partially_completed' : 'in_progress';
     }
-    boxCam.assignments.update(a.id, (d) => { d.state = next; d.updatedAt = Date.now(); });
+    boxCam.assignments.progress(a.id, { state: next, at: Date.now() });
     if (session.targetCompleted === true && next === 'completed') {
       vmetric('box_assignment_completed');
       const p = findPlayer(a.playerId);
@@ -302,10 +302,7 @@ export function registerBoxTraining(ctx) {
       if (!c || c.drillId !== session.drillId) continue;
       const prog = challengeProgress(c, sessions);
       const completes = prog.completed;
-      boxCam.entries.update(entry.id, (d) => {
-        d.progress = prog.total;
-        if (completes) { d.status = 'completed'; d.completedAt = Date.now(); }
-      });
+      boxCam.entries.progress(entry.id, { progress: prog.total, completedAt: completes ? Date.now() : null });
       if (completes) {
         vmetric('box_challenge_completed');
         notify({ kind: 'player', id: player.id }, 'box_cam', `Box Challenge complete: ${c.title}. Your work counts.`, entry.id);
@@ -430,19 +427,12 @@ export function registerBoxTraining(ctx) {
       // A session with no result (it expired before it started) or one already invalidated has nothing to invalidate:
       // the dispute is resolved and the session left as it is.
       if ((outcome === 'invalidated' || outcome === 'provider_bug') && s && s.verificationState && s.verificationState !== 'invalidated') {
-        const at = Date.now();
-        boxCam.sessions.update(s.id, (x) => {
-          x.previousVerificationState = x.verificationState;
-          x.verificationState = 'invalidated';
-          x.status = 'invalidated';
-          x.invalidatedAt = at;
-          // An append-only integrity history on the session itself, so a
-          // later restore never erases the fact or the moment of invalidation.
-          x.integrityEvents.push({ type: 'invalidated', at, disputeId: d.id, outcome });
-        });
+        // The session's integrity history is append-only, so a later restore never erases the fact or the moment of
+        // invalidation.
+        boxCam.sessions.invalidate(s.id, { at: Date.now(), disputeId: d.id, outcome });
         ledgerAppend({ type: 'box_result_invalidated', playerId: s.playerId, orgId: null, detail: { sessionId: s.id, disputeId: d.id, outcome } });
       }
-      const row = boxCam.disputes.update(d.id, (x) => { x.status = 'resolved'; x.resolution = { outcome, reason: String(reason).trim().slice(0, 400), at: Date.now() }; });
+      const row = boxCam.disputes.resolve(d.id, { outcome, reason: String(reason).trim().slice(0, 400), at: Date.now() });
       const target = d.by.kind === 'guardian' ? { kind: 'guardian', id: d.by.id } : { kind: 'player', id: d.playerId };
       notify(target, 'box_cam', `Trust & Safety resolved your Box Cam dispute: ${outcome === 'stands' ? 'the result stands' : 'the result was invalidated'}.`, d.id);
       return row;
@@ -455,13 +445,7 @@ export function registerBoxTraining(ctx) {
     if (s.verificationState !== 'invalidated' || !s.previousVerificationState) return res.status(409).json({ error: 'NOT_INVALIDATED' });
     if (!String(req.body?.reason ?? '').trim()) return res.status(400).json({ error: 'REASON_REQUIRED' });
     const restored = unit(() => {
-      const row = boxCam.sessions.update(s.id, (x) => {
-        x.verificationState = x.previousVerificationState;
-        x.status = x.previousVerificationState;
-        x.previousVerificationState = null;
-        x.invalidatedAt = null;
-        x.integrityEvents.push({ type: 'restored', at: Date.now(), to: x.verificationState });
-      });
+      const row = boxCam.sessions.restore(s.id, { at: Date.now() });
       ledgerAppend({ type: 'box_result_restored', playerId: s.playerId, orgId: null, detail: { sessionId: s.id, reason: String(req.body.reason).slice(0, 300) } });
       return row;
     });

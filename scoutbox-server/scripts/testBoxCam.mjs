@@ -1,7 +1,8 @@
 // Box Cam, the At-Home Combine and the production CV results (repositories/boxCam.mjs, migration 0031): the STRICT
-// tables and the two seeded ScoutBox challenges, the typers' refusals (a plain nonce is never stored; a CV result
-// cannot claim Combine Verified), records read back whole with their derived parts, recordBatch, updates that keep
-// what never changes, the routes' queries, units of work and fixtures. Temporary databases only; nothing touches
+// tables and the two seeded ScoutBox challenges, the columns' and keys' refusals (a plain nonce is never stored; a CV
+// result cannot claim Combine Verified; a session cites only its own player's records), records read back whole with
+// their derived parts, recordBatch, the named acts and the states they move from, the routes' queries, units of work
+// and fixtures. Temporary databases only; nothing touches
 // DATA_DIR. Run with: npm test
 
 import assert from 'node:assert/strict';
@@ -13,8 +14,9 @@ import { NOW, TTL, tempDir } from './coreIdentityTestFixtures.mjs';
 import { saveFixture, ORG, SCOUT } from './recruitmentTestFixtures.mjs';
 import {
   BOX_CAM_MIGRATION as MIGRATION, BOX_CAM_TABLES as TABLES, BOX_CAM_COLLECTIONS as COLLECTIONS, EXPERIMENTAL_NOTE,
-  typeSession, typeObservation, typeChallenge, typeAssignment, typeCvResult, typeAttempt, hashNonce, nonceMatches,
+  hashNonce, nonceMatches,
 } from '../repositories/boxCam.mjs';
+import { typeObservation } from '../domains/development/boxcam/shared.mjs';
 
 let passed = 0;
 const only = process.env.TEST_ONLY || '';
@@ -109,28 +111,41 @@ test('[schema] 0031 is registered after 0030 and creates the STRICT tables (no J
   s.close(); rm(dir);
 });
 
-// ------------------------------------------------------------- typing
-test('[typing] junk is refused naming the record and field', () => {
-  assert.match(typeSession(session({ nonceHash: NONCE.padEnd(64, 'x') })).reason, /nonceHash/, 'a plain nonce is not a hash');
-  assert.match(typeSession({ ...session(), nonce: NONCE }).reason, /boxSessions boxs-1 carries field\(s\).*nonce/);
-  assert.match(typeSession(finished({ status: 'partially_verified' })).reason, /status/, 'a finished status is its verification state');
-  assert.match(typeSession(finished({ verificationState: 'invalidated', status: 'invalidated' })).reason, /previousVerificationState/);
-  assert.match(typeSession(finished({ verificationReasons: ['not a code!'] })).reason, /verificationReasons\[0\]/);
+// ------------------------------------------------------------- writes
+test('[writes] junk is refused by the columns and keys, naming the record and field; nothing is written', () => {
+  const { s, dir } = seeded('s12b-junk');
+  const create = (kind, r) => () => s.repo[kind].create(r);
+  refused(create('sessions', session({ id: 'boxs-2', nonceHash: NONCE.padEnd(64, 'x') })), /BOX_CAM_INPUT_INVALID: box_sessions boxs-2 row: CHECK/, 'a plain nonce is not a hash');
+  refused(create('sessions', { ...session({ id: 'boxs-2' }), nonce: NONCE }), /box_sessions boxs-2 nonce: is not stored as written/);
+  refused(create('sessions', finished({ id: 'boxs-2', status: 'partially_verified' })), /boxs-2 row: CHECK/, 'a finished status is its verification state');
+  refused(create('sessions', finished({ id: 'boxs-2', verificationState: 'invalidated', status: 'invalidated' })), /boxs-2 row: CHECK/, 'an invalidation keeps the state it set aside');
+  refused(create('sessions', finished({ id: 'boxs-2', verificationReasons: ['not a code!'] })), /boxs-2 verificationReasons\[0\]: CHECK/);
+  refused(create('sessions', session({ id: 'boxs-2', playerId: 'pl-2', assignmentId: 'boxa-1' })), /boxs-2 row: FOREIGN KEY/, "another player's assignment");
+  refused(create('sessions', session({ id: 'boxs-2', obs: { active: [{ fromMs: 0 }] } })), /boxs-2 obs\.active\[0\]: CHECK/, 'an interval needs both ends');
+  refused(create('challenges', orgChallenge({ publisher: { kind: 'scoutbox', orgName: 'X' } })), /box_challenges boxc-1 row: CHECK/);
+  refused(create('challenges', orgChallenge({ endsAt: NOW })), /boxc-1 row: CHECK/);
+  refused(create('assignments', assignment({ id: 'boxa-2', dueDate: '1 Dec' })), /boxa-2 row: CHECK/);
+  refused(create('assignments', assignment({ id: 'boxa-2', frequencyPerWeek: 0 })), /boxa-2 row: CHECK/);
+  refused(create('assignments', assignment({ id: 'boxa-2', target: { type: 'repetitions', value: '200' } })), /boxa-2 (row|target\.value)/);
+  refused(create('assignments', assignment({ id: 'boxa-2', state: 'superseded' })), /boxa-2 row: CHECK/);
+  refused(create('attempts', attempt({ calibrationResult: { passed: true, checks: [1], at: NOW } })), /catt-1 calibrationResult\.checks/);
+  refused(create('attempts', attempt({ playerId: 'pl-2' })), /catt-1 row: FOREIGN KEY/, "another player's session");
+  refused(create('disputes', { id: 'boxd-1', sessionId: 'boxs-1', playerId: 'pl-2', by: { kind: 'player', id: 'pl-2' }, reason: 'x', status: 'open', resolution: null, createdAt: NOW }), /boxd-1 row: FOREIGN KEY/);
+  refused(() => s.repo.cvResults.record(cvResult({ combineVerified: true })), /pcv_abc row: CHECK/);
+  refused(() => s.repo.cvResults.record(cvResult({ refusalReason: null })), /pcv_abc row: CHECK/);
+  refused(() => s.repo.cvResults.record(cvResult({ trace: [{ atMs: 1, confidence: 0.5, frame: 'x' }] })), /pcv_abc trace\[0\]\.frame: is not stored as written/);
+  assert.deepEqual(s.repo.sessions.forPlayer(PID).map((x) => x.id), ['boxs-1'], 'a refused create wrote nothing');
+  assert.equal(s.repo.cvResults.latestForSession('boxs-1'), null);
+  s.close(); rm(dir);
+});
+
+test('[writes] the events route refuses an observation the engine cannot read', () => {
   assert.match(typeObservation({ kind: 'active', fromMs: 0 }, 'o').reason, /fromMs/, 'an interval needs both ends');
   assert.match(typeObservation({ kind: 'rep' }, 'o').reason, /atMs/);
   assert.match(typeObservation({ kind: 'active', fromMs: 0, toMs: 10, quality: 'great' }, 'o').reason, /quality/);
   assert.match(typeObservation({ kind: 'rep', atMs: 1, confidence: 2 }, 'o').reason, /confidence/);
   assert.match(typeObservation({ kind: 'rep', atMs: '1' }, 'o').reason, /atMs must be a number/);
-  assert.match(typeChallenge(orgChallenge({ publisher: { kind: 'scoutbox', orgName: 'X' } })).reason, /publisher/);
-  assert.match(typeChallenge(orgChallenge({ endsAt: NOW })).reason, /endsAt/);
-  assert.match(typeAssignment(assignment({ dueDate: '1 Dec' })).reason, /dueDate/);
-  assert.match(typeAssignment(assignment({ frequencyPerWeek: 0 })).reason, /frequencyPerWeek/);
-  assert.match(typeAssignment(assignment({ target: { type: 'repetitions', value: '200' } })).reason, /target\.value must be a finite number/);
-  assert.match(typeAssignment(assignment({ state: 'superseded' })).reason, /state/);
-  assert.match(typeAttempt(attempt({ calibrationResult: { passed: true, checks: [1], at: NOW } })).reason, /checks\[0\]/);
-  assert.match(typeCvResult(cvResult({ combineVerified: true })).reason, /combineVerified/);
-  assert.match(typeCvResult(cvResult({ refusalReason: null })).reason, /refusalReason/);
-  assert.ok(typeCvResult(cvResult()).ok);
+  assert.ok(typeObservation({ kind: 'rep', atMs: 1, confidence: 0.5 }, 'o').ok);
 });
 
 // ------------------------------------------------------------- records
@@ -142,12 +157,14 @@ test('[records] a session is created and read back whole; the nonce matches only
   assert.ok(nonceMatches(got, NONCE)); assert.ok(!nonceMatches(got, 'other')); assert.ok(!nonceMatches(got, undefined));
   const row = s.store.sqlite.prepare('SELECT * FROM box_sessions WHERE id = ?').get('boxs-1');
   assert.ok(!Object.values(row).includes(NONCE), 'the plain nonce is stored nowhere');
-  refused(() => s.repo.sessions.create(session({ id: 'boxs-2', assignmentId: 'boxa-nope' })), /assignmentId names no assignment/);
+  refused(() => s.repo.sessions.create(session({ id: 'boxs-2', assignmentId: 'boxa-nope' })), /box_sessions boxs-2 row: FOREIGN KEY/);
   s.close(); rm(dir);
 });
 
 test('[records] recordBatch appends observations in order, closes the open pause and advances the sequence', () => {
   const { s, dir } = seeded('s12b-obs');
+  refused(() => s.repo.sessions.recordBatch('boxs-1', { lastSeq: 1, observations: [] }), /lastSeq must grow while recording/, 'a batch only while recording');
+  s.repo.sessions.start('boxs-1', { at: NOW });
   s.repo.sessions.recordBatch('boxs-1', { lastSeq: 3, observations: [
     { kind: 'active', fromMs: 0, toMs: 1000, quality: 'good', atMs: null, confidence: null }, { kind: 'pause', fromMs: 1000, toMs: null, atMs: null, quality: null, confidence: null },
     { kind: 'resume', atMs: 1500 }, { kind: 'rep', atMs: 400, confidence: 0.9, fromMs: null, toMs: null, quality: null },
@@ -158,28 +175,72 @@ test('[records] recordBatch appends observations in order, closes the open pause
   assert.deepEqual(obs.reps, [{ atMs: 400, confidence: 0.9 }]);
   const after = s.repo.sessions.byId('boxs-1');
   assert.equal(after.lastSeq, 3); assert.equal(after.batches, 1);
-  refused(() => s.repo.sessions.recordBatch('boxs-1', { lastSeq: 3, observations: [] }), /lastSeq must grow/);
-  refused(() => s.repo.sessions.recordBatch('boxs-1', { lastSeq: 9, observations: [{ kind: 'rep' }] }), /atMs/);
+  refused(() => s.repo.sessions.recordBatch('boxs-1', { lastSeq: 3, observations: [] }), /BOX_CAM_STATE_CONFLICT: box_sessions boxs-1: lastSeq must grow/);
+  refused(() => s.repo.sessions.recordBatch('boxs-1', { lastSeq: 9, observations: [{ kind: 'rep' }] }), /observations\[0\]: CHECK/);
+  refused(() => s.repo.sessions.recordBatch('boxs-1', { lastSeq: 9, observations: [{ kind: 'rep', atMs: 1, extra: 1 }] }), /observations\[0\]: carries field\(s\).*extra/);
   assert.equal(s.repo.sessions.byId('boxs-1').lastSeq, 3, 'a refused batch changes nothing');
   s.close(); rm(dir);
 });
 
-test('[records] a session update keeps its identity and only grows the integrity history; an invalidation restores', () => {
-  const { s, dir } = seeded('s12b-update');
-  s.repo.sessions.update('boxs-1', (d) => Object.assign(d, finished({ assignmentId: 'boxa-1' })));
-  refused(() => s.repo.sessions.update('boxs-1', (d) => { d.nonceHash = hashNonce('x'); }), /nonceHash cannot change/);
-  refused(() => s.repo.sessions.update('boxs-1', (d) => { d.lastSeq = 99; }), /lastSeq cannot change/);
-  s.repo.sessions.update('boxs-1', (d) => {
-    d.previousVerificationState = d.verificationState; d.verificationState = 'invalidated'; d.status = 'invalidated'; d.invalidatedAt = NOW + 1;
-    d.integrityEvents.push({ type: 'invalidated', at: NOW + 1, disputeId: null, outcome: 'invalidated' });
-  });
-  refused(() => s.repo.sessions.update('boxs-1', (d) => { d.integrityEvents = []; }), /only grows/);
-  s.repo.sessions.update('boxs-1', (d) => {
-    d.verificationState = d.previousVerificationState; d.status = d.verificationState; d.previousVerificationState = null; d.invalidatedAt = null;
-    d.integrityEvents.push({ type: 'restored', at: NOW + 2, to: d.verificationState });
-  });
-  assert.deepEqual(plain(s.repo.sessions.byId('boxs-1').integrityEvents), [{ type: 'invalidated', at: NOW + 1, outcome: 'invalidated' }, { type: 'restored', at: NOW + 2, to: 'verified' }]);
-  refused(() => s.repo.sessions.update('boxs-1', (d) => { s.repo.sessions.update('boxs-1', () => {}); return d; }), /already being updated/);
+test('[acts] a session moves only from the state each act names; the integrity history is only inserted', () => {
+  const { s, dir } = seeded('s12b-acts');
+  const S = s.repo.sessions;
+  refused(() => S.finish('boxs-1', { status: 'verified', verificationState: 'verified' }), /BOX_CAM_STATE_CONFLICT: box_sessions boxs-1 is not recording/);
+  refused(() => S.setNote('boxs-1', { note: 'x' }), /is not finished/);
+  S.start('boxs-1', { at: NOW });
+  refused(() => S.start('boxs-1', { at: NOW }), /is not waiting to start/);
+  refused(() => S.expire('boxs-1'), /is not waiting to start/);
+  S.bindCvSession('boxs-1', { providerSessionId: 'pcv_1' });
+  refused(() => S.finish('boxs-1', { status: 'verified', verificationState: 'verified', nonceHash: hashNonce('x') }), /nonceHash is not a field this act sets/);
+  const result = { status: 'verified', endedAt: NOW + 60_000, sessionDurationMs: 60_000, verifiedActiveMs: 55_000, verifiedReps: 120, setsCompleted: null, targetCompleted: true, quality: 'good', interruptionsCount: 0, verificationState: 'verified', verificationReasons: ['REP_COUNT_NOT_CONFIGURED'], resultHash: 'a'.repeat(64), finalizedAt: NOW + 60_000 };
+  S.finish('boxs-1', result);
+  assert.deepEqual(plain(S.byId('boxs-1')), plain(finished({ assignmentId: 'boxa-1', cvProviderSessionId: 'pcv_1', verificationReasons: ['REP_COUNT_NOT_CONFIGURED'] })));
+  refused(() => S.finish('boxs-1', result), /is not recording/, 'a result is worked out once');
+  refused(() => S.cancel('boxs-1'), /is already finished/);
+  refused(() => S.restore('boxs-1', { at: NOW }), /is not invalidated/);
+  S.setNote('boxs-1', { note: 'Good session' });
+  S.invalidate('boxs-1', { at: NOW + 1, disputeId: null, outcome: 'invalidated' });
+  refused(() => S.invalidate('boxs-1', { at: NOW + 1, outcome: 'invalidated' }), /has no result to invalidate/);
+  assert.equal(S.byId('boxs-1').previousVerificationState, 'verified');
+  S.restore('boxs-1', { at: NOW + 2 });
+  const back = S.byId('boxs-1');
+  assert.equal(back.status, 'verified'); assert.equal(back.verificationState, 'verified'); assert.equal(back.previousVerificationState, null); assert.equal(back.note, 'Good session');
+  assert.deepEqual(plain(back.integrityEvents), [{ type: 'invalidated', at: NOW + 1, outcome: 'invalidated' }, { type: 'restored', at: NOW + 2, to: 'verified' }]);
+  refused(() => S.start('boxs-404', { at: NOW }), /BOX_CAM_NOT_FOUND/);
+  s.close(); rm(dir);
+});
+
+test('[acts] assignments, entries, disputes, requests and attempts move only from the state each act names', () => {
+  const { s, dir } = seeded('s12b-acts2');
+  const A = s.repo.assignments;
+  A.accept('boxa-1', { at: NOW + 1 });
+  refused(() => A.accept('boxa-1', { at: NOW + 2 }), /is not waiting to be accepted/);
+  refused(() => A.progress('boxa-1', { state: 'assigned', at: NOW }), /BOX_CAM_INPUT_INVALID/);
+  assert.equal(A.progress('boxa-1', { state: 'in_progress', at: NOW + 3 }).updatedAt, NOW + 3);
+  A.cancel('boxa-1', { at: NOW + 4 });
+  refused(() => A.cancel('boxa-1', { at: NOW + 5 }), /already cancelled/);
+  refused(() => A.progress('boxa-1', { state: 'completed', at: NOW + 5 }), /is cancelled/);
+  s.repo.challenges.create(orgChallenge());
+  s.repo.entries.create({ id: 'boxe-1', challengeId: 'boxc-1', playerId: PID, status: 'active', progress: 0, joinedAt: NOW, joinedBy: { kind: 'player', id: PID }, completedAt: null });
+  s.repo.entries.progress('boxe-1', { progress: 200 });
+  assert.equal(s.repo.entries.progress('boxe-1', { progress: 500, completedAt: NOW }).status, 'completed');
+  refused(() => s.repo.entries.progress('boxe-1', { progress: 600 }), /is not active/, 'a completed entry stays completed');
+  s.repo.disputes.create({ id: 'boxd-1', sessionId: 'boxs-1', playerId: PID, by: { kind: 'player', id: PID, name: 'Kola' }, reason: 'Wrong count', status: 'open', resolution: null, createdAt: NOW });
+  assert.deepEqual(plain(s.repo.disputes.resolve('boxd-1', { outcome: 'stands', reason: 'ok', at: NOW }).resolution), { outcome: 'stands', reason: 'ok', at: NOW });
+  refused(() => s.repo.disputes.resolve('boxd-1', { outcome: 'stands', reason: 'again', at: NOW }), /already resolved/);
+  const R = s.repo.requests;
+  R.create({ id: 'creq-1', orgId: ORG.id, orgName: ORG.name, requestedBy: { userId: SCOUT.userId, name: SCOUT.name, role: null, at: NOW }, playerId: PID, title: null, protocolIds: ['combine-box-touch-60'], deadline: null, instructions: null, state: 'requested', createdAt: NOW, completedAt: null });
+  R.complete('creq-1', { at: NOW });
+  refused(() => R.complete('creq-1', { at: NOW }), /is not open/);
+  refused(() => R.cancel('creq-1'), /already completed/);
+  const T = s.repo.attempts;
+  T.create(attempt({ calibrationResult: null }));
+  assert.deepEqual(plain(T.calibrate('catt-1', { passed: true, checks: ['geometry_ready_check'], at: NOW }).calibrationResult), { required: [], passed: true, checks: ['geometry_ready_check'], at: NOW });
+  T.markStarted('catt-1', { startedAt: NOW });
+  const done = T.measure('catt-1', { measuredValue: 42, measurementState: 'measured', combineState: 'combine_verified', reasons: ['A_REASON'], completedAt: NOW + 1, resultHash: 'b'.repeat(64) });
+  assert.deepEqual([done.combineState, done.measuredValue, done.startedAt, done.reasons], ['combine_verified', 42, NOW, ['A_REASON']]);
+  refused(() => T.cancel('catt-1', { at: NOW }), /already finished; a cancellation is refused/);
+  refused(() => T.measure('catt-1', { combineState: 'ready', boxSessionId: 'boxs-9' }), /boxSessionId is not a field this act sets/);
   s.close(); rm(dir);
 });
 
@@ -202,8 +263,7 @@ test('[records] challenges, entries, prefs, requests, attempts and CV results ro
   s.repo.attempts.create(attempt({ requestId: 'creq-1' }));
   assert.deepEqual(plain(s.repo.attempts.bySession('boxs-1').calibrationResult), { required: [], passed: true, checks: ['geometry_ready_check'], at: NOW });
   refused(() => s.repo.attempts.create(attempt({ id: 'catt-2' })), /already bound/);
-  s.repo.attempts.update('catt-1', (d) => { d.combineState = 'partially_measured'; d.measurementState = 'practice'; d.reasons = ['PRACTICE_ATTEMPT']; d.completedAt = NOW; });
-  refused(() => s.repo.attempts.update('catt-1', (d) => { d.boxSessionId = 'boxs-9'; }), /boxSessionId cannot change/);
+  s.repo.attempts.measure('catt-1', { combineState: 'partially_measured', measurementState: 'practice', reasons: ['PRACTICE_ATTEMPT'], completedAt: NOW });
   assert.equal(s.repo.attempts.count(PID, 'combine-box-touch-60', { mode: 'verified', since: NOW }), 1);
   s.repo.cvResults.record(cvResult());
   assert.deepEqual(plain(s.repo.cvResults.byProviderSession('pcv_abc')), cvResult());
@@ -220,8 +280,7 @@ test('[queries] the dispute queue pages oldest first; a rolled-back unit leaves 
   const first = s.repo.disputes.queue({ limit: 2 });
   assert.deepEqual(first.map((d) => d.id), ['boxd-1', 'boxd-2']);
   assert.deepEqual(s.repo.disputes.queue({ after: [first[1].createdAt, first[1].id], limit: 2 }).map((d) => d.id), ['boxd-3']);
-  s.repo.disputes.update('boxd-1', (d) => { d.status = 'resolved'; d.resolution = { outcome: 'stands', reason: 'ok', at: NOW }; });
-  refused(() => s.repo.disputes.update('boxd-1', (d) => { d.resolution.reason = 'again'; }), /already resolved/);
+  s.repo.disputes.resolve('boxd-1', { outcome: 'stands', reason: 'ok', at: NOW });
   assert.deepEqual(s.repo.disputes.queue().map((d) => d.id), ['boxd-2', 'boxd-3']);
   assert.equal(s.repo.disputes.queue({ all: true }).length, 3);
   refused(() => s.unit(() => { s.repo.assignments.create(assignment({ id: 'boxa-2' })); throw new Error('boom'); }), /boom/);
@@ -229,16 +288,17 @@ test('[queries] the dispute queue pages oldest first; a rolled-back unit leaves 
   s.close(); rm(dir);
 });
 
-test('[layer] a fixture written through the repository is typed, refuses a missing reference (nothing written), and the records read back as written', () => {
+test('[layer] a fixture written through the repository is checked by the columns, refuses a missing reference (nothing written), and the records read back as written', () => {
   const { s, dir } = seeded('s12b-fix');
+  s.repo.sessions.start('boxs-1', { at: NOW });
   s.repo.sessions.recordBatch('boxs-1', { lastSeq: 1, observations: [{ kind: 'presence', fromMs: 0, toMs: 10, quality: 'good', atMs: null, confidence: null }] });
   s.close();
   const read = readRecords(dir);
   assert.deepEqual(read.boxSessions[0].obs.presence, [{ fromMs: 0, toMs: 10, quality: 'good' }]);
   assert.equal(read.boxChallenges.length, 2);
   const write = (db) => writeFixture(dir, db, { now: NOW });
-  refused(() => write({ boxSessions: [session({ id: 'boxs-2', nonceHash: 'plain' })] }), /BOX_CAM_INPUT_INVALID: boxSessions boxs-2\.nonceHash/);
-  refused(() => write({ boxSessions: [session({ id: 'boxs-3' })], combineAttempts: [attempt({ boxSessionId: 'boxs-404' })] }), /BOX_CAM_REFERENCE_MISSING: combine_attempts catt-1: boxSessionId names no session/);
+  refused(() => write({ boxSessions: [session({ id: 'boxs-2', nonceHash: 'plain' })] }), /BOX_CAM_INPUT_INVALID: box_sessions boxs-2 row: CHECK/);
+  refused(() => write({ boxSessions: [session({ id: 'boxs-3' })], combineAttempts: [attempt({ boxSessionId: 'boxs-404' })] }), /BOX_CAM_INPUT_INVALID: combine_attempts catt-1 row: FOREIGN KEY/);
   assert.deepEqual(readRecords(dir).boxSessions.map((x) => x.id), ['boxs-1'], 'a refused fixture wrote nothing');
   write({ combineAttempts: [attempt()] });
   const again = readRecords(dir);

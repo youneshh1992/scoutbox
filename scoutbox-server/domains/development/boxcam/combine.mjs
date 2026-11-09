@@ -391,7 +391,7 @@ export function registerCombine(ctx) {
     // the Ready Check geometry passes). Physical-scale calibration (Box
     // Marker) is required by future protocols, which are unsupported anyway.
     const passed = required.length === 0 ? true : required.every((r) => checks.includes(r));
-    const next = boxCam.attempts.update(a.id, (d) => { d.calibrationResult = { passed, checks: [...checks], at: Date.now() }; });
+    const next = boxCam.attempts.calibrate(a.id, { passed, checks: [...checks], at: Date.now() });
     res.json({ attempt: attemptView(next, { includeIntegrity: true }), calibrationPassed: passed });
   });
 
@@ -405,7 +405,7 @@ export function registerCombine(ctx) {
     if (!nonceMatches(s, (req.body ?? {}).nonce)) return res.status(403).json({ error: 'NONCE_INVALID' });
     if (s.status !== 'recording') return res.status(409).json({ error: 'SESSION_NOT_RECORDING', status: s.status });
     const done = unit(() => {
-      boxCam.attempts.update(a.id, (d) => { d.startedAt = s.startedAt; });
+      boxCam.attempts.markStarted(a.id, { startedAt: s.startedAt });
       return ctx.boxCompleteSession(s.id, req.player); // -> onSessionFinalized -> applyCombineProgress
     });
     res.json({ attempt: attemptView(reads.attempts.byId(a.id), { includeIntegrity: true }), boxSession: ctx.boxSessionView(done) });
@@ -417,8 +417,8 @@ export function registerCombine(ctx) {
     if (COMBINE_TERMINAL.has(a.combineState)) return res.status(409).json({ error: 'ALREADY_FINALIZED' });
     const s = boundSession(a);
     const next = unit(() => {
-      if (s && s.status === 'recording') boxCam.sessions.update(s.id, (d) => { d.status = 'cancelled'; d.verificationState = 'cancelled'; });
-      return boxCam.attempts.update(a.id, (d) => { d.combineState = 'cancelled'; d.measurementState = 'cancelled'; d.completedAt = Date.now(); });
+      if (s && s.status === 'recording') boxCam.sessions.cancel(s.id);
+      return boxCam.attempts.cancel(a.id, { at: Date.now() });
     });
     res.json({ attempt: attemptView(next) });
   });
@@ -438,15 +438,8 @@ export function registerCombine(ctx) {
       providerCapabilities: combineCapsFor(session.provider, a.protocolId),
       mode: a.mode,
     });
-    const stored = boxCam.attempts.update(a.id, (d) => {
-      d.measuredValue = r.measuredValue;
-      d.measurementState = r.measurementState;
-      d.combineState = r.combineState;
-      d.reasons = r.reasons ?? [];
-      d.completedAt = Date.now();
-      d.resultHash = combineResultHash(d);
-    });
-    a = stored;
+    const measured = { measuredValue: r.measuredValue, measurementState: r.measurementState, combineState: r.combineState, completedAt: Date.now() };
+    a = boxCam.attempts.measure(a.id, { ...measured, reasons: r.reasons ?? [], resultHash: combineResultHash({ ...a, ...measured }) });
     vmetric('combine_attempt_completed');
     if (a.combineState === 'combine_verified') vmetric('combine_attempt_verified');
     else if (a.combineState === 'partially_measured') vmetric('combine_attempt_incomplete');
@@ -501,7 +494,7 @@ export function registerCombine(ctx) {
   function applyRequestProgress(player) {
     for (const r of reads.requests.forPlayer(player.id).filter((x) => x.state === 'requested')) {
       if (requiredDone(r).size >= r.protocolIds.length) {
-        boxCam.requests.update(r.id, (d) => { d.state = 'completed'; d.completedAt = Date.now(); });
+        boxCam.requests.complete(r.id, { at: Date.now() });
         vmetric('combine_request_completed');
         const org = byId.org(r.orgId);
         const lead = byId.user(r.requestedBy?.userId, (u) => !u.removedAt);
@@ -596,7 +589,7 @@ export function registerCombine(ctx) {
     const r = reads.requests.byId(req.params.id);
     if (!r || r.orgId !== req.org.id) return res.status(404).json({ error: 'REQUEST_NOT_FOUND' });
     if (r.state === 'completed') return res.status(409).json({ error: 'ALREADY_COMPLETED' });
-    const next = boxCam.requests.update(r.id, (d) => { d.state = 'cancelled'; });
+    const next = boxCam.requests.cancel(r.id);
     res.json({ request: requestView(next) });
   });
 

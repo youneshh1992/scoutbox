@@ -18,11 +18,11 @@ import { isAdult } from '../../../domain.mjs';
 import {
   verifiedActiveMs, dedupeReps, targetCompleted, detectionQuality,
   deriveVerification, resultHash, boxStreakWeeks, boxBests, boxCamDetail,
-  mergeIntervals, normIntervals, sumIntervals, fmtMs, STATE_COPY, TERMINAL_STATES,
+  mergeIntervals, normIntervals, sumIntervals, fmtMs, STATE_COPY, TERMINAL_STATES, typeObservation,
 } from './shared.mjs';
 import { drillByIdVersion, latestDrill, providerFor, LIVENESS_CHALLENGES, PROVIDERS } from './drills.mjs';
 import { rateLimitedBody } from '../../platform/rateLimit.mjs';
-import { hashNonce, nonceMatches, typeObservation, BOX_CAM_LIMITS } from '../../../repositories/boxCam.mjs';
+import { hashNonce, nonceMatches, BOX_CAM_LIMITS } from '../../../repositories/boxCam.mjs';
 
 const DRIFT_MS = 7_000;            // allowed client/server clock drift
 const SESSION_TTL_MS = 2 * 3_600_000;
@@ -206,13 +206,13 @@ export function registerBoxCamSessions(ctx) {
     const s = findOwnSession(req.player.id, req.params.id);
     if (!s) return res.status(404).json({ error: 'SESSION_NOT_FOUND' });
     if (s.status !== 'setup_required') return res.status(409).json({ error: 'SESSION_NOT_STARTABLE', status: s.status });
-    if (Date.now() > s.expiresAt) { boxCam.sessions.update(s.id, (d) => { d.status = 'cancelled'; }); return res.status(410).json({ error: 'SESSION_EXPIRED' }); }
+    if (Date.now() > s.expiresAt) { boxCam.sessions.expire(s.id); return res.status(410).json({ error: 'SESSION_EXPIRED' }); }
     const { nonce, liveness } = req.body ?? {};
     if (!nonceMatches(s, nonce)) return res.status(403).json({ error: 'NONCE_INVALID' });
     if (!liveness) return res.status(403).json({ error: 'LIVENESS_REQUIRED', challenge: s.livenessChallenge });
     if (liveness !== s.livenessChallenge) return res.status(403).json({ error: 'LIVENESS_MISMATCH', message: 'Complete the liveness action the server asked for.' });
     const at = Date.now();
-    const next = boxCam.sessions.update(s.id, (d) => { d.livenessPassedAt = at; d.startedAt = at; d.status = 'recording'; });
+    const next = boxCam.sessions.start(s.id, { at });
     res.json({ session: sessionView(next) });
   });
 
@@ -270,8 +270,9 @@ export function registerBoxCamSessions(ctx) {
   });
 
   // ------------------------------------------------------------- finalize
-  /** The finished session: every derived value worked out on `d` (a draft) from the accepted stream. */
-  function finalize(d, obs, { cancelled = false } = {}) {
+  /** The finished session's result (what `sessions.finish` stores), worked out from the session and its accepted stream. */
+  function finalize(s, obs, { cancelled = false } = {}) {
+    const d = { ...s };
     const drill = drillByIdVersion(d.drillId, d.drillVersion);
     const provider = PROVIDERS[d.provider];
     const capabilities = caps(d);
@@ -337,6 +338,8 @@ export function registerBoxCamSessions(ctx) {
     d.status = state;
     d.resultHash = resultHash(d);
     d.finalizedAt = now;
+    const { endedAt, sessionDurationMs, verifiedReps, setsCompleted, quality, interruptionsCount, verificationState, verificationReasons, status, resultHash: hash, finalizedAt } = d;
+    return { status, endedAt, sessionDurationMs, verifiedActiveMs: d.verifiedActiveMs, verifiedReps, setsCompleted, targetCompleted: d.targetCompleted, quality, interruptionsCount, verificationState, verificationReasons, resultHash: hash, finalizedAt };
   }
 
   // Shared completion: finalize + notifications + the onSessionFinalized hook
@@ -347,8 +350,7 @@ export function registerBoxCamSessions(ctx) {
   // notifications commit together or not at all.
   function completeSession(sessionId, p) {
     const s = unit(() => {
-      const obs = reads.sessions.observationsOf(sessionId);
-      const done = boxCam.sessions.update(sessionId, (d) => finalize(d, obs));
+      const done = boxCam.sessions.finish(sessionId, finalize(reads.sessions.byId(sessionId), reads.sessions.observationsOf(sessionId)));
       if (['verified', 'partially_verified'].includes(done.verificationState)) {
         notify({ kind: 'player', id: p.id }, 'box_cam', `Your work counts. ${fmtMs(done.verifiedActiveMs)} of ${latestDrill(done.drillId)?.title ?? done.drillId} was recorded in your training history.`, done.id);
         if (!isAdult(p) && p.guardianId) notify({ kind: 'guardian', id: p.guardianId }, 'box_cam', `${p.name} completed a Box Session (${fmtMs(done.verifiedActiveMs)} Box Cam verified).`, done.id);
@@ -381,11 +383,9 @@ export function registerBoxCamSessions(ctx) {
     const s = findOwnSession(req.player.id, req.params.id);
     if (!s) return res.status(404).json({ error: 'SESSION_NOT_FOUND' });
     if (TERMINAL_STATES.has(s.status)) return res.status(409).json({ error: 'ALREADY_FINALIZED' });
-    const obs = s.status === 'recording' ? reads.sessions.observationsOf(s.id) : null;
-    const next = boxCam.sessions.update(s.id, (d) => {
-      if (obs) finalize(d, obs, { cancelled: true });
-      else { d.status = 'cancelled'; d.verificationState = 'cancelled'; }
-    });
+    const next = s.status === 'recording'
+      ? boxCam.sessions.finish(s.id, finalize(s, reads.sessions.observationsOf(s.id), { cancelled: true }))
+      : boxCam.sessions.cancel(s.id);
     res.json({ session: sessionView(next) });
   });
 
@@ -398,7 +398,7 @@ export function registerBoxCamSessions(ctx) {
     if (!moderateOrRefuse(res, note, { kind: 'box_cam_note', playerId: req.player.id })) return;
     // A note is the player's words — provenance stays player_submitted_note
     // and never mixes with Box Cam observations.
-    const next = boxCam.sessions.update(s.id, (d) => { d.note = note; });
+    const next = boxCam.sessions.setNote(s.id, { note });
     res.json({ session: sessionView(next) });
   });
 
@@ -456,7 +456,7 @@ export function registerBoxCamSessions(ctx) {
     // reference and the ledger row commit together.
     const next = unit(() => {
       ctx.players.patchItem(req.player.id, 'media', { id: media.id }, { capturedBy: 'box_cam', boxSessionId: s.id });
-      const row = boxCam.sessions.update(s.id, (d) => { d.clipMediaId = media.id; });
+      const row = boxCam.sessions.attachClip(s.id, { mediaId: media.id });
       ctx.ledgerAppend?.({ type: 'box_clip_saved', playerId: req.player.id, orgId: null, detail: { sessionId: s.id, mediaId: media.id } });
       return row;
     });

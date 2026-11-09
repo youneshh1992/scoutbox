@@ -150,13 +150,22 @@ The rules are likely well under half of the production lines.
    result's time, a placement's instant, a withdrawal's reason). Size: `transitionsVouches.mjs` went from 391 to 346
    lines (29k → 26k characters); `verification.mjs` grew (663 → 723 lines, 59k → 65k characters), since its 13 record
    kinds trade one generic update for about 25 guarded acts. The spec-to-columns mapping is shared in `writes.mjs`.
+   **Box Cam done too (9 Nov):** the 24 draft edits in the Box Cam, Combine and CV routes became 20 named acts, and
+   `boxCam.mjs` has no JavaScript validator (896 → 751 lines, 71k → 61k characters). Each act is guarded in SQL by the
+   state it moves from: a session's result is worked out once, while it is recording (as is an accepted batch); an
+   attempt is measured once, while it is ready; an entry completes once, a dispute is resolved once, a request completes
+   once, and a cancelled assignment never moves. Invalidation and restore are their own acts and insert the integrity
+   event, so the history only grows by construction. Composite keys replace four JavaScript checks: a session's
+   assignment and challenge entry, a dispute's session, and an attempt's session and request all belong to the same
+   player. The events route's observation check moved to the domain (`shared.mjs`).
    **Follow-up:** `offerIntegrity` (`offer.mjs`) still checks shapes the schema now rules out (unknown statuses, duplicate
    or missing revisions). Trim it once the batteries that test it on in-memory records have been looked at.
-   **Still to do (9 Nov):** about 110 draft edits remain in domain code (by `grep`); 23 repositories still export
+   **Still to do (9 Nov):** about 85 draft edits remain in domain code (by `grep`); 22 repositories still export
    JavaScript validators. In order:
    1. ~~**Trials and trial requests**~~ (done, above).
    2. ~~**Agent transactions, compliance and core**~~ (done, below; the wiring of their cycle is still step 3).
-   3. ~~**Verification**~~ (claims and `transitionsVouches.mjs`, done above), then **Box Cam sessions** (`boxCam.mjs`, ~10).
+   3. ~~**Verification**~~ (claims and `transitionsVouches.mjs`, done above), then ~~**Box Cam sessions**~~
+      (`boxCam.mjs`, done above).
    4. **Then decide whether to stop.** The identity long tail (`identity.mjs`, `users.mjs`, `orgs.mjs` and others,
       ~60 edits, mostly 1–7 single-field edits per repository) carries little state-machine risk: convert a repository
       when it is next worked on. The repositories with validators but no draft updates (`integrations`,

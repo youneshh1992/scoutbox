@@ -20,6 +20,30 @@ export const SESSION_STATES = [
 export const TERMINAL_STATES = new Set(['verified', 'partially_verified', 'unable_to_verify', 'completed_unverified', 'cancelled', 'invalidated']);
 export const QUALITY = ['good', 'degraded', 'insufficient'];
 export const TARGET_TYPES = ['duration', 'repetitions', 'sets', 'combined'];
+export const OBSERVATION_KINDS = Object.freeze(['active', 'presence', 'ball', 'rep', 'set', 'pause', 'interruption', 'multi_person']);
+
+const isMs = (v) => typeof v === 'number' && Number.isFinite(v);
+const describe = (v) => (v === null ? 'null' : Array.isArray(v) ? 'an array' : typeof v === 'object' ? 'an object' : typeof v);
+/**
+ * One accepted observation as the events route maps it, `{ kind, fromMs?, toMs?, atMs?, quality?, confidence? }`: an
+ * event the engine cannot read is refused, naming the field. `{ ok, record }` or `{ ok: false, reason }`.
+ */
+export function typeObservation(raw, at) {
+  const bad = (field, what) => ({ ok: false, reason: `${at}.${field} ${what}` });
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return { ok: false, reason: `${at} is not an object (${describe(raw)})` };
+  const unknown = Object.keys(raw).filter((k) => !['kind', 'fromMs', 'toMs', 'atMs', 'quality', 'confidence'].includes(k));
+  if (unknown.length) return { ok: false, reason: `${at} carries field(s) this build does not store: ${unknown.join(', ')}` };
+  const { kind, fromMs = null, toMs = null, atMs = null, quality = null, confidence = null } = raw;
+  if (!OBSERVATION_KINDS.includes(kind)) return bad('kind', `must be one of ${OBSERVATION_KINDS.join('|')}`);
+  const interval = ['active', 'presence', 'ball', 'interruption', 'multi_person'].includes(kind);
+  for (const [k, v] of [['fromMs', fromMs], ['toMs', toMs], ['atMs', atMs]]) if (v !== null && !isMs(v)) return bad(k, `must be a number (got ${describe(v)})`);
+  if (interval && (fromMs === null || toMs === null || atMs !== null)) return bad('fromMs', 'and toMs are required on an interval (and atMs is not)');
+  if ((kind === 'rep' || kind === 'set') && (atMs === null || fromMs !== null || toMs !== null)) return bad('atMs', 'is required on a point observation (and fromMs/toMs are not)');
+  if (kind === 'pause' && (fromMs === null || atMs !== null)) return bad('fromMs', 'is required on a pause');
+  if (quality !== null && (!['active', 'presence'].includes(kind) || !QUALITY.includes(quality))) return bad('quality', `must be one of ${QUALITY.join('|')} on an active or presence interval`);
+  if (confidence !== null && (kind !== 'rep' || !isMs(confidence) || confidence < 0 || confidence > 1)) return bad('confidence', 'must be a number from 0 to 1 on a rep');
+  return { ok: true, record: { kind, fromMs, toMs, atMs, quality, confidence } };
+}
 
 // Honest per-state player copy — never "you didn't train", never "failed".
 export const STATE_COPY = {
