@@ -1,6 +1,5 @@
-// The delivery centre, the mail outbox and push (S14d: the dispatches and outbox/push repositories' explicit writes
-// and SQL reads), against a real server on a temporary data directory with the synthetic seed and the fast retry
-// ladder.
+// The delivery centre, the mail outbox and push, against a real server on a temporary data directory with the
+// synthetic seed and the fast retry ladder.
 //
 //   A a notice gets an in-app record (delivered at once) and an e-mail dispatch the local fake provider accepts —
 //     never reported as delivered or read until the provider says so; the delivery record is in the outbox

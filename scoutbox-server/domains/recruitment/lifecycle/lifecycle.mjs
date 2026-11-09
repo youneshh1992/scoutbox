@@ -1,16 +1,10 @@
 /**
- * M23 — the recruitment lifecycle: semantic actions over one transition table.
+ * The recruitment lifecycle: semantic actions over one transition table.
  *
- * WHERE AUTHORITY LIVES, AND IN WHICH DIRECTION
- *
- *   db.recruitmentCases   the canonical recruitment object (M12, unchanged)
- *   case.room.status      the canonical lifecycle state (M17, extended by 5)
- *   case.stage            a PURE DERIVATION of room.status, one writer
- *   case.history          the append-only record of how it got there
- *
- * One direction, no cycle: status → stage, never stage → status. M23 adds no
- * fourth representation and no stored "journey" — the journey is a projection
- * (journey.mjs), computed on read from the records above.
+ * `case.room.status` is the canonical lifecycle state; `case.stage` is a pure
+ * derivation of it (status → stage, never stage → status); `case.history` is
+ * the append-only record of how it got there. There is no stored "journey" —
+ * the journey is a projection (journey.mjs), computed on read.
  *
  * WHY THERE IS NO `PATCH stage = X`
  *
@@ -24,10 +18,10 @@
  *
  * It cannot fabricate the evidence a transition requires. `signed` needs a
  * confirmed joining record; `trial_completed` needs a completed trial. Those
- * objects belong to later phases, so the preconditions are declared here and
- * RESOLVED THROUGH AN INJECTED PROVIDER. Until a phase ships, its provider
- * answers "no such evidence" and the transition is refused — which is the
- * honest answer, and is why P2 creates no placeholder trials or offers.
+ * records belong to other modules, so the preconditions are declared here and
+ * RESOLVED THROUGH AN INJECTED PROVIDER. A provider without the evidence
+ * answers "no such evidence" and the transition is refused — never a
+ * placeholder trial or offer.
  */
 
 import {
@@ -47,12 +41,9 @@ export const LIFECYCLE_REOPENABLE = Object.freeze(['withdrawn', 'archived', 'clo
 const REOPENABLE = LIFECYCLE_REOPENABLE;
 
 /**
- * The initial state of a newly opened case.
- *
- * An ALIAS, not a second declaration. M17 owns the status set, so it owns
- * where a room starts; this names it in M23's vocabulary. It used to be its
- * own literal `'watching'`, which meant the value existed in three places —
- * here and at both room-creation sites — and was read at none of them.
+ * The initial state of a newly opened case. An ALIAS, not a second
+ * declaration: the rooms module owns the status set, so it owns where a room
+ * starts.
  */
 export const LIFECYCLE_INITIAL = INITIAL_ROOM_STATUS;
 
@@ -61,8 +52,8 @@ export const LIFECYCLE_INITIAL = INITIAL_ROOM_STATUS;
  *
  * Deliberately NOT prose: a reason a machine cannot group is a reason nobody
  * can report on. These describe WHY THE CASE MOVED. They are separate from
- * M17's 19 decision reason codes, which describe why a club DECIDED something
- * — a decision is an opinion, a transition is an event.
+ * the 20 decision reason codes (rooms/shared.mjs), which describe why a club
+ * DECIDED something — a decision is an opinion, a transition is an event.
  */
 export const LIFECYCLE_REASON_CODES = Object.freeze([
   'contact_planned',
@@ -89,16 +80,10 @@ const REASON_SET = new Set(LIFECYCLE_REASON_CODES);
  * Preconditions a target state requires from a DURABLE RECORD elsewhere.
  *
  * ONE TABLE, and this is a local name for it — not a copy and not an export.
- *
- * There used to be a second copy here, and that copy was the defect: the
- * legacy status route consulted m17's table and never saw this one, so
- * `offer_made` + `{status:'signed'}` walked straight past the requirement. Two
- * tables meant two answers to one question and the one that mattered was never
- * asked.
- *
- * It is deliberately NOT exported. An exported alias reads like a second
- * precondition table to the next person, which is how this started; callers
- * import `STATUS_EVIDENCE_REQUIRED` by its real name.
+ * Two tables would give two answers to one question (a route consulting the
+ * other one would walk `offer_made` → `signed` past the requirement). It is
+ * deliberately NOT exported, so it never reads as a second precondition
+ * table; callers import `STATUS_EVIDENCE_REQUIRED` by its real name.
  *
  * `kind` is resolved by the evidence provider. A provider that does not know a
  * kind must answer `{ satisfied: false, reason: 'not_implemented' }` — never
@@ -109,14 +94,14 @@ const LIFECYCLE_PRECONDITIONS = STATUS_EVIDENCE_REQUIRED;
 /**
  * Semantic actions. Each names one real event and maps to exactly one state.
  *
- * `roles` lists who may perform it, using M17's room role vocabulary. There is
+ * `roles` lists who may perform it, using the room role vocabulary. There is
  * no action here performable by a player or a guardian: a player responds to
  * their own contact, trial or offer, and the case moves BECAUSE that response
  * exists — through the precondition, never by the player addressing the case.
  *
  * `applicableFrom` narrows WHICH of the transition table's edges an action may
- * traverse. Three actions land on `under_review`, and without this they were
- * all offered from a withdrawn case at once — three names for one move, each
+ * traverse. Three actions land on `under_review`; without this they would
+ * all be offered from a withdrawn case at once — three names for one move, each
  * writing a different reason code into the history. "Resumed from hold" on a
  * case that was never on hold is a false record, and an analytics consumer
  * counting `case_reopened` would undercount every reopen taken under another
@@ -125,11 +110,9 @@ const LIFECYCLE_PRECONDITIONS = STATUS_EVIDENCE_REQUIRED;
  */
 // NULL PROTOTYPE, deliberately. A plain object literal answers truthy for
 // `constructor`, `toString`, `valueOf`, `hasOwnProperty` and `__proto__`, so a
-// client posting `{ action: "constructor" }` walked past the
-// `!LIFECYCLE_ACTIONS[action]` guard in the route, reached the validator, and
-// crashed reading `.roles` off Object's constructor — a 500 from one word of
-// request body. With no prototype, a key we did not define is `undefined` and
-// the guards that were already written do their job.
+// client posting `{ action: "constructor" }` would pass the
+// `!LIFECYCLE_ACTIONS[action]` guard and crash reading `.roles` — a 500 from
+// one word of request body. With no prototype, an undefined key is `undefined`.
 export const LIFECYCLE_ACTIONS = Object.freeze(Object.assign(Object.create(null), {
   startReview:        { to: 'under_review',        reason: 'club_decision',              roles: ['contributor', 'room_lead', 'recruitment_admin'], applicableFrom: (f) => !TERMINAL_ROOM_STATUSES.includes(f) && f !== 'on_hold' },
   planContact:        { to: 'contact_planned',     reason: 'contact_planned',            roles: ['room_lead', 'recruitment_admin'] },
@@ -145,7 +128,7 @@ export const LIFECYCLE_ACTIONS = Object.freeze(Object.assign(Object.create(null)
   recordOfferDeclined:{ to: 'offer_declined',      reason: 'player_declined',            roles: ['room_lead', 'recruitment_admin'] },
   confirmSignedOutcome:{ to: 'signed',             reason: 'signed_outcome',             roles: ['recruitment_admin'] },
   holdCase:           { to: 'on_hold',             reason: 'on_hold',                    roles: ['room_lead', 'recruitment_admin'] },
-  // M23 P8.1 (D-P81-1): a hold is a pause, not a rewind. Resuming returns the
+  // A hold is a pause, not a rewind. Resuming returns the
   // case to the state it was held FROM — a live Offer stays "Offer made", an
   // accepted Offer stays "Offer accepted" and the signing can continue — when
   // that state's own evidence still stands. `to` is the fallback (a case with
@@ -163,7 +146,7 @@ export const LIFECYCLE_ACTION_NAMES = Object.freeze(Object.keys(LIFECYCLE_ACTION
 /**
  * The state a held case was held FROM: the newest `on_hold` entry on its
  * append-only history names it. Null when the history carries no hold (a case
- * planted at on_hold, or an M12 case adopted there).
+ * planted at on_hold).
  */
 export function heldFromStatus(kase) {
   const h = Array.isArray(kase?.history) ? kase.history : [];
@@ -177,7 +160,7 @@ export function heldFromStatus(kase) {
 }
 
 /**
- * Where `resumeCase` takes a case (D-P81-1): the held-from state when it is a
+ * Where `resumeCase` takes a case: the held-from state when it is a
  * live state whose evidence (if the state needs any) still stands; otherwise
  * the fallback `under_review`. The resume is its own edge — the `on_hold`
  * table row names no evidence-bearing state on purpose, so nothing but a
@@ -204,7 +187,7 @@ export function lifecycleTargetFor(kase, action, context = {}) {
   return def.resolveTo ? def.resolveTo(kase, context) : def.to;
 }
 
-/** Role ranking, mirroring domains/recruitment/rooms/shared.mjs roomCan. */
+/** Role ranking, matching roomCan in rooms/shared.mjs. */
 const ROLE_RANK = { viewer: 0, contributor: 1, room_lead: 2, recruitment_admin: 3 };
 const roleAllows = (role, allowed) => {
   const have = ROLE_RANK[role];
@@ -213,14 +196,10 @@ const roleAllows = (role, allowed) => {
 };
 
 /**
- * An evidence provider that knows nothing.
- *
- * This is the P2 default and it is deliberately useless: every kind answers
- * "not implemented". A transition that needs durable evidence is therefore
- * REFUSED until the phase that owns that evidence ships and supplies a real
- * provider. The alternative — defaulting to satisfied — would let the
- * lifecycle assert things no record supports, which is precisely what the
- * governing rule forbids.
+ * An evidence provider that knows nothing: the default, and deliberately
+ * useless. Every kind answers "not implemented", so a transition that needs
+ * durable evidence is REFUSED unless a real provider is supplied. Defaulting
+ * to satisfied would let the lifecycle assert things no record supports.
  */
 export const NULL_EVIDENCE_PROVIDER = Object.freeze({
   check: () => ({ satisfied: false, reason: 'not_implemented' }),
@@ -262,10 +241,8 @@ export function canTransitionRecruitmentCase(kase, action, context = {}) {
     // Availability probe: "could this action be taken, given a reason?" as
     // opposed to "is this exact request valid?". `availableActions` asks the
     // first question, because a reason is supplied when the action is
-    // performed, not when it is offered. The first version of this passed a
-    // literal fake reason code instead, which made the check pass for the
-    // wrong reason and put the string 'placeholder' one careless echo away
-    // from a response body.
+    // performed, not when it is offered. A flag rather than a fake reason
+    // code, so no placeholder reason can leak into a response body.
     forAvailability = false,
   } = context;
 
@@ -287,8 +264,6 @@ export function canTransitionRecruitmentCase(kase, action, context = {}) {
     return { ok: false, error: 'LIFECYCLE_NOT_PERMITTED', message: 'Your role cannot take this recruitment action.' };
   }
 
-  // M23 P8.1 — the target is resolved for THIS case (only `resumeCase` resolves;
-  // every other action's target is its static `to`).
   const to = def.resolveTo ? def.resolveTo(kase, { evidence, now }) : def.to;
   const allowed = ROOM_TRANSITIONS[from] ?? [];
   if (from === to) {
@@ -352,28 +327,22 @@ export function availableActions(kase, context = {}) {
 /** Validate a lifecycle reason code. */
 export const isLifecycleReason = (code) => REASON_SET.has(code);
 
-/** At most this many reasons on one transition — the same ceiling M17 uses. */
+/** At most this many reasons on one transition — the same ceiling decisions use. */
 const MAX_LIFECYCLE_REASONS = 6;
 
 /**
  * Validate the reason codes on a lifecycle transition.
  *
- * WHY THIS EXISTS RATHER THAN REUSING M17's VALIDATOR
+ * WHY THIS EXISTS RATHER THAN REUSING THE DECISION VALIDATOR
  *
- * There are two reason taxonomies and they describe different things. M17's 20
- * codes say why a club DECIDED something — an opinion about a player.
+ * There are two reason taxonomies and they describe different things. The 20
+ * decision codes say why a club DECIDED something — an opinion about a player.
  * `LIFECYCLE_REASON_CODES` say why a case MOVED — an event in a process. The
- * two sets do not overlap by a single code.
+ * two sets do not overlap by a single code, and recording a judgement about
+ * the player as the reason a case closed would be a category error written
+ * into an append-only history.
  *
- * The M23 route used to call `validateReasonCodes` from domains/recruitment/rooms/shared.mjs, so it
- * accepted decision reasons on a transition and refused every one of the
- * sixteen lifecycle reasons it publishes. `closeCase` requires a reason, and
- * the only reasons it would take described a judgement about the player rather
- * than what happened to the case — a category error written into an
- * append-only history that nothing ever rewrites. `isLifecycleReason` was
- * exported and never called.
- *
- * The PROHIBITED set is shared deliberately and keeps M17's error code. A
+ * The PROHIBITED set is shared deliberately and keeps the rooms error code. A
  * protected characteristic can never be recorded as a reason for anything, and
  * that rule must not have two implementations that can drift.
  */
@@ -425,13 +394,9 @@ export function actionPermittedForRole(action, role) {
 }
 
 /**
- * Analytics compatibility (§50).
- *
- * M20 reads `room.history` for `room_status_changed` entries and counts the
- * statuses it finds. No status was renamed or removed by M23, so every
- * historical entry still means exactly what it meant. This function exists for
- * the one thing that DID change shape: callers that want the funnel's view of
- * a status, where two of the new states are deliberately not progress.
+ * The funnel's view of a status. Analytics counts `room_status_changed`
+ * entries in `room.history`; `on_hold` and `offer_declined` are real states
+ * but deliberately not progress.
  */
 export function toAnalyticsRecruitmentStage(status) {
   if (status === 'on_hold' || status === 'offer_declined') return null; // real, but not progress

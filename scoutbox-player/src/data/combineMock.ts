@@ -1,4 +1,4 @@
-// M16.1 demo mirror — a self-contained At-Home Combine with a SIMULATED Box
+// Demo mirror — a self-contained At-Home Combine with a SIMULATED Box
 // Cam observation stream. Every simulated attempt is marked simulated:true and
 // labelled "At-Home Combine demo — simulated Box Cam observations" in the UI.
 // Nothing here is presented as real verification. The demo reproduces the

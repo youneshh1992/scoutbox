@@ -1,9 +1,6 @@
 /**
- * Notifications and category notification preferences (S7a) get their own tables; insertion order is the feed order.
- * Amended in place by S14e (docs/architecture/migration.md §4.6): the audience kind's vocabulary, a staff audience as a
- * RESTRICT key to org_users, length and category CHECKs, the delivery centre's marker; the group key and the
- * acknowledger are worked out, not stored. Re-seed a database written before. REGISTERED in DATA_MIGRATIONS. `up()` is
- * the DDL only: the tables start empty and are written through the repository.
+ * Notifications and category notification preferences; insertion order is the feed order. A staff audience is a
+ * RESTRICT key to org_users; the group key and the acknowledger are worked out, not stored.
  */
 import { migrationApplied } from '../database.mjs';
 import { ONE_TIME_CODES_MIGRATION } from '../oneTimeCodes.mjs';

@@ -1,4 +1,4 @@
-// M14 typed client (org side): verification & trust — personal claims, the
+// Typed client (org side): verification & trust — personal claims, the
 // club Verification console (requests, staff, domains, administrators),
 // licences, references, squad invitations and safe public badge profiles.
 // Same live/demo split as api.ts: VITE_DEMO=1 selects the in-browser mirror.

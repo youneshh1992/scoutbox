@@ -1,18 +1,18 @@
 /**
- * M23 P8 — the audience journey routes and the notification target resolver.
+ * The audience journey routes and the notification target resolver.
  *
  *   GET /player/journeys                     the player's journeys, one per club that reached them
  *   GET /guardian/children/:id/journeys      the guardian's view of a child's journeys
  *   GET /org/agent/clients/:id/journey       an authorized agent's factual view of a client's journeys
  *
  * Every route reads through `buildRecruitmentJourney` with an audience viewer;
- * nothing here writes. The agent route proves the basis exactly as the P5.6E /
- * P6 / P7 agent routes do (membership, own agreement, the policy engine, scope,
+ * nothing here writes. The agent route proves the basis exactly as the agent
+ * Contact, Offer and signing routes do (membership, own agreement, the policy engine, scope,
  * licence, the client's own shares) and passes what it proved as `grants`; the
  * projection shows only the granted kinds and never says what it withheld.
  *
  * `notificationTargetFor` turns a notification's bare `refId` into the CURRENT
- * authorized resource for its audience at READ time (§29–§31): nothing is
+ * authorized resource for its audience at READ time: nothing is
  * stored, a superseded package resolves to the live one over the same Offer,
  * and a reference the audience may no longer open resolves to nothing (the
  * app shows plain text). It never resolves to a resource of another org.
@@ -61,7 +61,7 @@ export function registerJourneyRoutes(ctx) {
   });
 
   /**
-   * The agent's grants, proved the way each P5.6E/P6/P7 route proves them.
+   * The agent's grants, proved the way each agent Contact, Offer and signing route proves them.
    * A kind whose gate fails is simply not granted; the route itself answers
    * 403 only when the client's record is closed to this agent altogether.
    */
@@ -110,7 +110,7 @@ export function registerJourneyRoutes(ctx) {
   const room = (k, tab) => (k ? { kind: 'room', roomId: k.id, tab } : null);
   const blocked = (playerId, orgId) => safetyReads.blocks.has(playerId, orgId);
   /**
-   * M23 P8.1 (D-P81-14): an agent's target is re-derived through the SAME
+   * An agent's target is re-derived through the SAME
    * authority the client routes prove on every read — a live representation
    * (`client_private`), and for the Offer tab the employment/transfer scope
    * and a current licence. An agent whose representation ended, whose licence

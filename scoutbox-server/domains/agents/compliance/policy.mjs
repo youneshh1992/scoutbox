@@ -1,12 +1,12 @@
 /**
- * M23 P5.6C — the policy evaluation layer (pure).
+ * The policy evaluation layer (pure).
  *
  * Routes never say `if (country === 'GB')`. They hand the applicable policy
  * set, the agent's facet states, the subject and the clock to this module and
  * get a structured decision back. Everything here is a function over plain
- * records; nothing reads `db`, nothing answers HTTP.
+ * records; nothing reads storage, nothing answers HTTP.
  *
- * Frozen semantics (M23_P56A_CONFLICT_ENGINE_CONTRACT.md §3, §3a; P5.6A DR-52):
+ * Frozen semantics (DR-52, docs/product/agents.md):
  *   ACTIVE                 applied
  *   SUSPENDED              not applied; reason RULE_SUSPENDED; never a permission
  *   PARTIALLY_SUSPENDED    params.activeLimbs applied; the rest as SUSPENDED
@@ -28,7 +28,7 @@ export { RULE_STATUSES };
 
 export const POLICY_ACTIONS = Object.freeze(['approach_adult', 'declare_representation', 'request_consent', 'approach_minor']);
 
-/** Facet names the policy layer can require. `domestic_authorisation` is new in P5.6C (P5.6A DR-53). */
+/** Facet names the policy layer can require. Registration and domestic authorisation are separate facets (DR-53). */
 export const POLICY_FACETS = Object.freeze(['fifa_licence', 'national_registration', 'domestic_authorisation', 'minors_authorisation']);
 
 const DAY = 24 * 60 * 60 * 1000;
@@ -36,10 +36,10 @@ const DAY = 24 * 60 * 60 * 1000;
 /**
  * A policy boundary (`effectiveFrom` / `effectiveTo`) as an instant: a strict
  * DATE_ONLY (UTC midnight of that day) or a finite integer timestamp; NaN
- * otherwise. M23 P5.7 (T-4): the previous regex-then-Date.parse accepted
- * `2026-02-30` as 2 March — a published policy could start on a day that does
- * not exist. NaN fails every window comparison, so an unreadable boundary
- * means the version is never selected (closed).
+ * otherwise. `Date.parse` alone would read `2026-02-30` as 2 March, so a
+ * policy could start on a day that does not exist. NaN fails every window
+ * comparison, so an unreadable boundary means the version is never selected
+ * (closed).
  */
 const dateMs = (iso) => {
   if (typeof iso === 'string') { const p = parseStrictDateOnly(iso); return p.ok ? p.t : NaN; }
@@ -116,7 +116,7 @@ export function ruleAt(policySet, ruleId, now = Date.now()) {
 // ------------------------------------------------------------ scope
 
 /**
- * Jurisdiction resolution (contract §4.0). `national` when every MA in play
+ * Jurisdiction resolution. `national` when every MA in play
  * is the same national association with an encoded national policy;
  * `international` when INT or more than one MA is involved; `unknown` when
  * nothing usable was supplied.
@@ -270,12 +270,9 @@ export function evaluatePolicy({ action, memberAssociations = [], facets = {}, p
 
 /** FFAR "Minor" / FA "Minor": under 18. A separate predicate from the visibility age of majority (DR-14). */
 export function isRegulatoryMinor(dob, now = Date.now()) {
-  // P5.6F (F-8): `new Date(null)` is the EPOCH, not an invalid date, so a null
-  // date of birth used to answer "not a minor" (a 56-year-old) instead of
-  // "unknown". Same for 0 and false. Only a non-empty string can be a date of
-  // birth here; anything else is unknown, and unknown blocks (evaluateMinorGate).
-  // …and (F-12b) a day that only exists because V8 rolled it over — 30 February
-  // — is not a date of birth either. One rule for the whole platform: parseDob.
+  // `new Date(null)` is the EPOCH, not an invalid date, and V8 rolls 30 February
+  // over to March: either would give a confident wrong age. Anything parseDob
+  // rejects is unknown, and unknown blocks (evaluateMinorGate).
   const day = parseDob(dob);
   if (day === null) return null;
   const b = new Date(`${day}T00:00:00Z`);
@@ -294,9 +291,8 @@ export function isRegulatoryMinor(dob, now = Date.now()) {
  * country's first-contract age — a parameter that is UNKNOWN everywhere.
  */
 export function earliestPermittedApproachAt(dob, entry, { employingCountry = null } = {}) {
-  // M23 P5.7 (T-5): `new Date(null)` is the epoch and `new Date('2010-02-30')`
-  // is 2 March; a formula over either produced a confident, wrong date. One
-  // DOB rule for the platform: parseDob.
+  // `new Date(null)` is the epoch and `new Date('2010-02-30')` is 2 March; a
+  // formula over either would give a confident, wrong date, hence parseDob.
   const day = parseDob(dob);
   if (day === null || !entry?.rule) return { at: null, reason: 'MINOR_TIMING_NOT_ENCODED' };
   const b = new Date(`${day}T00:00:00Z`);
@@ -318,11 +314,11 @@ export function earliestPermittedApproachAt(dob, entry, { employingCountry = nul
   return { at: null, reason: 'MINOR_TIMING_NOT_ENCODED' };
 }
 
-/** No jurisdiction has a production minor pathway enabled (P5.6A DR-49; this mandate §49). */
+/** No jurisdiction has a production minor pathway enabled (DR-49). */
 export const MINOR_PATHWAY_PRODUCTION_ENABLED = Object.freeze({ ENG: false, INT: false, USA: false });
 
 /**
- * The minors compliance gate (mandate §47): jurisdiction-aware, guardian-first,
+ * The minors compliance gate: jurisdiction-aware, guardian-first,
  * accreditation-bound, fail-closed. Evaluates readiness; it exposes no
  * discovery and the route layer never lets an agency see a minor.
  *
@@ -384,7 +380,7 @@ export function evaluateMinorGate({ dob, memberAssociation, employingCountry = n
 // ------------------------------------------------------------ representation scope
 
 /**
- * The action must fit the agreement (mandate §25–§26). No exceptions are
+ * The action must fit the agreement. No exceptions are
  * invented: anything but an ACTIVE, client-confirmed, unexpired agreement
  * whose scope and jurisdiction cover the act is refused.
  */

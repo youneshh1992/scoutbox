@@ -1,33 +1,28 @@
 /**
- * S9c — a club's own setup as typed tables (migration `0021_club_setup`; docs/architecture/migration.md §4.3 "The
- * pattern", §4.5 S9; sql/04_scouting_assessment.sql): the tactical setup (roles with their criteria, transfer
- * windows), the squad, the shadow list, what a grassroots club is looking for, the federation-route verification
- * request, and role vacancies.
- *
- * The first four used to be facets of the organisation record (`org.tactical`, `org.squad`, `org.lookingFor`,
- * `org.federationCheck`, edited in place and flushed with `orgs.facets_json`); vacancies were the blob collection
- * `db.vacancies`. Reading or writing any of them on an organisation now throws, naming this repository
- * (repositories/orgs.mjs `RETIRED_FACETS`), and db.vacancies throws too.
+ * A club's own setup: the tactical setup (roles with their criteria, transfer windows), the squad, the shadow list,
+ * what a grassroots club is looking for, the federation-route verification request, and role vacancies. Writing any of
+ * the first four on an organisation record is refused, naming this repository (repositories/orgs.mjs).
  *
  * The shadow list is its own table (org_shadow_players), not a kind of squad row: a club considering a player for a
  * role is not that player's club. Nothing that reads "on this club's squad" (the grassroots squad, match-day
  * attendance, release, the passport's club relationships, the Trust score, Second Look) sees a shadow entry.
  *
- * WRITES are explicit and typed whole; a record the columns cannot hold is refused with its id (the routes check
- * first and answer 400). Each joins the open unit of work, the caller's transaction, or a transaction of its own.
+ * Writes are typed whole; a record the columns cannot hold is refused with its id (the routes check first and answer
+ * 400). Each joins the open unit of work, the caller's transaction, or a transaction of its own.
  *   tactical.save(setup)        — upserts the setup and diffs its roles BY ID: a kept role keeps its row (so its
  *                                 vacancies and shadow entries keep their role), a new role is inserted, a dropped
  *                                 role is deleted (their role_id becomes null; the candidates route answers
- *                                 409 ROLE_DELETED, as before).
+ *                                 409 ROLE_DELETED).
  *   squad.create / squad.remove, shadow.create, lookingFor.set, federation.submit, vacancies.create / update.
  *
- * READS are SQL and return fresh deep-frozen records; there is no mirror. Modules receive the queries through
- * `scoutingReads` (tacticalSetups, squad, shadow, lookingFor, federationChecks, vacancies).
+ * Reads return deep-frozen records. Modules receive the queries through `scoutingReads` (tacticalSetups, squad,
+ * shadow, lookingFor, federationChecks, vacancies).
  *
- * References. Player ids have NO foreign key (tolerant, like recruitment and S9a: a squad row outlives the account,
- * as it always has). org_id → orgs is RESTRICT (organisations are never deleted, O2). A role's org is its setup
- * (CASCADE children); vacancies.role_id and org_shadow_players.role_id → org_tactical_roles are ON DELETE SET NULL
- * (the documented "role deleted" state); that a role belongs to the same organisation is checked here.
+ * References. Player ids have NO foreign key (tolerant, like recruitment and the evidence passport: a squad row
+ * outlives the account). org_id → orgs is RESTRICT (organisations are never deleted, O2 in docs/decisions.md). A
+ * role's org is its setup (CASCADE children); vacancies.role_id and org_shadow_players.role_id → org_tactical_roles
+ * are ON DELETE SET NULL (the documented "role deleted" state); that a role belongs to the same organisation is
+ * checked here.
  */
 import { isPlainObject, ids, describe } from './recruitment.mjs';
 import { transaction, migrationApplied } from './database.mjs';
@@ -50,7 +45,7 @@ export const CRITERIA_VALUES = Object.freeze({
 export const SQUAD_SOURCES = Object.freeze(['manual', 'invite_approved', 'signing']);
 export const VACANCY_STATUSES = Object.freeze(['open', 'closed']);
 export const LOOKING_FOR_POSITIONS = PLAYER_POSITIONS;
-/** Limits: text over these is shortened by the routes (as it always was); lists over them are refused. */
+/** Limits: text over these is shortened by the routes; lists over them are refused. */
 export const CLUB_SETUP_LIMITS = Object.freeze({
   formation: 20, planningHorizon: 40, roles: 15, windows: 4, criteria: 8, roleName: 60, description: 300, windowName: 40,
   name: 200, position: 40, approvedBy: 200, lookingFor: 5, federation: 120, registrationId: 60, contactEmail: 120, notes: 300,
@@ -376,7 +371,7 @@ function readAll(sqlite) {
   };
 }
 
-/** The whole domain read back as plain records (`readAllRecords` in index.mjs: the test suites' read-back); null before its migration. */
+/** The whole domain read back as plain records (`readAllRecords` in index.mjs: the test suites' read-back). */
 export const CLUB_SETUP_RECORDS = {
   names: CLUB_SETUP_COLLECTIONS,
   read(sqlite) { return clubSetupLive(sqlite) ? readAll(sqlite) : null; },

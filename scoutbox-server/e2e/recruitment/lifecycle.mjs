@@ -1,4 +1,4 @@
-// M23 acceptance suite — P2: the canonical lifecycle and the journey projection.
+// Acceptance suite for the canonical recruitment lifecycle and the journey projection.
 //
 // The governing rule this suite exists to enforce:
 //
@@ -6,10 +6,10 @@
 //   what the UI wants to show, not what another subsystem happens to call it,
 //   and never more than the underlying records can prove.
 //
-// P2 scope: one authoritative lifecycle, server-validated semantic actions,
+// Scope: one authoritative lifecycle, server-validated semantic actions,
 // append-only history, viewer-aware projection, and — the part most worth
-// testing — the things that must NOT happen. Contact, Trial and Offer arrive in
-// later phases; this suite proves the lifecycle refuses to pretend they exist.
+// testing — the things that must NOT happen: no stage is claimed that a record
+// cannot prove.
 
 import { spawn } from 'node:child_process';
 import { mkdtempSync, readdirSync, readFileSync } from 'node:fs';
@@ -32,7 +32,7 @@ import {
 import { M23_ERROR_HTTP, httpStatusFor, publicErrorBody } from '../../domains/recruitment/lifecycle/errors.mjs';
 import { DATA_MIGRATIONS, TABLE_BACKED } from '../../repositories/index.mjs';
 import { FUNNEL_STAGES, stagesReached } from '../../m20/funnels.mjs';
-import { buildRecruitmentJourney, createEvidenceProvider } from '../../scripts/recruitmentReadsFixture.mjs'; // §4.3 step 2: the contacts/offers queries over the plain arrays
+import { buildRecruitmentJourney, createEvidenceProvider } from '../../scripts/recruitmentReadsFixture.mjs'; // the contacts/offers queries over plain arrays
 
 const PORT = 5700 + Math.floor(Math.random() * 200);
 const BASE = `http://localhost:${PORT}`;
@@ -81,7 +81,7 @@ section('U2 — no lifecycle action is performable by a player, and evidence can
 {
   const kase = { id: 'case-x', orgId: 'org-a', playerId: 'pl-a', room: { status: 'offer_made', rev: 1 } };
 
-  // #23 — the single most important negative in the milestone.
+  // #23 — the single most important negative in the suite.
   const toSigned = canTransitionRecruitmentCase(kase, 'confirmSignedOutcome', { role: 'recruitment_admin' });
   neg(toSigned.ok === false && toSigned.error === 'LIFECYCLE_EVIDENCE_REQUIRED',
     '#23 offer acceptance does not become signed: `signed` demands a confirmed joining record');
@@ -180,7 +180,7 @@ section('U3 — the projector refuses to mistake a broken database for an empty 
   neg(!/score|readiness|probability|percentage|quality|rating/i.test(body),
     '#30 the journey carries no score, readiness, probability, percentage or rating');
 
-  // §76 — determinism.
+  // Determinism.
   const a = buildRecruitmentJourney(base, 'case-1', { kind: 'org_staff', orgId: 'o1', role: 'room_lead' }, { now: 1000 });
   const b = buildRecruitmentJourney(base, 'case-1', { kind: 'org_staff', orgId: 'o1', role: 'room_lead' }, { now: 1000 });
   ok(JSON.stringify(a) === JSON.stringify(b), 'the projection is deterministic for the same db, viewer and clock');
@@ -272,7 +272,7 @@ section('H7-H8, H13-H14, H18-H20 — determinism, legacy mapping and isolation (
     'H8 three entries at the SAME millisecond come back in the same order every time');
   ok(s1.history.entries.length === 3, 'H8b and all three survive — identical timestamps are not deduped into one');
 
-  // H13 — every historical M17 status maps, exactly once, with no fallback.
+  // H13 — every historical room status maps, exactly once, with no fallback.
   const LEGACY = ['watching', 'under_review', 'shortlisted', 'priority', 'trial_requested',
     'trial_scheduled', 'trial_completed', 'offer_consideration', 'offer_made', 'signed',
     'withdrawn', 'archived', 'closed'];
@@ -452,7 +452,7 @@ section('P — the transition graph as a property, over every state × action ×
   }
   neg(inversions === 0, 'P6 the role ladder is monotone: no lower role may do what a higher role may not');
 
-  // §16 — the self-transition decision, stated once and enforced everywhere.
+  // The self-transition decision, stated once and enforced everywhere.
   //
   // A self-transition is REFUSED, and refused DISTINCTLY: `LIFECYCLE_NO_CHANGE`
   // rather than `LIFECYCLE_TRANSITION_INVALID`. "You are already there" and
@@ -496,9 +496,8 @@ section('P — the transition graph as a property, over every state × action ×
     }
   }
 
-  // The general form of the defect P13/P14 found: three actions reach
-  // `under_review`, and from a withdrawn case all three were offered at once.
-  // Each writes a different reason code into a history nothing ever rewrites,
+  // Three actions reach `under_review`; if a state offered more than one of
+  // them for the same move, the caller would pick the reason. Each writes a different reason code into a history nothing ever rewrites,
   // so "resumed from hold" could be recorded for a case that was never held.
   let ambiguous = 0;
   for (const from of ROOM_STATUSES) {
@@ -588,7 +587,7 @@ ok(created.body.room.status === 'watching', 'J2b which is `watching`');
 
 section('J — the positive journeys');
 {
-  // J1 — an existing M17 case projects.
+  // J1 — an existing room case projects.
   const j1 = await j('GET', `/org/rooms/${ROOM}/journey`, undefined, maria.token);
   ok(j1.status === 200 && j1.body.ok === true, 'J1 an M17-created case projects through the canonical journey');
   ok(j1.body.lifecycle.currentStage === 'watching', 'J1b with its real current stage');
@@ -615,7 +614,7 @@ section('J — the positive journeys');
   const after = (await j('GET', `/org/rooms/${ROOM}/journey`, undefined, maria.token)).body;
   neg(after.history.total === historyLen, '#29 and appends no duplicate history entry');
 
-  // #8 — contact is not yet implemented, so `contacted` is refused for want of evidence.
+  // #8 — no Contact has been delivered, so `contacted` is refused for want of evidence.
   const noEvidence = await j('POST', `/org/rooms/${ROOM}/lifecycle`, { action: 'recordContact', expectedRev: after.case.rev }, maria.token);
   neg(noEvidence.status === 422 && noEvidence.body.error === 'LIFECYCLE_EVIDENCE_REQUIRED',
     '#14-mandate a contact cannot be recorded before the Contact phase can prove one happened');
@@ -627,7 +626,7 @@ section('J — the positive journeys');
   neg(held.lifecycle.terminal === false, 'J7b and a held case is NOT terminal');
   ok(held.conditions.onHold === true, 'J7c the derived condition reports the hold');
   const resume = await j('POST', `/org/rooms/${ROOM}/lifecycle`, { action: 'resumeCase', expectedRev: held.case.rev }, maria.token);
-  // M23 P8.1 (D-P81-1): a resume returns the case to the state it was held FROM
+  // A resume returns the case to the state it was held FROM
   // (here a pre-contact state with no record to lose), never to a state further back.
   const heldFrom = after.lifecycle.currentStage;
   ok(resume.status === 200 && resume.body.to === heldFrom && resume.body.to !== 'on_hold', `J8 and it resumes to where it was held from (${heldFrom})`);
@@ -653,10 +652,9 @@ section('J — the positive journeys');
 
   // #24 — closed -> reopened -> closed is three real transitions, not one deduped pair.
   //
-  // Note the hold before each close. `under_review -> closed` is NOT an edge,
-  // in M17 or in M23: a case is put beyond active pursuit (held, withdrawn or
-  // archived) before it is filed away. The first draft of this test assumed the
-  // shortcut existed; the table refused, which is the table working.
+  // Note the hold before each close. `under_review -> closed` is NOT an edge:
+  // a case is put beyond active pursuit (held, withdrawn or archived) before it
+  // is filed away.
   const h1 = await j('POST', `/org/rooms/${ROOM}/lifecycle`, { action: 'holdCase', expectedRev: reopened.case.rev }, maria.token);
   ok(h1.status === 200, 'a case is held before it can be filed away');
   const preC1 = (await j('GET', `/org/rooms/${ROOM}/journey`, undefined, maria.token)).body;
@@ -731,9 +729,8 @@ section('Negatives — isolation, authority, concurrency, privacy');
   const held2 = (await j('GET', `/org/rooms/${ROOM}/journey`, undefined, maria.token)).body;
   const byScout = await j('POST', `/org/rooms/${ROOM}/lifecycle`, { action: 'confirmSignedOutcome', expectedRev: held2.case.rev }, tom.token);
   // Named exactly, not "one of three refusals". A disjunction over 403/409/422
-  // is the D5 shape: it passes when the server refuses for a DIFFERENT reason
-  // than the one under test, which is how a role-resolution bug hid behind an
-  // evidence gate. Role is checked before the transition table, so a scout is
+  // passes when the server refuses for a DIFFERENT reason than the one under
+  // test, which can hide a role-resolution bug behind an evidence gate. Role is checked before the transition table, so a scout is
   // refused for who they are, and that is the assertion.
   neg(byScout.status === 403 && byScout.body?.error === 'LIFECYCLE_NOT_PERMITTED',
     '#4 a non-lead scout is refused 403 LIFECYCLE_NOT_PERMITTED — for their role, not for missing evidence');
@@ -769,10 +766,8 @@ section('Negatives — isolation, authority, concurrency, privacy');
 
 section('H1-H6 — the signed boundary, attacked from every write path');
 {
-  // Drive a case all the way to offer_made using a provider-satisfied path is
-  // not possible in P2 (offer evidence is not implemented), so this group
-  // works against the pure validator for state coverage and against real HTTP
-  // for the routes that exist. Both matter: the validator is the rule, the
+  // This group works against the pure validator for state coverage and against
+  // real HTTP for the write paths into `signed`. Both matter: the validator is the rule, the
   // routes are where the rule is actually reachable.
 
   // ---- H1: the normal semantic action, no evidence.
@@ -804,9 +799,8 @@ section('H1-H6 — the signed boundary, attacked from every write path');
 
   // ---- H2/H3: the legacy status route is not a side door.
   //
-  // THIS IS THE DEFECT THIS HARDENING PASS EXISTS TO CATCH. Before the fix a
-  // club at offer_made could POST {status:'signed'} here and land on signed
-  // with nothing in db.signings at all.
+  // A club at offer_made must not be able to POST {status:'signed'} here and
+  // land on signed with no signing record at all.
   const lr = await j('POST', '/org/rooms', { playerId: ADULT.id, sourceContext: 'search' }, harbour.token);
   const HR = lr.body?.room?.roomId;
   if (HR) {
@@ -821,10 +815,8 @@ section('H1-H6 — the signed boundary, attacked from every write path');
 
   // H2c — the legacy route enforces the gate for a status it CAN reach.
   //
-  // `signed` is unreachable over HTTP in P2 (every route into it needs
-  // evidence no phase can supply), so proving the route gate needs a status
-  // that is both reachable and evidence-bearing: `contacted`, one step from
-  // `contact_planned`. Before the fix this returned 200 and moved the case.
+  // Proving the route gate needs a status that is both reachable and
+  // evidence-bearing: `contacted`, one step from `contact_planned`.
   // Use the harbour room: a DIFFERENT org, so it is a genuinely new case at
   // `watching` rather than the adopted Eastport one (there is one open room
   // per org and player, so re-creating returns the existing case).
@@ -842,7 +834,7 @@ section('H1-H6 — the signed boundary, attacked from every write path');
     ok(false, 'could not reach contact_planned for the legacy-route gate test');
   }
 
-  // H3 — the M12 legacy stage route cannot express `signed` at all.
+  // H3 — the legacy stage route cannot express `signed` at all.
   const stageNames = ['identified', 'review', 'observation', 'trial', 'invited', 'awaiting_response', 'decision', 'closed'];
   neg(stageNames.every((st) => roomStatusForStage(st, 'academy') !== 'signed'),
     'H3 no legacy M12 stage maps to `signed` — the compatibility path cannot express it');
@@ -875,7 +867,7 @@ section('H1-H6 — the signed boundary, attacked from every write path');
 
 section('Legacy compatibility — an old case still reads');
 {
-  // J12 — a case whose room predates M23, with no lifecycleAction on any entry
+  // J12 — a case whose room predates the lifecycle, with no lifecycleAction on any entry
   // and a status from the original thirteen, must project without rewriting.
   const legacy = await j('POST', '/org/rooms', { playerId: players.find((p) => p.id !== ADULT.id)?.id, sourceContext: 'search' }, maria.token);
   if (legacy.status === 201) {
@@ -894,11 +886,11 @@ section('Legacy compatibility — an old case still reads');
 
 section('V — two reason taxonomies, and the route must use the right one');
 {
-  // M17's 20 codes say why a club DECIDED something — an opinion about a
-  // player. M23's 16 say why a case MOVED — an event in a process. The route
-  // used to validate transitions against the DECISION taxonomy, which accepted
-  // a judgement about a player as the reason a case closed and refused every
-  // one of the sixteen reasons it publishes.
+  // The 20 decision codes say why a club DECIDED something — an opinion about a
+  // player. The 16 lifecycle codes say why a case MOVED — an event in a process.
+  // Validating transitions against the DECISION taxonomy would accept a
+  // judgement about a player as the reason a case closed and refuse every one
+  // of the sixteen reasons the lifecycle publishes.
   neg(LIFECYCLE_REASON_CODES.every((c) => !ALL_REASON_CODES.includes(c)),
     'V1 the two taxonomies share no code at all — they are not interchangeable');
   ok(LIFECYCLE_REASON_CODES.every((c) => isLifecycleReason(c)),
@@ -943,11 +935,10 @@ section('T — hostile input: no shape of request body becomes a 500');
   }
   ok(!!TROOM, 'T0 a case for the input checks');
 
-  // T1 — the one that was actually broken. `LIFECYCLE_ACTIONS` was a plain
-  // object literal, so `LIFECYCLE_ACTIONS['constructor']` was truthy: the
-  // route's `!LIFECYCLE_ACTIONS[action]` guard passed it through, the
-  // validator read `.roles` off Object's constructor, and one word of request
-  // body became a 500.
+  // T1 — prototype keys. On a plain object literal `LIFECYCLE_ACTIONS['constructor']`
+  // is truthy: a `!LIFECYCLE_ACTIONS[action]` guard would pass it through, the
+  // validator would read `.roles` off Object's constructor, and one word of
+  // request body would become a 500.
   const PROTO_KEYS = ['constructor', 'toString', 'valueOf', 'hasOwnProperty', '__proto__', 'prototype', 'isPrototypeOf'];
   for (const k of PROTO_KEYS) {
     const r = await j('POST', `/org/rooms/${TROOM}/lifecycle`, { action: k }, maria.token);
@@ -1015,8 +1006,7 @@ section('T — hostile input: no shape of request body becomes a 500');
 section('X — stored corruption: a broken record is reported, never rendered as fact');
 {
   // These go straight at the projector with databases that could not have been
-  // written by this build. The rule from M23-D2 carries forward: a broken
-  // record is infrastructure failure or corruption, and neither is "no data".
+  // written by this build. A broken record is infrastructure failure or corruption, and neither is "no data".
   const VIEWER = { kind: 'org_staff', orgId: 'org-X', role: 'room_lead' };
   const OPTS = { now: 1767225600000, evidence: NULL_EVIDENCE_PROVIDER };
   const base = (over = {}) => ({
@@ -1045,8 +1035,8 @@ section('X — stored corruption: a broken record is reported, never rendered as
   // list" are different operational problems and a log that conflates them
   // sends someone looking in the wrong place.
   {
-    // §4.3 step 2 and S9b (rewritten: it described the old storage). No db store is left: the contacts and the
-    // assessments are read through SQL queries, so an unusable one is a missing query, named; nothing is "malformed".
+    // The contacts and the assessments are read through SQL queries, so an unusable one is a missing query, named;
+    // nothing is "malformed".
     const db = base(); db.assessments = null; delete db.recruitmentContacts;
     const out = build(db);
     neg(out.missing?.includes('assessments') && out.missing?.includes('recruitmentContacts') && out.malformed?.length === 0,
@@ -1234,7 +1224,7 @@ section('A — authorization drift: the role is decided now, from the database, 
   //   recruitment_admin       -> 409 LIFECYCLE_TRANSITION_INVALID
   //
   // Neither reaches `signed`, which is the point: this reads the role without
-  // needing a transition that P2 cannot legally perform.
+  // needing a transition this case cannot legally perform.
   const confirmAs = async (token) => {
     const r = await j('POST', `/org/rooms/${AROOM}/lifecycle`, { action: 'confirmSignedOutcome' }, token);
     return r.status === 403 ? 'below_admin' : r.status === 409 ? 'admin' : `unexpected:${r.status}`;
@@ -1317,10 +1307,9 @@ section('W — write-site audit: every path that can move a case, and the ones t
   ok([...proStarts, ...grStarts].every((s) => ROOM_STATUSES.includes(s)),
     'W4 and every adoption start is a real status, never null or invented');
 
-  // W5-W10 (live) — the legacy M12 stage route is the oldest writer of
-  // `case.stage`, which M23 made a pure derivation of `room.status`. It had no
-  // bridge to the lifecycle at all, so it could move one representation of a
-  // case and leave the other behind.
+  // W5-W10 (live) — the legacy stage route writes `case.stage`, which is a pure
+  // derivation of `room.status`. Without a bridge to the lifecycle it could move
+  // one representation of a case and leave the other behind.
   const before = await j('GET', `/org/rooms/${ROOM}/journey`, undefined, maria.token);
   const stageBefore = before.body?.lifecycle?.currentStage;
   const legacyStage = await j('POST', `/org/cases/${ROOM}/stage`, { stage: 'trial', reason: 'legacy client' }, maria.token);
@@ -1343,7 +1332,7 @@ section('W — write-site audit: every path that can move a case, and the ones t
   neg(roomAfter.body?.room?.rev === revBefore,
     'W10 and it moves no concurrency token, because it moved no lifecycle state');
 
-  // W11 — the same route on a plain M12 case is untouched. Refusing a Room is
+  // W11 — the same route on a plain legacy case is untouched. Refusing a Room is
   // not an excuse to break the cases that have no lifecycle to protect.
   const spare = players.find((p) => p.id !== ADULT.id && p.dateOfBirth && (new Date().getFullYear() - new Date(p.dateOfBirth).getFullYear()) >= 18);
   const plain = await j('POST', '/org/cases', { playerId: spare?.id ?? ADULT.id, priority: 'low' }, tom.token);
@@ -1359,7 +1348,7 @@ section('W — write-site audit: every path that can move a case, and the ones t
 section('E — every error body, swept for private text at once');
 {
   // Individual "this response leaks nothing" checks test the responses somebody
-  // thought of. This collects EVERY refusal the two M23 routes can produce and
+  // thought of. This collects EVERY refusal the two lifecycle routes can produce and
   // sweeps them all against the same forbidden set, so a new error code added
   // later is covered by construction rather than by remembering.
   const SECRET = 'SECRETNOTEPHRASE';
@@ -1438,21 +1427,20 @@ section('Y — the error contract: one table, no default, nothing internal in th
 {
   // The drift guard, and it is MECHANICAL rather than a list somebody keeps.
   //
-  // Every `error: 'CODE'` literal in the M23 source is extracted from the
+  // Every `error: 'CODE'` literal in the lifecycle source is extracted from the
   // files themselves and required to have a status. A list written by hand
-  // here would pass forever while the module grew a code nobody mapped — which
-  // is exactly what the ternary chain this replaced did, silently, by falling
-  // through to 400.
+  // here would pass forever while the module grew a code nobody mapped, silently
+  // falling through to 400.
   const M23_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'domains', 'recruitment', 'lifecycle');
-  // errors.mjs is swept too since P3 moved `sendDomainError` — the one place
-  // that PRODUCES `LIFECYCLE_INTERNAL` — into it. Its table rows are
+  // errors.mjs is swept too: `sendDomainError` — the one place that PRODUCES
+  // `LIFECYCLE_INTERNAL` — lives in it. Its table rows are
   // `CODE: status,` and do not match a producing shape, so the sweep still
   // sees only what can actually be sent.
   const sources = readdirSync(M23_DIR).filter((f) => f.endsWith('.mjs'));
   const produced = new Set();
   for (const f of sources) {
     const text = readFileSync(path.join(M23_DIR, f), 'utf8');
-    // Two producing shapes: a literal `error: 'CODE'` and the P3 routes'
+    // Two producing shapes: a literal `error: 'CODE'` and the routes'
     // `err(res, 'CODE', …)` helper, which builds exactly that literal.
     for (const m of text.matchAll(/(?:error:|err\(res,)\s*'([A-Z][A-Z0-9_]+)'/g)) produced.add(m[1]);
   }
@@ -1464,10 +1452,10 @@ section('Y — the error contract: one table, no default, nothing internal in th
 
   // The converse. A table entry for a code nothing produces is dead weight that
   // makes the table look more complete than it is. `ROOM_VERSION_CONFLICT` is
-  // the one legitimate exception: M18.1's rev guard raises it, not M23.
-  // `CONTACT_VERSION_CONFLICT` (P3) is the same M18.1 guard, named for the Contact
+  // the one legitimate exception: the shared room rev guard raises it, not the
+  // lifecycle. `CONTACT_VERSION_CONFLICT` is the same guard, named for the Contact
   // record: raised through `errorCode:` in contactRoutes, never as `error:`.
-  // `TRIAL_VERSION_CONFLICT` (P4B) is the same M18.1 guard, named for the
+  // `TRIAL_VERSION_CONFLICT` is the same guard, named for the
   // Trial record: raised through `errorCode:` in trialRoutes, never as `error:`.
   const EXTERNAL = new Set(['ROOM_VERSION_CONFLICT', 'CONTACT_VERSION_CONFLICT', 'TRIAL_VERSION_CONFLICT']);
   const orphaned = Object.keys(M23_ERROR_HTTP).filter((c) => !produced.has(c) && !EXTERNAL.has(c));
@@ -1480,13 +1468,13 @@ section('Y — the error contract: one table, no default, nothing internal in th
 
   // Every mapped status is one this contract actually uses. A 418 or a 200 in
   // the table would be a typo that no other assertion here would notice.
-  // 429 joined in P3: the Contact cooldown is a deterministic per-recipient
+  // 429: the Contact cooldown is a deterministic per-recipient
   // refusal with a retry time, and 429 is the status that means exactly that.
   const BANDS = [400, 403, 404, 409, 422, 429, 500];
   const offBand = Object.entries(M23_ERROR_HTTP).filter(([, s]) => !BANDS.includes(s));
   neg(offBand.length === 0, `Y6 every status in the table is one of ${BANDS.join('/')}`);
 
-  // §36 — an internal error must not hand the client the implementation.
+  // An internal error must not hand the client the implementation.
   //
   // The control first: the projector's own return value DOES name the stores,
   // because that detail is what makes it useful in a log and in the unit tests
@@ -1508,14 +1496,13 @@ section('Y — the error contract: one table, no default, nothing internal in th
     'Y9 the diagnostic fields are absent from the public body, not emptied');
   ok(publicBody.error === 'JOURNEY_STORE_MISSING', 'Y10 while the code itself survives, so a client can still branch and a log can still group');
 
-  // §33 as a property over the HTTP bodies collected in E, rather than over the
+  // A property over the HTTP bodies collected in E, rather than over the
   // ones somebody remembered: no refusal may carry a key outside the allowlist.
   //
   // `ROOM_VERSION_CONFLICT` is excluded, and that is a decision with a reason.
-  // It is raised by M18.1's `guardRev` BEFORE this module's mapping is reached,
+  // It is raised by the shared `guardRev` BEFORE this module's mapping is reached,
   // and its body — `currentRev`, `updatedBy`, `updatedAt` — is the shared
-  // conflict contract that `conflict.tsx` renders in two clients across five
-  // milestones. `updatedBy` is deliberately a display name and never a user id,
+  // conflict contract that `conflict.tsx` renders in two clients. `updatedBy` is deliberately a display name and never a user id,
   // and every caller reaching it has already passed the room's visibility gate,
   // so there is nothing here a 200 would not also have shown them. Narrowing it
   // would break the shared conflict notice everywhere to disclose nothing.
@@ -1529,8 +1516,8 @@ section('Y — the error contract: one table, no default, nothing internal in th
   for (const s of strayKeys) console.error(`   stray key: ${s}`);
   neg(strayKeys.length === 0, 'Y11 no refusal M23 itself produces carries a field outside the published error shape');
 
-  // §35 — and the one body that IS excluded still may not carry the thing §35
-  // actually forbids. Checked rather than assumed, because the exclusion above
+  // And the one body that IS excluded still may not carry a user id, which is
+  // what actually matters. Checked rather than assumed, because the exclusion above
   // is only defensible if this holds.
   {
     const conflicts = ERROR_BODIES_FROM_E.filter(({ body }) => body?.error === 'ROOM_VERSION_CONFLICT');
@@ -1548,7 +1535,7 @@ section('Y — the error contract: one table, no default, nothing internal in th
     neg(carriesNarrative === false, 'Y11d and carries no lifecycle reason code and no narrative field');
   }
 
-  // §34 — the parity, restated after the mapping moved. Not "both are 404":
+  // The parity, restated after the mapping. Not "both are 404":
   // byte-identical, because a difference of one character is an oracle.
   const ghost = await j('GET', '/org/rooms/case-does-not-exist/journey', undefined, maria.token);
   const foreign = await j('GET', `/org/rooms/${ROOM}/journey`, undefined, harbour.token);
@@ -1557,18 +1544,17 @@ section('Y — the error contract: one table, no default, nothing internal in th
     'Y13 and their bodies are byte-identical, after the error mapping was centralised');
 }
 
-section('Z — what P2 deliberately does NOT ship, asserted rather than assumed');
+section('Z — what the lifecycle deliberately does NOT ship, asserted rather than assumed');
 {
-  // §43 — `recruitmentOffers` is OPTIONAL, and four separate things have to be
+  // `recruitmentOffers` is OPTIONAL, and four separate things have to be
   // true at once for that word to mean anything. Absence has product meaning
   // here: "we cannot answer that yet" is a different statement from "there are
   // none", and an empty array would quietly turn the first into the second.
   const jz = await j('GET', `/org/rooms/${ROOM}/journey`, undefined, maria.token);
   ok(jz.status === 200, 'Z1 the journey projects with no offers store present at all');
 
-  // M23 P6 shipped the canonical Offer; no lifecycle state is reinterpreted as an Offer (P6 §4, §60). The offers are
-  // rows of their tables, read through SQL, and the journey's offers stay optional through its `reads`.
-  // Z2–Z3 rewritten in S14a: they read the store contract (the blob's collection classifications).
+  // No lifecycle state is reinterpreted as an Offer. The offers are rows of their tables, read through SQL, and the
+  // journey's offers stay optional through its `reads`.
   ok(TABLE_BACKED.includes('recruitmentOffers'),
     'Z2 the offers are a table (since 0017), read through SQL');
   neg(DATA_MIGRATIONS.filter((m) => /offer/i.test(m.id)).map((m) => m.id).join() === '0017_recruitment_contacts_offers',
@@ -1580,16 +1566,15 @@ section('Z — what P2 deliberately does NOT ship, asserted rather than assumed'
 
   // The distinction the optional classification exists to protect.
   ok(jz.body.offer?.available === true,
-    'Z5 the journey reports offers as AVAILABLE (P6): the store exists, so "there are none" is now an honest answer');
+    'Z5 the journey reports offers as AVAILABLE: the store exists, so "there are none" is now an honest answer');
   ok(Array.isArray(jz.body.offer?.records) && jz.body.offer.records.length === 0,
     'Z6 and degrades structurally: a real empty list beside the flag, never an invented record');
 
-  // §43 — and P2 really has not created the store behind our back.
   const dbNow = (await j('GET', '/ops/schema', undefined, maria.token)).body ?? {};
   ok(typeof dbNow === 'object', 'Z7 the schema surface answers');
 
-  // §42 — Contact is a CONTRACT in P2, not an implementation. The vocabulary
-  // exists (the gate has to be able to refuse) and the object does not.
+  // The Contact vocabulary is published, because the gate has to be able to
+  // refuse it by name.
   const vocab = await j('GET', '/org/recruitment/lifecycle', undefined, maria.token);
   ok(vocab.status === 200, 'Z8 the lifecycle vocabulary answers');
   const names = (vocab.body.actions ?? []).map((a) => a.action);
@@ -1599,7 +1584,7 @@ section('Z — what P2 deliberately does NOT ship, asserted rather than assumed'
   ok(contactStates.includes('contact_planned') && contactStates.includes('contacted'),
     'Z10 and both Contact STATES are reachable destinations in the published table');
 
-  // P3 shipped the Contact surface INSIDE the case (`/org/rooms/:id/contacts`)
+  // The Contact surface lives INSIDE the case (`/org/rooms/:id/contacts`)
   // and nowhere else: there is no top-level contact list and no singular
   // alias. The one real route answers a DOMAIN code, never a bare 404.
   for (const p of ['/org/recruitment/contacts', `/org/rooms/${ROOM}/contact`]) {
@@ -1609,11 +1594,11 @@ section('Z — what P2 deliberately does NOT ship, asserted rather than assumed'
   {
     const probe = await j('POST', `/org/rooms/${ROOM}/contacts`, {}, maria.token);
     ok(probe.status !== 404 && /^CONTACT_[A-Z_]+$/.test(probe.body?.error ?? ''),
-      `Z11b /org/rooms/:id/contacts exists in P3 and refuses an empty draft by name (${probe.status} ${probe.body?.error})`);
+      `Z11b /org/rooms/:id/contacts exists and refuses an empty draft by name (${probe.status} ${probe.body?.error})`);
   }
 
-  // And the gate really does refuse `contacted` with the null provider, which
-  // is the whole reason the contract can be frozen before the object exists.
+  // And the gate really does refuse `contacted` with the null provider: with
+  // no way to check the evidence, it fails closed.
   const toContacted = canTransitionRecruitmentCase(
     { id: 'c', room: { status: 'contact_planned' }, history: [] },
     'recordContact',
@@ -1621,15 +1606,15 @@ section('Z — what P2 deliberately does NOT ship, asserted rather than assumed'
   );
   neg(toContacted.ok === false && toContacted.error === 'LIFECYCLE_EVIDENCE_REQUIRED'
     && toContacted.requires === 'contact_delivered',
-  'Z12 and `contacted` is refused for want of `contact_delivered` — the gate P3 will supply evidence to');
+  'Z12 and `contacted` is refused for want of `contact_delivered`');
   neg(toContacted.evidenceReason === 'not_implemented',
     'Z13 with the honest reason: this deployment cannot check it yet, so it fails CLOSED');
 }
 
 section('S — the subsystems M23 must not have touched');
 {
-  // "Do NOT add Match Score. Do NOT alter Trust. Do NOT alter M22 Combine
-  // eligibility." Asserted by taking a reading, moving the lifecycle, and
+  // The lifecycle adds no Match Score and alters neither Trust nor Combine
+  // eligibility. Asserted by taking a reading, moving the lifecycle, and
   // taking the reading again — rather than by reading the source and trusting
   // that nothing calls anything.
   let SROOM = null; let SPLAYER = null;

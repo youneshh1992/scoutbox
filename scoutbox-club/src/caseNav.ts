@@ -1,11 +1,11 @@
-// M24B — the Recruitment Room's category → subcategory arrangement (Pro).
+// The Recruitment Room's category → subcategory arrangement (Pro).
 //
 // Every subcategory is a function the Room already had, or a read-only view
 // over records the Room already reads. A category is UI organisation only —
 // it is not a lifecycle state and nothing persists it. The `legacy` ids are
-// the flat tab names the server still emits (notification targets, the
-// journey's next-action tab) and the old `#/recruitment/rooms/:id/<tab>`
-// links, every one of which resolves to its subcategory.
+// the flat tab names the server emits (notification targets, the journey's
+// next-action tab) and flat `#/recruitment/rooms/:id/<tab>` links, every one
+// of which resolves to its subcategory.
 import { validateCaseNav, type CaseNavModel } from '../../design-system/caseNav';
 
 export const ROOM_NAV: CaseNavModel = {
@@ -42,7 +42,7 @@ export const ROOM_NAV: CaseNavModel = {
     {
       id: 'engagement', labelKey: 'rm.cat.engagement',
       subs: [
-        // Internal talk first, shared communication second (M23 P3): the
+        // Internal talk first, shared communication second: the
         // Discussion never travels; Contact and Trial reach the player.
         { id: 'discussion', labelKey: 'rm.tab.discussion' },
         { id: 'contact', labelKey: 'rm.tab.contact' },

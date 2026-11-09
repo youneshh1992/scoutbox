@@ -1,14 +1,8 @@
-// M13 acceptance suite. Spawns its own server on an ISOLATED throwaway
-// database (never the dev data), runs unit fixtures against the pure helpers,
-// then drives every F1–F12 acceptance criterion over HTTP, including the ten
-// combined journeys, the 16/17-year-old boundary tests, a signed local
-// webhook receiver, provider-callback idempotency, SSO negatives, a
-// backup→isolated-restore cycle and a SIGKILL restart.
-//
-// F4–F7 (exposure, calibration, missing evidence, coverage) moved to
-// e2e/discovery/exposureCalibrationAndCoverage.mjs. F2 (transitions, S10), F3 (suitability, S9) and
-// F10 (the closed legacy representation lane, S11) stay here: the restart check reads F2's transition,
-// and they move with their domain's step.
+// Club operations: imports, API keys, webhooks, onboarding, MFA, SSO, support access, delivery, suitability,
+// transitions, group workspaces and budgets. Spawns its own server on an ISOLATED throwaway database (never the
+// dev data), runs unit fixtures against the pure helpers, then drives everything over HTTP, ending with a
+// backup→isolated-restore cycle and a SIGKILL restart. Transitions stay in this suite because the restart check
+// reads one.
 import { spawn } from 'node:child_process';
 import { mkdtempSync, cpSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -124,7 +118,7 @@ section('unit fixtures (pure helpers, controlled clocks)');
   ok(webhookUrlProblem('ftp://example.com/x') !== null, 'SSRF guard: non-http(s) schemes blocked');
   ok(webhookUrlProblem('http://example.com/x') !== null, 'external destinations must use https');
 
-  // ---- age boundaries by DOB with controlled evaluation dates (the §1 audit).
+  // ---- age boundaries by DOB with controlled evaluation dates.
   const at = new Date('2026-09-09T12:00:00Z');
   const dobYearsAgo = (y, extraDays = 0) => {
     const d = new Date(at);
@@ -161,8 +155,8 @@ const kid17Id = kid17?.player?.id ?? kid17?.id;
 const kid16Id = kid16?.player?.id ?? kid16?.id;
 ok(!!kid17Id && !!kid16Id, 'guardian created 17- and 16-year-old boundary players (DOB-derived)');
 
-// ================================================================ F1
-section('F1 — CSV import, identity, API keys, webhooks');
+// ================================================================ imports and integrations
+section('CSV import, identity, API keys, webhooks');
 {
   const tpl = await fetch(`${BASE}/org/imports/template`, { headers: { Authorization: `Bearer ${maria.token}` } });
   ok((await tpl.text()).startsWith('name,dob,'), 'downloadable CSV template');
@@ -273,7 +267,7 @@ section('F1 — CSV import, identity, API keys, webhooks');
   ok(r.body.items.every((c) => c.status === 'not_configured'), 'every provider connector honestly reports not_configured');
   receiver.close();
 
-  // S13a: integrations are typed tables — junk is refused naming the field, lists page by cursor, one live prospect
+  // Integrations: junk is refused naming the field, lists page by cursor, one live prospect
   // per provider and external id holds on every path.
   r = await j('POST', '/org/api-keys', { scopes: ['export:everything'] }, maria.token);
   ok(r.status === 400 && r.body.error === 'FIELD_INVALID' && r.body.field === 'scopes[0]', 'an unknown API scope is refused, naming it (not silently dropped)');
@@ -326,8 +320,8 @@ section('F1 — CSV import, identity, API keys, webhooks');
   ok(Number.isInteger(usedKey.lastUsedAt) && usedKey.keyHash === undefined, 'a use of the key is recorded; its hash is never served');
 }
 
-// ================================================================ F12
-section('F12 — onboarding, MFA, SSO, audit, support, backup, reliability');
+// ================================================================ onboarding and security
+section('onboarding, MFA, SSO, audit, support, backup, reliability');
 let inviteUserToken = null;
 {
   let r = await j('POST', '/org/invites', { email: 'newscout@eastport.example', name: 'Nina Invitee', role: 'Scout' }, maria.token);
@@ -419,8 +413,8 @@ let inviteUserToken = null;
   const grants = (await fetch(`${BASE}/admin/support`, { headers: A() }).then((x) => x.json())).grants;
   ok(grants[0].accessLog.length === 1, 'every support read lands in the access log');
 
-  // S13b: invites, SSO states, tickets and grants are typed tables — junk is refused naming the field (not clamped,
-  // coerced or stored as 'undefined'), the lists page by cursor, an invite code is single-use whatever its state.
+  // Invites, SSO states, tickets and grants: junk is refused naming the field (not clamped, coerced or stored as
+  // 'undefined'), the lists page by cursor, an invite code is single-use whatever its state.
   r = await j('POST', '/org/invites', { email: 'role.junk@eastport.example', name: 'Role Junk', role: 42 }, maria.token);
   ok(r.status === 400 && r.body.field === 'role', 'an invite role that is not text is refused, naming it');
   r = await j('POST', '/org/invites', { email: 'revoked.invitee@eastport.example', name: 'Revoked Invitee', role: 'Analyst' }, maria.token);
@@ -460,7 +454,7 @@ let inviteUserToken = null;
   // fast mode) so the dispatch to Nina (who HAS an email) exhausts its
   // retries and surfaces as a monitored failure — with nothing left over to
   // pollute later delivery tests.
-  // S13e: junk is refused naming the field (an unknown channel read as email, a count was clamped).
+  // Junk is refused naming the field: an unknown channel is not read as email, a count is not clamped.
   for (const [body, field] of [[{ channel: 'fax', count: 1 }, 'channel'], [{ channel: 'email', count: 0 }, 'count'], [{ channel: 'email', count: 21 }, 'count'], [{ channel: 'email', count: '2' }, 'count']]) {
     const bad = await fetch(`${BASE}/admin/delivery/inject-failure`, { method: 'POST', headers: { ...A(), 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     ok(bad.status === 400 && (await bad.json()).field === field, `an injection with a junk ${field} is refused, naming it`);
@@ -479,8 +473,8 @@ let inviteUserToken = null;
   ok(met.requests > 0 && met.note.includes('not a production SLA'), 'metrics carry counters + an honest scope note');
 }
 
-// ================================================================ F11
-section('F11 — delivery centre');
+// ================================================================ delivery centre
+section('delivery centre');
 {
   // Clear leftover injected failures by letting them drain, then test ladder.
   let r = await j('PUT', '/org/delivery/prefs', { quietStart: null, quietEnd: null, email: true }, scout2.token);
@@ -527,8 +521,8 @@ section('F11 — delivery centre');
   ok(ninaAfter.status === 'opened' && ninaAfter.deliveredAt && ninaAfter.openedAt, 'late bounce does NOT regress a confirmed open (forward-only ladder)');
 }
 
-// ================================================================ F3
-section('F3 — player-controlled suitability');
+// ================================================================ suitability
+section('player-controlled suitability');
 let oppId = null;
 {
   // Eastport publishes an opportunity with structured requirements.
@@ -541,7 +535,7 @@ let oppId = null;
   }, maria.token);
   ok(r.status === 200, 'club attaches structured requirements to an opportunity');
 
-  // S9d: reading preferences writes nothing; junk is refused with the field named.
+  // Reading preferences writes nothing; junk is refused with the field named.
   r = await j('GET', '/player/preferences', undefined, adeyemi.token);
   ok(r.status === 200 && r.body.preferences.updatedAt === null && r.body.private === true, 'preferences read before any save are the blank defaults');
   for (const [body, field] of [[{ transport: 'horse' }, 'transport'], [{ travelLimitKm: 'far' }, 'travelLimitKm'], [{ commitments: [{ day: 'tuesday', start: '16:00', end: '18:00', tz: 'Europe/London' }] }, 'commitments[0].day'], [{ commitments: [{ day: 'tue', start: '18:00', end: '16:00', tz: 'Europe/London' }] }, 'commitments[0].end']]) {
@@ -587,14 +581,14 @@ let oppId = null;
   ok(!leak.includes('college') && !leak.includes('travelLimit'), 'no private preference text leaks to the club');
 }
 
-// ================================================================ F2
-section('F2 — consent-based transitions');
+// ================================================================ transitions
+section('consent-based transitions');
 {
   const me = (await j('GET', '/player/me', undefined, adeyemi.token)).body;
   const mediaId = me.media?.[0]?.id ?? (me.player?.media?.[0]?.id);
   let r = await j('POST', '/player/transitions', { pack: {} }, adeyemi.token);
   ok(r.status === 400 && r.body.error === 'PACK_EMPTY', 'an empty pack (or club-private material) cannot start a transition');
-  // S10c: junk is refused with the field named, never clamped or coerced.
+  // Junk is refused with the field named, never clamped or coerced.
   r = await j('POST', '/player/transitions', { pack: { mediaIds: [mediaId] }, periodDays: 7 }, adeyemi.token);
   ok(r.status === 400 && r.body.error === 'FIELD_INVALID' && r.body.field === 'periodDays', 'a period outside 14-180 days is refused, not clamped');
   r = await j('POST', '/player/transitions', { pack: { mediaIds: mediaId } }, adeyemi.token);
@@ -632,7 +626,7 @@ section('F2 — consent-based transitions');
   ok(orgNotifs.some((n) => n.type === 'transition' && n.actionRequired), 'withdrawal notice with acknowledgement lands at the club');
   const ackN = orgNotifs.find((n) => n.type === 'transition' && n.actionRequired);
   r = await j('POST', `/org/notifications/${ackN.id}/ack`, {}, maria.token);
-  ok(r.status === 200 && r.body.ackedAt, 'the club acknowledges the withdrawal (F11 ack loop)');
+  ok(r.status === 200 && r.body.ackedAt, 'the club acknowledges the withdrawal');
 
   r = await j('POST', `/player/transitions/${trn.id}/place`, { orgId: 'org-eastport', note: 'Signed for the U21s' }, adeyemi.token);
   ok(r.status === 200 && r.body.transition.status === 'placed' && r.body.transition.history.length >= 3, 'placement closes the case, history intact');
@@ -651,15 +645,12 @@ section('F2 — consent-based transitions');
   ok(gt.status === 400, 'a pack can only reference records the player actually owns');
 }
 
-// ================================================================ F10
-section('F10 — the legacy representation lane is gone (M23 P5.6E E-1, removed in S11a)');
+// ================================================================ legacy representation lane
+section('the legacy representation lane is gone');
 {
-  // P5.6E §5/§7 permit exactly ONE active authority writer, and it is the
-  // canonical P5.6B lane: a licensed individual requests, the client confirms.
-  // The legacy lane created relationships with no licence check, no jurisdiction
-  // policy, no conflict evaluation, no consent ledger, no rev and no
-  // idempotency. It was closed in P5.6E and removed in S11a (no record could
-  // exist), so every one of its routes is now simply not there.
+  // There is exactly ONE representation authority writer: a licensed individual requests, the client confirms.
+  // The legacy lane had no licence check, jurisdiction policy, conflict evaluation, consent ledger, rev or
+  // idempotency, so none of its routes may exist.
   const bodies = [];
   for (const [label, playerId] of [['a 14-year-old', 'pl-guni'], ['a 17-year-old', kid17Id], ['a 16-year-old', kid16Id], ['an adult', 'pl-adeyemi']]) {
     const r = await j('POST', '/org/representation/propose', { playerId, representativeName: 'Alex Agent', scope: 'full' }, agency.token);
@@ -668,7 +659,7 @@ section('F10 — the legacy representation lane is gone (M23 P5.6E E-1, removed 
   }
   // The answer is UNIFORM: the answer for a 14-year-old is byte-identical to
   // the answer for an adult, so it does not distinguish a minor from a visible
-  // adult (the old lane's 403 UNDER_18_WALL / NOT_VISIBLE split did).
+  // adult.
   ok(new Set(bodies).size === 1, 'and the refusal is identical for a minor and an adult — it is not an age oracle');
   const r2 = await j('POST', '/org/representation/propose', { playerId: 'pl-adeyemi' }, maria.token);
   ok(r2.status === 404, 'a club gets the same: there is no such route');
@@ -683,8 +674,8 @@ section('F10 — the legacy representation lane is gone (M23 P5.6E E-1, removed 
   ok(canonical.status !== 404, `the canonical route exists (POST /org/agent/clients/request answers ${canonical.status})`);
 }
 
-// ================================================================ F8
-section('F8 — group workspaces');
+// ================================================================ group workspaces
+section('group workspaces');
 {
   let gr = await fetch(`${BASE}/admin/groups`, { method: 'POST', headers: { ...A(), 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'North West Development Group', adminOrgId: 'org-eastport' }) });
   const group = (await gr.json()).group;
@@ -732,10 +723,9 @@ section('F8 — group workspaces');
   ok(r.status === 403, 'post-departure fetch denied');
 }
 
-// S13c: groups and group grants are typed tables — junk is refused naming the field (not clamped, cut off or turned
-// into text), lists page by cursor, and a departure ends only the grants whose owner shares no group with any
-// recipient.
-section('S13c — group workspaces as tables');
+// Groups and group grants: junk is refused naming the field (not clamped, cut off or turned into text), lists page
+// by cursor, and a departure ends only the grants whose owner shares no group with any recipient.
+section('group workspaces as tables');
 {
   const post = (url, body) => fetch(`${BASE}${url}`, { method: 'POST', headers: { ...A(), 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(async (x) => ({ status: x.status, body: await x.json() }));
   let r = await post('/admin/groups', { name: 42, adminOrgId: 'org-eastport' });
@@ -803,8 +793,8 @@ section('S13c — group workspaces as tables');
   ok(r.body.grantsGiven.some((g) => g.id === both.id && g.revokedAt === null) && r.body.grantsGiven.every((g) => g.fromOrgId === 'org-eastport'), 'the audit export lists the grants the organisation gave');
 }
 
-// ================================================================ F9
-section('F9 — budget scenarios over the API');
+// ================================================================ budgets
+section('budget scenarios over the API');
 {
   const kase = (await j('POST', '/org/cases', { playerId: 'pl-svensson' }, maria.token)).body.case;
   let r = await j('POST', `/org/cases/${kase.id}/budget/scenarios`, {

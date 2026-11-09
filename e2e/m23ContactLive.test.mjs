@@ -1,4 +1,4 @@
-// M23 P3 LIVE — the Contact workflow, driven through the real Pro workspace
+// Live: the Contact workflow, driven through the real Pro workspace
 // and the real player app against a real server.
 //
 //   A  ADULT      lead opens a room for Kola (adult) → the Contact tab is a
@@ -172,7 +172,7 @@ async function openRoomFor(page, playerName) {
 }
 
 const tab = async (page, name) => {
-  await roomTab(page, name); // M24B — category → subcategory
+  await roomTab(page, name); // category → subcategory
   // The Contact panel renders a loading line until its list arrives.
   if (name === 'Contact') await page.locator('[role="tabpanel"][aria-label="Contact"] [aria-label="Contact history"]').waitFor({ timeout: 15000 });
 };
@@ -232,7 +232,7 @@ const ctxLead = await browser.newContext({ viewport: { width: 1440, height: 900 
 const lead = await enterClub(ctxLead, 'Eastport FC', 'Maria Keane', 'Head of Recruitment', 'lead');
 say('A1: a recruitment lead signs in through the real client');
 
-// §54: no new top-level navigation item.
+// No new top-level navigation item.
 {
   const nav = await lead.page.locator('nav.sidebar').innerText();
   neg(!/\bContact\b/.test(nav), 'A1b: the sidebar carries no "Contact" item — contact is a function of a case, not a destination');
@@ -241,7 +241,7 @@ say('A1: a recruitment lead signs in through the real client');
 const ROOM_A = await openRoomFor(lead.page, 'Kola Adeyemi');
 say(`A2: the lead opens a Recruitment Room for an adult player through the UI (${ROOM_A})`);
 {
-  // M24B — the pages of every category, read off the category buttons (only the open category's pages are in the tablist).
+  // The pages of every category, read off the category buttons (only the open category's pages are in the tablist).
   const tabs = await lead.page.locator('[data-casenav="room"] .casenav-cat').evaluateAll((els) => els.flatMap((e) => (e.dataset.subs ?? '').split(' ')));
   ok(tabs.includes('contact'), 'A2b: the room offers a page-local Contact tab');
   const idx = tabs.indexOf('contact');
@@ -312,7 +312,7 @@ if (await kola.locator('text=Our promises to every player').count()) {
   await kola.waitForSelector('text=Your visibility right now', { timeout: 30000 });
 }
 await openInbox(kola);
-// M24F.3 — the Inbox is a list of rows; the request opens to its detail and the words sit behind "View full message"
+// The Inbox is a list of rows; the request opens to its detail and the words sit behind "View full message"
 await kola.locator('[data-testid^="inbox-request-"]').first().click();
 await kola.locator('[data-testid^="req-details-"]').first().click();
 await kola.waitForSelector('text=Eastport FC — a conversation about a trial', { timeout: 20000 });
@@ -367,9 +367,9 @@ const ctxAmara = await browser.newContext({ viewport: { width: 390, height: 844 
 const amara = await enterPlayer(ctxAmara, 'Amara Adebayo', 'amara', 'text=Guardian');
 await amara.waitForSelector('text=About Guni — U15 development group', { timeout: 25000 });
 {
-  await amara.locator('[data-testid^="req-details-"]').first().click().catch(() => {}); // M24F.3 — message and routing note behind View full message
+  await amara.locator('[data-testid^="req-details-"]').first().click().catch(() => {}); // message and routing note behind View full message
   const txt = await bodyText(amara);
-  ok(/(about|For) Guni/.test(txt) && /U15 development group/.test(txt), 'M4: the guardian sees the message, about her child, at 390px'); // M24F: the record says "For Guni Adebayo"
+  ok(/(about|For) Guni/.test(txt) && /U15 development group/.test(txt), 'M4: the guardian sees the message, about her child, at 390px'); // the record says "For Guni Adebayo"
   ok(/routed to you because the player is under age/.test(txt), 'M4b: and is told why it reached her and not the child');
   ok((await amara.locator('[data-testid^="req-reply-"], input[placeholder*="reply" i]').count()) > 0, 'M4c: with a reply field (inside View full message, M24F.3)');
 }

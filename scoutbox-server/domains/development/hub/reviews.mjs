@@ -1,11 +1,11 @@
 /**
- * M21 — Development Reviews: append-only, and corrected by supersession.
+ * Development Reviews: append-only, and corrected by supersession.
  *
  * A review is a statement about what was true at a moment. That is the whole
  * value of it: six months later, "we agreed in August that these two goals
  * were in progress" is only useful if nobody has since edited August. So there
- * is no PATCH route for a submitted review anywhere in this milestone, and
- * this module offers no function that mutates one (§34).
+ * is no PATCH route for a submitted review anywhere, and this module offers
+ * no function that mutates one.
  *
  * Corrections are real and necessary — a reviewer picks the wrong plan, or
  * writes the wrong date — and they work by appending a new review that names
@@ -13,7 +13,7 @@
  * not hidden: a record that quietly vanishes when corrected is a record nobody
  * can rely on.
  *
- * The snapshot (§35) records enough goal state to explain what the reviewer
+ * The snapshot records enough goal state to explain what the reviewer
  * was looking at, and deliberately not the Passport. A review is a note about
  * a plan; a copy of the player's canonical evidence inside it would be a second
  * Passport with a date stamp, frozen and slowly becoming wrong.
@@ -25,7 +25,7 @@ import {
 import { evaluateTarget } from './targets.mjs';
 
 /**
- * Build the goal snapshots for a review (§35).
+ * Build the goal snapshots for a review.
  *
  * Per goal: its status, how many actions stood where, which evidence was
  * cited (ids only — the content is resolved live when the review is read, so
@@ -58,7 +58,7 @@ export function buildGoalSnapshots({ goals, actions, links, attempts, sessions }
         status: g.status,
         actionCounts: { total: counts.total, done: counts.done, blocked: counts.blocked, cancelled: counts.cancelled },
         completion: completionPhrase(counts),
-        // References, not evidence. The same rule as everywhere else in M21.
+        // References, not evidence: the same rule as everywhere else in the hub.
         evidenceRefs: (linksByGoal.get(g.id) ?? []).map((l) => ({ sourceType: l.sourceType, sourceId: l.sourceId })),
         // What the measurement said at review time — and, because it is
         // re-evaluated on read for the CURRENT state elsewhere, this is
@@ -74,7 +74,7 @@ export function buildGoalSnapshots({ goals, actions, links, attempts, sessions }
  * `reviewerKind` is not the caller's to choose freely: it follows from who
  * they are. A club cannot file a "Player reflection", and a player cannot file
  * a "Coach review" — the label is the provenance, and a provenance the subject
- * can set is not provenance (§37/§38).
+ * can set is not provenance.
  */
 export function validateReview({ body, access, viewer, now }) {
   const kind = viewer.kind === 'player_self' ? 'player_reflection'

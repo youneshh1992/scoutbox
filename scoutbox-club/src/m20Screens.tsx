@@ -1,4 +1,4 @@
-// M20 org screen — the Director Dashboard.
+// Org screen — the Director Dashboard.
 //
 // One sentence governs every pixel below:
 //
@@ -130,7 +130,7 @@ function PipelinePanels({ f }: { f: Family }) {
   const trialProcess = m.trial_process;
   const trialSteps = (trialProcess?.steps ?? {}) as Record<string, Figure>;
   const decisionOutcomes = m.decision_outcomes;
-  // M23 P8 — the journey funnel from the records themselves (case-based).
+  // The journey funnel from the records themselves (case-based).
   const jf = m.journey_evidence_funnel;
   const jfRows = (jf?.rows ?? []) as { stage: string; value: number; historyOnly: number; basis: string; source: string }[];
   const jfIntervals = (jf?.intervals ?? {}) as Record<string, { n: number; medianDays: number | null }>;
@@ -529,7 +529,7 @@ const FAMILY_RENDERERS: Record<string, (p: { f: Family; onDrill: (metric: string
 
 // ---------------------------------------------------------- executive layer
 //
-// M24F.4 — the top of the page is a director's view: four counts, the
+// The top of the page is a director's view: four counts, the
 // funnel as bars, time by stage as bars, coverage as a ring, and the five
 // things that need attention. Every number is one the server already sent;
 // nothing here is recomputed, rated or ranked. The seven families follow as
@@ -694,7 +694,7 @@ export function DirectorDashboardScreen({ session, tick, notify, filters, onFilt
 
   return (
     <div className="screen dash" data-screen="director-dashboard">
-      {/* M24F.5 — one line of controls: the period, then two quiet ways in. The
+      {/* One line of controls: the period, then two quiet ways in. The
           principle, the window and the other filters are one tap away; nothing
           explanatory sits above the numbers until it is asked for. */}
       <div className="dash-head" data-dash-head="true">
@@ -781,7 +781,7 @@ export function DirectorDashboardScreen({ session, tick, notify, filters, onFilt
           <button type="button" className="dash-detail-toggle" aria-expanded={showDetail} onClick={() => setShowDetail((v) => !v)} data-testid="dash-detail-toggle">
             {showDetail ? t('m20.exec.hideAll', 'Hide all figures') : t('m20.exec.showAll', 'Show all figures')}
           </button>
-          {/* M24F.5 — every panel, its limitation printed beside its number, one tap deeper. Rendered only when opened (not hidden). */}
+          {/* Every panel, its limitation printed beside its number, one tap deeper. Rendered only when opened (not hidden). */}
           {showDetail && (
             <div className="dash-detail" data-testid="dash-detail">
               {dash.trend && (

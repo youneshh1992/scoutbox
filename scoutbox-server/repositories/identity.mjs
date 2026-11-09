@@ -1,6 +1,5 @@
 /**
- * Players and guardians: typed tables with explicit writes (S4a, migration `0005_core_identity_live`; explicit since
- * S14h, docs/architecture/migration.md §4.6; sql/01_identity.sql).
+ * Players and guardians (`players`, `guardians`, `guardian_children`; the players' lists are playerSubrecords.mjs).
  *
  * Player record (every key always present):
  *   { id, name, dob, country, city, position, foot, heightCm, weightKg, squadNumber, contractUntil, marketValueRange,
@@ -22,27 +21,21 @@
  * this one, as `{ id, name, email }`.
  *
  * Password and e-mail-code hashes are never on a record (`passwordHashOf`, `setPasswordHash`, `emailCodeHashOf`,
- * `setEmailCodeHash`). Responses are allowlists.
- *
- * WRITES are explicit operations, each joining the open unit of work, the caller's transaction or its own: `create`,
- * `update(id, draft => …)`, the list operations, the link operations (`link`, `unlink`, `ageUp`) and the account
- * deletion (`erase`). READS are SQL: no mirror, no db.* view (`db.players` and `db.guardians` throw); fresh,
- * deep-frozen records; a list decodes its players' rows in one query per table. Refusals carry a code and name the
- * id and the field, never a value.
+ * `setEmailCodeHash`). Responses are allowlists. Refusals carry a code and name the id and the field, never a value.
  *
  * Relationships. `players.guardian_id` and the `primary` row of `guardian_children` are written together and cannot
  * disagree; a minor is created with its primary link in the same transaction (an unlinked child cannot be created);
  * a guardian's e-mail is unique case-insensitively. `ageUp` clears the primary link only (co-guardians keep listing
- * the player, as before).
+ * the player).
  *
- * The retained record (S4b-R; the Founder's decisions: the full birth date, 12 October 2026, and the country code
- * kept, 21 October 2026): an account deletion keeps the player's row reduced to its id, the deletion instant, the
+ * The retained record (the full birth date and the country code are kept: Founder's decisions, docs/decisions.md):
+ * an account deletion keeps the player's row reduced to its id, the deletion instant, the
  * birth date and the country, with fixed placeholders in the other required columns; its lists and links are deleted
  * in the same unit. A retained row is served by nothing that serves accounts, only by the `retained*` accessors, and
  * its id is never created again. Not a retention policy.
  *
  * A first installation's players and guardians (the seed) are imported once by `initialize`, while
- * `meta.coreIdentityInit` is `pending` (set by the migration); the first installation's import settles it.
+ * `meta.coreIdentityInit` is `pending` (set by the migration).
  */
 import { transaction, migrationApplied } from './database.mjs';
 import { parseStrictDateOnly } from '../temporal.mjs';
@@ -55,9 +48,9 @@ export const CORE_IDENTITY_LIVE_MIGRATION = '0005_core_identity_live';
 export const PLAYER_ERASURE_MIGRATION = '0014_player_erasure';
 /** `meta` key holding the initialisation state (`pending` | `done`); absent reads as `done`. */
 export const CORE_IDENTITY_INIT_META = 'coreIdentityInit';
-/** The two snapshot collections the identity repositories own; coupled through the link rows. */
+/** The two collections the identity repositories own; coupled through the link rows. */
 export const IDENTITY_COLLECTIONS = Object.freeze(['players', 'guardians']);
-/** The backup / snapshot collection the retained records travel in (never inside `players`). */
+/** The collection the retained records are read back in (never inside `players`). */
 export const PLAYERS_RETAINED_COLLECTION = 'playersRetained';
 export const RETAINED_PLAYER_NAME = 'Deleted player';
 
@@ -197,7 +190,7 @@ const PLAYER_DEFAULTS = Object.freeze({ city: null, position: null, foot: null, 
   level: 'amateur', footballCategory: null, identityVerified: false, guardianId: null, createdAt: null, location: null, stats: null,
   notificationPrefs: null, programme: null });
 
-/** An incoming player (create, a snapshot, the seed) with its defaults: every field present, the lists as given (or empty). */
+/** An incoming player (create, the seed) with its defaults: every field present, the lists as given (or empty). */
 function playerWithDefaults(raw) {
   const g = given(raw);
   const r = { ...PLAYER_DEFAULTS, ...g };
@@ -346,7 +339,7 @@ function playerFromDb(d, children, trialReports) {
   return rec;
 }
 
-/** S14i: the columns of a light record (scanLight, the fixture graph, the feed): the row's own facts, no lists. */
+/** The columns of a light record (scanLight, the fixture graph, the feed): the row's own facts, no lists. */
 const LIGHT_COLS = ['id', 'name', 'birth_date', 'country', 'city', 'position', 'foot', 'height_cm', 'weight_kg', 'level', 'availability', 'academy_plus',
   'first_team_seeker', 'football_category', 'identity_verified', 'lat', 'lng', 'created_at', 'profile_signal',
   'stats_appearances', 'stats_goals', 'stats_assists', 'stats_pace_kmh', 'stats_pass_completion_pct', 'stats_duel_success_pct', 'stats_clean_sheets'];
@@ -443,7 +436,7 @@ function adultsSql(nowMs) {
 /** Can this organisation ever see a minor (domain.mjs visibleToOrg: a verified club only)? */
 const seesMinors = (org) => org?.type === 'club' && org.verified === true;
 /**
- * S14i: the SQL functions the player reads use, registered on the connection from the JS rules themselves (one
+ * The SQL functions the player reads use, registered on the connection from the JS rules themselves (one
  * definition each): `haversine_km` (domain.mjs haversineKm, the Grassroots radius), `distance_tenths` (the distance a
  * Grassroots club is shown, in tenths of a km, as views/playerViews.mjs rounds it) and `lower_js` (JavaScript's
  * toLowerCase, which also lowers accented letters; SQLite's lower() is ASCII only).
@@ -466,7 +459,7 @@ function lngRanges(box) {
   return [[box.minLng, box.maxLng]];
 }
 
-// ------------------------------------------------------------------ profile completeness (S14i)
+// ------------------------------------------------------------------ profile completeness
 /**
  * `players.profile_signal`: the directory's sort figure, domain.mjs `trustScoreFromFacts` over the row's facts and its
  * list counts (attendance, clips, the trials' filed reports). Every write that can change a fact refreshes it in its own
@@ -477,7 +470,7 @@ const signalSqlCache = new WeakMap();
 function signalSql(sqlite) {
   let sql = signalSqlCache.get(sqlite);
   if (sql) return sql;
-  // Cached only once the trial reports exist (a connection that reads before their migration asks again next time).
+  // Cached only once the trial reports table exists (a connection that reads before it does asks again next time).
   const hasTrials = !!sqlite.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'trial_reports'").get();
   const reports = hasTrials ? '(SELECT COUNT(*) FROM trial_reports r JOIN trials t ON t.id = r.trial_id WHERE t.player_id = p.id)' : '0';
   const stats = ['stats_appearances', 'stats_goals', 'stats_assists', 'stats_pace_kmh', 'stats_pass_completion_pct', 'stats_duel_success_pct', 'stats_clean_sheets'].map((c) => `p.${c} IS NOT NULL`).join(' OR ');
@@ -509,7 +502,7 @@ export function refreshProfileSignals(sqlite, ids = null) {
   return changed;
 }
 
-// ------------------------------------------------------------------ the retained record (S4b-R)
+// ------------------------------------------------------------------ the retained record
 /** The fixed storage placeholders of a retained row: constants the table's constraints need, never read back as facts about the person. */
 export const RETAINED_PLACEHOLDERS = Object.freeze({ name: RETAINED_PLAYER_NAME, profile_signal: 0, academy_plus: 0, first_team_seeker: 0, availability: 'not_seeking', contract_status: 'unknown', level: 'amateur', identity_verified: 0, medical_shared: 0, medical_condition_status: 'unknown' });
 const RETAINED_KEYS = Object.freeze(['id', 'deletedAt', 'birthDate', 'country']);
@@ -533,11 +526,7 @@ export function validateRetainedRecord(rec, index = null) {
   if (unknown.length) problems.push(`unknown field(s) ${unknown.join(', ')} (a retained record carries exactly id, deletedAt, birthDate, country)`);
   return problems.map((m) => `${at}: ${m}`);
 }
-/**
- * The retained records as a snapshot collection (null before migration 0014). `replace` may only ADD records: a stored
- * record that is not listed, or listed with a changed birth date, country or deletion instant, refuses the whole save
- * (RETAINED_RECORD_PROTECTED, ids only). An omitted collection keeps the rows as they are.
- */
+/** The retained records, read back (the test suites' read-back). */
 export const PLAYERS_RETAINED = {
   name: PLAYERS_RETAINED_COLLECTION,
   cutOver: (sqlite) => migrationApplied(sqlite, PLAYER_ERASURE_MIGRATION),
@@ -550,10 +539,10 @@ const ERASE_COLUMNS = Object.freeze(P_COLS.filter((c) => !['id', 'birth_date', '
 const ERASE_SQL = `UPDATE players SET ${ERASE_COLUMNS.map((c) => `${c} = @${c}`).join(', ')} WHERE id = @id AND deleted_at IS NULL`;
 const eraseParamsFor = (rec) => { const full = retainedRowFor(rec); const p = { id: rec.id }; for (const c of ERASE_COLUMNS) p[c] = full[c]; return p; };
 
-// ------------------------------------------------------------------ typing a whole identity (the seed, a snapshot)
+// ------------------------------------------------------------------ typing a whole identity (the seed)
 const blocked = (detail, extra = {}) => refusal('IDENTITY_IMPORT_BLOCKED', `${detail}; nothing was written`, extra);
 /**
- * Type a snapshot pair `{ players, guardians }` (the records plus `password`, and a guardian's `emailCodeHash`): every
+ * Type a pair `{ players, guardians }` (the records plus `password`, and a guardian's `emailCodeHash`): every
  * record typed, ids and e-mails unique, every reference and both sides of every link consistent, no minor on `now`
  * without a primary guardian. Returns the rows to write, or throws IDENTITY_IMPORT_BLOCKED naming the ids and fields.
  */
@@ -621,7 +610,7 @@ function writeIdentity(sqlite, typed) {
 
 const cutOver = (sqlite) => migrationApplied(sqlite, CORE_IDENTITY_LIVE_MIGRATION);
 
-/** Read every live player and guardian in snapshot form (the records plus their hashes; no trial reports, no coGuardians). */
+/** Read every live player and guardian with their hashes (no trial reports, no coGuardians). */
 function readIdentitySnapshot(sqlite) {
   const live = sqlite.prepare(`${P_SELECT} WHERE deleted_at IS NULL ORDER BY rowid`).all();
   const children = readChildrenFor(sqlite, live.map((d) => d.id));
@@ -632,7 +621,7 @@ function readIdentitySnapshot(sqlite) {
   return { players, guardians };
 }
 
-/** The whole domain read back as plain records (`readAllRecords` in index.mjs: the test suites' read-back); null before its migration. */
+/** The whole domain read back as plain records (`readAllRecords` in index.mjs: the test suites' read-back). */
 export const IDENTITY_RECORDS = {
   names: IDENTITY_COLLECTIONS,
   cutOver,
@@ -750,7 +739,7 @@ export function createIdentityRepositories({ sqlite, log = () => {}, unit = null
   };
 
   /**
-   * Keyset paging over the admitted players (S14i). `order` lists `[sqlExpression, 'ASC' | 'DESC', args?]`, the last one unique
+   * Keyset paging over the admitted players. `order` lists `[sqlExpression, 'ASC' | 'DESC', args?]`, the last one unique
    * (the id); `after` is the previous page's last key. Returns the rows (with `k0…kN`, the key) of one page plus one.
    */
   const keysetRows = (w, order, { limit, after = null }) => {
@@ -921,7 +910,7 @@ export function createIdentityRepositories({ sqlite, log = () => {}, unit = null
       return { playerId: id, guardianId: p.guardian_id };
     }),
     /**
-     * The account deletion (S4b-R): the row stays, reduced to the retained record; the lists and links are deleted.
+     * The account deletion: the row stays, reduced to the retained record; the lists and links are deleted.
      * A retained id is refused. Sessions, codes and the media queue are the caller's acts in the same unit.
      */
     erase: (id, { at = now() } = {}) => operation(() => {
@@ -968,13 +957,13 @@ export function createIdentityRepositories({ sqlite, log = () => {}, unit = null
     /** The live players the organisation may see (see scanWhere: the whole visibility rule), with the further filters. */
     visibleCandidates: (org, filter = {}, opts = {}) => players.list({ ...filter, visibleTo: org }, opts),
     /**
-     * S14j: the whole visibility rule for `org` as SQL over `players p` (the wall, the Grassroots radius, the blocks),
+     * The whole visibility rule for `org` as SQL over `players p` (the wall, the Grassroots radius, the blocks),
      * for a read that joins the players to another domain's rows (the match facts). `{ sql, args }`, or null when the
      * organisation can see nobody (a Grassroots club without a ground).
      */
     visibleWhere: (org, at = now()) => scanWhere({ visibleTo: org }, at),
     /**
-     * One page of the organisation's player directory (S14i), in the directory's declared order (directoryOrder), with
+     * One page of the organisation's player directory, in the directory's declared order (directoryOrder), with
      * the scan filters plus `text`. `page` is `{ limit, after }` from readPage(query, directoryCursorShape(org)).
      */
     directoryPage: (org, filter = {}, page) => {
@@ -1014,7 +1003,7 @@ export function createIdentityRepositories({ sqlite, log = () => {}, unit = null
       }
     },
     /**
-     * The Film Room deck (S14i): one page of the playable clips (a url) of the players the organisation may see,
+     * The Film Room deck: one page of the playable clips (a url) of the players the organisation may see,
      * verified clips first, then the most viewed, then the player id and the clip's place in their list (player_media_deck).
      * Returns `{ items: [{ player, media }], nextCursor }`, the players decoded once per page.
      */
@@ -1037,7 +1026,7 @@ export function createIdentityRepositories({ sqlite, log = () => {}, unit = null
       };
     },
     /**
-     * The fixture graph (S14i): one page of the (fixture, date) groups of the attendances of the players the
+     * The fixture graph: one page of the (fixture, date) groups of the attendances of the players the
      * organisation may see, the newest date first, then the fixture name. Each group lists its attendances in the
      * players' creation order (a player may appear twice), with the venue of the first. `{ items, nextCursor }`.
      */
@@ -1057,7 +1046,7 @@ export function createIdentityRepositories({ sqlite, log = () => {}, unit = null
       return { items: [...byKey.values()], nextCursor: out.nextCursor };
     },
     /**
-     * The club feed's player half (S14i): the admitted players created since `since` and the clips uploaded since
+     * The club feed's player half: the admitted players created since `since` and the clips uploaded since
      * then, each newest first and at most `limit`: `{ players: [light], clips: [{ player: light, media }] }`.
      */
     recentFor: (org, since, limit) => {
@@ -1071,7 +1060,7 @@ export function createIdentityRepositories({ sqlite, log = () => {}, unit = null
       return { players: fresh, clips };
     },
     /**
-     * Every live player's best result per drill (S14i, the benchmarks' cohort), for the players a scan filter admits:
+     * Every live player's best result per drill (the benchmarks' cohort), for the players a scan filter admits:
      * Map drill id → [{ playerId, max, min }]. One GROUP BY; no player is decoded.
      */
     drillBests: (filter = {}) => {
@@ -1090,7 +1079,7 @@ export function createIdentityRepositories({ sqlite, log = () => {}, unit = null
     passwordHashOf: (id) => q('SELECT password_hash FROM players WHERE id = ? AND deleted_at IS NULL').get(id)?.password_hash ?? null,
     /** Rows per list table (counts only), for reports. */
     subrecordRows: () => countChildRows(st),
-    /** The narrow accessors of the retained records (S4b-R). No route serves one. */
+    /** The narrow accessors of the retained records. No route serves one. */
     retained: (id) => { const r = typeof id === 'string' ? q('SELECT id, deleted_at, birth_date, country FROM players WHERE id = ? AND deleted_at IS NOT NULL').get(id) : null; return r ? retainedRecordFromRow(r) : null; },
     isRetained: (id) => isRetainedId(id),
     retainedRecords: () => q('SELECT id, deleted_at, birth_date, country FROM players WHERE deleted_at IS NOT NULL ORDER BY deleted_at, id').all().map(retainedRecordFromRow),
@@ -1192,7 +1181,7 @@ export function createIdentityRepositories({ sqlite, log = () => {}, unit = null
       return { engine: 'sqlite', players: counts.players, guardians: counts.guardians, links: counts.links, imported: 0 };
     },
     /**
-     * First-installation initialisation: type the given records (the seed, in snapshot form) and write them with the
+     * First-installation initialisation: type the given records (the seed, with their hashes) and write them with the
      * state `done` in one transaction. Allowed only while the state is `pending` and the tables are empty; a refused
      * seed writes nothing and the state stays `pending`.
      */

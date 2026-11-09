@@ -1,8 +1,6 @@
 /**
- * Signing packages, completed signings, post-signing follow-ups and outcome reports (S8d) get their own typed
- * tables, and `idempotency_keys` is created for the signing packages' keys. Runs with foreign keys off.
- * REGISTERED in DATA_MIGRATIONS. `up()` is the DDL only: the tables start empty and are written
- * through the repository.
+ * Signing packages, completed signings, post-signing follow-ups and outcome reports, and `idempotency_keys` for the
+ * signing packages' keys. Runs with foreign keys off.
  */
 import { migrationApplied } from '../database.mjs';
 import { idempotencyKeysDdl } from '../recruitment.mjs';

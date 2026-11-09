@@ -1,17 +1,13 @@
 /**
  * The data layer: every domain's tables in one SQLite file, each owned by one repository. `attachDataLayer` runs the
- * table migrations and attaches the repositories (see its comment).
+ * table migrations and attaches the repositories in dependency order (organisations → identity → staff → sessions →
+ * the rest), so every repository that references another finds its rows in place on a first installation.
  *
- * Order at boot (server.mjs): open the store → attachDataLayer (migrations, then organisations → identity → staff →
- * sessions → the rest, so every repository that references another finds its rows in place on a first
- * installation) → module registration → listen.
+ * `readAllRecords` is the test suites' whole-database read (scripts/dataLayerFixture.mjs `readRecords`). Nothing writes
+ * a whole collection: every write is a repository operation.
  *
- * Whole-database read for the test suites (scripts/dataLayerFixture.mjs `readRecords`): `readAllRecords` reads every
- * collection as plain records in the shape the server sees. Nothing writes a whole collection: every write is a
- * repository operation.
- *
- * This directory is `repositories/`, not `data/`: `data/` is the server's
- * runtime data directory (DATA_DIR), which tests delete between runs.
+ * This directory is `repositories/`, not `data/`: `data/` is the server's runtime data directory (DATA_DIR), which
+ * tests delete between runs.
  */
 import { runDataMigrations, dataSchemaReport } from './database.mjs';
 import { createUsersRepository, USERS_TABLE } from './users.mjs';
@@ -105,7 +101,7 @@ const NOTIFICATION_TABLE_DISPATCH = Object.freeze([...OUTBOX_PUSH_RECORD_TABLES]
 /** The notifications and preferences. */
 const NOTIFICATION_FEED_TABLES = Object.freeze([NOTIFICATIONS_TABLE, NOTIFICATION_PREFS_TABLE]);
 
-/** The whole database as plain records, collection by collection (a domain before its migration is left out). */
+/** The whole database as plain records, collection by collection. */
 export function readAllRecords(sqlite) {
   const out = {};
   for (const table of TABLES) {
@@ -114,7 +110,7 @@ export function readAllRecords(sqlite) {
   }
   const identity = IDENTITY_RECORDS.read(sqlite);
   if (identity) Object.assign(out, identity);
-  const retained = PLAYERS_RETAINED.read(sqlite); // S4b-R: the retained records, under their own name, never inside `players`
+  const retained = PLAYERS_RETAINED.read(sqlite); // under their own name, never inside `players`
   if (retained) out[PLAYERS_RETAINED.name] = retained;
   const queue = MEDIA_DELETIONS_TABLE.read(sqlite);
   if (queue) out[MEDIA_DELETIONS_TABLE.name] = queue;
@@ -122,55 +118,55 @@ export function readAllRecords(sqlite) {
     const rows = table.read(sqlite);
     if (rows) out[table.name] = rows;
   }
-  const audit = SAFETY_AUDIT_RECORDS.read(sqlite); // S6b, explicit since S14b: the eight audit collections (null before the 0013 record)
+  const audit = SAFETY_AUDIT_RECORDS.read(sqlite);
   if (audit) Object.assign(out, audit);
-  const recruitment = RECRUITMENT_RECORDS.read(sqlite); // S8a: requests and trials from their typed tables (null before the 0015 record)
+  const recruitment = RECRUITMENT_RECORDS.read(sqlite);
   if (recruitment) Object.assign(out, recruitment);
-  const cases = RECRUITMENT_CASES_RECORDS.read(sqlite); // S8b: the five collections from their tables (null before the 0016 record)
+  const cases = RECRUITMENT_CASES_RECORDS.read(sqlite);
   if (cases) Object.assign(out, cases);
-  const contactsOffers = CONTACTS_OFFERS_RECORDS.read(sqlite); // S8c: the two collections from their tables (null before the 0017 record)
+  const contactsOffers = CONTACTS_OFFERS_RECORDS.read(sqlite);
   if (contactsOffers) Object.assign(out, contactsOffers);
-  const signings = SIGNINGS_FOLLOWUPS_RECORDS.read(sqlite); // S8d: the four typed collections from their tables (null before the 0018 record)
+  const signings = SIGNINGS_FOLLOWUPS_RECORDS.read(sqlite);
   if (signings) Object.assign(out, signings);
-  const evidence = SCOUTING_EVIDENCE_RECORDS.read(sqlite); // S9a: evidence, coach affiliations and squad invitations (null before the 0019 record)
+  const evidence = SCOUTING_EVIDENCE_RECORDS.read(sqlite);
   if (evidence) Object.assign(out, evidence);
-  const assessments = SCOUTING_ASSESSMENTS_RECORDS.read(sqlite); // S9b: assessment templates, assessments, video segments and playlists (null before the 0020 record)
+  const assessments = SCOUTING_ASSESSMENTS_RECORDS.read(sqlite);
   if (assessments) Object.assign(out, assessments);
-  const clubSetup = CLUB_SETUP_RECORDS.read(sqlite); // S9c: tactical setups, squads, shadow lists, looking-for, federation checks, vacancies (null before the 0021 record)
+  const clubSetup = CLUB_SETUP_RECORDS.read(sqlite);
   if (clubSetup) Object.assign(out, clubSetup);
-  const opportunitiesCampaigns = OPPORTUNITIES_CAMPAIGNS_RECORDS.read(sqlite); // S9d: opportunities, applications, campaigns, submissions, player preferences (null before the 0022 record)
+  const opportunitiesCampaigns = OPPORTUNITIES_CAMPAIGNS_RECORDS.read(sqlite);
   if (opportunitiesCampaigns) Object.assign(out, opportunitiesCampaigns);
-  const verification = VERIFICATION_RECORDS.read(sqlite); // S10a: claims, events, evidence, tokens, administrators, applications, disputes, references, invitations, conflicts, domain requests, verified domains (null before the 0023 record)
+  const verification = VERIFICATION_RECORDS.read(sqlite);
   if (verification) Object.assign(out, verification);
-  const passport = PASSPORT_RECORDS.read(sqlite); // S10b: Passport preferences, career entries, achievements, shares, corrections (null before the 0024 record)
+  const passport = PASSPORT_RECORDS.read(sqlite);
   if (passport) Object.assign(out, passport);
-  const transitions = TRANSITIONS_RECORDS.read(sqlite); // S10c: transition cases and coach references (null before the 0025 record)
+  const transitions = TRANSITIONS_RECORDS.read(sqlite);
   if (transitions) Object.assign(out, transitions);
-  const agentCore = AGENT_CORE_RECORDS.read(sqlite); // S11a: agent profiles, affiliations and agreements (null before the 0026 record)
+  const agentCore = AGENT_CORE_RECORDS.read(sqlite);
   if (agentCore) Object.assign(out, agentCore);
-  const compliancePolicies = COMPLIANCE_POLICIES_RECORDS.read(sqlite); // S11b-1: Trust & Safety reviewers and policy versions (null before the 0027 record)
+  const compliancePolicies = COMPLIANCE_POLICIES_RECORDS.read(sqlite);
   if (compliancePolicies) Object.assign(out, compliancePolicies);
-  const complianceRecords = COMPLIANCE_RECORDS_RECORDS.read(sqlite); // S11b-2: compliance contexts (with evaluations), reviews and consents (null before the 0028 record)
+  const complianceRecords = COMPLIANCE_RECORDS_RECORDS.read(sqlite);
   if (complianceRecords) Object.assign(out, complianceRecords);
-  const agentTransactions = AGENT_TRANSACTIONS_RECORDS.read(sqlite); // S11c: transactions, representation bindings and documents (null before the 0029 record)
+  const agentTransactions = AGENT_TRANSACTIONS_RECORDS.read(sqlite);
   if (agentTransactions) Object.assign(out, agentTransactions);
-  const development = DEVELOPMENT_RECORDS.read(sqlite); // S12a: objectives, drill reviews and the Development Hub (null before the 0030 record)
+  const development = DEVELOPMENT_RECORDS.read(sqlite);
   if (development) Object.assign(out, development);
-  const boxCam = BOX_CAM_RECORDS.read(sqlite); // S12b: Box Cam, Combine and CV results (null before the 0031 record)
+  const boxCam = BOX_CAM_RECORDS.read(sqlite);
   if (boxCam) Object.assign(out, boxCam);
-  const discovery = DISCOVERY_RECORDS.read(sqlite); // S12c: briefs, Nobody Missed, Second Look, watchlists (null before the 0032 record)
+  const discovery = DISCOVERY_RECORDS.read(sqlite);
   if (discovery) Object.assign(out, discovery);
-  const insight = INSIGHT_COVERAGE_RECORDS.read(sqlite); // S12d: exposure, review-later, evidence gaps, calibration, coverage (null before the 0033 record)
+  const insight = INSIGHT_COVERAGE_RECORDS.read(sqlite);
   if (insight) Object.assign(out, insight);
-  const integrations = INTEGRATIONS_RECORDS.read(sqlite); // S13a: imports, prospects, identity reviews, API keys, webhooks (null before the 0034 record)
+  const integrations = INTEGRATIONS_RECORDS.read(sqlite);
   if (integrations) Object.assign(out, integrations);
-  const enterprise = ENTERPRISE_RECORDS.read(sqlite); // S13b: staff invites, SSO, support tickets and access grants (null before the 0035 record)
+  const enterprise = ENTERPRISE_RECORDS.read(sqlite);
   if (enterprise) Object.assign(out, enterprise);
-  const groups = GROUPS_RECORDS.read(sqlite); // S13c: group workspaces and group grants (null before the 0036 record)
+  const groups = GROUPS_RECORDS.read(sqlite);
   if (groups) Object.assign(out, groups);
-  const grassroots = GRASSROOTS_RECORDS.read(sqlite); // S13d: open days, match days and friendlies (null before the 0037 record)
+  const grassroots = GRASSROOTS_RECORDS.read(sqlite);
   if (grassroots) Object.assign(out, grassroots);
-  const operations = OPERATIONS_RECORDS.read(sqlite); // S13e: uploads, saved searches, invoices, reputation seed, delivery bookkeeping (null before the 0038 record)
+  const operations = OPERATIONS_RECORDS.read(sqlite);
   if (operations) Object.assign(out, operations);
   return out;
 }
@@ -188,24 +184,21 @@ export function attachDataLayer({ seed = {}, store, nextId, sessionTtlMs, now = 
   if (!sqlite) throw new TypeError('the data layer needs a store with a SQLite connection (node:sqlite); there is no in-memory or JSON fallback');
   const migrations = runDataMigrations(sqlite, DATA_MIGRATIONS, { now: now(), log, context: { sessionTtlMs } });
 
-  // Every repository writes its rows at once and reads through SQL.
   // The organisations attach first: org_users, and most tables after them, reference orgs.
-  // S14g: the organisations are explicit.
   const orgs = createOrgsRepository({ sqlite, nextId, log, now, unit: store.unit });
   const orgsBoot = orgs.initState() === 'pending' ? orgs.initialize(seed.orgs ?? []) : orgs.attach();
 
-  // S14h: players and guardians are explicit. Their trial reports
-  // come from the recruitment repository, attached below (a first installation's seed carries none).
+  // Players' trial reports come from the recruitment repository, attached below (a first installation's seed carries
+  // none).
   let recruitment = null;
-  /** A collection the caller handed in before its table took over (the seed's or a fixture's plain array), or []. */
+  /** A collection the caller handed in (the seed's or a fixture's plain array), or []. */
   const handedIn = (name) => (Object.hasOwn(seed, name) && Array.isArray(seed[name]) ? seed[name] : []);
   const identity = createIdentityRepositories({ sqlite, log, unit: store.unit, now, trialReportsOf: (ids) => (recruitment ? recruitment.trialReportsForPlayers(ids) : new Map()) });
-  const identityWasPending = identity.initState() === 'pending'; // a first installation: its seed is imported once (S13e: the demo reputation rows too)
+  const identityWasPending = identity.initState() === 'pending'; // a first installation: its seed (and the demo reputation rows) is imported once
   const identityBoot = identityWasPending
     ? identity.initialize({ players: seed.players ?? [], guardians: seed.guardians ?? [] }, { now: now() })
     : identity.attach();
 
-  // S14f: staff and sessions are explicit.
   const users = createUsersRepository({ sqlite, nextId, log, now, unit: store.unit });
   const usersBoot = users.attach();
 
@@ -217,17 +210,15 @@ export function attachDataLayer({ seed = {}, store, nextId, sessionTtlMs, now = 
   const codes = createOneTimeCodesRepository({ sqlite, log, now, unit: store.unit });
   const codesBoot = codes.attach({ at: now() });
 
-  // S14e: explicit, no mirror.
   const notifications = createNotificationsRepository({ sqlite, log, now, nextId, unit: store.unit });
   const notificationsBoot = notifications.attach();
 
-  // S14d: explicit, no mirror.
   const dispatches = createDispatchesRepository({ sqlite, log, now, unit: store.unit });
   const dispatchesBoot = dispatches.attach();
   const outboxPush = createOutboxPushRepository({ sqlite, log, now, unit: store.unit });
   const outboxPushBoot = outboxPush.attach();
 
-  // The explicit repositories, in dependency order.
+  // The remaining repositories, in dependency order.
   const recruitmentContactsOffers = createRecruitmentContactsOffersRepository({ sqlite, log, now, unit: store.unit });
   const recruitmentContactsOffersBoot = recruitmentContactsOffers.attach();
   const recruitmentCases = createRecruitmentCasesRepository({ sqlite, log, now, unit: store.unit });
@@ -277,7 +268,7 @@ export function attachDataLayer({ seed = {}, store, nextId, sessionTtlMs, now = 
   const operations = createOperationsRepository({ sqlite, log, now, unit: store.unit });
   const operationsBoot = operations.attach({ seedReputation: identityWasPending ? handedIn('reputationSeed') : [] });
 
-  // S14j: the match facts are derived (kept by triggers on their inputs, re-derived before COMMIT by the builder the
+  // The match facts are derived (kept by triggers on their inputs, re-derived before COMMIT by the builder the
   // discovery domain registers); they have no collection and are never read back as records.
   const matchFacts = createMatchFactsRepository({ sqlite, now });
 
@@ -332,7 +323,7 @@ export function attachDataLayer({ seed = {}, store, nextId, sessionTtlMs, now = 
     migrations,
     /** True when this boot imported the seed: a first installation. */
     firstInstallation: identityWasPending,
-    /** The schema version: the number of the latest applied table migration (`0039_…` → 39). */
+    /** The schema version: the number of the latest applied table migration (`0040_…` → 40). */
     schemaVersion: () => schemaVersionOf(sqlite),
     /** Operator-facing view of the schema: the version, the migrations applied and known, whether it is current. */
     schemaReport: () => {

@@ -1,8 +1,8 @@
-// M22 — the holdout set (§35–§37).
+// The holdout set.
 //
 // WHY THIS FILE EXISTS, STATED PLAINLY
 //
-// Every number in m22/evaluation.json was produced by material the engine was
+// Every number in evaluation.json was produced by material the engine was
 // developed against. Thresholds were moved because those fixtures disagreed
 // with them; fixture bugs were found because the engine disagreed with the
 // fixtures. That is a legitimate and productive loop, and it is also exactly
@@ -26,11 +26,11 @@
 //     range would fail for a reason that is already documented, which proves
 //     nothing and tempts a reader to widen the envelope to recover the score.
 //
-// §37: THE HOLDOUT IS RUN ONCE, under a recorded constant freeze. If a
+// THE HOLDOUT IS RUN ONCE, under a recorded constant freeze. If a
 // threshold moves afterwards, the recorded result is stale and the holdout
 // must be regenerated with fresh seeds — not re-run until it agrees.
 //
-// §38: its numbers are reported SEPARATELY from the development numbers. They
+// Its numbers are reported SEPARATELY from the development numbers. They
 // are never averaged together. A merged figure would let a strong development
 // score carry a weak holdout score, which is precisely the information the
 // holdout exists to expose.
@@ -630,7 +630,7 @@ export function holdoutSeeds({ generation = ACTIVE_GENERATION.generation } = {})
 
 /**
  * Consumed holdout material, for the DEVELOPMENT harness to run as permanent
- * regressions (§38).
+ * regressions.
  *
  * Once a case has been used to diagnose a defect it is seen material and can
  * never go back to holdout duty — but it is also the single most valuable

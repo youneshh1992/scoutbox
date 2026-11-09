@@ -1,15 +1,8 @@
-// S8a-core through the REAL server (server.mjs booted as a child process on temporary
-// data directories, synthetic seed records only): requests and trials as tables — the
-// direct trial invitation, the player's acceptance (the request's answer, the thread with
-// its REAL request key and the trial row in ONE save), the mandatory report, the trial-day
-// staff route, the inbox/listing routes answering as before, the duplicate-pending answer of
-// the direct route beside two stored open-day invitations for one player (D2), a SIGKILL
-// right after the acceptance, the deletion unit's tombstones (requests and trials reduced in
-// place, the thread deleted) with a REAL COMMIT failure leaving everything as it was, a
-// request naming a historically missing player served and counted (Q7a), and the admin
-// backup (a copy of the database) restored into a NEW directory row for row. Every database read goes
-// through a second read-only connection. Nothing here touches DATA_DIR or real data.
-// Run with: npm test
+// Recruitment requests and trials through the REAL server (booted as a child process on temporary data directories,
+// synthetic seed records only): the invitation and acceptance (request, thread and trial in one unit), the report,
+// the trial-day staff route, the duplicate-pending answer (D2), a SIGKILL, the deletion unit with a real COMMIT
+// failure, a historically missing player counted (Q7a), and backup/restore. Every database read goes through a second
+// read-only connection. Nothing here touches DATA_DIR or real data. Run with: npm test
 import assert from 'node:assert/strict';
 import { spawnChild } from './testChildren.mjs';
 import { freePort } from './testPort.mjs';
@@ -63,23 +56,23 @@ const tableExists = (dir, t) => !!q1(dir, "SELECT 1 AS one FROM sqlite_master WH
 const recDump = (dir) => JSON.stringify(Object.fromEntries([...TABLES, 'channels', 'messages'].filter((t) => tableExists(dir, t)).map((t) => [t, qAll(dir, `SELECT * FROM ${t} ORDER BY rowid`)])));
 const orgLogin = async (S, orgId = 'org-eastport', scoutName = 'Maria Keane', role = 'Head of Recruitment') => { const r = await S.j('POST', '/auth/org/login', { orgId, scoutName, role }); assert.equal(r.status, 200, r.text); return r.body.token; };
 const signupAdult = async (S, name) => { const r = await S.j('POST', '/auth/player/signup', { name, dob: '2000-01-01', country: 'GB', password: 'synthetic-pass-1' }); assert.equal(r.status, 201, r.text); return { pid: r.body.playerId, token: r.body.token }; };
-/** A direct trial invitation (the legacy route) answered by the adult: the request's answer, the thread and the trial in one save. */
+/** A direct trial invitation (the legacy route) answered by the adult: the request's answer, the thread and the trial in one unit. */
 async function inviteAndAccept(S, maria, pid, token, { proposedDate = '2026-11-01' } = {}) {
   const inv = await S.j('POST', `/org/players/${pid}/request`, { type: 'trial', message: 'Come and train with us.', proposedDate, altSlots: ['2026-11-02'], venue: 'Eastport Ground', notes: 'Bring boots' }, maria); assert.equal(inv.status, 201, inv.text);
   const acc = await S.j('POST', `/player/requests/${inv.body.requestId}/respond`, { accept: true, chosenSlot: proposedDate }, token); assert.equal(acc.status, 200, acc.text);
   return { requestId: inv.body.requestId, trialId: acc.body.trialId, channelId: acc.body.contactChannel };
 }
 
-await test('[routes] a fresh boot records 0015_recruitment (followed by S8b\'s 0016 since that step) and the fifteen tables exist with channels carrying the real request key; the direct invitation and the adult\'s acceptance land as rows (the request answered, the trial with its history and keys.accept, the thread naming the request through the key) with no blob behind them; /org/requests, /org/trials, /player/inbox and /player/trials answer as before; the report lands in trial_reports and the day staff in trial_day_staff; the direct route still answers REQUEST_PENDING; a SIGKILL right after the acceptance loses nothing; /capabilities counts the rows', async () => {
+await test('[routes] a fresh boot records 0015_recruitment (followed by 0016) and the fifteen tables exist with channels carrying the real request key; the direct invitation and the adult\'s acceptance land as rows (the request answered, the trial with its history and keys.accept, the thread naming the request through the key) with no blob behind them; /org/requests, /org/trials, /player/inbox and /player/trials answer as before; the report lands in trial_reports and the day staff in trial_day_staff; the direct route still answers REQUEST_PENDING; a SIGKILL right after the acceptance loses nothing; /capabilities counts the rows', async () => {
   const dir = tempDir('s8a-boot'); const S = await boot(dir);
-  assert.equal(applied(dir).filter((id) => id < '0019').at(-4), MIGRATION, 'the S8a migration, recorded before S8b\'s 0016, S8c\'s 0017 and S8d\'s 0018'); for (const t of TABLES) assert.ok(tableExists(dir, t), `${t} exists`);
+  assert.equal(applied(dir).filter((id) => id < '0019').at(-4), MIGRATION, 'the recruitment migration, recorded before 0016, 0017 and 0018'); for (const t of TABLES) assert.ok(tableExists(dir, t), `${t} exists`);
   assert.ok(qAll(dir, 'PRAGMA foreign_key_list(channels)').some((r) => r.table === 'recruitment_requests'), 'channels.request_id is a real key');
   const maria = await orgLogin(S); const { pid, token } = await signupAdult(S, 'Invited Adult');
   const dup = await S.j('POST', `/org/players/${pid}/request`, { type: 'trial', message: 'First.', proposedDate: '2026-11-01', venue: 'G', notes: '' }, maria); assert.equal(dup.status, 201);
   const pending = await S.j('POST', `/org/players/${pid}/request`, { type: 'trial', message: 'Second.', proposedDate: '2026-11-01', venue: 'G', notes: '' }, maria); assert.equal(pending.status, 409); assert.equal(pending.body.error, 'REQUEST_PENDING');
   const acc = await S.j('POST', `/player/requests/${dup.body.requestId}/respond`, { accept: true, chosenSlot: '2026-11-01' }, token); assert.equal(acc.status, 200, acc.text);
   const requestId = dup.body.requestId; const trialId = acc.body.trialId;
-  assert.ok(noBlobTable(dir), 'no blob table'); // rewritten in S14a: it described the blob
+  assert.ok(noBlobTable(dir), 'no blob table');
   const row = q1(dir, 'SELECT status, trial_id, contact_channel_id, player_id FROM recruitment_requests WHERE id = ?', requestId); assert.equal(row.status, 'accepted'); assert.equal(row.trial_id, trialId); assert.equal(row.player_id, pid);
   assert.equal(q1(dir, 'SELECT request_id FROM channels WHERE id = ?', row.contact_channel_id).request_id, requestId);
   const t = q1(dir, 'SELECT request_id, workflow_state, player_id FROM trials WHERE id = ?', trialId); assert.equal(t.request_id, requestId); assert.equal(t.workflow_state, 'accepted');
@@ -95,7 +88,7 @@ await test('[routes] a fresh boot records 0015_recruitment (followed by S8b\'s 0
   assert.equal(q1(dir, 'SELECT coach_rating, filed_at FROM trial_reports WHERE trial_id = ?', trialId).coach_rating, 8); assert.equal(q1(dir, 'SELECT status FROM trials WHERE id = ?', trialId).status, 'reported');
   const profile = await S.j('GET', `/org/players/${pid}`, undefined, maria); assert.equal(profile.body.trialReports?.length ?? profile.body.player?.trialReports?.length, 1, 'the derived trialReports on the profile');
   const cap = await S.j('GET', '/capabilities'); const dom = cap.body.dataLayer.domains.recruitment; assert.equal(dom.mode, 'live'); assert.equal(dom.rows.requests, 1); assert.equal(dom.rows.trials, 1);
-  // SIGKILL right after an acceptance: the rows were in the route's own save
+  // SIGKILL right after an acceptance: the rows were committed by the route's own unit
   const b = await signupAdult(S, 'Killed Adult'); const second = await inviteAndAccept(S, maria, b.pid, b.token, { proposedDate: '2026-11-05' });
   await S.kill();
   assert.equal(q1(dir, 'SELECT status FROM recruitment_requests WHERE id = ?', second.requestId).status, 'accepted'); assert.ok(q1(dir, 'SELECT 1 AS one FROM trials WHERE id = ?', second.trialId));
@@ -106,7 +99,7 @@ await test('[routes] two stored open-day invitations for one player (the shape t
   const dir = tempDir('s8a-openday'); let S = await boot(dir);
   const maria = await orgLogin(S); const { pid, token } = await signupAdult(S, 'Open Day Adult'); const flow = await inviteAndAccept(S, maria, pid, token);
   await S.stop();
-  assert.ok(noBlobTable(dir), 'no blob table'); // rewritten in S14a: it described the blob
+  assert.ok(noBlobTable(dir), 'no blob table');
   // two pending open-day invitations for the same org/player/type and one request of a missing player, written through
   // the repository (as the open-day outcome route writes them); then the backup of that database restored into a NEW directory
   { const L = openLayer(dir); const base = L.layer.recruitment.requests.byId(flow.requestId);
@@ -146,14 +139,14 @@ await test('[backup] the admin backup is a copy of the database: its requests an
   await S.stop();
   const liveDump = recDump(dir); assert.equal(recDump(bk.body.dir), liveDump, 'the backup holds every recruitment and thread row');
   assert.equal(q1(bk.body.dir, 'SELECT count(*) AS n FROM recruitment_requests').n, 2); assert.equal(q1(bk.body.dir, 'SELECT name FROM trial_day_staff WHERE trial_id = ?', flow.trialId).name, 'Coach Dan');
-  { const s = new DatabaseSync(path.join(bk.body.dir, 'scoutbox.db'), { readOnly: true }); const t = readTrials(s)[0]; assert.equal(t.requestId, flow.requestId); assert.deepEqual(t.history.map((h) => h.action).slice(0, 1), ['trial_accepted'], 'the acceptance is in the copy (S8a: recorded by the history entry; the write-only keys.accept fingerprint is gone)'); s.close(); }
+  { const s = new DatabaseSync(path.join(bk.body.dir, 'scoutbox.db'), { readOnly: true }); const t = readTrials(s)[0]; assert.equal(t.requestId, flow.requestId); assert.deepEqual(t.history.map((h) => h.action).slice(0, 1), ['trial_accepted'], 'the acceptance is in the copy (recorded by the history entry)'); s.close(); }
   const restored = tempDir('s8a-restore'); fs.cpSync(bk.body.dir, restored, { recursive: true });
   S = await boot(restored); assert.ok(live(restored)); assert.equal(recDump(restored), liveDump, 'row for row');
   const mariaR = await orgLogin(S); assert.ok((await S.j('GET', '/org/trials', undefined, mariaR)).body.items.some((x) => x.id === flow.trialId), 'the restored server serves the trial'); await S.stop();
   rm(dir, restored, bk.body.dir);
 });
 
-// ------------------------------------------------------------- review of 6d77aa7 (F1)
+// ------------------------------------------------------------- idempotency keys through the real routes
 await test('[routes] through the real routes: an invitation with a clientKey replays (the same row, idempotent) and conflicts (TRIAL_IDEMPOTENCY_CONFLICT); a reschedule with a clientKey replays across a restart; a repository write of an act the routes never write (an unknown act, a prototype-named own act) is refused with the trial\'s id, and the real keys survive a backup and a restore (where the same clientKey still replays)', async () => {
   const dir = tempDir('s8a-f1'); let S = await boot(dir); let maria = await orgLogin(S); const a = await signupAdult(S, 'Keyed Adult');
   const room = await S.j('POST', '/org/rooms', { playerId: a.pid, sourceContext: 'search' }, maria); assert.equal(room.status, 201, room.text); const RID = room.body.room.roomId;
@@ -163,18 +156,18 @@ await test('[routes] through the real routes: an invitation with a clientKey rep
   const inv = await S.j('POST', `/org/rooms/${RID}/trials`, INVITE(), maria); assert.equal(inv.status, 201, inv.text);
   const replay = await S.j('POST', `/org/rooms/${RID}/trials`, INVITE(), maria); assert.equal(replay.status, 200, replay.text); assert.equal(replay.body.idempotent, true, 'the same clientKey and payload: a replay');
   const conflict = await S.j('POST', `/org/rooms/${RID}/trials`, INVITE({ message: 'A different message.' }), maria); assert.equal(conflict.body.error, 'TRIAL_IDEMPOTENCY_CONFLICT', conflict.text);
-  assert.equal(q1(dir, 'SELECT count(*) AS n FROM recruitment_requests WHERE case_id = ?', RID).n, 1, 'one request row'); assert.equal(q1(dir, 'SELECT invite_key FROM recruitment_requests WHERE case_id = ?', RID).invite_key, 'inv-key-1', 'keys.invite as the request\'s own column (§4.3)');
+  assert.equal(q1(dir, 'SELECT count(*) AS n FROM recruitment_requests WHERE case_id = ?', RID).n, 1, 'one request row'); assert.equal(q1(dir, 'SELECT invite_key FROM recruitment_requests WHERE case_id = ?', RID).invite_key, 'inv-key-1', 'keys.invite as the request\'s own column');
   const pending = (await S.j('GET', '/player/inbox', undefined, a.token)).body.items.find((r) => r.type === 'trial' && r.status === 'pending'); assert.ok(pending, 'the invitation in the inbox');
   const acc = await S.j('POST', `/player/requests/${pending.id}/respond`, { accept: true, chosenSlot: pending.trialDetails.proposedDate }, a.token); assert.equal(acc.status, 200, acc.text); const TID = acc.body.trialId;
   const current = async (srv, token) => (await srv.j('GET', `/org/rooms/${RID}/trials/${TID}`, undefined, token)).body;
-  // the revision moves the accepted slot's session (its id is stable, so the payload fingerprint is stable and the clientKey can replay; a NEW session gets a minted id — a route rule outside this step)
+  // the revision moves the accepted slot's session (its id is stable, so the payload fingerprint is stable and the clientKey can replay; a NEW session gets a minted id)
   const SID = q1(dir, 'SELECT id FROM trial_schedule_sessions WHERE trial_id = ? ORDER BY position', TID).id; assert.ok(SID, 'the accepted slot became a session');
   const RESCHEDULE = (rev) => ({ timezone: 'Europe/London', expectedRev: rev, sessions: [{ id: SID, startsAt: T0 + 72 * H, endsAt: T0 + 74 * H, venue: { name: 'Eastport Dome', town: 'Eastport' }, kind: 'training' }], clientKey: 'sched-key-1' });
   const t0 = await current(S, maria); const res = await S.j('POST', `/org/rooms/${RID}/trials/${TID}/reschedule`, RESCHEDULE(t0.trial?.rev ?? t0.rev), maria); assert.equal(res.status, 200, res.text);
   const replayS = async (srv, token, label) => { const t = await srv.j('GET', `/org/rooms/${RID}/trials/${TID}`, undefined, token); const r = await srv.j('POST', `/org/rooms/${RID}/trials/${TID}/reschedule`, RESCHEDULE(t.body.trial?.rev ?? t.body.rev), token); assert.equal(r.status, 200, `${label}: ${r.text}`); assert.equal(r.body.idempotent, true, `${label}: the schedule clientKey replays`); return r; };
   await replayS(S, maria, 'same process');
   await S.stop(); S = await boot(dir); maria = await orgLogin(S); await replayS(S, maria, 'after a restart'); await S.stop();
-  // S8a (§4.3): an act the routes never write (an unknown act, a prototype-named own act) is refused by the trial's
+  // An act the routes never write (an unknown act, a prototype-named own act) is refused by the trial's
   // repository update with the trial's id — nothing written — and the real keys survive a backup and a restore, where they still replay.
   { const L = openLayer(dir); const trials = L.layer.recruitment.trials; const t = trials.byId(TID); assert.ok(t && Array.isArray(t.keys.schedule) && t.keys.schedule[0].key === 'sched-key-1');
     const before = fullDump(L.sqlite);

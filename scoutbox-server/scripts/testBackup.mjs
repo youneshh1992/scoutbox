@@ -139,7 +139,7 @@ await test('copy: every table of the source database is in the copy with the sam
   const before = dumpTables(path.join(src.dir, 'scoutbox.db'));
   const copy = dumpTables(path.join(src.backup, 'scoutbox.db'));
   assert.deepEqual(Object.keys(copy), Object.keys(before), 'the same tables');
-  // Rewritten in S14a: the blob rows in `collections` and the save counters in `meta` are gone; the id counter is a `counters` row.
+  // The id counter is a `counters` row.
   assert.equal('collections' in before, false, 'there is no blob table');
   for (const name of ['data_migrations', 'meta', 'counters', 'players', 'channels', 'messages', 'notifications', 'sessions', 'media_deletions']) {
     assert.ok(before[name]?.rows.length > 0, `${name} has rows in the source (the comparison is not over empty tables)`);

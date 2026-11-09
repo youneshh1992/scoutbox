@@ -1,4 +1,4 @@
-// M22 — LAYER 3: PROTOCOL INTERPRETATION (§25, §26).
+// LAYER 3: PROTOCOL INTERPRETATION.
 //
 //   input:  tracked observations (normalised: ball diameters, seconds)
 //   output: touch events, juggle events, protocol violations
@@ -8,11 +8,11 @@
 // cannot, because neither is passed a protocol id.
 //
 // -------------------------------------------------------------------------
-// THE CONTACT STATE MACHINE (§5)
+// THE CONTACT STATE MACHINE
 //
 // A touch is NOT a threshold comparison evaluated independently per frame.
 // That design lets sustained proximity increment a counter forever, which is
-// exactly the gaming vector §8 and §11 of the fix pack describe. Instead one
+// exactly the gaming vector to close. Instead one
 // physical contact walks a machine, and the machine can only emit once per
 // traversal:
 //
@@ -72,7 +72,7 @@ export function interpretTouches(motion, {
   let lastEmitMs = -Infinity;
   let ambiguousIntervals = 0;
   // Contact-range impulses the refractory window had to discard. This is the
-  // honest signal for §30: if the engine keeps seeing strikes it is not
+  // honest signal for over-cadence: if the engine keeps seeing strikes it is not
   // allowed to count, the activity is running faster than it can resolve.
   // Derived from what the tracker OBSERVED, never from a player-reported
   // number and never from the count finally emitted.
@@ -96,7 +96,7 @@ export function interpretTouches(motion, {
     // A sample whose neighbours are separated by a long gap cannot support a
     // contact decision: the velocity either side is not comparable. The
     // machine drops to READY and the interval is recorded as ambiguous,
-    // which the quality layer later counts against continuity (§13, §15).
+    // which the quality layer later counts against continuity.
     if (m.gapBeforeMs > maxGapMs || m.gapAfterMs > maxGapMs) {
       ambiguousIntervals += 1;
       go('READY', m.atMs, 'observation_gap');
@@ -166,13 +166,10 @@ export function interpretTouches(motion, {
         // within contact range. Candidate and confirmation therefore resolve
         // in the same iteration, and the event is stamped and scored here.
         //
-        // An earlier cut waited one more sample before confirming AND
-        // required the ball still to be adjacent then. That is backwards — a
-        // struck ball is leaving. It dropped nearly every genuine touch, and
-        // the counts fell as pace rose, because a faster touch clears contact
-        // range sooner. The confidence fix that preceded this one (carrying
-        // the impulsive sample forward) treated the symptom; the wait itself
-        // was the defect.
+        // Waiting one more sample before confirming, and requiring the ball
+        // still to be adjacent then, is backwards — a struck ball is
+        // leaving. It drops nearly every genuine touch, and the counts fall
+        // as pace rises, because a faster touch clears contact range sooner.
         go('CONTACT_CANDIDATE', m.atMs, 'impulse_detected');
         if (m.atMs - lastEmitMs < refractoryMs) {
           // Temporal half of the debounce: too soon after the last contact to
@@ -209,24 +206,23 @@ export function interpretTouches(motion, {
 
       case 'SEPARATING':
         // NOT counted here, and the reason is a real limitation rather than
-        // an oversight (§31).
+        // an oversight.
         //
         // `impulsive` is a velocity CHANGE threshold, and friction
         // deceleration immediately after a legitimate strike produces a
         // change of the same magnitude when sampled at video rates. Counting
         // impulses in this state therefore counts the decaying tail of every
         // genuine touch, and a perfectly valid attempt condemns itself as
-        // running too fast — which is exactly what happened when it was
-        // tried. There is no reliable way to separate "a new strike arriving
-        // too soon" from "the previous strike still decaying" with this
-        // detector, so the engine does not pretend to.
+        // running too fast. There is no reliable way to separate "a new
+        // strike arriving too soon" from "the previous strike still
+        // decaying" with this detector, so the engine does not pretend to.
         //
         // Consequence, stated plainly: over-cadence detection is PARTIAL. It
         // fires when the machine has re-armed and a blocked strike reaches
         // APPROACHING, and it misses over-cadence activity that arrives while
-        // the machine is still separating. That limitation is recorded in
-        // M22_CV_EVALUATION.md and is one more reason the production gate
-        // stays closed for exact Box Touch measurement.
+        // the machine is still separating. That limitation is one more
+        // reason the production gate stays closed for exact Box Touch
+        // measurement.
         if (m.atMs - lastEmitMs >= refractoryMs) go('REFRACTORY', m.atMs, 'refractory_elapsed');
         break;
 
@@ -248,7 +244,7 @@ export function interpretTouches(motion, {
  *
  * A juggle contact is a REVERSAL of vertical motion in the player's frame,
  * followed by a flight clearing `minFlight` ball diameters. Explicitly NOT
- * peak counting (§23): a peak is the top of a flight, and counting peaks
+ * peak counting: a peak is the top of a flight, and counting peaks
  * conflates apex with contact and double-counts a bouncing ball.
  */
 export function interpretJuggles(motion, {

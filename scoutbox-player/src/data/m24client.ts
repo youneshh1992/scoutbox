@@ -1,4 +1,4 @@
-// M23 P5.6B — the player's side of agent representation ("My Agent").
+// The player's side of agent representation ("My Agent").
 //
 // Live implementation reads the server's /player/agent/* routes through the
 // shared per-account bearer tokens; the demo mirror lives in m24mock.ts
@@ -37,7 +37,7 @@ export interface AgentRelationship {
   disputeReason: string | null;
   shareWithAgencyStaff: boolean;
   /**
-   * M23 P5.6E — the client's three separate disclosure choices. Each starts
+   * The client's three separate disclosure choices. Each starts
    * false and each can be turned off again at any time; confirming a
    * relationship turns none of them on.
    */
@@ -49,10 +49,10 @@ export interface AgentRelationship {
 
 export type AgentAction = 'confirm' | 'decline' | 'terminate' | 'dispute';
 
-/** M23 P5.6E — which disclosure a toggle is about. */
+/** which disclosure a toggle is about. */
 export type DisclosureKey = 'clubPresence' | 'contactRouting' | 'trialVisibility';
 
-/** M23 P5.6E §19 — an opportunity an agent put in front of this player. */
+/** an opportunity an agent put in front of this player. */
 export interface SharedOpportunity {
   id: string;
   opportunityId: string;

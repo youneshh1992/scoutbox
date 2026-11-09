@@ -1,9 +1,7 @@
 /**
- * Integrations get their own typed tables (S13a): import batches (columns, rows, row errors and history as rows), the
- * prospects an import creates, identity reviews (the record is the batch row they name), API keys (hash only, scopes
- * as rows), webhook endpoints (events as rows) and webhook deliveries (a typed payload, attempts as rows).
- * REGISTERED in DATA_MIGRATIONS. `up()` is the DDL only: nothing is carried over (no production data; rollback means
- * re-seed).
+ * Integrations: import batches (columns, rows, row errors and history as rows), the prospects an import creates,
+ * identity reviews (the record is the batch row they name), API keys (hash only, scopes as rows), webhook endpoints
+ * (events as rows) and webhook deliveries (a typed payload, attempts as rows).
  */
 import { migrationApplied } from '../database.mjs';
 import { INSIGHT_COVERAGE_MIGRATION } from '../insightCoverage.mjs';

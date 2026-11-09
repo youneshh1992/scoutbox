@@ -1,4 +1,4 @@
-// M16.1 demo mirror (org side). A coach requests standardized Combine tests
+// Demo mirror (org side). A coach requests standardized Combine tests
 // and reads Combine Verified RESULTS — never raw footage. Missing results are
 // blank (never 0) and there is no overall ranking. Same honesty rules as live.
 import type { CombineApi, CombineRequestRow, CompareMatrix, PlayerCombine, CombineResult } from './combineApi';

@@ -1,4 +1,4 @@
-// M16.2 LIVE browser journeys (T1, T8) — real backend, separate contexts.
+// LIVE browser journeys (T1, T8) — real backend, separate contexts.
 // T1: the player opens their Trust Profile, sees the score, the band and the
 // mandatory disclaimer, and "Why this score?" explains every component.
 // T8: a club sees the score and SAFE explanation only — never the raw

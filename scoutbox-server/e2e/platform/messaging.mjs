@@ -1,5 +1,4 @@
-// Message threads (S14c: the channels repository's explicit writes and SQL reads), against a real server on a
-// temporary data directory with the synthetic seed.
+// Message threads, against a real server on a temporary data directory with the synthetic seed.
 //
 //   A the organisation's inbox pages by cursor ({ items, nextCursor }), most recently active first; a new message
 //     moves its thread to the top; `playerId` limits it to one player's threads; junk paging is refused with 400
@@ -160,10 +159,10 @@ section('F — responses are allowlists');
   neg((await j('GET', '/admin/channels')).status === 401, 'the admin audit needs the admin key');
 }
 
-section('G — a sign-up name is at most 120 characters (S14h); a thread keeps the whole name');
+section('G — a sign-up name is at most 120 characters; a thread keeps the whole name');
 {
   const tooLong = await j('POST', '/auth/player/signup', { name: `Synthetic ${'L'.repeat(340)}`, dob: '2000-01-01', country: 'GB', password: 'synthetic-pass-1' });
-  neg(tooLong.status === 400 && tooLong.body?.error === 'FIELD_INVALID' && tooLong.body?.field === 'name', 'a 350-character name is refused at sign-up, naming the field (S14h)');
+  neg(tooLong.status === 400 && tooLong.body?.error === 'FIELD_INVALID' && tooLong.body?.field === 'name', 'a 350-character name is refused at sign-up, naming the field');
   const longName = `Synthetic ${'L'.repeat(110)}`;
   const signup = await j('POST', '/auth/player/signup', { name: longName, dob: '2000-01-01', country: 'GB', password: 'synthetic-pass-1' });
   ok(signup.status === 201, 'an adult with a 120-character name signs up');

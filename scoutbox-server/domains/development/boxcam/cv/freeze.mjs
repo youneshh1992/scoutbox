@@ -1,4 +1,4 @@
-// M22 — the constant freeze (§34).
+// The constant freeze.
 //
 // A holdout only means something if the thing being tested did not move
 // between "we froze it" and "we measured it". Otherwise the holdout is just
@@ -25,14 +25,11 @@
 //
 //   source      the observation layers themselves, comment-stripped
 //
-// That last group was added after the first holdout run, and the reason is
-// worth recording. The freeze originally covered only CONSTANTS, which left a
-// hole wide enough to drive through: a change to the layer CODE — a different
+// Source is frozen because a change to the layer CODE — a different
 // normalisation order, a reordered guard — changes what the engine counts
-// without moving a single threshold, so the freeze would have reported itself
-// intact while the holdout result underneath it went stale. Generation 1 of
-// the holdout found exactly such a defect in the tracking layer, and fixing it
-// would have left the freeze silent. It no longer is.
+// without moving a single threshold, so a constants-only freeze would report
+// itself intact while the holdout result underneath it went stale. Generation
+// 1 of the holdout found exactly such a defect in the tracking layer.
 //
 // Deliberately NOT frozen: the fixtures, the scene generator, the harness.
 // Those are the measuring instrument, and an instrument may be extended. The

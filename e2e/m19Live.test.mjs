@@ -1,4 +1,4 @@
-// M19 LIVE browser journeys — Explainable Matching and Dynamic Watchlists,
+// LIVE browser journeys — Explainable Matching and Dynamic Watchlists,
 // driven through the real Pro workspace against a real server.
 //
 // M19-1   a recruiter writes criteria and gets a set of players back

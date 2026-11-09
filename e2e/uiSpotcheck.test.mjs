@@ -1,14 +1,10 @@
-// Feature spot-check across the player demo UI: M6 surfaces (directory, trial
-// slots, season history, prefs/export) plus the M7 flows — guardian signup
+// Feature spot-check across the player demo UI: the directory, trial slots,
+// season history and prefs/export, plus the flows — guardian signup
 // with password + email verification, and cross-tab device pairing.
 import { chromium } from 'playwright-core';
 import { ensureDemoHost } from './demoHost.mjs';
 
-// D7 (M22 §74-§76): this test OWNS its demo host. It used to assume one
-// was already listening on :8099 — which was true only because crosstab
-// and demoOffline left one behind. Once those correctly released the
-// port, every spotcheck failed, which is the ambient-state dependency
-// becoming visible rather than a new break.
+// This test owns its demo host: it starts one if none is running (see demoHost.mjs).
 const demo = await ensureDemoHost();
 const HOST = process.env.DEMO_HOST || demo.host;
 const EXE = process.env.CHROMIUM || '/opt/pw-browsers/chromium';
@@ -33,23 +29,23 @@ const freshPage = async () => {
   await page.waitForSelector('text=Club directory', { timeout: 10000 });
   say(`directory card renders: ${await page.locator('text=Eastport FC').first().isVisible()}`);
 
-  // M9: pathway + opportunity radar on Home
-  await page.waitForSelector('text=Your journey', { timeout: 10000 }); // M24F.4 — the Home's journey section
-  await page.waitForSelector('text=/clubs? within 50 km/', { timeout: 10000 }); // M24F.5 — the row names its count in words
+  // Pathway + opportunity radar on Home
+  await page.waitForSelector('text=Your journey', { timeout: 10000 }); // the Home's journey section
+  await page.waitForSelector('text=/clubs? within 50 km/', { timeout: 10000 }); // the row names its count in words
   await page.waitForSelector('text=Moss Side Athletic', { timeout: 5000 });
   say('pathway + opportunity radar render on Home');
 
   await page.waitForTimeout(9000); // delayed demo trial request arrives with slots
   await page.click('a[href="/inbox"]');
-  // M24F.3 — the invitation is a row; its slot picker opens with the row
+  // The invitation is a row; its slot picker opens with the row
   await page.waitForSelector('[data-testid="row-accent-trial"]', { timeout: 15000 });
   await page.locator('[data-testid^="inbox-request-"]').filter({ has: page.locator('[data-testid="row-accent-trial"]') }).first().click();
   await page.waitForSelector('[data-testid^="trial-slot-"], [data-testid^="alt-slot-"]', { timeout: 15000 });
   say('trial slot picker renders in inbox');
   await page.locator('[data-testid="detail-back"]').first().click().catch(() => {});
 
-  // M9: training programme on Upload
-  // P2.5: Upload is the "+ Add evidence" action on Football; its route is unchanged.
+  // Training programme on Upload
+  // Upload is the "+ Add evidence" action on Football; its route is unchanged.
   await page.click('a[href="/football"]');
   await page.click('a[href="/upload"]');
   await page.waitForSelector('text=Your training programme', { timeout: 15000 });
@@ -57,8 +53,8 @@ const freshPage = async () => {
   await page.waitForSelector('text=this week', { timeout: 10000 });
   say('training programme: track selected, weekly sessions render');
 
-  await page.click('a[href^="/you"]'); // P2.5: Profile is the first page tab of You
-  // M24F.1 — the profile has four sections; the season and the cohort are Performance, the references are Evidence
+  await page.click('a[href^="/you"]'); // Profile is the first page tab of You
+  // The profile has four sections; the season and the cohort are Performance, the references are Evidence
   await page.getByRole('tab', { name: 'Performance' }).click();
   await page.waitForSelector('text=Season by season', { timeout: 15000 });
   say('season history renders on the profile\'s Performance section');
@@ -69,7 +65,7 @@ const freshPage = async () => {
 
   await page.click('a[href^="/you"]');
   await page.getByRole('tab', { name: 'Account' }).click();
-  // M24F.2 — Account is categories: Preferences holds the notifications, Privacy holds your data
+  // Account is categories: Preferences holds the notifications, Privacy holds your data
   await page.click('[data-testid="account-cat-preferences"]');
   await page.click('[data-testid="account-notifications"]');
   await page.waitForSelector('text=School-hours mute', { timeout: 15000 });
@@ -87,7 +83,7 @@ const freshPage = async () => {
 // ---- new guardian: password + email code (DEMO42) gates, then IDV
 {
   const page = await freshPage();
-  await page.click('[data-testid="auth-choice-parent"]'); // M24D: the entry rows are Player · Parent · Guardian · Use an invitation code
+  await page.click('[data-testid="auth-choice-parent"]'); // the entry rows are Player · Parent · Guardian · Use an invitation code
   await page.fill('input[placeholder="Your full name"]', 'Nadia Test');
   await page.fill('input[placeholder="Your email"]', 'nadia@testfamily.co.uk');
   await page.fill('input[placeholder="Password (required, 8+ characters)"]', 'longenough1');
@@ -106,16 +102,16 @@ const freshPage = async () => {
   const g = await freshPage();
   await g.locator('text=Enter').nth(2).click(); // Amara (guardian)
   await g.waitForSelector('text=Club requests', { timeout: 20000 });
-  await g.waitForSelector('[data-testid^="trial-slot-"], [data-testid^="alt-slot-"]', { timeout: 10000 }); // M24F.3 — the slots are the picker
+  await g.waitForSelector('[data-testid^="trial-slot-"], [data-testid^="alt-slot-"]', { timeout: 10000 }); // the slots are the picker
   say('guardian slot picker renders');
-  await g.locator('[data-testid^="guardian-manage-"]').first().click(); // M24F.4 — pairing sits behind "Manage …'s profile"
+  await g.locator('[data-testid^="guardian-manage-"]').first().click(); // pairing sits behind "Manage …'s profile"
   await g.click('text=Generate pairing code');
   await g.waitForSelector('text=Code: ', { timeout: 8000 });
   const code = (await g.locator('text=Code: ').first().innerText()).replace('Code: ', '').trim();
   say(`guardian pairing code generated: ${code}`);
 
   const c = await freshPage();
-  await c.click('text=Use an invitation code'); // M24D: the entry rows are Player · Parent · Guardian · Use an invitation code
+  await c.click('text=Use an invitation code'); // the entry rows are Player · Parent · Guardian · Use an invitation code
   await c.fill('input[placeholder="XXXXXX"]', code);
   await c.click('text=Pair and enter');
   await c.waitForSelector('text=Your visibility right now', { timeout: 20000 });

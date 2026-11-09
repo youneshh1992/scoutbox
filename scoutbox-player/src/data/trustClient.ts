@@ -1,4 +1,4 @@
-// M16.2 — ScoutBox Trust Score, the player/guardian typed client.
+// ScoutBox Trust Score, the player/guardian typed client.
 //
 // The Trust Score answers ONE question: how strongly is this player's football
 // record supported by trustworthy, current, attributable evidence? It is NOT
@@ -8,7 +8,7 @@
 // The score is DERIVED SERVER-SIDE on every read from canonical evidence: this
 // client never computes, adjusts, caches or asserts a score, and there is no
 // write route at all. The Football Passport payload deliberately carries no
-// numeric score (M15), so the Trust Profile is fetched from its own endpoint
+// numeric score, so the Trust Profile is fetched from its own endpoint
 // and composed into the UI next to the Passport.
 import { m12Request as req } from './httpClient';
 import { trustMock } from './trustMock';

@@ -1,4 +1,4 @@
-// S4b-R through the REAL server (server.mjs booted as a child process on
+// The retained player record through the REAL server (server.mjs booted as a child process on
 // temporary data directories; synthetic records only): the retained player
 // record on the two deletion routes (an adult's own account, a guardian's child),
 // every account reader and authentication path afterwards, the audit rows
@@ -7,9 +7,6 @@
 // retry landing once; the admin backup (a database copy) keeping retained
 // records separate from live accounts, a restore into a NEW directory. Every read of the file goes through a second connection. Nothing
 // here touches DATA_DIR or real data. Run with: npm test
-//
-// FAILING-FIRST NOTE (recorded on the unchanged d16362f tree): every test fails
-// there on a concrete assertion (the row is hard-deleted; no 0014).
 import assert from 'node:assert/strict';
 import { spawnChild } from './testChildren.mjs';
 import { freePort } from './testPort.mjs';
@@ -30,7 +27,7 @@ const A = { 'x-admin-key': 'scoutbox-admin' };
 const MIGRATION = '0014_player_erasure';
 const AUDIT_TABLES = ['blocks', 'reports', 'org_notes', 'ledger', 'source_changes'];
 
-/** The retained row (plan §D.6.1 item 1): id, the deletion instant, the full birth date, the country; fixed placeholders; NULL everywhere else. */
+/** The retained row: id, the deletion instant, the full birth date, the country; fixed placeholders; NULL everywhere else. */
 const RETAINED_ROW = (id, deletedAt, birthDate, country) => ({
   id, name: 'Deleted player', birth_date: birthDate, country, city: null, position: null, foot: null, height_cm: null, weight_kg: null, squad_number: null,
   contract_until_date: null, market_value_range: null, agent_name: null, academy_plus: 0, first_team_seeker: 0, availability: 'not_seeking', contract_status: 'unknown', level: 'amateur',
@@ -95,7 +92,7 @@ async function auditFor(S, pid, adultToken, maria) {
   assert.equal((await S.j('POST', `/org/players/${pid}/notes`, { text: 'Synthetic note about the adult.' }, maria)).status, 201);
   assert.equal((await S.j('PATCH', '/player/football-passport/prefs', { positions: { primary: 'CM', secondary: [] } }, adultToken)).status, 200);
   assert.equal((await S.j('GET', `/org/players/${pid}`, undefined, maria)).status, 200, 'the club reads the adult before the deletion');
-  assert.equal((await S.j('POST', '/admin/backup', {}, null, A)).status, 201); // flushes every staged write
+  assert.equal((await S.j('POST', '/admin/backup', {}, null, A)).status, 201);
 }
 const naming = (dir, pid) => snap(dir, (c) => Object.fromEntries(AUDIT_TABLES.map((t) => [t, c.get(`SELECT COUNT(*) AS n FROM ${t} WHERE ${t === 'reports' ? 'target_player_id' : 'player_id'} = ?`, pid).n])));
 
@@ -103,7 +100,7 @@ const naming = (dir, pid) => snap(dir, (c) => Object.fromEntries(AUDIT_TABLES.ma
 await test('[cutover] a fresh boot records 0014_player_erasure last; DELETE /player/account and DELETE /guardian/children/:id keep EXACTLY the agreed row (id, the deletion instant, the full birth date, the country; fixed placeholders; NULL elsewhere), remove the child rows, links, session, pairing code and queue the media file as today; afterwards the account is served by no reader — /player/me 401, login PLAYER_NOT_FOUND, the club\'s view and list 404/absent, the guardian\'s children list without the child, the pairing code refused, a second deletion refused — the audit rows naming the person are byte-identical and the Q4 count unchanged while the new retained-reference count names them; /capabilities counts the retained records; a SIGKILL and a restart serve the same', async () => {
   const dir = tempDir('s4br-routes'); let S = await boot(dir);
   let cap = (await S.j('GET', '/capabilities')).body;
-  assert.equal(cap.dataLayer.migrations.filter((id) => id < '0019').at(-5), MIGRATION, `0014 recorded after 0013 (S8a's 0015, S8b's 0016, S8c's 0017 and S8d's 0018 follow it: ${cap.dataLayer.migrations.slice(-5).join(', ')})`);
+  assert.equal(cap.dataLayer.migrations.filter((id) => id < '0019').at(-5), MIGRATION, `0014 recorded after 0013 (0015–0018 follow it: ${cap.dataLayer.migrations.slice(-5).join(', ')})`);
   assert.equal(cap.dataLayer.domains.players.retained, 0, 'the report counts retained records');
   const maria = await orgLogin(S);
   const { pid, token, file } = await signupAdult(S, 'Erased Adult');
@@ -200,7 +197,7 @@ await test('[cutover] the admin backup is a copy of the database that keeps the 
   const restored = tempDir('s4br-restored'); fs.cpSync(bk.body.dir, restored, { recursive: true });
   S = await boot(restored);
   assert.deepEqual(retainedRowsOf(restored), retained, 'the retained rows, exactly');
-  // Before any route reads a profile: a club's profile view is a ledger row written at once (S14b).
+  // Before any route reads a profile: a club's profile view is a ledger row written at once.
   assert.equal(auditRows(restored), auditBefore, 'the audit rows restored row for row');
   assert.equal((await S.j('GET', '/capabilities')).body.dataLayer.domains.players.retained, 2);
   const mariaR = await orgLogin(S); assert.equal((await S.j('GET', `/org/players/${a.pid}`, undefined, mariaR)).status, 404); assert.equal((await S.j('GET', `/org/players/${b.pid}`, undefined, mariaR)).status, 200);

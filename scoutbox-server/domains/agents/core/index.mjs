@@ -1,21 +1,20 @@
 /**
- * M23 P5.6B — ScoutBox Agent core: routes.
+ * ScoutBox Agent core: routes.
  *
  * Mounted on the canonical routers (`/org/agent/*`, `/player/agent/*`,
  * `/admin/agent/*`) so the existing session, org and player gates apply
  * before anything here runs. Every mutation re-derives authority at mutation
- * time from the live records and the clock, in the P5.6A order:
+ * time from the live records and the clock, in this order:
  *
  *   authenticate → resolve user → resolve agency membership → conceal foreign
  *   resource → role → relationship / access basis → block / safeguarding →
  *   objective verification (regulated only) → rev / idempotency → mutate →
  *   history → event → notification.
  *
- * What is deliberately NOT here (P5.6C/D): conflict adjudication, multiple-
- * representation approval, regulatory override, dispute resolution, minor
- * compliance approval, transactions, negotiation, fee enforcement, Offer.
- * There is also NO route through which the shared Trust & Safety key can
- * verify or reject a licence, resolve a dispute or override a state (G-C0).
+ * Compliance review and transactions live in ../compliance and ../transactions,
+ * which fill the `hooks` seams below. There is NO route here through which the
+ * shared Trust & Safety key can verify or reject a licence, resolve a dispute
+ * or override a state (G-C0).
  */
 
 import { visibleToOrg } from '../../../domain.mjs';
@@ -47,15 +46,13 @@ export function registerAgent(rawCtx) {
     orgCanSee, checkEligibility, distanceBand, moderateOrRefuse, verificationProvider, agentCore, unit, log = console,
   } = ctx;
   if (!notifications) throw new TypeError('registerAgent needs the notifications repository (ctx.notifications)');
-  // S11a: profiles, memberships, agreements and agency settings are tables of repositories/agentCore.mjs, written
-  // through these explicit operations (inside a unit of work with their notifications) and read through SQL.
   if (typeof agentCore?.agreements?.update !== 'function' || typeof unit !== 'function') throw new TypeError('registerAgent needs the agent core repository and unit from the data layer');
   const { profiles, affiliations, agreements, settings } = agentCore;
 
   const testProviderEnabled = process.env.AGENT_VERIFICATION_TEST_PROVIDER === '1';
-  // P5.6C seams the Compliance Engine fills after it registers: a facet that
-  // needs attributed review, a client's dispute, and the policy layer's
-  // verdict on an Approach. Absent (tests of the pure core), P5.6B behaviour.
+  // Seams the Compliance Engine fills after it registers: a facet that needs
+  // attributed review, a client's dispute, and the policy layer's verdict on
+  // an Approach. Absent (tests of the pure core), the core decides alone.
   const hooks = { facetNeedsReview: null, representationDisputed: null, authorizeApproach: null };
   const now = () => Date.now();
   const hist = (record, action, by, detail = null) => {
@@ -65,7 +62,7 @@ export function registerAgent(rawCtx) {
   const byOrg = (req) => ({ kind: 'org', userId: req.orgUser.id, name: req.orgUser.name });
   const byPlayer = (req) => ({ kind: 'player', userId: req.player.id, name: req.player.name });
 
-  // ------------------------------------------------------------ input (S11a: junk is refused, naming the field)
+  // ------------------------------------------------------------ input (junk is refused, naming the field)
   const invalid = (res, field, message, scope = 'input') => { sendAgentError(res, { error: 'AGENT_INPUT_INVALID', field, message }, scope); return undefined; };
   /** Optional text: undefined when absent, null when empty, the trimmed text otherwise; refused when not text or over `max`. */
   const optText = (res, v, field, max, scope) => {
@@ -103,7 +100,7 @@ export function registerAgent(rawCtx) {
         return null;
       }
       // First person into an agency with no members: the same bootstrap rule
-      // M14 uses for the first verification root admin.
+      // as the first verification root admin.
       aff = unit(() => {
         const draft = {
           id: nextId('aff'), agencyOrgId: req.org.id, userId: req.orgUser.id, tiers: ['agency_admin'],
@@ -230,7 +227,7 @@ export function registerAgent(rawCtx) {
       const gap = verificationGap(p, ma, t);
       if (gap) alerts.push({ kind: 'jurisdiction', memberAssociation: ma, facet: gap.facet, state: gap.state });
     }
-    const unread = notifications.unreadCount('org_user', me); // S7a: the repository's count
+    const unread = notifications.unreadCount('org_user', me);
     res.json({
       profileState: fifa, hasProfile: !!p, tiers: req.tiers, counts, alerts, unreadNotifications: unread,
       regulatoryNotice: 'ScoutBox is infrastructure. It performs no football-agent services, adjudicates no conflicts and confirms no regulatory status. Relationship records here are confirmed by the client, not by ScoutBox.',
@@ -291,9 +288,9 @@ export function registerAgent(rawCtx) {
   });
 
   /**
-   * Submit a facet for verification. Production has no provider and no
-   * attributed reviewer yet, so the honest outcome is MANUAL_REVIEW_REQUIRED
-   * with a note that says exactly why. The synthetic provider (flag) exists
+   * Submit a facet for verification. Production has no register provider, so
+   * the honest outcome is MANUAL_REVIEW_REQUIRED (queued for attributed Trust &
+   * Safety review) with a note that says exactly why. The synthetic provider (flag) exists
    * for development and tests and names itself in the provenance.
    */
   orgRouter.post('/agent/profile/facets/:facet/submit', (req, res) => {
@@ -311,8 +308,8 @@ export function registerAgent(rawCtx) {
     const ma = facet === 'fifa_licence' ? null : String(rawMa ?? '').trim().toUpperCase();
     // A national facet belongs to a member association; INT is FIFA level, not one.
     if (facet !== 'fifa_licence' && (ma === 'INT' || !JURISDICTIONS.includes(ma))) return sendAgentError(res, { error: 'AGENT_JURISDICTION_INVALID', allowed: JURISDICTIONS.filter((j) => j !== 'INT') }, 'facet');
-    // Minors authorisation is recorded, never activated: no production minors pathway exists (P5.6A DR-49).
-    // P5.6C: ONE provider abstraction (fail-honest). Without it, the P5.6B
+    // Minors authorisation is recorded, never activated: no production minors pathway exists.
+    // ONE provider abstraction (fail-honest). Without it, the core's
     // synthetic/none evaluation; with it, the same states plus UNAVAILABLE,
     // which writes nothing and answers 503 — an outage is never a permission.
     const outcome = verificationProvider
@@ -502,7 +499,7 @@ export function registerAgent(rawCtx) {
     if (!resolveMembership(req, res)) return;
     if (!requireCap(req, res, 'agency.audit.read')) return;
     const all = agentAuditRows(agentCore.reads, req.org, { findPlayer, orgCanSee });
-    // P5.6C: compliance rows (contexts, consents, attributed reviews) ride the same feed, same shape.
+    // Compliance rows (contexts, consents, attributed reviews) ride the same feed, same shape.
     if (hooks.auditRows) { all.push(...hooks.auditRows(req.org)); all.sort((a, b) => (b.at - a.at) || String(b.id).localeCompare(String(a.id))); }
     const limit = Math.min(50, Math.max(1, Number(req.query.limit) || 25));
     let start = 0;
@@ -523,7 +520,7 @@ export function registerAgent(rawCtx) {
     const q = String(req.query.q ?? '').trim().toLowerCase();
     if (q.length < 2) return res.json({ items: [], note: 'Type at least two characters.' });
     const items = [];
-    // S14h: adults and the visibility rule's SQL part in the query, a batch at a time, stopping at twenty.
+    // Adults and the visibility rule's SQL part are in the query, a batch at a time, stopping at twenty.
     players.scan({ visibleTo: req.org, adultsOnly: true }, (p) => {
       if (!isAdult(p)) return true;                    // minors never appear, whatever the query
       if (!visibleToOrg(p, req.org) || isBlocked(p.id, req.org.id)) return true;
@@ -571,11 +568,10 @@ export function registerAgent(rawCtx) {
   }
 
   /**
-   * Request a relationship with an ADULT player. A REGULATED action under the
-   * frozen P5.6A classification (an Approach), so the objective step-5 check
-   * applies: the agent's required facets must be VERIFIED. In production no
-   * facet can be VERIFIED until attributed review exists (G-C0), which is the
-   * honest state of this build; development and tests use the synthetic
+   * Request a relationship with an ADULT player. A REGULATED action (an
+   * Approach), so the objective verification check applies: the agent's
+   * required facets must be VERIFIED. In production a facet is VERIFIED only by
+   * an attributed reviewer (G-C0); development and tests use the synthetic
    * provider.
    */
   orgRouter.post('/agent/clients/request', (req, res) => {
@@ -606,7 +602,7 @@ export function registerAgent(rawCtx) {
         return sendAgentError(res, { error: 'REPRESENTATION_IDEMPOTENCY_CONFLICT' }, 'request');
       }
     }
-    // Step 8 before step 5? No — but the subject check must not leak: a
+    // Verification before the subject check, and the subject check must not leak: a
     // player who does not exist, a minor, a blocked player and an invisible
     // player answer alike, and the verification refusal (own state) comes
     // first so a refused agent learns nothing about the subject either way.
@@ -621,7 +617,7 @@ export function registerAgent(rawCtx) {
     }
     const conflict = requestConflict(agreements.forAgentClient(req.orgUser.id, player.id), { agentUserId: req.orgUser.id, playerId: player.id, now: now() });
     if (conflict) return sendAgentError(res, { ...conflict, message: conflict.error === 'REPRESENTATION_COOLDOWN' ? 'A recent request to this player was declined or ended; wait before asking again.' : 'A relationship with this player already exists or is pending.' }, 'request');
-    // P5.6C: an Approach is a regulated act — the versioned policy layer has
+    // An Approach is a regulated act — the versioned policy layer has
     // the last word at mutation time (registration and domestic authorisation
     // under the applicable national rules; the exclusive-agreement window,
     // which is UNDER_LEGAL_REVIEW, goes to attributed review, never a block,
@@ -802,14 +798,14 @@ export function registerAgent(rawCtx) {
         hist(d, event === 'representation_confirmed' ? 'representation_confirmed' : event === 'representation_rejected' ? 'representation_rejected' : event === 'representation_disputed' ? 'representation_disputed' : 'representation_terminated', byPlayer(req), { from: st, to, by: 'client', hadReason: !!reason });
         bumpRev(d, { by: { id: req.player.id, name: req.player.name }, at: t });
       });
-      // Literal event names: the M18.2 registry audit reads call sites textually.
+      // Literal event names: the event registry audit reads call sites textually.
       const ev = { orgId: out.agencyOrgId, agreementId: out.id, agentUserId: out.agentUserId };
       if (event === 'representation_confirmed') broadcast('representation_confirmed', ev);
       else if (event === 'representation_rejected') broadcast('representation_rejected', ev);
       else if (event === 'representation_disputed') broadcast('representation_disputed', ev);
       else broadcast('representation_terminated', ev);
       notify({ kind: 'org_user', id: out.agentUserId }, notifyType, notifyText, out.id);
-      // P5.6C: a dispute becomes an attributed review item (P5.6A C6). The
+      // A dispute becomes an attributed review item. The
       // reason stays with the client; the reviewer sees only that one exists.
       if (to === 'disputed' && hooks.representationDisputed) hooks.representationDisputed(out, byPlayer(req));
       return out;
@@ -836,7 +832,7 @@ export function registerAgent(rawCtx) {
 
   /**
    * The client's own choices about this relationship: whether agency staff see a
-   * summary row (P5.6B), and — M23 P5.6E — the three separate DISCLOSURE choices
+   * summary row, and the three separate DISCLOSURE choices
    * that decide whether their agent is a routable party on a club's contact,
    * appears on a club's screen, or is given their trial schedule.
    *
@@ -877,7 +873,7 @@ export function registerAgent(rawCtx) {
       // next contact being routed, the next club screen naming the agent and the
       // next read of the trial schedule. What was already validly routed stays
       // in the record, because rewriting history would be a lie about what
-      // happened (§22).
+      // happened.
       const current = normaliseDisclosure(a.disclosure);
       for (const k of DISCLOSURE_KEYS) if (Object.hasOwn(body.disclosure, k) && body.disclosure[k] !== current[k]) changed[k] = body.disclosure[k];
     }
@@ -906,7 +902,7 @@ export function registerAgent(rawCtx) {
   // ============================================================ ADMIN: read only
   // Trust & Safety may LOOK. There is deliberately no admin mutation in this
   // module: verifying a licence, resolving a dispute or overriding a state
-  // requires attributed reviewer identity (G-C0) and belongs to P5.6C.
+  // requires attributed reviewer identity (G-C0) and belongs to the compliance domain.
   adminRouter.get('/agent/relationships', (req, res) => {
     const page = pageQuery(req, res); if (!page) return;
     const { items, nextCursor } = pageOf(agreements.page(page).rows, page.limit, (r) => r.key);
@@ -917,8 +913,8 @@ export function registerAgent(rawCtx) {
     });
   });
   // States and provenance only. The declared number and the submitted
-  // reference are withheld: without an attributed review lane (P5.6C) the
-  // shared key has no use for them, and an oversight view needs the STATE.
+  // reference are withheld: the shared key is not an attributed reviewer and
+  // has no use for them, and an oversight view needs the STATE.
   const facetForOversight = (f) => (f ? { state: f.state, storedState: f.storedState, provenance: f.provenance, submittedAt: f.submittedAt, verifiedAt: f.verifiedAt, recheckAt: f.recheckAt } : null);
   adminRouter.get('/agent/profiles', (req, res) => {
     const page = pageQuery(req, res); if (!page) return;
@@ -951,8 +947,8 @@ export function registerAgent(rawCtx) {
 
   // ============================================================ sweep
   /**
-   * S11a: the two notices that a read used to write. An active relationship ending within 30 days tells its agent once,
-   * and a VERIFIED facet whose re-check date passed tells its agent once; each marker commits with its notification.
+   * An active relationship ending within 30 days tells its agent once, and a VERIFIED facet whose re-check date passed
+   * tells its agent once; each marker commits with its notification. A sweep, not a read, so reads never write.
    */
   function agentSweep() {
     const t = now();
@@ -960,7 +956,7 @@ export function registerAgent(rawCtx) {
       try {
         unit(() => {
           agreements.update(a.id, (d) => { d.expiryNotifiedAt = t; });
-          // Only a current member is told (before S11a only an agent opening their home saw it); the marker is written either way.
+          // Only a current member is told; the marker is written either way.
           if (affiliations.activeFor(a.agentUserId, a.agencyOrgId, t)) notify({ kind: 'org_user', id: a.agentUserId }, 'representation_expiring', 'A client relationship ends within 30 days. A new relationship needs a new client confirmation.', a.id);
         });
       } catch (err) { log.error?.(`agent sweep: the expiry notice for ${a.id} failed: ${err?.message ?? err}`); }
@@ -984,9 +980,9 @@ export function registerAgent(rawCtx) {
 
   return {
     onPlayerDeleted, agentSweep, effectiveAgreementStatus, agreementGrantsAccess, testProviderEnabled,
-    // P5.6C: the Compliance Engine reuses exactly these gates rather than its own copies.
+    // The Compliance Engine reuses exactly these gates rather than its own copies.
     resolveMembership, requireCap, profileOf, facetView, hooks,
-    // P5.6E: the integration seam's agent-facing reads resolve `:id` through the
+    // The integration seam's agent-facing reads resolve `:id` through the
     // SAME concealing lookup as every other client route, so a foreign agreement
     // is a 404 there for the same reason it is one here.
     findOwnAgreement,

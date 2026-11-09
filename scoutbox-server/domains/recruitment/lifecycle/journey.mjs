@@ -1,29 +1,16 @@
 /**
- * M23 — the canonical recruitment journey projection.
+ * The canonical recruitment journey projection.
  *
  * A journey is NOT a stored object. It is what you get when you read the
- * canonical records for one case and arrange them for one viewer. Nothing here
- * writes, nothing here caches, and there is no `db.recruitmentJourneys` — a
- * second copy of a derivation is a second thing that can be wrong.
+ * canonical records for one case (through `opts.reads`, all owned by other
+ * repositories) and arrange them for one viewer. Nothing here writes or
+ * caches — a second copy of a derivation is a second thing that can be wrong.
  *
- * Inputs, all canonical and all owned by someone else:
+ * A required read that is ABSENT is not an empty recruitment history — it is
+ * broken composition, and reporting "nothing happened" would be the most
+ * misleading possible answer. The projector refuses instead.
  *
- *   opts.reads.cases       the case, its room facet, and case.history (SQL since §4.3 step 2)
- *   opts.reads.decisions   append-only decisions (M17; SQL since §4.3 step 2)
- *   opts.reads.requests    contact/trial requests (core; SQL since §4.3 step 2)
- *   opts.reads.trials      accepted trials (core; SQL since §4.3 step 2)
- *   opts.reads.assessments assessments (M12; SQL since S9b)
- *   opts.reads.offers      offers (M23 P4 — optional; read through SQL since §4.3 step 2)
- *   opts.reads.outcomeReports  post-signing outcomes (M12; optional; SQL since §4.3 step 2)
- *   opts.reads.signings    signings (core; required) and opts.reads.signingPackages (P7; optional), SQL since §4.3 step 2
- *
- * THE D2 CARRY-FORWARD (§26). A required store that is ABSENT is not an empty
- * recruitment history — it is a broken database, and reporting "nothing
- * happened" would be the most misleading possible answer. The projector
- * refuses instead. Migration should make this unreachable; if it is ever
- * reached, something is wrong that a person needs to see.
- *
- * NO SCORE (§30). There is no journey score, readiness score, signing
+ * NO SCORE. There is no journey score, readiness score, signing
  * probability, candidate quality or progress percentage — and there is no
  * field one could be stored in. How far a case has travelled is a fact about a
  * club's process, not a measurement of a person.
@@ -36,12 +23,10 @@ import {
 import { ROOM_STATUS_LABELS, ROOM_TRANSITIONS } from '../rooms/shared.mjs';
 import { contactMilestone, contactIntegrity } from './contact.mjs';
 import { trialMilestone, trialIntegrity } from './trial.mjs';
-// M23 P6 — the Offer domain's own status derivation (lazy expiry), so the
-// journey never reads a stored status an expired revision has outgrown.
+// The Offer domain's own status derivation (lazy expiry), so the journey
+// never reads a stored status an expired revision has outgrown.
 import { offerStatus as canonicalOfferStatus, liveStatus as canonicalLiveStatus, offerIntegrity, offerCaseConsistency, offerCaseCorrupt } from '../offers/offer.mjs';
 import { effectiveStatus as signingEffectiveStatus, currentRevision as signingCurrentRevision, signingIntegrity, signingConsistency, signingCorrupt, isLive as signingIsLive, findParty } from '../signings/signing.mjs';
-// M23 P8 — the journey MODEL: stage, completed stages, current resources, the
-// server-derived next action, the validator and the timeline visibility table.
 import {
   JOURNEY_POLICY_VERSION, canonicalStageFor, completedStagesFor, nextActionFor, validateRecruitmentJourney,
   currentContactForCase, currentTrialForCase, currentAssessmentForCase, currentDecisionForCase, currentOfferForCase, currentSigningForCase,
@@ -49,21 +34,17 @@ import {
 } from './journeyModel.mjs';
 
 /**
- * `db` collections this projection may not proceed without. The requests, trials, contacts (required since P3), offers,
- * signings, signing packages and outcome reports are read through SQL since §4.3 step 2: `opts.reads.requests`,
- * `.trials`, `.contacts` and `.signings` are required (a missing one is reported as the missing store of that name,
- * `recruitmentContacts` for the contacts); `opts.reads.offers`, `.signingPackages` and `.outcomeReports` are optional like their phases always were.
+ * Empty: every input is an `opts.reads` entry. `cases`, `decisions`, `requests`, `trials`, `contacts`, `signings` and
+ * `assessments` are required (checked in the projector); `offers`, `signingPackages` and `outcomeReports` are optional.
  */
 export const JOURNEY_REQUIRED_STORES = Object.freeze([
-  // S9b: the assessments are read through SQL too (`opts.reads.assessments`, required): no `db` collection is left.
 ]);
 
-/** Stores that are genuinely optional right now, because their phase has not shipped (none since §4.3 step 2: the outcome reports are an optional `reads` entry). */
 export const JOURNEY_OPTIONAL_STORES = Object.freeze([]);
 
 export const JOURNEY_VIEWERS = Object.freeze([
   'org_staff', 'grassroots_staff', 'player_self', 'guardian', 'trust_safety',
-  // M23 P8 — an authorized agent: the route proves the basis (representation,
+  // An authorized agent: the route proves the basis (representation,
   // scope, licence, the client's own share) and passes `authorized: true`;
   // the projection then shows the factual workflow stages the client shared.
   'agent',
@@ -93,7 +74,7 @@ const TIMELINE_ACTIONS = new Set([
   'room_decision_recorded',
 ]);
 
-/** P4B — the Trial history actions that are milestones. Unlinking is housekeeping. */
+/** The Trial history actions that are milestones. Unlinking is housekeeping. */
 const TRIAL_TIMELINE_ACTIONS = new Set([
   'trial_accepted', 'trial_schedule_proposed', 'trial_rescheduled', 'trial_schedule_confirmed', 'trial_schedule_declined',
   'trial_attendance_recorded', 'trial_cancelled', 'trial_completed', 'trial_evidence_linked',
@@ -109,11 +90,11 @@ const TRIAL_TIMELINE_ACTIONS = new Set([
  * set, ids of records it already owns — and NO player identity: no name, no
  * date of birth, no contact detail. A block or a removal stops a player's data
  * flowing; there is no player data here for it to stop. The surfaces that do
- * carry player identity (M17's room header) re-run `orgCanSee` on every read,
+ * carry player identity (the room header) re-run `orgCanSee` on every read,
  * which is where that check belongs.
  */
 /**
- * M23 P8.1 (D-P81-15) — a record belongs to ONE case. A row that names a case
+ * A record belongs to ONE case. A row that names a case
  * belongs to that case and no other. A row that names none (a legacy request,
  * a legacy Trial, an assessment written outside a Trial) belongs to the case
  * of this club and player that was OPEN when it was written: an ended case
@@ -143,12 +124,11 @@ export function buildRecruitmentJourney(caseId, viewer, opts = {}) {
     historyCursor = 0,
     reads = {},
   } = opts;
-  // The player through the identity repository (`reads.player`, every route passes it).
   const playerOf = typeof reads.player === 'function' ? reads.player : () => null;
 
-  // ---- §26 — infrastructure before data: a query object a route forgot to pass is broken composition, reported by
-  // the store it stands for, never answered as an empty history. (`malformed` stays in the answer: nothing is a plain
-  // list any more, so it is always empty.)
+  // ---- Infrastructure before data: a query object a route forgot to pass is broken composition, reported by
+  // the store it stands for, never answered as an empty history. (`malformed` is always empty; it stays in the
+  // response shape.)
   const missing = [];
   if (typeof reads.cases?.byId !== 'function' || typeof reads.cases?.forOrgPlayer !== 'function') missing.push('recruitmentCases');
   if (typeof reads.decisions?.forRoom !== 'function') missing.push('roomDecisions');
@@ -173,7 +153,7 @@ export function buildRecruitmentJourney(caseId, viewer, opts = {}) {
 
   const kase = reads.cases.byId(caseId);
 
-  // ---- §39 — tenant isolation with 404 concealment.
+  // ---- Tenant isolation with 404 concealment.
   //
   // A foreign organisation's case must be indistinguishable from one that does
   // not exist. Same code, same message, no count, no hint that the id is real.
@@ -185,15 +165,14 @@ export function buildRecruitmentJourney(caseId, viewer, opts = {}) {
     return { ok: false, error: 'CASE_NOT_A_ROOM', message: 'This recruitment case has no workspace.' };
   }
 
-  // The records of THIS case, read once (§4.3 step 2): every projection below filters these. The contacts, offers and
+  // The records of THIS case, read once: every projection below filters these. The contacts, offers and
   // packages that name the case; the club's signings of this player (a legacy row names no package). `offers` and
-  // `packages` are null when their store is not composed (the optional phases).
+  // `packages` are null when their read is not composed (they are optional).
   const rec = {
     contacts: reads.contacts.forCase(kase.id),
     // The club's other cases of this player (an earlier, ended case owns its own records) and this case's decisions.
     siblingCases: reads.cases.forOrgPlayer(kase.orgId, kase.playerId),
     decisions: reads.decisions.forRoom(kase.id),
-    // The club's assessments of this player (S9b: SQL).
     assessments: reads.assessments.forOrgPlayer(kase.orgId, kase.playerId),
     offers: typeof reads.offers?.forCase === 'function' ? reads.offers.forCase(kase.id) : null,
     packages: typeof reads.signingPackages?.forCase === 'function' ? reads.signingPackages.forCase(kase.id) : null,
@@ -211,15 +190,15 @@ export function buildRecruitmentJourney(caseId, viewer, opts = {}) {
     signingForPackage: (packageId) => (typeof reads.signings.forPackage === 'function' ? reads.signings.forPackage(packageId) : null),
   };
 
-  // ---- §35/§36/§37 — hidden club interest.
+  // ---- Hidden club interest.
   //
   // THE RULE THIS ENFORCES: a player cannot learn that a club has a case on
   // them by asking. Not the stage, not the existence, not a count, not a
   // different error for "exists but hidden" versus "does not exist".
   //
-  // At P2 no share boundary has been crossed by anything — Contact, Trial and
-  // Offer arrive in later phases — so the honest answer to every player and
-  // guardian is the same one they would get for a case that was never opened.
+  // A player or guardian sees only records that crossed a share boundary to
+  // them; with none, the answer is the one they would get for a case that was
+  // never opened.
   if (viewer.kind === 'player_self' || viewer.kind === 'guardian') {
     const shared = sharedRecordsFor(rec, kase, viewer, now);
     if (shared.length === 0) {
@@ -231,7 +210,7 @@ export function buildRecruitmentJourney(caseId, viewer, opts = {}) {
       // Deliberately NOT the case id: the player is being shown the things
       // that were shared with them, not a window onto the club's workspace.
       shared,
-      // M23 P8 — the player's own journey: a stage word derived only from
+      // The player's own journey: a stage word derived only from
       // records that reached them, the one thing they could do now, the ids
       // of their current records, and the milestones they were party to.
       // No case id, no lifecycle state, no priority, no decision, no note.
@@ -241,12 +220,12 @@ export function buildRecruitmentJourney(caseId, viewer, opts = {}) {
     };
   }
 
-  // ---- §38 — Trust & Safety is not a master key.
+  // ---- Trust & Safety is not a master key.
   if (viewer.kind === 'trust_safety' && viewer.authorized !== true) {
     return { ok: false, error: 'CASE_NOT_FOUND', message: 'No such recruitment case.' };
   }
 
-  // ---- M23 P8 §17/§47 — an agent is not a master key either. The route
+  // ---- An agent is not a master key either. The route
   // establishes the basis; without `authorized: true` the case does not exist.
   if (viewer.kind === 'agent') {
     if (viewer.authorized !== true || viewer.playerId !== kase.playerId) {
@@ -286,10 +265,10 @@ export function buildRecruitmentJourney(caseId, viewer, opts = {}) {
       at: d.createdAt,
       by: d.by?.name ?? null,
       supersededById: d.supersededById ?? null,
-      // §80 — the note is NEVER projected. It is org-private free text and it
+      // The note is NEVER projected. It is org-private free text and it
       // has no business travelling inside a summary that other surfaces embed.
       hasNote: !!d.note,
-      // P5 — a formal decision is the same row with an outcome; legacy rows
+      // A formal decision is the same row with an outcome; legacy rows
       // read as advisory recommendations. Ids, the outcome word, a count.
       kind: d.kind === 'formal' ? 'formal' : 'recommendation',
       outcome: d.kind === 'formal' ? d.outcome ?? null : null,
@@ -297,15 +276,15 @@ export function buildRecruitmentJourney(caseId, viewer, opts = {}) {
     }));
   const currentDecision = decisions.filter((d) => !d.supersededById).slice(-1)[0] ?? null;
   const currentFormal = currentDecision && currentDecision.kind === 'formal' ? currentDecision : null;
-  // P5 — the case's single draft, for the club only: its existence, its
+  // The case's single draft, for the club only: its existence, its
   // outcome and who holds it. Never its rationale; never on any other viewer.
   const decisionDraft = kase.decisionDraft && typeof kase.decisionDraft === 'object'
     ? { id: kase.decisionDraft.id ?? null, outcome: kase.decisionDraft.outcome ?? null, by: kase.decisionDraft.by?.name ?? null, updatedAt: kase.decisionDraft.updatedAt ?? null }
     : null;
 
-  // P4B — the Trial workflow, as MILESTONES: ids, states, times and counts
-  // (§87). Never instructions, an address, a note, an observation or an
-  // assessment. A structurally corrupt row is omitted and counted (§143).
+  // The Trial workflow, as MILESTONES: ids, states, times and counts.
+  // Never instructions, an address, a note, an observation or an
+  // assessment. A structurally corrupt row is omitted and counted.
   let trialsOmitted = 0;
   const trials = [];
   for (const t of rec.trials) {
@@ -313,11 +292,11 @@ export function buildRecruitmentJourney(caseId, viewer, opts = {}) {
     if (trialIntegrity(t, { orgId: kase.orgId, caseId: t.caseId ?? null }).length) { trialsOmitted += 1; continue; }
     trials.push({ id: t.id, status: t.status, proposedDate: t.proposedDate ?? null, hasReport: !!t.report, workflow: trialMilestone(t) });
   }
-  // P8 — the model, the current-resource selection and the timeline read THIS
+  // The model, the current-resource selection and the timeline read THIS
   // case's Trials only (`caseId`), the same scope as the evidence provider: a
   // Trial from this club's earlier, ended case with the same player is that
   // case's history, never this case's current Trial or its trial stage. The
-  // `trials` list above stays the club's view of the player (P4).
+  // `trials` list above stays the club's view of the player.
   const trialRows = rec.trials.filter((t) => t?.orgId === kase.orgId && t.playerId === kase.playerId && t.caseId === kase.id && trials.some((x) => x.id === t.id));
   const trialInvitations = rec.caseRequests.filter((r) => r?.type === 'trial' && r.caseId === kase.id && r.orgId === kase.orgId);
   const trialAssessments = rec.assessments.filter((a) => a.context?.trialId && trialRows.some((x) => x.id === a.context.trialId));
@@ -326,10 +305,10 @@ export function buildRecruitmentJourney(caseId, viewer, opts = {}) {
     .filter((r) => r?.orgId === kase.orgId && r.playerId === kase.playerId)
     .map((r) => ({ id: r.id, type: r.type, status: r.status, routedTo: r.routedTo ?? null, createdAt: r.createdAt }));
 
-  // P3 — the Contact workflow, as MILESTONES (§87). Ids, states and times.
+  // The Contact workflow, as MILESTONES. Ids, states and times.
   // Never a body, a summary or a reply: the journey is a map of the process,
   // not a copy of the communication. A structurally corrupt record is omitted
-  // and counted rather than rendered as if it were sound (§143).
+  // and counted rather than rendered as if it were sound.
   let contactsOmitted = 0;
   const contactRecords = [];
   for (const c of rec.contacts) {
@@ -342,10 +321,9 @@ export function buildRecruitmentJourney(caseId, viewer, opts = {}) {
   const assessments = rec.assessments
     .map((a) => ({ id: a.id, state: a.state, at: a.submittedAt ?? a.createdAt }));
 
-  // Optional stores: absent because their phase has not shipped. Structural
-  // degradation (an empty list plus an explicit availability flag), never an
-  // invented record.
-  // P6: the canonical Offer store. Only this case's own rows (same org, same
+  // Optional reads degrade structurally (an empty list plus an explicit
+  // availability flag), never an invented record.
+  // The canonical Offer store. Only this case's own rows (same org, same
   // player), with an integrity check so a malformed row projects nothing; the
   // status is DERIVED (an ISSUED revision past its expiry reads EXPIRED).
   // Terms, notes and documents never appear in the journey.
@@ -356,7 +334,7 @@ export function buildRecruitmentJourney(caseId, viewer, opts = {}) {
       .map((o) => ({ id: o.id, type: o.type, status: canonicalOfferStatus(o, now), liveStatus: canonicalLiveStatus(o, now) }))
     : [];
 
-  // M23 P7.1/P8 — the signing ROW that supports this case: the one a
+  // The signing ROW that supports this case: the one a
   // COMPLETED package on THIS case names back, else (legacy) the club's
   // un-packaged row for this player. A row that names another case's
   // package proves nothing here.
@@ -364,21 +342,21 @@ export function buildRecruitmentJourney(caseId, viewer, opts = {}) {
   const signing = supportingSigningRow(rec, kase, packageRows) ?? null;
   const outcomeAvailable = rec.outcomesAvailable;
 
-  // ---- M23 P8 — the journey block: stage, completed stages, current
+  // ---- The journey block: stage, completed stages, current
   // resources, the server-derived next action and the classification.
   const offerRows = offersAvailable ? rec.offers.filter((o) => o?.caseId === kase.id && o.orgId === kase.orgId && o.playerId === kase.playerId && offerIntegrity(o, { orgId: kase.orgId, caseId: kase.id }).length === 0) : [];
   const soundPackages = packageRows.filter((p) => signingIntegrity(p, { orgId: kase.orgId }).length === 0);
-  // P8.1 (D-P81-17): every record naming THIS case that failed its integrity check — omitted above, and a problem below.
+  // Every record naming THIS case that failed its integrity check — omitted above, and a problem below.
   const offersCorrupt = offersAvailable ? rec.offers.filter((o) => o?.caseId === kase.id && o.orgId === kase.orgId && offerIntegrity(o, { orgId: kase.orgId, caseId: kase.id }).length > 0).length : 0;
   const packagesCorrupt = packageRows.length - soundPackages.length;
   const trialsCorrupt = rec.caseTrials.filter((t) => t?.caseId === kase.id && t.orgId === kase.orgId && trialIntegrity(t, { orgId: kase.orgId, caseId: kase.id }).length > 0).length;
   const corruptRecords = offersCorrupt + packagesCorrupt + trialsCorrupt + contactsOmitted;
-  // P8.1 (D-P81-15): this case's assessments — never the ended case's (a Trial of another case, or written while another case was open).
+  // This case's assessments — never the ended case's (a Trial of another case, or written while another case was open).
   const allAssessments = rec.assessments.filter((a) => !ownedByAnotherCase(rec, kase, { caseId: trialCaseOf(rec, a.context?.trialId), at: a.createdAt }));
   const journeyBlock = journeyFor(rec, kase, {
     playerOf,
     status, role, now,
-    blocked: !!reads.blocks?.has(kase.playerId, kase.orgId), // the safety repository's queries
+    blocked: !!reads.blocks?.has(kase.playerId, kase.orgId),
     contacts: rec.contacts.filter((c) => c && c.caseId === kase.id && c.orgId === kase.orgId && contactIntegrity(c, { orgId: kase.orgId, caseId: kase.id }).length === 0),
     trials: trialRows, trialRequests: trialInvitations, assessments: allAssessments,
     decisions: rec.decisions.filter((d) => d?.roomId === kase.id && d.orgId === kase.orgId),
@@ -402,7 +380,7 @@ export function buildRecruitmentJourney(caseId, viewer, opts = {}) {
     activeTrial: trials.some((t) => t.status === 'awaiting_report'),
     offerAwaitingResponse: offers.some((o) => o.liveStatus === 'ISSUED'),
   });
-  // P5 §61 — evaluation exists (a submitted assessment or a completed trial)
+  // Evaluation exists (a submitted assessment or a completed trial)
   // and no FORMAL decision stands on a live case. Derived by looking, never
   // stored, never a status; a workflow-coverage fact, not a judgement.
   conditions.decisionOutstanding = !LIFECYCLE_TERMINAL.includes(status)
@@ -410,7 +388,7 @@ export function buildRecruitmentJourney(caseId, viewer, opts = {}) {
     && (assessments.some((a) => a.state !== 'draft') || trials.some((t) => t.workflow?.workflowState === 'completed'));
   conditions.hasFormalDecision = !!currentFormal;
 
-  // §31/§42 — next actions are deterministic AND permission-aware. An action
+  // Next actions are deterministic AND permission-aware. An action
   // this person cannot perform is not a suggestion, it is a dead end with a
   // 403 at the end of it.
   const actions = availableActions(kase, { role, evidence, now });
@@ -430,7 +408,7 @@ export function buildRecruitmentJourney(caseId, viewer, opts = {}) {
     lifecycle: {
       currentStage: status,
       label: ROOM_STATUS_LABELS[status] ?? status,
-      stage: kase.stage ?? null,          // the M12 derivation, for reference only
+      stage: kase.stage ?? null,          // derived from status, for reference only
       terminal: LIFECYCLE_TERMINAL.includes(status),
       reopenable: LIFECYCLE_REOPENABLE.includes(status),
       allowedNext: ROOM_TRANSITIONS[status] ?? [],
@@ -438,7 +416,7 @@ export function buildRecruitmentJourney(caseId, viewer, opts = {}) {
     },
     conditions,
     nextActions: actions,
-    // M23 P8 — ONE server-derived next action, the current resources and the
+    // ONE server-derived next action, the current resources and the
     // classification. Clients read these; they never compute them.
     journey: journeyBlock,
     contact: { records: contacts, contacts: contactRecords, omitted: contactsOmitted },
@@ -452,8 +430,8 @@ export function buildRecruitmentJourney(caseId, viewer, opts = {}) {
       // A signing is a separate, confirmed fact. It is reported as what it is
       // and never inferred from the lifecycle reaching `offer_accepted`.
       signing: signing ? { id: signing.id, at: signing.ts, method: signing.method ?? 'LEGACY_RECORDED', signingPackageId: signing.signingPackageId ?? null } : null,
-      // M23 P7 — the signing WORKFLOW, ids and the status word only. A case at
-      // `signed` from before P7 has none, and none is invented for it.
+      // The signing WORKFLOW, ids and the status word only. A case at
+      // `signed` with no package has none, and none is invented for it.
       signingPackages: rec.packages !== null
         ? rec.packages
           .filter((p) => p?.caseId === kase.id && p.orgId === kase.orgId && p.playerId === kase.playerId && signingIntegrity(p, { orgId: kase.orgId }).length === 0)
@@ -469,15 +447,14 @@ export function buildRecruitmentJourney(caseId, viewer, opts = {}) {
  * What a player or guardian may see: records that crossed an explicit share
  * boundary, and nothing else.
  *
- * At P2 this returns the contact/trial requests that were actually sent to
- * them — records that already exist and that they already receive through the
- * Inbox. It deliberately contains no case id, no stage, no room, no decision
+ * The requests, Trials, Offers and signing packages that actually reached
+ * them. It deliberately contains no case id, no stage, no room, no decision
  * and no count of anything internal.
  */
 function sharedRecordsFor(rec, kase, viewer, now = Date.now()) {
   const mine = (r) => {
     if (r?.orgId !== kase.orgId || r.playerId !== kase.playerId) return false;
-    if (ownedByAnotherCase(rec, kase, { caseId: r.caseId ?? contactCaseOf(rec, r.contactId), at: r.createdAt })) return false; // P8.1 (D-P81-15): the ended case's request is its own line
+    if (ownedByAnotherCase(rec, kase, { caseId: r.caseId ?? contactCaseOf(rec, r.contactId), at: r.createdAt })) return false; // the ended case's request is its own
     if (viewer.kind === 'player_self') return r.routedTo !== 'guardian' && viewer.playerId === kase.playerId;
     return r.routedTo === 'guardian' && r.guardianId === viewer.guardianId;
   };
@@ -488,13 +465,13 @@ function sharedRecordsFor(rec, kase, viewer, now = Date.now()) {
     status: r.status,
     at: r.createdAt,
   }));
-  // P4B — the family's own Trial: the operational edge they already hold
+  // The family's own Trial: the operational edge they already hold
   // through /player/trials and /guardian/trials (state, revision, times).
   // Only the recipient who accepted sees it here; a minor's own device sees
   // the outcome line, never the guardian's record. No case id, no history.
   const mineTrial = (t) => {
     if (t?.orgId !== kase.orgId || t.playerId !== kase.playerId || t.subjectRemovedAt) return false;
-    if (ownedByAnotherCase(rec, kase, { caseId: t.caseId ?? null, at: t.acceptedAt ?? t.createdAt })) return false; // P8.1 (D-P81-15)
+    if (ownedByAnotherCase(rec, kase, { caseId: t.caseId ?? null, at: t.acceptedAt ?? t.createdAt })) return false;
     if (viewer.kind === 'player_self') return viewer.playerId === kase.playerId && (t.recipient ? t.recipient.type === 'player' : t.acceptedBy === 'player');
     return t.recipient ? t.recipient.type === 'guardian' && t.recipient.guardianId === viewer.guardianId : t.acceptedBy === 'guardian';
   };
@@ -502,7 +479,7 @@ function sharedRecordsFor(rec, kase, viewer, now = Date.now()) {
     const m = trialMilestone(t);
     return { kind: 'trial', id: t.id, workflowState: m.workflowState, at: t.acceptedAt, scheduledAt: m.scheduledAt, revision: m.revision, sessionCount: m.sessions.length, completion: m.completion };
   });
-  // M23 P8 — an Offer whose live revision was ISSUED to this recipient, and a
+  // An Offer whose live revision was ISSUED to this recipient, and a
   // signing package PRESENTED to them, crossed the share boundary too. Ids,
   // status words and instants; no terms, no digest, no note.
   const offers = offersSharedWith(rec, kase, viewer, now).map(({ offer, revision, liveStatus }) => ({ kind: 'offer', id: offer.id, revisionId: revision?.id ?? null, revisionNumber: revision?.revisionNumber ?? null, status: liveStatus, at: revision?.issuedAt ?? offer.createdAt ?? null, respondedAt: revision?.respondedAt ?? null }));
@@ -510,7 +487,7 @@ function sharedRecordsFor(rec, kase, viewer, now = Date.now()) {
   return [...requests, ...trials, ...offers, ...signings];
 }
 
-/** Offers of this case whose live revision was issued to THIS recipient (the snapshot names them). */
+/** Offers of this case whose live revision was issued to THIS recipient (the revision's recipient snapshot names them). */
 function offersSharedWith(rec, kase, viewer, now) {
   if (rec.offers === null) return [];
   const out = [];
@@ -541,9 +518,9 @@ function packagesSharedWith(rec, kase, viewer, now) {
 }
 
 /**
- * The signing ROW that supports THIS case (P7.1 §32 applied to the journey):
- * a row a COMPLETED package on this case names back, else — for a case from
- * before P7 — the club's un-packaged row for this player. A row that belongs
+ * The signing ROW that supports THIS case:
+ * a row a COMPLETED package on this case names back, else — for a case with
+ * no package — the club's un-packaged row for this player. A row that belongs
  * to another case's package is not this case's evidence.
  */
 function supportingSigningRow(rec, kase, packageRows) {
@@ -572,7 +549,7 @@ function foreignReferences(rec, kase) {
 }
 
 /**
- * M23 P8 — the journey block for the club: the canonical stage, the completed
+ * The journey block for the club: the canonical stage, the completed
  * stages with their basis, the current resource of each kind, ONE next
  * action for this viewer, and the validator's verdict. Reads; never writes.
  */
@@ -591,7 +568,7 @@ function journeyFor(rec, kase, f) {
   const subjectRemoved = !!kase.subjectRemovedAt || !f.playerOf(kase.playerId);
   const verdict = validateRecruitmentJourney(facts);
   const next = nextActionFor({ status: f.status, role: f.role, now: f.now, blocked, subjectRemoved, contact, trial, trialRequest, assessed, decision, offer, signing, signingRow: f.signingRow });
-  // M23 P8.1 (§13/§14/§36) — a case whose lifecycle and records disagree fails
+  // A case whose lifecycle and records disagree fails
   // CLOSED on the strip: the act is still named (so the reader knows where the
   // case stands), but it is not offered until the record is put right. The
   // domain routes keep their own gates; this only stops a client from being
@@ -620,7 +597,7 @@ function journeyFor(rec, kase, f) {
 }
 
 /**
- * M23 P8 §16 — the player's (or guardian's) journey with ONE club: derived
+ * The player's (or guardian's) journey with ONE club: derived
  * only from records that reached them. Stage word, next action, current
  * ids, the milestones they were party to. No case id, no lifecycle word
  * (except `signed`, which is theirs), no priority, no decision, no note.
@@ -664,7 +641,7 @@ function playerJourneyFor(rec, kase, viewer, shared, now) {
 }
 
 /**
- * M23 P8 §17 — an authorized agent's projection: the factual workflow stages
+ * An authorized agent's projection: the factual workflow stages
  * the client shared, and nothing about the club's process. The route has
  * already proved the basis; `viewer.grants` says which record kinds the
  * scope and the client's shares permit (`contacts`, `trials`, `offers`,
@@ -714,10 +691,10 @@ const liveRevisionOf = (o) => (o?.revisions ?? []).some((r) => r && r.status !==
  */
 function timelineFor(kase, decisions, contactRecords = [], trial = {}) {
   const out = [];
-  // P4B — Trial milestones: ids, states and counts. The invitation and its
+  // Trial milestones: ids, states and counts. The invitation and its
   // decline come from the request row; everything after acceptance comes
   // from the Trial's own append-only history; an assessment is recorded as
-  // existing and nothing more (D-16). Never a note, an address, an
+  // existing and nothing more. Never a note, an address, an
   // instruction, an observation or a rating.
   for (const r of trial.invitations ?? []) {
     if (r?.createdAt != null) out.push({ _k: `trial_invited:${r.id}`, kind: 'trial_invited', at: r.createdAt, by: r.scoutName ?? null, requestId: r.id, recipientType: r.recipient?.type ?? r.routedTo ?? null });
@@ -741,7 +718,7 @@ function timelineFor(kase, decisions, contactRecords = [], trial = {}) {
     const at = a.submittedAt ?? a.createdAt;
     if (at != null) out.push({ _k: `trial_assessment_recorded:${a.id}`, kind: 'trial_assessment_recorded', at, by: null, trialId: a.context.trialId, assessmentId: a.id, state: a.state });
   }
-  // P3 — two safe milestones per contact, keyed by the contact id so two in
+  // Two safe milestones per contact, keyed by the contact id so two in
   // the same millisecond keep a stable order.
   for (const c of contactRecords) {
     if (c.initiatedAt != null) {
@@ -751,7 +728,7 @@ function timelineFor(kase, decisions, contactRecords = [], trial = {}) {
       out.push({ _k: `contact_response:${c.id}`, kind: 'contact_response_received', at: c.respondedAt, by: null, responseKind: c.responseKind, contactId: c.id });
     }
   }
-  // M23 P8 — Offer and signing milestones from each record's own append-only
+  // Offer and signing milestones from each record's own append-only
   // history: ids, words and instants. Never a term, a digest, a note or a
   // recipient's name. A live revision that expired unanswered is a derived
   // milestone at its expiry instant (nothing writes EXPIRED).
@@ -775,7 +752,7 @@ function timelineFor(kase, decisions, contactRecords = [], trial = {}) {
       reasonCodes: h.detail?.reasonCodes ?? [],
     });
   }
-  // M23 P5.6E — the club's own record that it invited a transaction workspace from
+  // The club's own record that it invited a transaction workspace from
   // this case, and that it withdrew the invitation. A milestone, because it is the
   // moment the case reached outside the Room. Ids, a time, the colleague who did it
   // and WHETHER the player was represented — never who their agent is, never a term,

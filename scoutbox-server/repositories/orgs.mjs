@@ -1,6 +1,5 @@
 /**
- * Organisations as one typed table with explicit writes (S3, migration `0004_orgs_live`; explicit since S14g,
- * docs/architecture/migration.md §4.6; sql/01_identity.sql).
+ * Organisations: the `orgs` table.
  *
  * Record (the keys every reader sees, all always present):
  *   { id, name, type, level, plan, country,
@@ -11,17 +10,14 @@
  * The password hash is never on a record: `passwordHashOf` gives it to the sign-in check and `setPasswordHash`
  * writes it. Responses are allowlists, never the record.
  *
- * Facets that moved to other repositories: tactical, squad, lookingFor and federationCheck are club setup tables
- * (S9c), verification is the verification tables (S10a, its revokedAt the column verification_revoked_at), and
- * agencySettings is the agent core's (S11a). Since S14g there is no facet storage at all: an unknown field is
- * refused.
+ * An organisation's club setup (tactical, squad, lookingFor, federationCheck), verification and agency settings live
+ * in their own repositories (clubSetup, verification, agentCore); a write naming one of those fields is refused,
+ * naming where it lives (RETIRED_FACET_OWNER). Any other unknown field is refused too.
  *
- * WRITES are explicit operations (`create`, `update(id, draft => …)`, `setPasswordHash`), each joining the open unit
- * of work, the caller's transaction or its own. READS are SQL: no mirror and no db.* view (`db.orgs` throws); fresh,
- * deep-frozen records. Refusals carry a code and name the id and the field, never a value.
+ * Refusals carry a code and name the id and the field, never a value.
  *
  * A first installation's organisations (the seed) are imported once by `initialize`, while `meta.orgsInit` is
- * `pending` (set by the migration); the first installation's import settles it.
+ * `pending` (set by the migration).
  */
 import { PLANS } from '../catalogue.mjs';
 import { transaction, migrationApplied } from './database.mjs';
@@ -83,7 +79,7 @@ export const ORG_RECORD_KEYS = Object.freeze(['id', 'name', 'type', 'level', 'pl
 const BOOLEANS = Object.freeze(['trustedPartner', 'verified', 'safeguardingContractSigned', 'suspended', 'emailDomainVerified', 'mfaRequiredForLeads']);
 /** The fields an update's draft may change (the id and the creation time never change; the password has its own operation). */
 const EDITABLE = Object.freeze(ORG_RECORD_KEYS.filter((k) => k !== 'id' && k !== 'createdAt'));
-/** Fields that moved to another repository, named in the refusal so a missed writer learns where they went. */
+/** Fields another repository owns, named in the refusal so a misdirected writer learns where they live. */
 const RETIRED_FACET_OWNER = Object.freeze({ tactical: 'clubSetup', squad: 'clubSetup', lookingFor: 'clubSetup', federationCheck: 'clubSetup', verification: 'verification', agencySettings: 'agentCore' });
 
 /** Fill the optional fields of an incoming record with their defaults (null, or false for a flag). */
@@ -163,8 +159,8 @@ const cutOver = (sqlite) => migrationApplied(sqlite, ORGS_CUTOVER_MIGRATION);
 
 // ------------------------------------------------------------------ the whole-domain read
 /**
- * Type one snapshot organisation: `{ ok: true, row, passwordHash }` or `{ ok: false, reason }`. A snapshot row is a
- * record plus `password` (the hash, or null); absent optional fields take their defaults (`createdAt` the save's
+ * Type one organisation to import (the seed): `{ ok: true, row, passwordHash }` or `{ ok: false, reason }`. A row is
+ * a record plus `password` (the hash, or null); absent optional fields take their defaults (`createdAt` the import's
  * time); an unknown field is refused.
  */
 export function typeOrgSnapshotRow(raw, { now = Date.now() } = {}) {
@@ -180,7 +176,7 @@ export function typeOrgSnapshotRow(raw, { now = Date.now() } = {}) {
 
 const readSnapshot = (sqlite) => sqlite.prepare(`${SELECT} ORDER BY rowid`).all().map((d) => ({ ...fromDb(d), password: d.password_hash }));
 
-/** The whole domain read back as plain records (`readAllRecords` in index.mjs: the test suites' read-back); null before its migration. */
+/** The whole domain read back as plain records (`readAllRecords` in index.mjs: the test suites' read-back). */
 export const ORGS_TABLE = {
   name: 'orgs',
   read(sqlite) { return cutOver(sqlite) ? readSnapshot(sqlite) : null; },

@@ -1,4 +1,4 @@
-// M12 typed client (org side): evidence passport, assessments, video
+// Typed client (org side): evidence passport, assessments, video
 // workspace, recruitment cases, tactical fit, opportunities, campaigns,
 // development follow-up, trial days, outcomes, coach affiliations.
 // Same live/demo split as api.ts: VITE_DEMO=1 selects the in-browser mirror.

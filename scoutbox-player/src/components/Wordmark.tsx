@@ -1,5 +1,5 @@
 // The one ScoutBox wordmark: "ScoutBox" in Albert Sans ExtraBold (the brand
-// mark — M24E keeps it when everything else moved to Inter), the brand green
+// mark, kept although the rest of the UI uses another face), the brand green
 // square drawn as a box on the baseline (never the small-square glyph, which the font
 // centres on the x-height), and the TM raised beside it. Used by the Player's
 // Home header and its entry screen; the portals draw the same mark in CSS
@@ -14,7 +14,7 @@ export function Wordmark({ size = 24, color, tmColor, label }: { size?: number; 
   const square = Math.max(5, Math.round(size * 0.25));
   const lineHeight = Math.round(size * 1.08);
   const tmSize = Math.max(7, Math.round(size * 0.3));
-  // M24F.2 — the ™ rides above the green square, tight to the final "x": one
+  // The ™ rides above the green square, tight to the final "x": one
   // column after the letters (2px gap), the square on the baseline, the ™ at
   // the top. The mark reads as one word.
   return (

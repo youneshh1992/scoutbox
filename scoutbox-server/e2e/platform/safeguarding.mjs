@@ -1,5 +1,4 @@
-// Safeguarding and audit routes (S14b: the safety-audit repository's explicit writes and SQL reads), against a
-// real server on a temporary data directory with the synthetic seed.
+// Safeguarding and audit routes, against a real server on a temporary data directory with the synthetic seed.
 //
 //   A the Trust & Safety lists page by cursor ({ items, nextCursor }): reports in triage order, blocks and
 //     moderation newest first; junk paging is refused with 400

@@ -1,35 +1,9 @@
-// M23 P5.6C — persistence, migration and restart audit for the Conflict &
-// Compliance Engine.
-//
-//   1  the compliance tables: migrations 0027 and 0028, each recorded once; a
-//      clean database holds the three SEEDED policy versions and nothing else,
-//      and reopening it changes nothing
-//   2  a database carrying typed agent rows: the compliance migrations invent
-//      no review item and no reviewer identity, and change no agent row
-//   3  a real boot over that database: /healthz reports the schema,
-//      every profile has the (empty) domestic_authorisation facet, a facet that
-//      needs a human and a client's dispute each raise ONE attributed review
-//      item, the seeded policies are listed as published, and the shared admin
-//      key still has no reviewer lane (G-C0)
-//
-// S11a: the agent profiles, affiliations and agreements are typed tables
-// (migration 0026), planted in the writers' whole literals. No migration
-// bootstraps review items from them: a review is requested by the route that
-// needs one, which section 3 exercises.
-// S14a: the blob store and its snapshot registry (step 2306) are retired; the
-// schema checks read the table migrations recorded in data_migrations.
-// S11b-1: the reviewers and the policy versions are typed tables too (migration 0027 inserts the seeded versions, read
-// back exactly); a reviewer row the table cannot hold (an unknown status word) is refused by the repository, naming it.
-//   4  clean boot → context → declared representation → attributed review →
-//      consent → revocation → stop → read back → reboot: bytes survive
-//      (ledger rows incl. the revocation row, evaluations, revs, keys, the
-//      reviewer session), dev reviewers are not re-seeded, no migration runs
-//      twice, and every key replays
-//   5  corruption on disk is contained and named: a review whose snapshot is
-//      PROHIBITED cannot be approved by anyone, a wiped policy store makes
-//      every jurisdiction unsupported (never silently CLEAR), a consent that
-//      names an unknown policy version is insufficient, and a reviewer row
-//      with an unknown status cannot log in
+// Persistence, migration and restart audit for the Conflict & Compliance Engine:
+// (1) the compliance tables and their seeded policy versions, (2) the migrations
+// invent no review or reviewer and change no agent row, (3) a real boot over
+// typed agent rows, (4) a full round trip across a restart, (5) corruption on
+// disk is contained and named. No migration bootstraps review items: a review is
+// requested by the route that needs one, which section 3 exercises.
 //
 // Nothing is rewritten, re-ordered or "repaired" on boot.
 
@@ -92,8 +66,8 @@ async function bootOn(dataDir, port) {
 
 const PORT = 6800 + Math.floor(Math.random() * 150);
 const T0 = 1_700_000_000_000;
-// S11b: the five stores are tables — reviewers and policy versions (migration 0027, which inserts the seeded
-// versions), contexts, reviews and consents (migration 0028).
+// Reviewers and policy versions come from migration 0027 (which inserts the seeded versions); contexts, reviews
+// and consents from 0028.
 const TABLE_STORES = ['tsReviewers', 'jurisdictionPolicies', 'regulatoryReviews', 'regulatoryConsents', 'complianceContexts'];
 const STEPS = [COMPLIANCE_POLICIES_MIGRATION, COMPLIANCE_RECORDS_MIGRATION];
 const SCHEMA_VERSION = Number(DATA_MIGRATIONS.map((m) => m.id).sort().at(-1).slice(0, 4));
@@ -105,7 +79,7 @@ const appliedMigrations = (dir) => {
 
 // ------------------------------------------------------------- fixtures
 
-/** The writers' whole literals for the agent core rows (S11a: typed tables; the repository refuses a partial record). */
+/** The writers' whole literals for the agent core rows (the repository refuses a partial record). */
 const affiliation = (id, userId, tiers) => ({ id, agencyOrgId: 'org-ag', userId, tiers, startedAt: T0, endedAt: null, endedReason: null, createdAt: T0, rev: 1, revAt: T0, revBy: null, keys: {}, history: [] });
 const profile = (id, userId, displayName, jurisdictions, facets) => ({ id, userId, agencyOrgId: 'org-ag', displayName, declared: { fifaLicenceNumber: null, jurisdictions }, facets: { ...newFacets(), ...facets }, createdAt: T0, updatedAt: T0, rev: 1, revAt: T0, revBy: null, history: [] });
 const agreement = (id, clientId) => ({
@@ -143,8 +117,6 @@ function agencySnapshot() {
 }
 
 // ======================================================= 1 — the tables
-// Rewritten in S14a: sections 1 and 2 described the retired snapshot registry (step m250_001 at 2306, runMigrations
-// over in-memory snapshots, the store contract). They now check the table migrations and what they write.
 section('1 — the compliance tables: 0027 and 0028, each recorded once; the seeded policies are rows of 0027');
 {
   const ids = DATA_MIGRATIONS.map((m) => m.id);
@@ -153,11 +125,11 @@ section('1 — the compliance tables: 0027 and 0028, each recorded once; the see
   for (const s of TABLE_STORES) ok(TABLE_BACKED.includes(s), `${s} is a table, not a collection`);
   const freshDir = mkdtempSync(path.join(tmpdir(), 'sbx-m25p1-'));
   const tables = readRecords(freshDir);
-  ok(tables.jurisdictionPolicies.length === SEEDED_POLICY_VERSIONS.length && tables.jurisdictionPolicies.map((p) => p.id).sort().join() === SEEDED_POLICY_VERSIONS.map((p) => p.id).sort().join(), `the ${SEEDED_POLICY_VERSIONS.length} P5.6A policy versions are seeded (FIFA baseline, England 2026/27, USA)`);
+  ok(tables.jurisdictionPolicies.length === SEEDED_POLICY_VERSIONS.length && tables.jurisdictionPolicies.map((p) => p.id).sort().join() === SEEDED_POLICY_VERSIONS.map((p) => p.id).sort().join(), `the ${SEEDED_POLICY_VERSIONS.length} policy versions are seeded (FIFA baseline, England 2026/27, USA)`);
   ok(tables.jurisdictionPolicies.every((p) => p.status === 'published' && p.proposedBy === null && p.approvedBy === null && p.history[0].by.name === 'migration 0027_compliance_policies' && p.history[0].detail.seeded === true), 'each seeded version is published, attributed to the migration, with no reviewer invented');
   ok(tables.jurisdictionPolicies.every((p) => stableJson(p.rules) === stableJson(SEEDED_POLICY_VERSIONS.find((v) => v.id === p.id).rules)), 'each seeded version\'s rules (statuses, sources, parameters, overrides) read back exactly as encoded');
   neg(tables.tsReviewers.length === 0 && tables.regulatoryReviews.length === 0 && tables.regulatoryConsents.length === 0 && tables.complianceContexts.length === 0, 'reviewers, reviews, consents and contexts start EMPTY — nobody is a reviewer by default');
-  neg(![...COMPLIANCE_POLICIES_TABLES, ...COMPLIANCE_RECORDS_TABLES].some((t) => /offer|negotiation|transaction/i.test(t)), 'the compliance migrations create no offer, negotiation or transaction table (out of scope for P5.6C)');
+  neg(![...COMPLIANCE_POLICIES_TABLES, ...COMPLIANCE_RECORDS_TABLES].some((t) => /offer|negotiation|transaction/i.test(t)), 'the compliance migrations create no offer, negotiation or transaction table (out of scope for compliance)');
   const recordsBefore = appliedMigrations(freshDir);
   const again = readRecords(freshDir);
   ok(stableJson(again) === stableJson(tables) && stableJson(appliedMigrations(freshDir)) === stableJson(recordsBefore) && STEPS.every((id) => recordsBefore.filter((r) => r.id === id).length === 1), 'reopening the file changes no table and records no migration again');
@@ -319,7 +291,7 @@ section('5 — corruption on disk is contained, named by its effect, never repai
 {
   const dir = mkdtempSync(path.join(tmpdir(), 'sbx-m25p5-'));
   const db = agencySnapshot();
-  // (a) a review whose stored snapshot says PROHIBITED — nobody can approve it. S11b-2: a review naming a context that
+  // (a) a review whose stored snapshot says PROHIBITED — nobody can approve it. A review naming a context that
   // is not there is not a row the typed table can hold (its key refuses it); the same snapshot on an
   // Approach item (no context) is, and stays planted.
   const prohibited = (subject) => ({
@@ -344,7 +316,7 @@ section('5 — corruption on disk is contained, named by its effect, never repai
   ok(s0.up, 'a first boot seeds the dev reviewers (empty store)');
   const seeded = await s0.stop();
   ok(seeded.tsReviewers.length === 3, 'three dev reviewers on disk');
-  // S11b-1: a reviewer row with an unknown status word is not a row the typed table can hold: the repository refuses
+  // A reviewer row with an unknown status word is not a row the typed table can hold: the repository refuses
   // it, naming it, and nothing is written.
   const odd = { id: 'tsr-odd', name: 'Odd Reviewer', role: 'trust_safety_admin', status: 'enabled', secretHash: 'not-a-hash', createdAt: T0, createdBy: { kind: 'system', userId: null, name: 'fixture' }, revokedAt: null, revokedBy: null, rev: 1, revAt: T0, revBy: null, history: [] };
   let refused = null;
@@ -362,7 +334,7 @@ section('5 — corruption on disk is contained, named by its effect, never repai
     ok(rej.status === 200 && rej.body.review.status === 'REJECTED' && rej.body.review.decision.resultingState.note === 'context gone', 'rejecting it works and says honestly that its context is gone');
     const after = await s.stop();
     neg(!after.tsReviewers.some((r) => r.id === 'tsr-odd') && after.tsReviewers.every((r) => r.status === 'active'), 'the failed login wrote no reviewer row and changed no status');
-    // Now wipe the policy store and boot again: nothing is CLEAR without an encoded policy. (S11b-2: the review that
+    // Now wipe the policy store and boot again: nothing is CLEAR without an encoded policy. (The review that
     // names a version goes with it — a typed row cannot name a version that is not there.) No route deletes a policy
     // version, so the wipe is plain SQL on the file (the rules and history rows cascade).
     neg(after.regulatoryReviews.length === 1, '(the one review is the planted one)');

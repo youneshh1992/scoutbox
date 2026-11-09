@@ -1,8 +1,8 @@
-// S7a through the REAL server (server.mjs booted as a child process on
+// Notifications through the REAL server (server.mjs booted as a child process on
 // temporary data directories, synthetic records only): the feed order and the
-// coalescing rules exactly as before (reverse insertion order, a refreshed
-// clock that does not move the row, one row coalesced, the six-hour window and
-// the stop at the first older row — planted rows included), the notification
+// coalescing rules (reverse insertion order, a refreshed clock that does not
+// move the row, one row coalesced, the six-hour window — planted rows
+// included), the notification
 // row durable in its table with the message it announces and across a SIGKILL,
 // the acknowledgment atomic with the dispatch rows under a real COMMIT failure,
 // preferences (a non-boolean value refused, the mandatory category forced
@@ -86,7 +86,7 @@ const feedOf = async (S, p, token) => { const r = await S.j('GET', p, undefined,
 const sameFeed = (feed) => feed.map((n) => ({ id: n.id, ts: n.ts, repeatCount: n.repeatCount, read: n.read, ackedAt: n.actionRequired?.ackedAt ?? null }));
 
 // ------------------------------------------------------------- the feed order and coalescing, through the real routes
-await test('feed and coalescing through the real routes: an identical message notification coalesces into one row (repeatCount, refreshed ts, no second row); the feed is reverse INSERTION order — a later, different notification stays above the refreshed one; a planted identical row older than six hours is not coalesced while the recent identical unread row is (S14e: the newest identical unread row whose last occurrence is within six hours; the old scan stopping at the first older row is gone); a planted identical row inside the window, inserted last, is the one coalesced, the earlier identical row untouched; the order survives a SIGKILL; and after the cutover the rows are in the notifications table with the message that announced them', async () => {
+await test('feed and coalescing through the real routes: an identical message notification coalesces into one row (repeatCount, refreshed ts, no second row); the feed is reverse INSERTION order — a later, different notification stays above the refreshed one; a planted identical row older than six hours is not coalesced while the recent identical unread row is (the newest identical unread row whose last occurrence is within six hours); a planted identical row inside the window, inserted last, is the one coalesced, the earlier identical row untouched; the order survives a SIGKILL; and after the cutover the rows are in the notifications table with the message that announced them', async () => {
   const dir = tempDir('s7a-feed'); let S = await boot(dir);
   const maria = await orgLogin(S, 'org-eastport', 'Maria Keane', 'Head of Recruitment'); const kola = await playerLogin(S, 'pl-adeyemi');
   const { channelId } = await openThread(S, maria, kola);
@@ -174,7 +174,7 @@ await test('acknowledgment: a withdrawal notice (notifyAction) lands with its co
   const ok = await ack();
   assert.equal(ok.status, 200, ok.text); assert.ok(ok.body.ackedAt);
   assert.equal(q1(dir, 'SELECT action_acked_at AS at FROM notifications WHERE id = ?', notice.id).at, ok.body.ackedAt, 'durable when the response is sent');
-  // A skipped external row (no e-mail on record) keeps 'skipped' and gains actionedAt, exactly as before S7a (the ladder never moves a terminal side state).
+  // A skipped external row (no e-mail on record) keeps 'skipped' and gains actionedAt (the ladder never moves a terminal side state).
   assert.ok(dispatches().every((d) => d.actionedAt && (d.status === 'actioned' || d.status === 'skipped')), `the dispatch rows moved to actioned in the same commit: ${JSON.stringify(dispatches().map((d) => [d.channel, d.status]))}`);
   assert.ok(dispatches().some((d) => d.status === 'actioned'), 'the in-app row is actioned');
   const second = await ack(); assert.equal(second.status, 200); assert.equal(second.body.ackedAt, ok.body.ackedAt, 'a second ack returns the first');
@@ -185,7 +185,7 @@ await test('acknowledgment: a withdrawal notice (notifyAction) lands with its co
 });
 
 // ------------------------------------------------------------- preferences
-await test('preferences through the real routes: a category turned off never creates a notification (and creates one again once it is on); a non-boolean value (numeric zero on the mandatory category, a numeric emailIntent) is refused and nothing is stored (S14e); a literal false on the mandatory category, an unknown category and a non-object are refused; the mandatory category is on in the view; emailIntent is stored; everything survives a restart; the preferences of one person never touch another', async () => {
+await test('preferences through the real routes: a category turned off never creates a notification (and creates one again once it is on); a non-boolean value (numeric zero on the mandatory category, a numeric emailIntent) is refused and nothing is stored; a literal false on the mandatory category, an unknown category and a non-object are refused; the mandatory category is on in the view; emailIntent is stored; everything survives a restart; the preferences of one person never touch another', async () => {
   const dir = tempDir('s7a-prefs'); let S = await boot(dir);
   const maria = await orgLogin(S, 'org-eastport', 'Maria Keane', 'Head of Recruitment'); const kola = await playerLogin(S, 'pl-adeyemi');
   const { channelId } = await openThread(S, maria, kola);
@@ -244,7 +244,7 @@ await test('account deletion: the person\'s notification rows go inside the dele
     assert.ok(mine() >= 2, `${label}: the rows are retained`); assert.equal(q1(dir, 'SELECT COUNT(*) AS n FROM players WHERE id = ?', 'pl-adeyemi').n, 1, `${label}: the player is retained`);
   });
   assert.equal((await del()).status, 200);
-  assert.equal(mine(), 0); assert.equal(others(), othersBefore, 'nobody else lost a row'); assert.equal(q1(dir, 'SELECT COUNT(*) AS n FROM players WHERE id = ? AND deleted_at IS NULL', 'pl-adeyemi').n, 0, 'the live row went (S4b-R: the retained record stays)');
+  assert.equal(mine(), 0); assert.equal(others(), othersBefore, 'nobody else lost a row'); assert.equal(q1(dir, 'SELECT COUNT(*) AS n FROM players WHERE id = ? AND deleted_at IS NULL', 'pl-adeyemi').n, 0, 'the live row went (the retained record stays)');
   assert.equal(q1(dir, 'SELECT COUNT(*) AS n FROM notification_pref_categories WHERE audience_id = ?', 'pl-adeyemi').n, 1, 'the preferences are retained');
   await S.stop(); rm(dir);
 });
@@ -277,7 +277,7 @@ await test('backup/restore: the admin backup\'s database copy holds the notifica
   rm(dir, restored);
 });
 
-// ------------------------------------------------------------- review of ba6956d, finding 1: effects after the durable save, through the real server
+// ------------------------------------------------------------- effects only after the durable commit, through the real server
 /**
  * An SSE stream for one session: the frames it received (each with the `id:` the
  * server stamped on it, when it stamped one), and a close. With `lastEventId` the
@@ -322,7 +322,7 @@ await test('through the real server: a message whose unit fails at the REAL COMM
   // The recipient reads the feed, so the next identical sentence is a NEW row (and a new push), not a coalesce.
   assert.equal((await S.j('POST', '/player/notifications/read', {}, kola)).status, 200);
   await settle(async () => q1(dir, 'SELECT read AS r FROM notifications WHERE audience_id = ? AND type = ?', 'pl-adeyemi', 'message')?.r === 1);
-  // 2. The unit that carries the next message and its notification fails at COMMIT (S14c: a message is one unit with
+  // 2. The unit that carries the next message and its notification fails at COMMIT (a message is one unit with
   //    its ledger row and notifications, so the sender hears 500 and nothing of it is stored or announced).
   const messagesBefore = q1(dir, 'SELECT COUNT(*) AS n FROM messages WHERE channel_id = ?', channelId).n;
   assert.equal((await S.j('POST', '/__faults', { rules: 'internal:unit.sqlite_commit:1' })).status, 200);

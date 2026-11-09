@@ -1,4 +1,4 @@
-// In-browser demo mirror of the M12 org API (VITE_DEMO=1 builds only).
+// In-browser demo mirror of the m12api org client (VITE_DEMO=1 builds only).
 // Populated with realistic synthetic examples of every feature so the demo
 // artifact SHOWS the real screens working; state lives in this tab's memory.
 import type { Session } from './api';

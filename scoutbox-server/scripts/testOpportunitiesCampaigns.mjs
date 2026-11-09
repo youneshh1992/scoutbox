@@ -1,12 +1,7 @@
-// S9d — the opportunity board, applications, assessment campaigns and players' private suitability preferences as
-// typed tables with explicit writes (repositories/opportunitiesCampaigns.mjs, migration 0022). What this suite proves:
-// the migration creates the fifteen typed tables, empty; db.opportunities and the other four names throw; the typers
-// refuse junk with the field named; every record reads back exactly as written (structured requirements, history,
-// the approved summary, drills, rubric, attempts with their file-check issues, preferences with slots and tags); one
-// live application per opportunity and player and one submission per campaign and player hold; the fixed fields of an
-// update cannot change and a nested update is refused; a rolled-back unit leaves nothing; preferences are not stored
-// until saved; the counts, the reminder query and the club lists by cursor answer from SQL; and a fixture written
-// through the repository is typed, refuses missing references and duplicates (nothing written), and reads back.
+// The opportunity board, applications, assessment campaigns and players' private suitability preferences
+// (repositories/opportunitiesCampaigns.mjs, migration 0022): the typed tables, the typers' refusals, records read back
+// exactly, one live application per opportunity and player and one submission per campaign and player, preferences not
+// stored until saved, SQL counts and cursor lists, units of work and fixtures.
 // Temporary databases only; nothing touches DATA_DIR. Run with: npm test
 
 import assert from 'node:assert/strict';

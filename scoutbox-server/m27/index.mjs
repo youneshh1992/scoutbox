@@ -1,31 +1,29 @@
 /**
- * M23 P5.6E — the cross-app integration SEAM: the one database-bound layer that
+ * The cross-app integration SEAM: the one database-bound layer that
  * resolves the facts `m27/integration.mjs` decides on.
  *
  * `integration.mjs` is pure and knows no records. This file is the opposite: it
  * reads the canonical stores through their OWN gates — `findPlayer`, `isAdult`,
- * `isBlocked`, `orgCanSee`, M24's `profileOf`, M25's policy verdict — assembles
- * the facts, and hands them to `agentSurfaceDecision`. No app resolves those
+ * `isBlocked`, `orgCanSee`, the agent's `profileOf`, the compliance policy verdict —
+ * assembles the facts, and hands them to `agentSurfaceDecision`. No app resolves those
  * facts for itself, so "can this agent see this?" has exactly one answer
- * everywhere (§47).
+ * everywhere.
  *
  * What this module deliberately does NOT do:
  *
  *   - it declares no store. Every fact it reads is already somebody's truth;
  *     the client's disclosure choices live on the representation agreement that
- *     they are choices ABOUT (§103: strong preference, no new foundational
- *     stores). Schema stays at 2307.
+ *     they are choices ABOUT.
  *   - it opens no second Inbox, no second Trial workflow, no second transaction
  *     workflow and no Offer lane. The agent-facing routes here are READS of
  *     records the canonical systems own.
- *   - it never turns a legacy M13 F10 row into authority. The basis comes from
- *     `agentClientBasis`, which is `agreementGrantsAccess`
- *     (M23_P56E_REPRESENTATION_SEAM_AUDIT.md §1).
+ *   - it never turns a legacy adult-representation row into authority. The basis
+ *     comes from `agentClientBasis`, which is `agreementGrantsAccess`.
  *
- * The seam is handed to M23 through a holder object created before M23 is
- * registered, because M23 is registered first. Until this module fills that
- * holder, every integration question answers "no" — a suite that boots M23
- * alone routes to the player and to nobody else.
+ * The seam is handed to the recruitment lifecycle (registerM23) through a holder
+ * object created before it is registered, because it is registered first. Until
+ * this module fills that holder, every integration question answers "no" — a
+ * suite that boots the lifecycle alone routes to the player and to nobody else.
  */
 
 import {
@@ -54,10 +52,10 @@ export function registerIntegration(ctx) {
     byId, orgRouter, playerRouter, nextId, notify, broadcast,
     findPlayer, isAdult, isBlocked, orgCanSee, checkEligibility, distanceBand,
     agent, compliance, rateLimit,
-    agentCore, unit, // S11a: an opportunity share is a row of its agreement, written by agreements.update in a unit
-    recruitmentCases, // S8b: the handoff is part of its case, written by cases.update
-    recruitmentReads, // §4.3 step 2: contacts are read through SQL
-    transactionReads, // S11c: the live transaction covering a case is read through SQL
+    agentCore, unit, // an opportunity share is a row of its agreement, written by agreements.update in a unit
+    recruitmentCases, // the handoff is part of its case, written by cases.update
+    recruitmentReads,
+    transactionReads,
   } = ctx;
   if (typeof transactionReads?.transactions?.liveForIndividual !== 'function') throw new TypeError('registerIntegration needs transactionReads from the data layer');
   if (!recruitmentCases?.cases) throw new TypeError('registerIntegration needs the recruitment-cases repository from the data layer');
@@ -70,7 +68,7 @@ export function registerIntegration(ctx) {
   const now = () => Date.now();
 
   /**
-   * The M18.1 provider, not a second one. Both of this module's writes end in a
+   * The shared rate-limit provider, not a second one. Both of this module's writes end in a
    * notification to a person and both can be repeated after being taken back, so
    * each carries a quota like every comparable write in the codebase.
    *
@@ -92,7 +90,7 @@ export function registerIntegration(ctx) {
     ?? byId.user(userId)?.name ?? null;
 
   /**
-   * The case, through M17's own concealing lookup and M17's own role ranking —
+   * The case, through the Room lifecycle's own concealing lookup and role ranking —
    * not a second copy of either. `need` is 'view' or 'write'; a handoff is a
    * decision about the club's external conduct, so it needs the same rank the
    * formal decision does.
@@ -112,7 +110,6 @@ export function registerIntegration(ctx) {
     }
     return { kase, role, canWrite };
   }
-  // S11a: agreements are rows of repositories/agentCore.mjs, read through SQL.
   const agreementsFor = (clientId) => ctx.agentReads.agreements.forClient(clientId);
   const agreementById = (id) => (typeof id === 'string' ? ctx.agentReads.agreements.byId(id) : null);
 
@@ -123,7 +120,7 @@ export function registerIntegration(ctx) {
 
   /**
    * Every agent who currently represents this client. A row that names no
-   * individual (a legacy mirror) can never appear here: the predicate is asked
+   * individual (a legacy row) can never appear here: the predicate is asked
    * about the agent the row itself names, so a null agent fails its own test.
    */
   function activeAgentsFor(clientId, at = now()) {
@@ -158,7 +155,7 @@ export function registerIntegration(ctx) {
 
   /**
    * The compliance layer's CURRENT answer for a regulated surface, through the
-   * one narrow seam P5.6C exposes. No seam registered → `null`, which the
+   * one narrow seam the compliance module (domains/agents/compliance/) exposes. No seam registered → `null`, which the
    * decision reads as "not evaluated", which is not clear.
    */
   function complianceClearFor(surface, agentUserId, jurisdiction) {
@@ -169,7 +166,7 @@ export function registerIntegration(ctx) {
   }
 
   /**
-   * An explicit, separate player share for a surface that needs one (§11, §74).
+   * An explicit, separate player share for a surface that needs one.
    *
    * There is NO writer for an agent-directed Passport or evidence share in this
    * build: the Passport's share links (`passport_shares`) are link tokens a person opens, not a standing
@@ -217,12 +214,12 @@ export function registerIntegration(ctx) {
   // ------------------------------------------------------- contact routing
 
   /**
-   * §21–§23. Who a club's contact may validly reach right now.
+   * Who a club's contact may validly reach right now.
    *
    * The club never names the agent — it asks for a MODE. This resolves the
    * player's own representative, decides `contact_participation` for that agent,
    * and returns the routing. Called at compose time for the preview AND again at
-   * send time, so authority is re-derived rather than remembered (§23).
+   * send time, so authority is re-derived rather than remembered.
    */
   function contactRoute({ recipient, clientId, viewerOrgId, requestedMode = 'player_only', at = now() }) {
     if (!recipient) return { ok: false, error: 'CONTACT_RECIPIENT_UNAVAILABLE' };
@@ -256,7 +253,7 @@ export function registerIntegration(ctx) {
   } : null);
 
   /**
-   * §14/§63. The Club-facing "represented by" projection, answered from the
+   * The Club-facing "represented by" projection, answered from the
    * PLAYER's own disclosure choice. A club does not learn who represents a
    * player because the player exists; it learns because the player said so.
    */
@@ -282,11 +279,11 @@ export function registerIntegration(ctx) {
   // ------------------------------------------------- agent-facing reads
 
   /**
-   * The contacts a club routed to THIS agent (§24). Reading is gated on the
+   * The contacts a club routed to THIS agent. Reading is gated on the
    * live basis, and the items are exactly those whose recorded routing snapshot
    * names this agent — so revoking `contactRouting` stops new contacts arriving
-   * without erasing the ones the agent legitimately already received (§22:
-   * history is not rewritten).
+   * without erasing the ones the agent legitimately already received (history
+   * is not rewritten).
    *
    * Thread isolation: no `caseId`, no case status, no club-private note, no
    * other player, no recruitment ranking. The club's own recruitment process is
@@ -336,10 +333,10 @@ export function registerIntegration(ctx) {
   });
 
   /**
-   * §26–§29. That a Trial exists, and its scheduling. Never its assessment,
+   * That a Trial exists, and its scheduling. Never its assessment,
    * never its report, never a Box Cam payload, never the exact venue address or
    * the club's joining instructions — those were held back from the invitation
-   * until the FAMILY accepted (P4B D-23) and they remain the family's.
+   * until the FAMILY accepted and they remain the family's.
    *
    * There is no coordination write here, and no route in this build through
    * which an agent confirms, reschedules, cancels or attends a Trial. The mandate
@@ -394,19 +391,19 @@ export function registerIntegration(ctx) {
     });
   });
 
-  // --------------------------------------------- §17–§19 opportunity share
+  // --------------------------------------------------- opportunity share
 
   /**
-   * §18. The agent brings an opportunity to their client's attention.
+   * The agent brings an opportunity to their client's attention.
    *
    * The opportunity must ALREADY be on the client's own board — the board is
    * rebuilt here through `opportunityBoardFor`, the same function the player's
    * own screen uses, under the same mutual-visibility and eligibility rules. An
    * agent therefore cannot surface something their client could not already
    * find, and a club's private recruitment case, its watchlist and its matching
-   * weights have no path into this route at all (§17).
+   * weights have no path into this route at all.
    *
-   * `Do not auto-apply Player` (§18): this writes a share and a notification.
+   * `Do not auto-apply Player`: this writes a share and a notification.
    * Applying stays the player's own act on the player's own route, and there is
    * no parameter here that could start one.
    */
@@ -479,7 +476,7 @@ export function registerIntegration(ctx) {
         keys: key ? { share: { key, fp: payloadFingerprint({ opportunityId: opp.id, note }) } } : {},
         rev: 1, revAt: at,
       };
-      // S11a: a share is a row of its agreement, written by an explicit update (no agreement rev: a share changes no term).
+      // A share is a row of its agreement, written by an explicit update (no agreement rev: a share changes no term).
       agentCore.agreements.update(a.id, (d) => {
         d.opportunityShares.push(draft);
         d.history.push({ id: nextId('aud'), at, action: 'opportunity_shared', by: { kind: 'org', userId: req.orgUser.id, name: req.orgUser.name }, detail: { shareId: draft.id, via: draft.via } });
@@ -542,7 +539,7 @@ export function registerIntegration(ctx) {
   });
 
   /**
-   * §19. The player's own view of what their agents have put in front of them.
+   * The player's own view of what their agents have put in front of them.
    * Read from the agreements that are active NOW: a share made under a
    * relationship that has since ended stops appearing, because the suggestion
    * was part of that relationship. Nothing here applies for anybody.
@@ -563,17 +560,17 @@ export function registerIntegration(ctx) {
     });
   });
 
-  // ------------------------------------ §32–§39 P5 decision → transaction
+  // ------------------------------------ formal decision → transaction
 
   /**
    * Whether a finalised formal decision to PROGRESS is the current head of this
    * case's decision chain. The one thing that crosses the boundary is this
    * boolean: not the reasons, not the note, not the evidence, not the author
-   * (§32 "Do not expose the internal decision itself").
+   * ("Do not expose the internal decision itself").
    */
   function hasFinalProgressDecision(kase) {
     const rows = recruitmentReads.decisions.forRoom(kase.id).filter((d) => d.orgId === kase.orgId);
-    // `chainHead` and `isFormal` are P5's own — an advisory recommendation is not
+    // `chainHead` and `isFormal` are the formal decision's own — an advisory recommendation is not
     // a formal decision, and a superseded row is not the head.
     const head = chainHead(rows);
     return !!head && isFormal(head) && head.state === 'final' && head.outcome === 'progress' && !head.supersededById;
@@ -598,7 +595,7 @@ export function registerIntegration(ctx) {
     const player = findPlayer(kase.playerId);
     const h = handoffOf(kase);
     const live = liveTransactionFor(kase);
-    // "current compliance can be evaluated" (§34). Asked of the client's own
+    // "current compliance can be evaluated". Asked of the client's own
     // agent where there is one; where the player is unrepresented there is no
     // agent to evaluate and the question does not arise, so it is satisfied —
     // the transaction's own creation gate will ask it of whoever opens one.
@@ -642,7 +639,7 @@ export function registerIntegration(ctx) {
   } : null);
 
   /**
-   * §38. The readiness view. The club sees whether the entrypoint is available
+   * The readiness view. The club sees whether the entrypoint is available
    * and, if not, every reason — as codes, so the surface can word them and no
    * internal rationale rides along. "Visibility of button is not authorization":
    * the mutation below calls the very same function, so a club that forces the
@@ -667,7 +664,7 @@ export function registerIntegration(ctx) {
     });
   });
 
-  /** §32/§33. The explicit authorised club action. */
+  /** The explicit authorised club action. */
   orgRouter.post('/rooms/:id/transaction-handoff', (req, res) => {
     const got = roomForHandoff(req, res, 'write');
     if (!got) return;
@@ -759,7 +756,7 @@ export function registerIntegration(ctx) {
   });
 
   /**
-   * The AGENT's side of the invitation (§39): the handoffs standing for this
+   * The AGENT's side of the invitation: the handoffs standing for this
    * agent's own clients. A reference and an id — enough to open a transaction
    * from, and nothing about the club's recruitment thinking.
    */
@@ -794,7 +791,7 @@ export function registerIntegration(ctx) {
   });
 
   /**
-   * Called by P5.6D when a transaction names a `recruitmentCaseId`: the
+   * Called by the transactions module (domains/agents/transactions/) when a transaction names a `recruitmentCaseId`: the
    * invitation is marked taken up and bound to that transaction, so the club can
    * see one was opened without seeing inside it, and so a second transaction
    * cannot be opened from the same invitation.
@@ -831,14 +828,14 @@ export function registerIntegration(ctx) {
     // decisions
     decide,
     /**
-     * Does this recruitment case belong to this organisation? P5.6D asks this
+     * Does this recruitment case belong to this organisation? The transactions module asks this
      * before it shows a club a case reference, so that the transaction module
      * never has to read the cases itself.
      */
     caseBelongsTo: (caseId, orgId) => recruitmentReads.cases.byId(caseId)?.orgId === orgId,
     basisFor,
-    // P6.1: the licence fact for a read that is not a regulated ACTION but is
-    // agent work all the same (the Offer projection, m28). One predicate, here.
+    // The licence fact for a read that is not a regulated ACTION but is
+    // agent work all the same (the Offer projection). One predicate, here.
     licenceCurrentFor,
     activeAgentsFor,
     soleActiveAgentFor,
@@ -848,7 +845,7 @@ export function registerIntegration(ctx) {
     routingModes: CONTACT_ROUTING_MODES,
     // projections
     clubPresenceFor,
-    // the P5 → transaction handoff, for P5.6D's create route to bind
+    // the formal decision → transaction handoff, for the transactions create route to bind
     bindHandoff,
     duplicateTransactionOf,
     handoffStatuses: HANDOFF_STATUSES,

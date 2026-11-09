@@ -1,4 +1,4 @@
-// PRE-M24 (PM-6): an outdated or mistyped link lands here instead of the
+// An outdated or mistyped link lands here instead of the
 // Expo developer page ("Unmatched Route", English only, with a link to the
 // /_sitemap route list). Nothing is changed; the reader gets a way home.
 import { useRouter } from 'expo-router';

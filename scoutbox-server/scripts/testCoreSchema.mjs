@@ -1,10 +1,7 @@
-// Behavioural tests for the core identity schema: the five tables created by
-// migration 0002 (plan step S1, as a shadow) and live one domain at a time
-// since — sessions (0003), orgs (0004), players/guardians/guardian_children
-// (0005, S4a) — their constraints, foreign keys and the identity records
-// as they are typed and read back. Everything runs on
-// throwaway databases under the OS temp directory; nothing touches DATA_DIR.
-// Run with: npm test
+// Behavioural tests for the core identity schema (sessions, orgs, players, guardians,
+// guardian_children; migrations 0002–0005): constraints, foreign keys and the identity
+// records as they are typed and read back. Everything runs on throwaway databases
+// under the OS temp directory; nothing touches DATA_DIR. Run with: npm test
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import crypto from 'node:crypto';
@@ -31,7 +28,7 @@ const nextId = (p) => `${p}-${++counter}`;
 const freshDb = () => { const s = new DatabaseSync(':memory:'); s.exec('PRAGMA foreign_keys = ON;'); runDataMigrations(s, DATA_MIGRATIONS, { now: Date.UTC(2026, 9, 11, 12) }); return s; };
 const tempDir = (tag) => fs.mkdtempSync(path.join(os.tmpdir(), `sb-${tag}-`));
 
-/** A synthetic snapshot in the exact shapes the server writes. No real data. */
+/** A synthetic record set in the exact shapes the server writes. No real data. */
 function syntheticSnapshot({ orgUserId = 'usr-9001' } = {}) {
   const now = Date.now();
   return {
@@ -101,16 +98,16 @@ test('constraints: CHECKs refuse values the code never writes', () => {
   assert.throws(() => player({ dob: '2000-1-1' }), /CHECK/);
   assert.throws(() => player({ availability: 'maybe' }), /CHECK/);
   assert.throws(() => s.prepare("INSERT INTO players (id, profile_signal, name, birth_date, country, height_cm) VALUES ('p2', 30, 'P', '2000-01-01', 'GB', 'tall')").run(), /cannot store TEXT value in INTEGER column/, 'STRICT refuses text in an INTEGER column');
-  // S14h: lengths and ranges.
+  // Lengths and ranges.
   assert.throws(() => s.prepare("INSERT INTO players (id, profile_signal, name, birth_date, country) VALUES ('p3', 30, ?, '2000-01-01', 'GB')").run('N'.repeat(121)), /CHECK/, 'a name over 120 characters');
   assert.throws(() => s.prepare("INSERT INTO players (id, profile_signal, name, birth_date, country, height_cm) VALUES ('p3', 30, 'P', '2000-01-01', 'GB', 400)").run(), /CHECK/, 'a height out of range');
   assert.throws(() => s.prepare("INSERT INTO players (id, profile_signal, name, birth_date, country, stats_pass_completion_pct) VALUES ('p3', 30, 'P', '2000-01-01', 'GB', 120)").run(), /CHECK/, 'a percentage over 100');
   assert.throws(() => s.prepare("INSERT INTO players (id, profile_signal, name, birth_date, country, prefs_quiet_start) VALUES ('p3', 30, 'P', '2000-01-01', 'GB', '9pm')").run(), /CHECK/, 'quiet hours not HH:MM');
   assert.throws(() => s.prepare("INSERT INTO players (id, profile_signal, name, birth_date, country, city) VALUES ('p3', 30, 'P', '2000-01-01', 'GB', '')").run(), /CHECK/, 'an empty city is NULL');
-  assert.throws(() => s.prepare("INSERT INTO players (id, profile_signal, name, birth_date, country) VALUES ('p3', 100, 'P', '2000-01-01', 'GB')").run(), /CHECK/, 'a profile figure over 99 (S14i)');
-  assert.throws(() => s.prepare("INSERT INTO players (id, name, birth_date, country) VALUES ('p3', 'P', '2000-01-01', 'GB')").run(), /NOT NULL/, 'the profile figure is required (S14i)');
-  assert.equal(s.prepare("SELECT COUNT(*) AS n FROM pragma_table_info('players') WHERE name = 'facets_json'").get().n, 0, 'no facet storage (S14h)');
-  assert.equal(s.prepare("SELECT COUNT(*) AS n FROM pragma_table_info('guardians') WHERE name = 'facets_json'").get().n, 0, 'no facet storage (S14h)');
+  assert.throws(() => s.prepare("INSERT INTO players (id, profile_signal, name, birth_date, country) VALUES ('p3', 100, 'P', '2000-01-01', 'GB')").run(), /CHECK/, 'a profile figure over 99');
+  assert.throws(() => s.prepare("INSERT INTO players (id, name, birth_date, country) VALUES ('p3', 'P', '2000-01-01', 'GB')").run(), /NOT NULL/, 'the profile figure is required');
+  assert.equal(s.prepare("SELECT COUNT(*) AS n FROM pragma_table_info('players') WHERE name = 'facets_json'").get().n, 0, 'no facet storage');
+  assert.equal(s.prepare("SELECT COUNT(*) AS n FROM pragma_table_info('guardians') WHERE name = 'facets_json'").get().n, 0, 'no facet storage');
   const session = (over) => s.prepare("INSERT INTO sessions (token_hash, sid, kind, ref_id, org_user_id, created_at, expires_at) VALUES (@h, @sid, @kind, 'r', @user, 1, 2)").run({ h: 'h', sid: 's', kind: 'player', user: null, ...over });
   assert.throws(() => session({ kind: 'admin' }), /CHECK/);
   assert.throws(() => session({ kind: 'org' }), /CHECK/, 'an org session must name its staff member');
@@ -133,7 +130,7 @@ test('foreign keys are enforced and cascade the way the model owns its rows', ()
   assert.throws(() => s.prepare("INSERT INTO sessions (token_hash, sid, kind, ref_id, org_user_id, created_at, expires_at) VALUES ('h', 's', 'org', 'org-a', 'usr-none', 1, 2)").run(), /FOREIGN KEY/);
   seedOrgUser(s, 'usr-1');
   s.prepare("INSERT INTO sessions (token_hash, sid, kind, ref_id, org_user_id, created_at, expires_at) VALUES ('h', 's', 'org', 'org-a', 'usr-1', 1, 2)").run();
-  // S14h: a guardian with a child is never deleted from under it (RESTRICT), nor a player with a link; one primary per player.
+  // A guardian with a child is never deleted from under it (RESTRICT), nor a player with a link; one primary per player.
   assert.throws(() => s.prepare("DELETE FROM guardians WHERE id = 'g'").run(), /FOREIGN KEY/);
   assert.throws(() => s.prepare("DELETE FROM players WHERE id = 'p'").run(), /FOREIGN KEY/);
   s.prepare("INSERT INTO guardians (id, name, email) VALUES ('g2', 'G2', 'g2@example.com')").run();
@@ -154,9 +151,8 @@ test('a failing transaction leaves nothing behind', () => {
   assert.equal(s.prepare('SELECT COUNT(*) AS n FROM orgs').get().n, 0);
 });
 
-// ------------------------------------------------------------- the identity records (S4a)
-// Since migration 0005 the players, guardians and guardian_children tables are
-// LIVE. Read back, both collections are the records the server sees (childIds
+// ------------------------------------------------------------- the identity records
+// Read back, the players and guardians are the records the server sees (childIds
 // from the links, in order, roles per side). A first installation types the
 // records as one coupled pair (the links derive from both collections).
 const PLAYER_ADULT = () => ({ id: 'pl-adult', name: 'Adult Player', dob: '2000-01-01', country: 'GB', city: 'London', position: 'ST', foot: 'right', heightCm: 180, weightKg: 75, stats: { appearances: 20, goals: 9, assists: 3, paceKmh: 33.4, passCompletionPct: 81, duelSuccessPct: 63 }, academyPlus: true, availability: 'available_now', contractStatus: 'free_agent', identityVerified: true, guardianId: null, level: 'semi_pro', location: { lat: 51.5, lng: -0.1 }, medical: { shared: true, records: [], conditionStatus: 'fully_fit' }, notificationPrefs: { quietStart: '22:00', quietEnd: '07:00', schoolHoursMute: null, timezone: null }, programme: { track: 'ST', startedAt: 1_700_000_000_000, completed: [] }, badges: ['Finisher'], createdAt: 1_690_000_000_000, password: 'scrypt$aa$bb' });
@@ -178,7 +174,7 @@ test('identity records: players and guardians read back from the live tables as 
   const server = openStore(dir);
   const layer = firstInstallation(server, cleanRecords());
   assert.deepEqual(layer.boot.identity, { engine: 'sqlite', players: 2, guardians: 2, links: 2, imported: 4 }, 'a first installation initialises from the records once (imported counts players and guardians)');
-  assert.equal(hasBlobTable(server.sqlite), false, 'no blob table: the records are rows (rewritten in S14a: it listed the blob rows)');
+  assert.equal(hasBlobTable(server.sqlite), false, 'no blob table: the records are rows');
   server.sqlite.close();
   // The tables read back as records.
   const back = readRecords(dir);
@@ -226,7 +222,7 @@ test('identity records: a first installation types players and guardians as one 
 test('identity tables: there is no players table before migration 0005; TABLE_BACKED lists every live collection', () => {
   const s = new DatabaseSync(':memory:'); s.exec('PRAGMA foreign_keys = ON;');
   runDataMigrations(s, DATA_MIGRATIONS.filter((m) => !/^00(0[56789]|1[0-9]|2[0-9]|3[0-9]|4[0-9])_/.test(m.id))); // each later step needs its predecessor
-  assert.equal(s.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE name = 'players'").get().n, 0, 'S14h: there is no players table before 0005');
+  assert.equal(s.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE name = 'players'").get().n, 0, 'there is no players table before 0005');
   s.close();
   assert.deepEqual([...TABLE_BACKED], ['orgs', 'players', 'guardians', 'playersRetained', 'users', 'sessions', 'mediaDeletions', 'emailChallenges', 'pairingCodes', 'notifications', 'notificationPrefs', 'dispatches', 'outbox', 'pushLog', 'pushTokens', 'channels', 'blocks', 'reports', 'moderationLog', 'orgNotes', 'ledger', 'opsEvents', 'sourceChanges', 'idvQueue', 'requests', 'trials', 'recruitmentCases', 'roomComments', 'roomSnapshots', 'roomDecisions', 'roomEvidenceState', 'recruitmentContacts', 'recruitmentOffers', 'signingPackages', 'signings', 'followUps', 'outcomeReports', 'evidence', 'coachAffiliations', 'squadInvites', 'assessmentTemplates', 'assessments', 'videoSegments', 'playlists', 'tacticalSetups', 'squadMembers', 'shadowPlayers', 'lookingFor', 'federationChecks', 'vacancies', 'opportunities', 'applications', 'campaigns', 'campaignSubmissions', 'playerPrefs', 'verClaims', 'verEvents', 'verEvidence', 'verTokens', 'verAdmins', 'verRootTransfers', 'verRootRequests', 'verDisputes', 'verReferences', 'verPlayerInvites', 'verConflicts', 'verDomainRequests', 'orgVerifiedDomains', 'passportPrefs', 'passportCareerEntries', 'passportAchievements', 'passportShares', 'passportCorrections', 'transitionCases', 'vouches', 'agentProfiles', 'agencyAffiliations', 'representationAgreements', 'tsReviewers', 'jurisdictionPolicies', 'complianceContexts', 'regulatoryReviews', 'regulatoryConsents', 'agentTransactions', 'transactionRepresentations', 'transactionDocuments', 'devObjectives', 'drillGuidance', 'developmentPlans', 'developmentGoals', 'developmentActions', 'developmentEvidenceLinks', 'developmentReviews', 'boxCamPrefs', 'boxChallenges', 'boxChallengeEntries', 'boxAssignments', 'boxSessions', 'boxCamDisputes', 'combineRequests', 'combineAttempts', 'boxCamCvResults', 'recruitmentBriefs', 'nobodyMissedReviews', 'secondLookItems', 'dynamicWatchlists', 'watchlistHistory', 'exposureEvents', 'reviewLater', 'evidenceSuggestions', 'calibrationSessions', 'fixtures', 'coveragePlans', 'coverageAssignments', 'importBatches', 'prospects', 'identityReviews', 'apiKeys', 'webhookEndpoints', 'webhookDeliveries', 'orgInvites', 'ssoConfigs', 'ssoStates', 'supportTickets', 'supportAccessGrants', 'groups', 'groupGrants', 'openTrials', 'matchdays', 'friendlies', 'uploadSessions', 'savedSearches', 'invoices', 'reputationSeed', 'deliveryCallbacksSeen']);
 });

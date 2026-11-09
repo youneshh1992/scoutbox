@@ -1,69 +1,28 @@
 /**
- * One-time codes — migration plan step S6a (docs/architecture/s6-readiness-review.md §5–§6).
+ * One-time codes:
  *
- * Owns two tables:
+ *   email_challenges  the club e-mail-domain verification code (POST /org/verification/email → …/confirm): one row per
+ *                     organisation, 30-minute lifetime, consumed on success, failed confirmations counted on the row and
+ *                     the challenge invalidated after EMAIL_CHALLENGE_MAX_ATTEMPTS of them.
+ *   pairing_codes     the child device pairing code (POST /guardian/children/:id/pairing-code → POST /auth/player/pair):
+ *                     one row per child, 15-minute lifetime, single use.
  *
- *   email_challenges  the club e-mail-domain verification code
- *                     (POST /org/verification/email → …/confirm): one row per
- *                     organisation, 30-minute lifetime, consumed on success,
- *                     failed confirmations counted on the row and the challenge
- *                     invalidated after EMAIL_CHALLENGE_MAX_ATTEMPTS of them.
- *   pairing_codes     the child device pairing code
- *                     (POST /guardian/children/:id/pairing-code →
- *                     POST /auth/player/pair): one row per child, 15-minute
- *                     lifetime, single use.
+ * A row never stores the code: only `code_hash`, sha256 hex of the code trimmed and upper-cased (the routes' comparison
+ * form). The plain code exists once outside the client: in the return value of the issue methods, which the routes put
+ * in the e-mail (challenge) or the guardian's response (pairing code). Nothing here logs, reports or exports it. A
+ * sha256 of a six-character code from a 31-character alphabet (≈ 2^29.7 values) protects against casual disclosure of a
+ * database or a backup, not against an offline search by someone holding the file: the lifetimes (15 and 30 minutes)
+ * bound that exposure; this is stated in OPERATIONS.md, not hidden.
  *
- * A row never stores the code: only `code_hash` — sha256 hex of the code
- * trimmed and upper-cased, which is exactly the comparison the routes made on
- * the plain value (the sessions convention, `repositories/sessions.mjs`). The
- * plain code exists once outside the client: in the return value of the issue
- * methods, which the routes put in the e-mail (challenge) or the guardian's
- * response (pairing code). Nothing here logs, reports or exports it. A sha256
- * of a six-character code from a 31-character alphabet (≈ 2^29.7 values)
- * protects against casual disclosure of a database or a backup, not against an
- * offline search by someone holding the file — the lifetimes (15 and 30
- * minutes) bound that exposure; this is stated in OPERATIONS.md, not hidden.
+ * Expiry is judged on every read and consume (`expires_at > now`); expired rows are also swept at boot and before every
+ * issue. An issue replaces the owner's previous row (one live code per organisation / per child).
  *
- * Expiry is judged on every read and consume (`expires_at > now`); expired rows
- * are also swept at boot and before every issue, so a dead row never lingers
- * for long. An issue replaces the owner's previous row (one live code per
- * organisation / per child, as the filter-then-push did).
+ * `pairing_codes.player_id` carries no foreign key on purpose: player ids carry no key (records outlive an account).
+ * Instead the deletion unit revokes the child's codes explicitly (`revokePairingCodesFor`). `email_challenges.org_id`
+ * references `orgs(id)`.
  *
- * `pairing_codes.player_id` carries NO foreign key on purpose: player ids carry
- * no key (records outlive an account, migration.md §4.3). Instead the deletion unit
- * revokes the child's codes explicitly (`revokePairingCodesFor`), and the migration
- * refuses an outstanding code for a player that does not exist. `email_challenges.org_id`
- * does reference `orgs(id)` (organisations are upserted and pruned, never
- * rewritten whole; a pruned organisation takes its challenge with it).
- *
- * Whether the tables are authoritative is decided by the cutover record
- * `0008_one_time_codes` in `data_migrations`, never by the tables existing.
- *
- * Transactions. The repository is a participant in the store's unit of work:
- * every mutation runs through one boundary (`operation`, documented at the
- * factory) that joins an open unit through the store's participant API, runs
- * in a transaction of its own outside a unit, and runs as part of a raw
- * transaction a tool or test opened without a BEGIN of its own. A failure
- * after a statement already ran therefore poisons the enclosing unit even when
- * the caller catches it; the unit refuses to commit and its rollback undoes the
- * statements (review of b2a237e).
- *
- * Snapshot formats (backups, restores, the persistence suites). An entry of
- * the `emailChallenges` / `pairingCodes` collection is ONE of:
- *   legacy  { orgId, email, code, expiresAt }       / { code, playerId, expiresAt }
- *           — the plain-code shape every build before S6a wrote and every
- *           backup taken before S6a holds; hashed on the way in, never stored;
- *   stored  { orgId, email, codeHash, expiresAt, attempts } / { codeHash, playerId, expiresAt }
- *           — the row form this repository exports and a backup taken after
- *           S6a holds.
- * An entry that carries both `code` and `codeHash`, neither, an unknown field,
- * a malformed hash, a non-integer expiry, a negative or non-integer attempt
- * count, a missing owner, or that duplicates an owner or a hash, is refused
- * with the entry index and the reason (`ONE_TIME_CODES_IMPORT_BLOCKED`), and
- * the migration is rolled back. Nothing is
- * coerced, reinterpreted or dropped silently. The one deliberate drop is the
- * migration's: entries already expired at cutover time are not imported, and
- * their count is recorded in `meta.oneTimeCodesCutover` and logged.
+ * Every mutation runs through one boundary (`operation`, documented at the factory), so a failure after a statement
+ * already ran poisons the enclosing unit even when the caller catches it.
  */
 import crypto from 'node:crypto';
 import { migrationApplied, transaction } from './database.mjs';
@@ -96,7 +55,7 @@ CREATE UNIQUE INDEX pairing_codes_player_id ON pairing_codes (player_id);
 CREATE INDEX pairing_codes_expires_at ON pairing_codes (expires_at);`;
 
 export const sha256 = (s) => crypto.createHash('sha256').update(String(s)).digest('hex');
-/** The comparison form the routes have always used: trimmed, upper-cased. */
+/** The comparison form: trimmed, upper-cased. */
 export const normaliseCode = (code) => String(code ?? '').trim().toUpperCase();
 /** The stored form of a code: sha256 hex of its normalised value. */
 export const hashCode = (code) => sha256(normaliseCode(code));
@@ -110,9 +69,8 @@ const describe = (v) => (v === null ? 'null' : Array.isArray(v) ? 'an array' : t
 
 // ------------------------------------------------------------------ validation (no coercion; every refusal names the reason)
 /**
- * Decide which snapshot format an entry is in and extract its hash. Returns
- * `{ codeHash, format }` or `{ reason }`. The two shapes are told apart by the
- * presence of exactly one of `code` (legacy, plain) and `codeHash` (stored).
+ * Decide which format an entry is in and extract its hash. Returns `{ codeHash, format }` or `{ reason }`. The two
+ * shapes are told apart by the presence of exactly one of `code` (plain, hashed on the way in) and `codeHash`.
  */
 function codeOf(raw) {
   const hasCode = Object.hasOwn(raw, 'code');
@@ -154,7 +112,7 @@ const PAIRING_SELECT = 'SELECT code_hash, player_id, expires_at FROM pairing_cod
 const emailStored = (r) => ({ orgId: r.org_id, email: r.email, codeHash: r.code_hash, expiresAt: r.expires_at, attempts: r.attempts });
 const pairingStored = (r) => ({ codeHash: r.code_hash, playerId: r.player_id, expiresAt: r.expires_at });
 
-/** The whole domain read back as plain records (`readAllRecords` in index.mjs: the test suites' read-back); null before its migration. */
+/** The whole domain read back as plain records (`readAllRecords` in index.mjs: the test suites' read-back). */
 export const EMAIL_CHALLENGES_TABLE = {
   name: 'emailChallenges',
   read(sqlite) { if (!codesLive(sqlite)) return null; return sqlite.prepare(`${EMAIL_SELECT} ORDER BY org_id`).all().map(emailStored); },
@@ -166,26 +124,17 @@ export const PAIRING_CODES_TABLE = {
 
 // ------------------------------------------------------------------ the repository
 /**
- * `newCode()` mints a plain code (injectable for tests; the default draws from
- * CODE_ALPHABET with the platform CSPRNG).
+ * `newCode()` mints a plain code (injectable for tests; the default draws from CODE_ALPHABET with the platform
+ * CSPRNG). `unit` is the store's participant API ({ active(), join(work) }) or null (a tool, a test).
  *
- * `unit` is the store's participant API ({ active(), join(work) }) or null (a
- * tool, a test, the migration). Every mutation — issue, consumption, the
- * failed-attempt count, revocation, the sweep — runs through ONE boundary,
- * `operation` (review of b2a237e): inside an open unit of work it joins the
- * unit through `unit.join`, so a failure after a statement already ran (the
- * reissue's delete before a failed insert, the tenth attempt's increment
- * before a failed cancellation) poisons the unit even when the caller catches
- * the error — the unit cannot commit the fragment, and its one rollback undoes
- * the statements and restores memory. Outside a unit a mutation runs in a
- * transaction of its own; and inside a raw SQLite transaction that a tool or a
- * test opened on the connection (no unit active) it runs as part of that
- * transaction, with no BEGIN of its own — an open transaction is never taken
- * for a unit. Validation is part of the operation (a refused argument inside a
- * unit poisons it like any other failure); expected negative results (no live
- * row, no match, nothing to delete) are return values, never failures. The
- * repository keeps no memory state (the views are read from the table on each
- * access) and needs no snapshotState/restoreState.
+ * Every mutation (issue, consumption, the failed-attempt count, revocation, the sweep) runs through one boundary,
+ * `operation`: inside an open unit of work it joins the unit through `unit.join`, so a failure after a statement
+ * already ran (the reissue's delete before a failed insert, the tenth attempt's increment before a failed
+ * cancellation) poisons the unit even when the caller catches the error, and the unit's rollback undoes the
+ * statements. Outside a unit a mutation runs in a transaction of its own; inside a raw SQLite transaction that a tool
+ * or a test opened (no unit active) it runs as part of that transaction, with no BEGIN of its own. Validation is part
+ * of the operation (a refused argument inside a unit poisons it like any other failure); expected negative results
+ * (no live row, no match, nothing to delete) are return values, never failures.
  */
 export function createOneTimeCodesRepository({ sqlite, now = Date.now, newCode = randomCode, log = () => {}, unit = null }) {
   if (!sqlite) throw new TypeError('the one-time-code repository needs a SQLite connection (node:sqlite); codes have no in-memory or JSON fallback');
@@ -224,7 +173,7 @@ export function createOneTimeCodesRepository({ sqlite, now = Date.now, newCode =
     pairingCodeTtlMs: PAIRING_CODE_TTL_MS,
     maxEmailAttempts: EMAIL_CHALLENGE_MAX_ATTEMPTS,
 
-    /** Boot: refuse to run without the cutover record; sweep expired rows; report counts (never a code or a hash). */
+    /** Boot: refuse to run without the migration record; sweep expired rows; report counts (never a code or a hash). */
     attach({ at = now() } = {}) {
       if (!stmt.cutover.get(ONE_TIME_CODES_MIGRATION)) throw new Error(`one-time codes: the cutover record ${ONE_TIME_CODES_MIGRATION} is missing from data_migrations; the tables cannot be trusted as the source of truth`);
       const swept = repo.sweepExpired(at);
@@ -236,7 +185,7 @@ export function createOneTimeCodesRepository({ sqlite, now = Date.now, newCode =
       return operation(() => ({ emailChallenges: stmt.emailSweep.run(at, EMAIL_CHALLENGE_MAX_ATTEMPTS).changes, pairingCodes: stmt.pairSweep.run(at).changes }));
     },
     counts: () => ({ emailChallenges: stmt.emailCount.get().n, pairingCodes: stmt.pairCount.get().n }),
-    /** Rows that are still live at `at` (what a rollback would invalidate). */
+    /** Rows that are still live at `at`. */
     outstanding: (at = now()) => ({ emailChallenges: stmt.emailLive.get(at, EMAIL_CHALLENGE_MAX_ATTEMPTS).n, pairingCodes: stmt.pairLive.get(at).n }),
 
     // ---------------------------------------------------------- e-mail challenges
@@ -335,7 +284,7 @@ export function createOneTimeCodesRepository({ sqlite, now = Date.now, newCode =
     /** Remove the child's codes, live or not (the deletion unit calls this before the player row goes). Returns how many rows went. */
     revokePairingCodesFor: (playerId) => operation(() => stmt.pairDeleteFor.run(playerId).changes),
 
-    /** Every stored row in its stored form (`codeHash`, never a code), for the admin backup; the views cannot round-trip and must not be exported. */
+    /** Every stored row in its stored form (`codeHash`, never a code). */
     exportEmailChallenges: () => EMAIL_CHALLENGES_TABLE.read(sqlite) ?? [],
     exportPairingCodes: () => PAIRING_CODES_TABLE.read(sqlite) ?? [],
   };

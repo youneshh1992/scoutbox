@@ -1,4 +1,4 @@
-// M23 P5.6B LIVE — ScoutBox Agent driven through the real client against a
+// Live: ScoutBox Agent driven through the real client against a
 // real server, with the player app confirming on the other side.
 //
 //   A  ADMIN       Tomás (Director) signs in on the Agent platform → Home →
@@ -193,12 +193,12 @@ say('A1: the seeded agency Director signs in through the real Agent client (plat
   const nav = await sidebarText(tomas.page);
   ok(/Clients/.test(nav) && /Agency/.test(nav) && /Inbox/.test(nav), 'A2: the sidebar carries Clients, Agency and Inbox');
   neg(!/Opportunit/.test(nav), 'A2b: an administrator who is not a licensed agent sees no Opportunities section (convenience filter; the server refuses anyway)');
-  // P5.6D made Transactions a real destination (every member may READ the
-  // agency's transactions; the server refuses the writes). Offers, Negotiation
-  // and Fees are still nobody's destination, which is what this guards.
+  // Transactions is a real destination (every member may READ the agency's
+  // transactions; the server refuses the writes). Offers, Negotiation and Fees
+  // are nobody's destination, which is what this guards.
   neg(!/Offer|Negotiat|Fees?\b|Signing/i.test(nav), 'A2c: no Offers, Negotiation, Fees or Signings destination exists');
   await tomas.page.waitForSelector('[data-testid="agent-home"]', { timeout: 15000 });
-  await tomas.page.locator('.f-about > summary').first().click().catch(() => {}); // M24F.3 — the notice sits behind About
+  await tomas.page.locator('.f-about > summary').first().click().catch(() => {}); // the notice sits behind About
   ok(await waitText(tomas.page, /adjudicates no conflicts/), 'A3: Home carries the regulatory notice — ScoutBox adjudicates nothing');
   ok(/Agency administrator/.test(await tomas.page.locator('[data-testid="my-tiers"]').innerText()), 'A4: the account block shows the migrated role: Agency administrator');
   neg(!/Licensed agent/.test(await tomas.page.locator('[data-testid="my-tiers"]').innerText()), 'A4b: a self-typed "Director" made nobody a licensed agent');
@@ -305,16 +305,16 @@ say('C1: Kola signs in to the player app');
   const card = await myAgentCard(kola);
   const txt = await card.innerText();
   ok(/Ana Costa/.test(txt) && /North Star Sports Agency/.test(txt) && /Awaiting your answer/.test(txt), 'C2: My Agent shows Ana\'s request from North Star, awaiting his answer');
-  // M24F.2 — the licence is stated as a fact; the caveat sentence is reserved for an UNVERIFIED licence.
+  // The licence is stated as a fact; the caveat sentence is reserved for an UNVERIFIED licence.
   ok(/FIFA licence: verified/i.test(txt) && !/check the provenance/i.test(txt) && !/NOT verified/i.test(txt), 'C3: the card shows the licence STATE as one fact (the caveat is reserved for an unverified licence)');
   neg(!/TEST-VERIFIED|FIFA-2024/.test(txt), 'C4: no reference or licence number reaches the player');
   if (!/employment,\s*transfer/.test(txt) || !/18\s*months/.test(txt)) console.error('   card text:', JSON.stringify(txt).slice(0, 600));
   ok(/employment,\s*transfer/.test(txt) && /18\s*months/.test(txt), 'C5: scope and term are stated');
   await card.locator('text="Confirm"').first().click();
-  // M24F.5 freeze — wait for the state C6 asserts, not only its first half. The
+  // Wait for the state C6 asserts, not only its first half. The
   // success line renders when the confirm call returns; the status pill changes
   // when the list re-fetch lands, one request later. Waiting on the line alone let
-  // a sample under load fall between the two (the one C6 failure in M24F.5).
+  // a sample under load fall between the two.
   const confirmedState = (t) => /Confirmed — active from now/.test(t) && /\bActive\b/.test(t);
   await card.page().waitForFunction(() => { const t = document.querySelector('[data-testid="my-agent"]')?.innerText ?? ''; return /Confirmed — active from now/.test(t) && /\bActive\b/.test(t); }, null, { timeout: 10000 }).catch(() => {});
   if (!confirmedState(await card.innerText())) console.error('   card text after Confirm:', JSON.stringify(await card.innerText()).slice(0, 700));
@@ -339,7 +339,7 @@ say('C1: Kola signs in to the player app');
   ok(/Confirmed by client/.test(await ana.page.locator('[data-testid="client-activity"]').innerText()), 'D5: Activity shows "Confirmed by client"');
   await go(ana.page, '#/opportunities');
   await ana.page.waitForSelector('[data-testid="agent-opportunities"]', { timeout: 15000 });
-  await ana.page.locator('[data-testid="agent-opportunities"] .f-about > summary').first().click().catch(() => {}); // M24F.3 — the scope line sits behind About
+  await ana.page.locator('[data-testid="agent-opportunities"] .f-about > summary').first().click().catch(() => {}); // the scope line sits behind About
   ok(/Only opportunities legitimately visible to a confirmed client/.test(await bodyText(ana.page)), 'D6: the aggregate Opportunities board carries the honest scope line');
   await go(ana.page, '#/home');
   await ana.page.waitForSelector('[data-testid="home-active"]', { timeout: 15000 });
@@ -383,7 +383,7 @@ say('C1: Kola signs in to the player app');
   await tomas.page.waitForSelector('[data-testid="add-member"]', { timeout: 15000 });
   const form = tomas.page.locator('[data-testid="add-member"]');
   await form.locator('input').nth(0).fill('Ben Okoro');
-  // D-P56B-11: the form once kept the previous member's roles; assert the reset and set Analyst only.
+  // The form must not keep the previous member's roles; assert the reset and set Analyst only.
   ok(await form.getByLabel('Assistant').isChecked() && !(await form.getByLabel('Licensed agent').isChecked()), 'N2a: the add-member form reset to its default roles after the previous add');
   await form.getByLabel('Assistant').uncheck();
   await form.getByLabel('Analyst').check();
@@ -411,14 +411,14 @@ say('C1: Kola signs in to the player app');
   await ana.page.waitForSelector('[data-testid="agent-clients"]', { timeout: 15000 });
   const all = [];
   for (const h of ['#/home', '#/profile', '#/clients', `#/clients/${REL}`, '#/opportunities', '#/inbox', '#/agency', '#/agency/team', '#/agency/compliance', '#/agency/settings']) {
-    await go(ana.page, h); await sleep(700); for (const sm of await ana.page.locator('.f-about > summary').all()) await sm.click().catch(() => {}); all.push(await bodyText(ana.page)); // M24F.3 — the honesty sentences sit behind About
+    await go(ana.page, h); await sleep(700); for (const sm of await ana.page.locator('.f-about > summary').all()) await sm.click().catch(() => {}); all.push(await bodyText(ana.page)); // the honesty sentences sit behind About
   }
   // The workspace may SAY there is no offer / negotiation / fee here; it may not offer one. Strip the honesty sentences, then sweep.
   const honest = /[^.\n]*(not part of this workspace|no offer, negotiation, fee or contract|no transaction room|aucune offre|ne font pas partie)[^.\n]*[.\n]/gi;
-  // "Transaction" is a real destination since P5.6D, so it is no longer swept for
-  // here — m23AgentTransactionLive owns that surface and its own wording sweep.
-  // "Offers" is a read-only destination since P6 (the client's shared Offers;
-  // m23OfferLive owns that surface and its wording), and since P8 the client's
+  // "Transaction" is a real destination, so it is not swept for here —
+  // m23AgentTransactionLive owns that surface and its own wording sweep.
+  // "Offers" is a read-only destination (the client's shared Offers;
+  // m23OfferLive owns that surface and its wording), and the client's
   // journey line names the factual stage ("Offer received", "Offer accepted —
   // signing pending"). The tab label and the stage words are stripped like the
   // honesty sentences. What must still be absent everywhere is an offer the
@@ -460,11 +460,8 @@ say('C1: Kola signs in to the player app');
   await go(phone, '#/profile');
   await phone.waitForSelector('[data-testid="facet-fifa-licence"]', { timeout: 15000 });
   ok(await phone.evaluate(() => document.scrollingElement.scrollWidth <= window.innerWidth + 1), 'N6g: 360px: the verification page fits');
-  // M23 P5.6F (F-6). The release checklist names six viewports. Reading the
-  // suites rather than the reports showed 1440, 1280, 390 and 360 covered on the
-  // Agent portal and 1024 and 768 covered NOWHERE on it — the two tablet widths
-  // had never been rendered by any Agent suite in P5.6B–E. Closed here on the
-  // densest surfaces, and each width asserts CONTENT as well as fit, because a
+  // The release checklist names six viewports; the two tablet widths (1024 and
+  // 768) are covered here on the Agent portal's densest surfaces, and each width asserts CONTENT as well as fit, because a
   // blank page has no horizontal scroll either.
   for (const w of [{ width: 1024, height: 900 }, { width: 768, height: 1024 }]) {
     await phone.setViewportSize(w);
@@ -485,7 +482,7 @@ say('C1: Kola signs in to the player app');
 {
   await go(ana.page, `#/clients/${REL}`);
   await ana.page.waitForSelector('[role="tablist"]', { timeout: 15000 });
-  await clientTab(ana.page, 'representation'); // M24B — Player › Representation
+  await clientTab(ana.page, 'representation'); // Player › Representation
   const tab = ana.page.locator('[role="tablist"] button[role="tab"]:has-text("Representation")');
   await tab.click();
   const sel = await tab.getAttribute('aria-selected');

@@ -1,8 +1,8 @@
-// The one paging convention (domains/platform/paging.mjs, migration.md §4.3 step 2): "continue from here". What this
-// suite proves: a missing limit is the default and a valid one is taken as given; a limit that is not a whole number
-// from 1 to 100 is refused (never clamped); a cursor round-trips through encodeCursor, and one that does not decode to
-// the list's key shape is refused; pageOf cuts the extra row and hands out the last item's key exactly when there is
-// more; sendPageError answers 400 with the code and rethrows anything else. Run with: npm test
+// The one paging convention (domains/platform/paging.mjs): "continue from here". A missing limit is the default and a
+// valid one is taken as given; a limit that is not a whole number from 1 to 100 is refused (never clamped); a cursor
+// round-trips through encodeCursor, and one that does not decode to the list's key shape is refused; pageOf cuts the
+// extra row and hands out the last item's key exactly when there is more; sendPageError answers 400 with the code and
+// rethrows anything else. Run with: npm test
 import assert from 'node:assert/strict';
 import { PAGE_LIMITS, readPage, encodeCursor, pageOf, sendPageError } from '../domains/platform/paging.mjs';
 

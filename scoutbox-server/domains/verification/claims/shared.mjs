@@ -1,4 +1,4 @@
-// M14 shared — verification & trust core.
+// Verification & trust core.
 //
 // Design contract (enforced here, at the server, never in a client):
 //  * Verification is a set of INDEPENDENT CLAIMS, each recording WHAT was
@@ -11,8 +11,8 @@
 //  * The engine is fully deterministic — no AI output participates in any
 //    decision. Everything here is a pure function over stored records so it
 //    can be unit-tested directly.
-//  * M14 does NOT introduce a new age system: all age gates continue to use
-//    the existing DOB/country isAdult() from domain.mjs.
+//  * There is no separate age system: all age gates use the DOB/country
+//    isAdult() from domain.mjs.
 import crypto from 'node:crypto';
 import { isExpiredAt, readInstant } from '../../../temporal.mjs';
 
@@ -23,7 +23,7 @@ import {
 } from '../../../repositories/verification.mjs';
 export { CLAIM_TYPES, CLAIM_STATES, METHODS, REVIEW_REASONS, EVIDENCE_TYPES, EVIDENCE_VISIBILITY, VER_LEVELS };
 
-// Deterministic method identifiers (§4). document_submitted is EVIDENCE
+// Deterministic method identifiers. document_submitted is EVIDENCE
 // COLLECTION, never an authoritative method.
 // Methods that may accompany a transition INTO `verified`.
 export const AUTHORITATIVE_METHODS = new Set([
@@ -37,7 +37,7 @@ export const AUTHORITATIVE_METHODS = new Set([
 ]);
 
 // ---------------------------------------------------------- state machine
-// One map; applyTransition() is the ONLY way any M14 code changes a status.
+// One map; applyTransition() is the ONLY way verification code changes a status.
 export const VALID_TRANSITIONS = {
   unverified: ['collecting_evidence', 'pending'],
   collecting_evidence: ['pending', 'unverified'],
@@ -92,14 +92,14 @@ export function applyTransition(claim, to, { actorKind, actorId, method, reason,
 }
 
 // --------------------------------------------------- effective-claim engine
-// A claim DISPLAYS as verified only if every condition holds at READ TIME
-// (§51). Nothing trusts a cached boolean.
+// A claim DISPLAYS as verified only if every condition holds at READ TIME.
+// Nothing trusts a cached boolean.
 export function effectiveStatus(claim, { org = null, subjectRemoved = false, now = Date.now() } = {}) {
   const reasons = [];
   let status = claim.status;
   // Expiry applies to CURRENT claims. A closed period (current=false) is
   // finished history — it does not "expire", it remains a verified past fact.
-  // M23 P5.7 (T-3): `validUntil` is an EXCLUSIVE expiry instant; a claim is
+  // `validUntil` is an EXCLUSIVE expiry instant; a claim is
   // expired at exactly that instant. `null` means no expiry. An unreadable
   // value (a string, NaN) is NOT "no expiry" — it reads expired.
   if (status === 'verified' && claim.current !== false && isExpiredAt(claim.validUntil, now)) { status = 'expired'; reasons.push('VALID_UNTIL_PASSED'); }
@@ -152,7 +152,7 @@ export function domainCovered(candidate, orgDomain) {
 }
 
 // ------------------------------------------------------------ risk signals
-// Deterministic flags (§26). Signals, NEVER conclusions: nothing downstream
+// Deterministic flags. Signals, NEVER conclusions: nothing downstream
 // may describe a flag as fraud, and no flag alone rejects anything.
 export function riskFlags(input) {
   const {
@@ -179,7 +179,7 @@ export function riskFlags(input) {
 }
 
 // ------------------------------------------------- human-review decision
-// §24: one deterministic engine answers CAN_AUTO_COMPLETE vs
+// One deterministic engine answers CAN_AUTO_COMPLETE vs
 // REQUIRES_HUMAN_REVIEW with reason codes. "Auto" here means "no ScoutBox
 // (Trust & Safety) human needed" — an authorised ORGANISATION administrator
 // confirming their own staff IS the authoritative source, not a fallback.
@@ -213,7 +213,7 @@ export function decideReview(input) {
 // ------------------------------------------------------ evidence handling
 export const EVIDENCE_MIME_ALLOW = new Set(['application/pdf', 'image/png', 'image/jpeg', 'image/webp']);
 export const EVIDENCE_MAX_BYTES = 8 * 1024 * 1024;
-/** Content-signature sniffing (M14.1). The claimed MIME and extension are
+/** Content-signature sniffing. The claimed MIME and extension are
  *  attacker-controlled; the leading bytes are not. This is FORMAT
  *  identification only — it is NOT malware scanning and is never reported
  *  as such (checks.malwareScan stays 'not_configured'). */
@@ -262,7 +262,7 @@ export function evidenceCompleteness(claimType, evidenceTypes) {
   return { complete: missing.length === 0, missing };
 }
 
-// -------------------------------------------------------------- tokens (§34)
+// -------------------------------------------------------------- tokens
 // Cryptographically random, hashed at rest, expiring, single-use, bound to a
 // purpose AND an address/subject. The plain secret exists only in the email
 // that carries it — it is never logged and never stored.
@@ -339,10 +339,10 @@ export function orgCanAttest(org, pending = false) {
 }
 
 // --------------------------------------------------------- public projection
-// THE one safe projector (§50). Everything any client shows publicly about
+// THE one safe projector. Everything any client shows publicly about
 // verification flows through here. It never returns evidence, emails,
 // reviewer notes, risk flags, or internal review state.
-// ---- assurance levels (M14.1). NOT a trust score: a fixed, three-value
+// ---- assurance levels. NOT a trust score: a fixed, three-value
 // statement of WHO stands behind a verified claim. It changes only wording
 // and projection — the state machine is untouched.
 //   authoritative            → an external authoritative source confirmed it
@@ -399,9 +399,9 @@ export function toPublicVerificationProfile({ subjectType, subjectId, claims, or
     const org = claim.organisationId ? orgsById.get(claim.organisationId) ?? null : null;
     const eff = effectiveStatus(claim, { org, subjectRemoved, now });
     if (!eff.displayable) continue;
-    const y = (ms) => (readInstant(ms) !== null && ms ? new Date(ms).getUTCFullYear() : null); // M23 P5.7: UTC, not the server's zone
+    const y = (ms) => (readInstant(ms) !== null && ms ? new Date(ms).getUTCFullYear() : null); // UTC, not the server's zone
     if (claim.claimType === 'PERSON_IDENTITY') {
-      // Structured identity assurance (M14.1): the public projection carries
+      // Structured identity assurance: the public projection carries
       // WHAT kind of confirmation stands behind the identity — a manual
       // document review must be distinguishable from a future authoritative
       // identity provider. It never carries evidence.
@@ -452,7 +452,7 @@ export function badgeLabel(claim, org, eff) {
         ? `Former ${orgName} ${claim.role ?? 'staff'} · Verified history`
         : `Role verified: ${claim.role ?? 'staff'}`;
     case 'LICENCE':
-      // Provenance-sensitive wording (M14.1): only an authoritative source
+      // Provenance-sensitive wording: only an authoritative source
       // may put "verified" next to a licence. A ScoutBox document review (or
       // migrated record) renders as a REVIEWED credential, never as an
       // authoritative licence verification.

@@ -1,6 +1,6 @@
 // Real listening-port enumeration for the browser batteries.
 //
-// `ss` is NOT installed in the CI/agent container (M23 P5.6F, F-7): every
+// `ss` is NOT installed in the CI/agent container: every
 // `ss -ltn | grep :port` check there reported "zero listeners" whether or not a
 // port was held — a check that cannot fail, which is worse than no check because
 // it appears in the evidence column. This reads /proc/net/tcp and /proc/net/tcp6

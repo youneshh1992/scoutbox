@@ -1,5 +1,5 @@
 /**
- * Counters (S14a, migration 0039): named monotonic values. One today, `id`, behind every `<prefix>-<n>` id the
+ * Counters: named monotonic values. One today, `id`, behind every `<prefix>-<n>` id the
  * server mints (`nextId`).
  *
  * The process keeps the value in memory and writes each new value through at once (`MAX`, so a write never lowers

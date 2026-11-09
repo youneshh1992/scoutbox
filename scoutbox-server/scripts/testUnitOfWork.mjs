@@ -1,8 +1,7 @@
 // The store's unit of work: an explicit unit makes repository row writes commit
-// or roll back TOGETHER. No repository keeps records in memory (S14 last: no
-// save path, no participants), so a failure leaves the database as it was and
-// every read after it sees the committed rows. Retrying means re-running the
-// whole operation.
+// or roll back TOGETHER. No repository keeps records in memory, so a failure
+// leaves the database as it was and every read after it sees the committed rows.
+// Retrying means re-running the whole operation.
 // Everything runs on throwaway databases with synthetic fixtures. Run with: npm test
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
@@ -28,8 +27,8 @@ const ORGS = () => [
   { id: 'org-grass', name: 'Riverside Juniors', type: 'club', level: 'grassroots', location: { lat: 51.5, lng: -0.1, city: 'London' }, plan: 'Grassroots', trustedPartner: false, country: 'GB', verified: false, safeguardingContractSigned: false },
   { id: 'org-agency', name: 'Northstar Agency', type: 'agency', level: null, plan: 'Pro', trustedPartner: false, country: 'FR', verified: false },
 ];
-// Since S4a the players and guardians are table-backed too: the fixture player is a valid record (the identity repositories validate it at the first boot's import).
-// The first installation's records (S14a: handed in as the seed; staff are written through their repository).
+// The first installation's seed (staff are written through their repository). The fixture player must be a valid
+// record: the identity repositories validate it at the first boot's import.
 const fixtureSeed = () => ({ orgs: ORGS(), guardians: [], players: [{ id: 'pl-1', name: 'P', dob: '2000-01-01', country: 'GB', city: 'Start', medical: { shared: false, records: [], conditionStatus: 'unknown' } }] });
 
 /** A first installation with the fixture seeded and one staff member; returns everything a test needs. */
@@ -57,7 +56,7 @@ function operation(t, { failLate = false, afterCommit = null } = {}) {
     t.layer.players.update('pl-1', (d) => { d.city = 'In the unit'; });
     token = t.layer.sessions.create('player', 'pl-1').token;
     if (afterCommit) t.store.afterCommit(afterCommit);
-    // Rewritten in S14a: the failure used to be an unserialisable blob; now the work fails after every write.
+    // The work fails after every write.
     if (failLate) throw new Error('late failure after the writes');
     return 'done';
   });
@@ -70,9 +69,9 @@ function assertDatabaseUntouched(t) {
   assert.equal(t.raw("SELECT city FROM players WHERE id = 'pl-1'").city, 'Start', 'no player write');
   assert.equal(t.raw("SELECT COUNT(*) AS n FROM sessions WHERE kind = 'player'").n, 0, 'no session row');
   assert.equal(t.raw("SELECT verified FROM orgs WHERE id = 'org-grass'").verified, 1, 'the unrelated write made before the unit is kept');
-  assert.equal(hasBlobTable(t.store.sqlite), false, 'rewritten in S14a: there is no blob table');
+  assert.equal(hasBlobTable(t.store.sqlite), false, 'there is no blob table');
 }
-/** Reads after a failure (S14h: no repository keeps memory; a held record is a frozen copy): every read sees the committed rows. */
+/** Reads after a failure (a held record is a frozen copy): every read sees the committed rows. */
 function assertMemoryRestored(t, refs) {
   const { p1 } = refs;
   assert.ok(Object.isFrozen(p1), 'a held record is a frozen copy');
@@ -99,7 +98,6 @@ await test('unit of work: a row insert, a row update, a staged player write and 
   const refs = prepare(t);
   const calls = [];
   let outcome = null;
-  // Rewritten in S14a: this counted the store's save revision, which is gone; the BEGINs are counted instead.
   assert.equal(begins(t, () => { outcome = operation(t, { afterCommit: () => calls.push(t.store.sqlite.isTransaction) }); }), 1, 'one transaction for the whole unit');
   const { result, token } = outcome;
   assert.equal(result, 'done'); assert.equal(t.store.sqlite.isTransaction, false);
@@ -159,7 +157,7 @@ await test('unit of work: a process killed before COMMIT leaves the pre-operatio
   again.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
 });
 
-// ------------------------------------------------------------- nesting, saves inside, async, participants
+// ------------------------------------------------------------- nesting, async, participants
 await test('unit of work: a nested unit joins the enclosing one (an inner failure rolls everything back); several writes inside a unit are one transaction; asynchronous work is refused and rolled back; a unit cannot start inside a foreign transaction', () => {
   const dir = tempDir('uow-nest'); const t = boot(dir);
   const p1 = t.layer.players.byId('pl-1');
@@ -188,7 +186,7 @@ await test('unit of work: a nested unit joins the enclosing one (an inner failur
   t.store.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
 });
 
-await test('unit of work: participants — organisations, staff (S14f) and sessions take part: a failure later in the unit leaves none of them; a unit that finishes commits them together', () => {
+await test('unit of work: participants — organisations, staff and sessions take part: a failure later in the unit leaves none of them; a unit that finishes commits them together', () => {
   const dir = tempDir('uow-parts'); const t = boot(dir);
   let err = null;
   try {
@@ -222,7 +220,7 @@ await test('unit of work: an after-commit callback that fails does not undo the 
   t.store.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
 });
 
-// ------------------------------------------------------------- review corrections (independent review of the first foundation commit)
+// ------------------------------------------------------------- BEGIN/ROLLBACK failures, poisoning, async shapes
 const tick = () => new Promise((resolve) => setImmediate(resolve));
 /** Collect unhandled rejections while `fn` runs (plus two turns of the event loop), so an unobserved promise is a test failure rather than a process crash. */
 async function withUnhandled(fn) {
@@ -296,7 +294,7 @@ await test('a nested (joined) unit that fails poisons the whole unit even when i
   t.store.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
 });
 
-await test('an organisation updated twice inside a unit: the second update sees the first, the commit writes the last; a rollback leaves the committed row; a restart reads the table (S14g: replaces the facet change-detection check)', () => {
+await test('an organisation updated twice inside a unit: the second update sees the first, the commit writes the last; a rollback leaves the committed row; a restart reads the table', () => {
   const dir = tempDir('uow-revert'); const t = boot(dir);
   t.unit(() => {
     t.layer.orgs.update('org-pro', (d) => { d.name = 'Eastport FC (renamed)'; });
@@ -306,7 +304,7 @@ await test('an organisation updated twice inside a unit: the second update sees 
   assert.equal(t.raw("SELECT name FROM orgs WHERE id = 'org-pro'").name, 'Eastport FC (renamed)'); assert.equal(t.raw("SELECT suspended FROM orgs WHERE id = 'org-pro'").suspended, 1);
   assert.throws(() => t.unit(() => { t.layer.orgs.update('org-pro', (d) => { d.suspended = false; d.name = 'Nope'; }); throw new Error('late failure'); }), /late failure/);
   assert.equal(t.layer.orgs.byId('org-pro').suspended, true); assert.equal(t.layer.orgs.byId('org-pro').name, 'Eastport FC (renamed)');
-  // An update from inside the same organisation's update is refused (§4.3).
+  // An update from inside the same organisation's update is refused.
   assert.throws(() => t.layer.orgs.update('org-pro', () => { t.layer.orgs.update('org-pro', (d) => { d.suspended = false; }); }), /already being updated/);
   t.store.sqlite.close();
   const again = openStore(dir);
@@ -424,7 +422,7 @@ await test('participant API: store.unit.join runs an operation inside the open u
   t.store.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
 });
 
-test('cost (migration.md §4.3.1): a player write — standalone and inside a unit of work with an organisation update — runs exactly as many SQL statements with 2,000 players as with 20, and a rolled-back unit leaves the row as it was', () => {
+test('cost: a player write — standalone and inside a unit of work with an organisation update — runs exactly as many SQL statements with 2,000 players as with 20, and a rolled-back unit leaves the row as it was', () => {
   // Every statement the process runs is counted: StatementSync run / get / all / iterate and DatabaseSync exec.
   const counted = { on: false, n: 0 };
   const restore = [];
@@ -438,15 +436,15 @@ test('cost (migration.md §4.3.1): a player write — standalone and inside a un
   try {
     const statementsFor = (n) => {
       const dir = tempDir(`cost-${n}`);
-      const seed = { ...fixtureSeed(), players: Array.from({ length: n }, (_, i) => ({ id: `pl-${i}`, name: `Player ${i}`, dob: '2000-01-01', country: 'GB', city: 'Start' })) }; // S14h: the trials own the reports; a seed player carries none
+      const seed = { ...fixtureSeed(), players: Array.from({ length: n }, (_, i) => ({ id: `pl-${i}`, name: `Player ${i}`, dob: '2000-01-01', country: 'GB', city: 'Start' })) }; // the trials own the reports; a seed player carries none
       const t = boot(dir, seed);
       const players = t.layer.players;
       counted.n = 0; counted.on = true;
       players.update('pl-7', (d) => { d.city = 'Standalone'; });
-      t.unit(() => { players.update('pl-7', (d) => { d.city = 'In a unit'; }); t.layer.orgs.update('org-pro', (d) => { d.suspended = true; }); }); // (S14a: the blob edit that stood here is gone)
+      t.unit(() => { players.update('pl-7', (d) => { d.city = 'In a unit'; }); t.layer.orgs.update('org-pro', (d) => { d.suspended = true; }); });
       counted.on = false;
       const statements = counted.n;
-      // A unit that fails after the write: the row is unchanged (S14h: there is no memory to restore; a held record is a frozen copy).
+      // A unit that fails after the write: the row is unchanged (a held record is a frozen copy).
       const held = players.byId('pl-7');
       assert.throws(() => t.unit(() => { players.update('pl-7', (d) => { d.city = 'Rolled back'; }); throw new Error('late'); }), /late/);
       assert.equal(held.city, 'In a unit'); assert.ok(Object.isFrozen(held)); assert.equal(players.byId('pl-7').city, 'In a unit'); assert.equal(t.raw("SELECT city FROM players WHERE id = 'pl-7'").city, 'In a unit');
@@ -462,7 +460,7 @@ test('cost (migration.md §4.3.1): a player write — standalone and inside a un
   }
 });
 
-test('cost (S14i): a page of the org directory runs as many SQL statements with 2,000 players as with 200, and decodes only the page', () => {
+test('cost: a page of the org directory runs as many SQL statements with 2,000 players as with 200, and decodes only the page', () => {
   const counted = { on: false, n: 0 };
   const restore = [];
   for (const [proto, names] of [[StatementSync.prototype, ['run', 'get', 'all', 'iterate']], [DatabaseSync.prototype, ['exec']]]) {
@@ -495,7 +493,7 @@ test('cost (S14i): a page of the org directory runs as many SQL statements with 
   }
 });
 
-test('cost (migration.md §4.3.1, S14g, S14h): an empty unit of work runs no statement on the organisations, the players or the guardians, however many there are', () => {
+test('cost: an empty unit of work runs no statement on the organisations, the players or the guardians, however many there are', () => {
   const sqlOf = [];
   const restore = [];
   for (const [proto, names] of [[StatementSync.prototype, ['run', 'get', 'all', 'iterate']], [DatabaseSync.prototype, ['exec']]]) {

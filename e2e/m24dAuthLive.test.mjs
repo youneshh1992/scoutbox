@@ -1,4 +1,4 @@
-// M24D LIVE — the entry screens of the five applications, responsive and
+// LIVE — the entry screens of the five applications, responsive and
 // accessible, against real builds (Pro, Grassroots, Agent and the Trust &
 // Safety key screen from live builds; the Agent's demo roster from a demo
 // build; the Player from a live Expo web export).
@@ -136,15 +136,15 @@ async function portalAudit(page, app, width) {
   if (r.primaries < 1 || !r.primaryInside || r.primaryH < 40) fail(`${tag}: the primary action (${r.primaries}) must be visible, inside the viewport and ≥40px (${r.primaryH})`);
   if (r.unlabelled.length) fail(`${tag}: unlabelled fields: ${r.unlabelled.join(', ')}`);
   if (r.unnamed) fail(`${tag}: ${r.unnamed} button(s) without an accessible name`);
-  // M24F.2 — the Grassroots introduction is the headline and one sentence only (no points at any width).
+  // The Grassroots introduction is the headline and one sentence only (no points at any width).
   const grass = /^Grassroots/.test(app);
   if (grass ? r.pointsShown : (width <= 720 ? r.pointsShown : !r.pointsShown)) fail(`${tag}: the introduction points are ${r.pointsShown ? 'shown' : 'hidden'} (${grass ? 'Grassroots has none' : 'phone hides them, desktop shows them'})`);
   if (!r.h2 || !r.summary) fail(`${tag}: the introduction keeps its headline and one sentence`);
   if (r.pills || r.emoji || r.circles) fail(`${tag}: pills ${r.pills}, emoji ${r.emoji}, icon circles ${r.circles} — the entry screen must have none`);
   if (!r.form || !r.signature || !r.wordmark) fail(`${tag}: roles / landmarks (form ${r.form}, signature ${r.signature}, wordmark+tm ${r.wordmark})`);
-  // M24E — ONE fixed appearance on every entry screen: no theme control before sign-in.
+  // ONE fixed appearance on every entry screen: no theme control before sign-in.
   if (r.toggle) fail(`${tag}: an appearance toggle is rendered on the entry screen`);
-  // M24E — Inter on the product text; the wordmark alone keeps the brand face.
+  // Inter on the product text; the wordmark alone keeps the brand face.
   if (!/^(")?Inter\b/.test(r.fonts.label) || !/^(")?Inter\b/.test(r.fonts.button) || !/^(")?Inter\b/.test(r.fonts.headline) || !r.fonts.interLoaded) fail(`${tag}: Inter must resolve on labels, buttons and the headline (${JSON.stringify(r.fonts)})`);
   if (!/Albert Sans/.test(r.fonts.wordmark)) fail(`${tag}: the wordmark keeps Albert Sans (${r.fonts.wordmark})`);
   if (r.eye.some((e) => !e.label || !['true', 'false'].includes(e.pressed))) fail(`${tag}: the password reveal must carry aria-label and aria-pressed (${JSON.stringify(r.eye)})`);
@@ -222,7 +222,7 @@ for (const [app, port, kb] of PORTAL) {
   say(`${app}: responsive and accessible at ${WIDTHS.length} widths (card ${summary.join(' ')})`);
 }
 
-// ================================== M24E — one fixed appearance, and the way out
+// ================================== one fixed appearance, and the way out
 console.log('\n— M24E: fixed entry appearance, sign out, switch organisation —');
 const THEME_KEY = { Pro: 'sb-theme:pro', Grassroots: 'sb-theme:grass', Agent: 'sb-theme:agent', 'Trust & Safety': 'sb-theme:safety' };
 for (const [app, port] of [['Pro', PORTS.club], ['Grassroots', PORTS.grassroots], ['Agent', PORTS.agent], ['Trust & Safety', PORTS.admin]]) {

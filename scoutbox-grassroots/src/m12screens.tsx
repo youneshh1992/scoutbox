@@ -1,7 +1,7 @@
 import { RecordFacts, DetailItems } from './RecordDetails';
 import { sentenceCase } from './presentation';
 import { CountChart, countBy } from './ScoutVisuals';
-// M12 org screens: Assessments (with offline drafts), Recruitment cases,
+// Org screens: Assessments (with offline drafts), Recruitment cases,
 // Squad Planner, Opportunities, Campaigns, Video Workspace, Outcomes,
 // Trial Days — plus the Evidence Passport panel.
 // Accessibility: every interactive control carries a label, status changes
@@ -201,7 +201,7 @@ function AssessmentEditor({ session, assessment, notify, onClose }: { session: S
   const [reasons, setReasons] = useState(existing?.recommendation.reasons ?? assessment.recommendation?.reasons ?? '');
   const [saveState, setSaveState] = useState<'idle' | 'local' | 'synced'>(existing ? 'local' : 'idle');
 
-  // Offline drafts (F12C): every edit lands in identity-scoped local storage
+  // Offline drafts: every edit lands in identity-scoped local storage
   // first, so a dropped connection or closed laptop loses nothing.
   const persistLocal = useCallback((r: AssessmentRating[], v: string, re: string) => {
     try {
@@ -381,7 +381,7 @@ export function SquadPlannerScreen({ session, tick, notify }: ScreenProps) {
   const showCandidates = async (v: Vacancy) => {
     try {
       const r = await m12.vacancyCandidates(session, v.id);
-      // S14i: the candidates are paged (r.nextCursor); this shows the first page only. "Load more" is needed.
+      // The candidates are paged (r.nextCursor); this shows the first page only. "Load more" is needed.
       setCands({ candidates: r.candidates, note: r.note, roleName: r.role.name });
     } catch (e) { notify(e instanceof Error ? e.message : 'Failed', true); }
   };
@@ -642,7 +642,7 @@ export function VideoScreen({ session, tick, notify, openPlayer }: ScreenProps) 
   );
 }
 
-// ----------------------------------------------------- outcomes (F11 org)
+// ----------------------------------------------------- outcomes (org)
 export function OutcomesScreen({ session, tick, notify }: ScreenProps) {
   const [list, reload] = useAsync<FollowUp[]>(() => m12.listFollowUps(session), [tick]);
   const stateClass = (s: string) => s === 'confirmed' ? 'green' : s === 'disputed' ? 'red' : s === 'unknown_pending' ? 'gold' : '';
@@ -788,7 +788,7 @@ export function TrialDaysScreen({ session, tick, notify }: ScreenProps) {
   );
 }
 
-// ------------------------------------------------- coach identity (F10, GR)
+// ------------------------------------------------- coach identity (GR)
 export function CoachesScreen({ session, tick, notify }: ScreenProps) {
   const [coaches, reload] = useAsync(() => m12.listCoaches(session), [tick]);
   const [players, setPlayers] = useState<{ id: string; name: string; guardianManaged?: boolean }[]>([]);
@@ -799,11 +799,11 @@ export function CoachesScreen({ session, tick, notify }: ScreenProps) {
   useEffect(() => {
     api.allPlayers(session).then((ps) => setPlayers(ps.map((p) => ({ id: p.id, name: p.name, guardianManaged: p.guardianManaged })))).catch(() => {});
   }, [session]);
-  // M24F — an editorial page, not a stack of boxes: a heading and one
+  // An editorial page, not a stack of boxes: a heading and one
   // supporting sentence, the form as a row of underlined fields, each
   // affiliation a hairline record (name, role · since, state, actions), the
   // invitations under their own heading. The full privilege rule is one
-  // disclosure away; nothing the previous screen said is lost.
+  // disclosure away.
   const since = (iso: string) => { const d = new Date(iso); return Number.isNaN(d.getTime()) ? iso : d.toLocaleDateString('en-GB', { month: 'short', year: 'numeric' }); };
   const confirm = async () => {
     if (!name.trim()) return;

@@ -1,6 +1,6 @@
-// M19 acceptance suite — Explainable Matching and Dynamic Watchlists.
+// Explainable Matching and Dynamic Watchlists battery.
 //
-// M19 answers exactly two questions and refuses the third:
+// Matching answers exactly two questions and refuses the third:
 //
 //   which visible players satisfy the criteria this club wrote?
 //   for each of them, WHICH criteria, one by one?
@@ -14,7 +14,7 @@
 //
 // Structure:  §1–§9   in-process — the pure engines, the vocabulary, source sweeps
 //             §10–§22 HTTP against a fresh server
-//             §23–§24 second and third boots: upgrade path, restart idempotence
+//             §23     a second boot: restart idempotence
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import { mkdtempSync } from 'node:fs';
@@ -58,7 +58,7 @@ const seenAbuse = new Set();
 const fail = (msg) => { console.error(`✗ ${msg}`); process.exitCode = 1; };
 const ok = (cond, msg) => { if (cond) { passed++; console.log(`✓ ${msg}`); } else fail(msg); };
 const neg = (cond, msg) => { negatives++; ok(cond, `[neg] ${msg}`); };
-/** A numbered abuse case. The number is the contract with the mandate. */
+/** A numbered abuse case (A1–A60); the summary checks every number was exercised. */
 const abuse = (n, cond, msg) => { seenAbuse.add(n); neg(cond, `A${n} — ${msg}`); };
 /** A numbered positive case: the feature works, with everything above true. */
 const expect = (n, cond, msg) => ok(cond, `E${n} — ${msg}`);
@@ -108,7 +108,7 @@ section('§1 — the criterion vocabulary is complete, closed and self-consisten
   abuse(1, !CRITERION_TYPE_NAMES.some((t) => /score|rating|potential|talent|ceiling|\bability\b|quality|grade/i.test(t)),
     'no criterion type is a judgement about a player rather than a fact about one');
   abuse(2, !CRITERION_TYPE_NAMES.some(isProhibitedCriterion), 'no criterion type names a protected characteristic');
-  abuse(3, PROHIBITED_BRIEF_FIELDS.every((f) => isProhibitedCriterion(f)), 'every protected field M18 refuses, M19 refuses too');
+  abuse(3, PROHIBITED_BRIEF_FIELDS.every((f) => isProhibitedCriterion(f)), 'every protected field a Recruitment Brief refuses, matching refuses too');
   abuse(4, isProhibitedCriterion('player_ethnicity') && isProhibitedCriterion('Family-Income') && isProhibitedCriterion('SCHOOL TYPE'),
     'a protected trait is caught whatever the spelling, casing or separator');
   ok(MATCH_POLICY_VERSION === 1 && CRITERIA_SCHEMA_VERSION === 1, 'the policy and schema versions are declared');
@@ -287,17 +287,17 @@ section('§4 — one engine, evaluating facts, failing closed');
   ok(twice[0] === twice[1], 'the same facts and criteria at the same instant produce byte-identical explanations');
 }
 
-// ===================================== §5 one engine, and M18 delegates
-section('§5 — there is ONE matching engine, and M18 uses it');
+// ===================================== §5 one engine, and Nobody Missed delegates
+section('§5 — there is ONE matching engine, and Nobody Missed uses it');
 {
   const brief = { positions: ['CDM'], minAge: 16, maxAge: 18, maxLevel: 'semi_pro', minTrustBand: 'established_evidence' };
   const viaM18 = playerMatchesBrief(FACTS, brief, { now: NOW });
   const viaM19 = matchBrief(FACTS, brief, { now: NOW });
-  ok(JSON.stringify(viaM18) === JSON.stringify(viaM19), 'M18 playerMatchesBrief IS the M19 engine — identical output, not a second implementation');
-  ok(viaM18.matched === true && viaM18.reasons.every((x) => x.key && x.text), 'the M18 contract is unchanged: matched + keyed reasons');
+  ok(JSON.stringify(viaM18) === JSON.stringify(viaM19), 'Nobody Missed\'s playerMatchesBrief IS the matching engine — identical output, not a second implementation');
+  ok(viaM18.matched === true && viaM18.reasons.every((x) => x.key && x.text), 'the Nobody Missed contract is unchanged: matched + keyed reasons');
   const canonical = briefCriteriaToCanonical(brief);
   abuse(43, canonical.preferred.length === 0 && canonical.required.length > 0,
-    'a Recruitment Brief becomes ALL-required criteria — M19 cannot silently soften what a club wrote as a requirement');
+    'a Recruitment Brief becomes ALL-required criteria — matching cannot silently soften what a club wrote as a requirement');
   const src = read('scoutbox-server/domains/discovery/shared.mjs');
   abuse(44, /from '\.\/matching\/match\.mjs'/.test(src) && !/function evaluateCriterion|switch \(c\.type\)/.test(src),
     'domains/discovery/shared.mjs delegates and holds no second evaluator of its own');
@@ -357,7 +357,7 @@ section('§7 — ordering is declared, deterministic, and never a ranking');
     'no ordering option is a match-quality ranking');
   abuse(51, DEFAULT_MATCH_SORT === 'recent_evidence',
     'the default ordering is the least suggestive useful one, not a quality order');
-  // S14j: the orders are SQL keyset orders (matching/query.mjs); each ends on the player id.
+  // The orders are SQL keyset orders (matching/query.mjs); each ends on the player id.
   const src = read('scoutbox-server/domains/discovery/matching/query.mjs');
   neg(/order: \[lead, \['f\.player_id', 'ASC'\]\]/.test(src),
     'every comparator ends on the player id, so two reads of the same data return the same order');
@@ -387,12 +387,12 @@ section('§8 — the source itself carries no score, no ranking and no player su
     }
   }
   const routes = [...read('scoutbox-server/domains/discovery/matching/index.mjs').matchAll(/orgRouter\.(get|post|patch|put|delete)\('([^']+)'/g)].map((m) => `${m[1].toUpperCase()} ${m[2]}`);
-  ok(routes.length === 8, `${routes.length} M19 routes, all on the ORGANISATION router`);
+  ok(routes.length === 8, `${routes.length} matching routes, all on the ORGANISATION router`);
   abuse(53, !/playerRouter|guardianRouter|publicRouter|tsRouter|adminRouter/.test(read('scoutbox-server/domains/discovery/matching/index.mjs')),
-    'M19 registers nothing on a player, guardian, public, T&S or admin router — there is no player-facing surface to leak from');
+    'matching registers nothing on a player, guardian, public, T&S or admin router — there is no player-facing surface to leak from');
   {
     // Exactly one read of the players, inside the guarded query. Anything else would be a path around the visibility
-    // rule. S14j: the routes read no player record for matching at all; the one read is the shared match query's
+    // rule. The routes read no player record for matching at all; the one read is the shared match query's
     // visibility condition (matching/query.mjs), and a club that may see nobody gets an empty query.
     const strip = (f) => read(f).split('\n').filter((l) => !/^\s*(\*|\/\/)/.test(l)).join('\n');
     const routes = strip('scoutbox-server/domains/discovery/matching/index.mjs');
@@ -412,7 +412,7 @@ section('§8 — the source itself carries no score, no ranking and no player su
 }
 
 // ========================== §9 registry, preferences, limits, migration
-section('§9 — the M19 events, notifications, limits and schema are all declared');
+section('§9 — the matching events, notifications, limits and schema are all declared');
 {
   const M19_EVENTS = ['watchlist_created', 'watchlist_updated', 'watchlist_membership_changed', 'watchlist_archived', 'matching_room_created'];
   for (const e of M19_EVENTS) {
@@ -427,21 +427,20 @@ section('§9 — the M19 events, notifications, limits and schema are all declar
   ok(!!RATE_LIMIT_POLICY.matching_query && !!RATE_LIMIT_POLICY.watchlist_write, 'matching and watchlist writes are both rate-limited');
   neg(RATE_LIMIT_POLICY.matching_query.scope === 'org' && RATE_LIMIT_POLICY.watchlist_write.scope === 'org',
     'both limits are per ORGANISATION, so one member cannot spend a colleague’s budget or evade their own');
-  // What M19 must keep proving is that its own stores arrive through a numbered, recorded migration. Rewritten in
-  // S14a: the blob step m190_001 is retired; the watchlists are tables of migration 0032.
+  // The watchlist stores must arrive through a numbered, recorded migration.
   ok(DATA_MIGRATIONS.filter((m) => m.id === DISCOVERY_MIGRATION).length === 1 && ['dynamicWatchlists', 'watchlistHistory'].every((c) => DISCOVERY_COLLECTIONS.includes(c)), `the watchlist stores arrive through a numbered migration (${DISCOVERY_MIGRATION})`);
   ok(SOURCE_CONTEXTS.includes('dynamic_watchlist') && SOURCE_CONTEXTS.includes('matching'), 'a Room can record that it came from matching or a watchlist');
   ok(LIMITS.watchlistsPerOrg > 0 && LIMITS.maxCriteria > 0, 'the pathological-input bounds exist');
-  ok(TYPE_CATEGORY.watchlist === 'watchlist_changes' && TRUST_BANDS.length === 5 && EVIDENCE_REQUIREMENTS.length > 0, 'the shared vocabularies M19 borrows are intact');
+  ok(TYPE_CATEGORY.watchlist === 'watchlist_changes' && TRUST_BANDS.length === 5 && EVIDENCE_REQUIREMENTS.length > 0, 'the shared vocabularies matching borrows are intact');
   const { payload, dropped } = minimizePayload('watchlist_membership_changed', { orgId: 'o', watchlistId: 'w', playerId: 'p', playerName: 'K', entered: 4 });
   abuse(58, !('playerId' in payload) && !('playerName' in payload) && !('entered' in payload) && dropped.length === 3,
     'a membership-change event never ships who moved or how many — the recipient re-reads under their own authorization');
 }
 
-// ========== §9b the boundaries the mandate names that nothing else covers
-section('§9b — age boundaries, time-driven change, and the things M19 must NOT be');
+// ========== §9b the boundaries that nothing else covers
+section('§9b — age boundaries, time-driven change, and the things matching must NOT be');
 {
-  // Age comes from `ageOn` (M18.2, UTC calendar days). A birthday that lands
+  // Age comes from `ageOn` (UTC calendar days). A birthday that lands
   // exactly on the boundary must flip on the day, not the day after.
   const dob = '2008-06-01';
   const dayBefore = ageOn(dob, new Date(Date.UTC(2026, 4, 31)));
@@ -477,7 +476,7 @@ section('§9b — age boundaries, time-driven change, and the things M19 must NO
 
   // Analytics: counters only, never a player label and never a quality metric.
   const metrics = [...idxSrc.matchAll(/vmetric\?\.\(([^)]*)\)/g)].map((m) => m[1]);
-  ok(metrics.length >= 5, `${metrics.length} metric counters in the M19 routes`);
+  ok(metrics.length >= 5, `${metrics.length} metric counters in the matching routes`);
   abuse(47, metrics.every((m) => /^'[a-z_]+'$/.test(m.trim()) || /transition === 'entered'/.test(m)),
     'every metric is a constant counter name — no player id, no criteria, no score is ever counted');
 
@@ -499,7 +498,7 @@ section('§9b — age boundaries, time-driven change, and the things M19 must NO
 }
 
 // ============================================================ HTTP boot
-section('§10 — a clean database boots with M19 in place');
+section('§10 — a clean database boots with matching in place');
 const ENV = { ...process.env, PORT: String(PORT), DATA_DIR, M13_QUIET_LOGS: '1', M13_FAST_RETRY: '1', BOX_CAM_TEST_PROVIDER: '1' };
 const children = [];
 process.on('exit', () => { for (const c of children) { try { c.kill('SIGKILL'); } catch { /* gone */ } } });
@@ -533,7 +532,7 @@ const kola = (await j('POST', '/auth/player/login', { playerId: 'pl-adeyemi' }))
 ok([maria, tom, rita, dee, nia, kola].every((x) => x?.token), 'HTTP actors logged in');
 {
   const h = await j('GET', '/healthz');
-  ok(h.body.schemaVersion === SCHEMA_VERSION, `/healthz reports schema ${SCHEMA_VERSION} with the M19 migration applied`);
+  ok(h.body.schemaVersion === SCHEMA_VERSION, `/healthz reports schema ${SCHEMA_VERSION} with the matching migration applied`);
 }
 
 // The two criteria sets these sections reuse. `q()` wraps them into a request
@@ -592,7 +591,7 @@ let EASTPORT_TOTAL = 0;
     'a player who meets none of the preferred criteria is still on the list, and still explained');
   {
     // The list must NOT come back sorted by how many preferred criteria each
-    // player met — that would be the ranking M19 refuses to produce, arrived
+    // player met — that would be the ranking matching refuses to produce, arrived
     // at by the back door.
     const counts = withPreferred.body.items.map((i) => i.preferredMet);
     const byPreferred = [...counts].sort((a, b) => b - a);
@@ -672,7 +671,7 @@ section('§15 — ordering and paging are deterministic');
   const bogus = await j('POST', '/org/matching', q(ANY_AGE_C, { sort: 'best_match' }), maria.token);
   abuse(50, bogus.status === 200 && bogus.body.sort === DEFAULT_MATCH_SORT,
     'asking for an ordering called "best_match" quietly gets the declared default, because no such ordering exists');
-  // S14j: matching pages by cursor (§4.3), so a page is one query and only its players are decoded.
+  // Matching pages by cursor, so a page is one query and only its players are decoded.
   const p1 = await j('POST', '/org/matching', q(ANY_AGE_C, { limit: 3 }), maria.token);
   const p2 = await j('POST', '/org/matching', q(ANY_AGE_C, { limit: 3, cursor: p1.body.nextCursor }), maria.token);
   expect(7, p1.body.items.length === 3 && typeof p1.body.nextCursor === 'string' && p2.body.items.length > 0 && p1.body.total === p2.body.total
@@ -702,12 +701,12 @@ let WL = null; let BRIEF = null;
   abuse(46, liveWithoutBrief.status === 400 && liveWithoutBrief.body.error === 'WATCHLIST_MODE_INVALID',
     'only a watchlist linked to a brief can follow one live');
 
-  // S12c: a field of the wrong type is refused, naming it, where it used to be read as the default or cut down.
+  // A field of the wrong type is refused, naming it, rather than read as the default or cut down.
   const junk = async (body) => (await j('POST', '/org/watchlists', { name: 'Junk', mode: 'snapshot', criteria: CDM, ...body }, maria.token)).body;
-  neg((await junk({ notify: 'no' })).field === 'notify', 'S12c: a notify that is not true or false is refused, not read as "on"');
-  neg((await junk({ sourceType: 'spreadsheet' })).error === 'WATCHLIST_SOURCE_UNKNOWN', 'S12c: an unknown source type is refused, not read as saved criteria');
-  neg((await junk({ sourceId: { id: 'x' } })).field === 'sourceId', 'S12c: a source reference that is not short text is refused, not stored as it came');
-  neg((await j('GET', '/org/watchlists?status=deleted', undefined, maria.token)).body.error === 'WATCHLIST_STATUS_UNKNOWN', 'S12c: an unknown status filter is refused, not answered with an empty list');
+  neg((await junk({ notify: 'no' })).field === 'notify', 'a notify that is not true or false is refused, not read as "on"');
+  neg((await junk({ sourceType: 'spreadsheet' })).error === 'WATCHLIST_SOURCE_UNKNOWN', 'an unknown source type is refused, not read as saved criteria');
+  neg((await junk({ sourceId: { id: 'x' } })).field === 'sourceId', 'a source reference that is not short text is refused, not stored as it came');
+  neg((await j('GET', '/org/watchlists?status=deleted', undefined, maria.token)).body.error === 'WATCHLIST_STATUS_UNKNOWN', 'an unknown status filter is refused, not answered with an empty list');
 
   const created = await j('POST', '/org/watchlists', { name: '2027 Defensive Midfielders', mode: 'snapshot', criteria: MIDFIELD }, maria.token);
   WL = created.body.watchlist;
@@ -766,17 +765,17 @@ section('§17 — membership is derived on read, with the transitions explained'
     'they left because the CRITERIA changed, and the history says that rather than blaming the player');
   const badCursor = await j('GET', `/org/watchlists/${WL.id}/history?cursor=nope`, undefined, maria.token);
   neg(badCursor.status === 400 && badCursor.body.error === 'HISTORY_CURSOR_INVALID', 'a fabricated history cursor is refused, not silently ignored');
-  // S12c: the transitions page through SQL ("continue from here"): two pages hold every transition once, newest first.
+  // The transitions page by cursor: two pages hold every transition once, newest first.
   const pg1 = await j('GET', `/org/watchlists/${WL.id}/history?limit=1`, undefined, maria.token);
   const pg2 = await j('GET', `/org/watchlists/${WL.id}/history?limit=100&cursor=${pg1.body.nextCursor}`, undefined, maria.token);
   ok(pg1.body.items.length === 1 && typeof pg1.body.nextCursor === 'string' && pg2.status === 200
     && [...pg1.body.items, ...pg2.body.items].map((x) => x.id).join() === h3.body.items.map((x) => x.id).join() && pg2.body.nextCursor === null,
-  'S12c: the history pages: the second page continues exactly where the first stopped');
-  neg((await j('GET', `/org/watchlists/${WL.id}/history?limit=abc`, undefined, maria.token)).body.error === 'PAGE_LIMIT_INVALID', 'S12c: a junk page size is refused, not clamped');
+  'the history pages: the second page continues exactly where the first stopped');
+  neg((await j('GET', `/org/watchlists/${WL.id}/history?limit=abc`, undefined, maria.token)).body.error === 'PAGE_LIMIT_INVALID', 'a junk page size is refused, not clamped');
   const wl1 = await j('GET', '/org/watchlists?limit=1', undefined, maria.token);
   const wl2 = await j('GET', `/org/watchlists?limit=100&cursor=${wl1.body.nextCursor}`, undefined, maria.token);
   ok(wl1.body.items.length === 1 && typeof wl1.body.total === 'number' && new Set([...wl1.body.items, ...wl2.body.items].map((w) => w.id)).size === wl1.body.total,
-    'S12c: the watchlist list pages too, every watchlist exactly once');
+    'the watchlist list pages too, every watchlist exactly once');
 }
 
 // ================================= §18 concurrency, lifecycle and limits
@@ -904,9 +903,6 @@ section('§23 — a restart changes nothing about what a watchlist means');
   const caps = await j('GET', '/capabilities');
   ok(caps.body.schema?.upToDate === true, 'the second boot runs no migration twice');
 }
-
-// §24 (an M18.2 database upgrading to M19 on boot) was removed in S14a: it rewound the retired blob store's schema
-// record, and there is no compatibility with files written by earlier dev builds. Restart survival is §23.
 
 // ================================================================= summary
 const missingAbuse = Array.from({ length: 60 }, (_, i) => i + 1).filter((n) => !seenAbuse.has(n));

@@ -1,4 +1,4 @@
-// M24F.3 — the redesigned Player Inbox in a real browser against the real
+// The redesigned Player Inbox in a real browser against the real
 // Player bundle and a live scoutbox-server. Everything the Inbox shows is
 // seeded through the public API as the clubs would do it:
 //   N  a normal conversation (an accepted contact → a thread with a composer);

@@ -1,6 +1,6 @@
 import { RecordFacts, DetailItems } from './RecordDetails';
 import { CountChart, countBy } from './ScoutVisuals';
-// M17 org screens — Recruitment Rooms.
+// Org screens — Recruitment Rooms.
 //
 // A Recruitment Room is the CLUB's private decision layer over one player:
 // what we think, what we have reviewed, what we are waiting on, what we
@@ -36,10 +36,10 @@ import { t, fmtDate, fmtDateTime } from './i18n';
 import { TrialPanel } from './trialPanel';
 import { DecisionWorkflow } from './decisionPanel';
 import { OfferWorkflow } from './offerPanel';
-// M23 P8 — a grassroots club that took an Offer to acceptance continues to the signing here (no dead end).
+// A grassroots club that took an Offer to acceptance continues to the signing here (no dead end).
 import { SigningWorkflow } from './signingPanel';
 import { JourneyStrip, useRoomJourney } from './journeyStrip';
-// M24B — category → subcategory navigation and the read-oriented panels.
+// Category → subcategory navigation and the read-oriented panels.
 import { CaseNav, CaseCrumb, casePanelProps } from '../../design-system/CaseNavigation';
 import { defaultLocation, locate, resolveTab } from '../../design-system/caseNav';
 import { ROOM_NAV } from './caseNav';
@@ -53,14 +53,14 @@ interface RoomsScreenProps {
   openPlayer: (id: string) => void;
   /** Deep link: "#/recruitment/rooms/:roomId" opens this room directly. */
   roomId?: string | null;
-  /** M23 P8: the tab a deep link named ("#/recruitment/rooms/:id/offer"). */
+  /** The tab a deep link named ("#/recruitment/rooms/:id/offer"). */
   roomTab?: string | null;
   onRoomTab?: (roomId: string, tab: string) => void;
   onOpenRoom?: (roomId: string) => void;
   onCloseRoom?: () => void;
 }
 
-/** M24B — a subcategory id of ROOM_NAV (see caseNav.ts); legacy flat tab ids resolve to one. */
+/** A subcategory id of ROOM_NAV (see caseNav.ts); legacy flat tab ids resolve to one. */
 type TabId = string;
 
 // Grassroots keeps the same statuses and the same gates, but has no offers or
@@ -77,7 +77,7 @@ const statusLabel = (code: string, fallback?: string | null) => t(`rm.st.${code}
 const healthLabel = (code: string | null, fallback?: string | null) => (code ? t(`rm.health.${code}`, fallback ?? code.replace(/_/g, ' ')) : t('rm.none'));
 const reasonLabel = (code: string) => t(`rm.reason.${code}`, code.replace(/_/g, ' '));
 const recommendationLabel = (code: string) => t(`rm.rec.${code}`, code.replace(/_/g, ' '));
-/** M23 P8 (D-P8-15): a context may be a word or an M12 object; a list row shows a label, never an object (React refuses objects as children). */
+/** A context may be a word or an assessment-context object; a list row shows a label, never an object (React refuses objects as children). */
 const contextWord = (c: unknown): string | null => {
   if (typeof c === 'string') return c;
   if (!c || typeof c !== 'object') return null;
@@ -85,7 +85,7 @@ const contextWord = (c: unknown): string | null => {
   const bits = [o.fixture, o.date].filter((x): x is string => typeof x === 'string' && x.trim() !== '');
   return bits.length ? bits.join(' · ') : (o.trialId ? 'trial' : null);
 };
-/** M23 P8 (D-P8-15): an assessment's recommendation may arrive as a word or as the M12 `{ verdict }` object; the Room shows the word and never throws. */
+/** An assessment's recommendation may arrive as a word or as a `{ verdict }` object; the Room shows the word and never throws. */
 const recommendationWord = (r: unknown): string | null => (typeof r === 'string' ? r : r && typeof r === 'object' && typeof (r as { verdict?: unknown }).verdict === 'string' ? (r as { verdict: string }).verdict : null);
 const priorityLabel = (code: string) => t(`rm.pri.${code}`, code);
 const taskStateLabel = (code: string) => t(`rm.task.${code}`, code.replace(/_/g, ' '));
@@ -101,10 +101,10 @@ function errMessage(e: unknown): string {
     if (e.code === 'ROOM_REASON_REQUIRED') return t('rm.errReasonRequired');
     if (e.code === 'ROOM_REASON_PROHIBITED') return t('rm.errReasonProhibited');
     if (e.code === 'RATE_LIMITED') return t('rm.errRateLimited');
-    // A lost update is now refused rather than applied, so it has to be
+    // A lost update is refused rather than applied, so it has to be
     // explainable: the person is told their work is intact and what to do.
     if (e.code === 'ROOM_VERSION_CONFLICT') return t('common.conflict');
-    // M23 P8 — the legacy status move's three refusals, explained rather than echoed.
+    // The legacy status move's three refusals, explained rather than echoed.
     if (e.code === 'ROOM_EVIDENCE_REQUIRED') return t('rm.errEvidenceRequired');
     if (e.code === 'ROOM_TRANSITION_INVALID') return t('rm.errTransitionInvalid');
     if (e.code === 'ROOM_PERMISSION_REQUIRED') return t('rm.errPermission');
@@ -190,7 +190,7 @@ function RoomsList({ session, tick, onOpenRoom }: RoomsScreenProps) {
   return (
     <div>
       <CountChart title="Rooms in this view" note="Current states of the rooms returned by your selected view and search." unit="rooms" distribution items={data ? countBy(data.items, r => r.status) : null} />
-      {/* M24F.5 — one About for every explanation on this list; the privacy line stays on screen. */}
+      {/* One About for every explanation on this list; the privacy line stays on screen. */}
       <details className="f-about" data-testid="rooms-about"><summary>About</summary><div className="dim" style={{ fontSize: 12.5 }}><p>{t('rm.intro')}</p>{funnel && <p>{funnel.note}</p>}<p>{t('rm.attentionNote')}</p></div></details>
       <div className="dim" style={{ fontSize: 12.5, marginBottom: 10 }}><Icon name="lock-keyhole" size={13} /> {t('rm.privacy')}</div>
 
@@ -310,10 +310,10 @@ function RoomView({ session, tick, notify, openPlayer, roomId, roomTab, onRoomTa
   const [staff, setStaff] = useState<StaffRow[]>([]);
 
   const reload = useCallback(() => setBump((b) => b + 1), []);
-  // M23 P8 — the tab follows the deep link (back/forward included), and a click writes the tab into the link.
+  // The tab follows the deep link (back/forward included), and a click writes the tab into the link.
   useEffect(() => { if (isTabId(roomTab)) setTabState(subOf(roomTab)); }, [roomTab, roomId]);
   const setTab = useCallback((id: TabId) => { const sub = subOf(id); setTabState(sub); onRoomTab?.(roomId, sub); }, [onRoomTab, roomId]);
-  // §55 — returning to the page re-reads the case.
+  // returning to the page re-reads the case.
   useEffect(() => {
     const onVisible = () => { if (document.visibilityState === 'visible') reload(); };
     window.addEventListener('focus', reload);
@@ -353,7 +353,7 @@ function RoomView({ session, tick, notify, openPlayer, roomId, roomTab, onRoomTa
 function RoomLoading() { return <div className="dim">{t('rm.loading')}</div>; }
 
 function RoomBody({ session, room, tick, notify, reload, staff, openPlayer, tab, setTab, onCloseRoom }: PanelProps & { tick: number; tab: TabId; setTab: (id: TabId) => void; onCloseRoom?: () => void }) {
-  // M23 P8 — ONE journey read per room view, shared by the strip and the timeline.
+  // ONE journey read per room view, shared by the strip and the timeline.
   const { journey, bump } = useRoomJourney(session, room, tick);
   const shared = { session, room, notify, reload, staff, openPlayer, journey };
   const loc = locate(ROOM_NAV, tab) ?? defaultLocation(ROOM_NAV);
@@ -365,7 +365,7 @@ function RoomBody({ session, room, tick, notify, reload, staff, openPlayer, tab,
       <RoomHeader {...shared} />
       <JourneyStrip session={session} room={room} journey={journey} notify={notify} reload={reload} bump={bump} onTab={(id) => setTab(id as TabId)} />
 
-      {/* M24B — category → subcategory. Only the current category's pages are
+      {/* Category → subcategory. Only the current category's pages are
           in the DOM; the panel below is the ARIA tabpanel of the selected one. */}
       <CaseCrumb model={ROOM_NAV} value={loc} translate={(k) => t(k)} prefix={[t('nav2.rooms'), room.playerAvailable ? (room.playerName ?? '') : t('rm.playerWithheld')]} />
       <CaseNav
@@ -418,7 +418,7 @@ interface PanelProps {
   reload: () => void;
   staff: StaffRow[];
   openPlayer: (id: string) => void;
-  /** M23 P8 — the journey projection (null until read, or in demo mode). */
+  /** The journey projection (null until read, or in demo mode). */
   journey?: RoomJourney | null;
 }
 
@@ -469,7 +469,7 @@ function RoomHeader({ session, room, notify, reload, staff, openPlayer }: PanelP
 
   return (
     <div className="section room-head" aria-label={t('rm.headerLabel')}>
-      {/* M23 P2.5 — identity row: who, where they stand, and the two things a
+      {/* Identity row: who, where they stand, and the two things a
           scout does from here (move the room, open the profile). Everything
           else is one disclosure below. Nothing here is inferred from a score. */}
       <div className="room-id">
@@ -1200,7 +1200,7 @@ function DecisionPanel({ session, room, notify, reload }: PanelProps) {
   );
 }
 
-// ---------------------------------------------------------------- contact (M23 P3)
+// ---------------------------------------------------------------- contact
 //
 // A page-local tab inside the Room: Contact is a FUNCTION of the case, not a
 // destination. Everything the recipient will read is written here and is
@@ -1286,7 +1286,7 @@ function ContactPanel({ session, room, notify, reload }: PanelProps) {
   const [bump, setBump] = useState(0);
   const [subject, setSubject] = useState('');
   /**
-   * M23 P5.6E — the routing the club asks for. `player_only` is the default and
+   * The routing the club asks for. `player_only` is the default and
    * is always available; `both` asks that the client's own agent be a party as
    * well. There is no third option, and the server decides again at send time.
    */

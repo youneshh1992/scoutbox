@@ -1,8 +1,6 @@
 /**
- * The agent core (S11a) gets its own typed tables: agent profiles (declared jurisdictions, verification facets,
- * history), agency affiliations (roles, history), representation agreements (scope, policy versions, opportunity shares,
- * history) and an agency's settings. REGISTERED in DATA_MIGRATIONS. `up()` is the DDL. (An agency's settings were the
- * organisation facet `agencySettings`; since S14g the organisations have no facet storage.)
+ * The agent core: agent profiles (declared jurisdictions, verification facets, history), agency affiliations (roles,
+ * history), representation agreements (scope, policy versions, opportunity shares, history) and an agency's settings.
  */
 import { migrationApplied } from '../database.mjs';
 import { TRANSITIONS_MIGRATION } from '../transitionsVouches.mjs';

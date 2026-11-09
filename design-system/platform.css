@@ -11,7 +11,7 @@
 
 * { box-sizing: border-box; margin: 0; }
 html { font-family: var(--sb-font); font-optical-sizing: auto; }
-/* M24E — the wordmark is the one piece of text not in Inter (the established brand mark). */
+/* the wordmark is the one piece of text not in Inter (the established brand mark). */
 .wordmark { font-family: var(--sb-font-brand); }
 body { background: var(--sb-paper); color: var(--sb-ink); overflow: hidden; font-family: var(--sb-font); font-size: 14px; line-height: 1.5; -webkit-font-smoothing: antialiased; }
 #root { height: 100vh; }
@@ -20,7 +20,7 @@ h2 { font-size: 20px; font-weight: 600; letter-spacing: -0.45px; line-height: 1.
 h3 { font-size: 16px; font-weight: 600; line-height: 1.35; letter-spacing: -0.25px; }
 em { font-style: normal; }
 svg { flex-shrink: 0; }
-/* M24F.5 — Inter everywhere: keys, digests, ids and the error boundary read in the product face (tabular figures keep them legible). */
+/* Inter everywhere: keys, digests, ids and the error boundary read in the product face (tabular figures keep them legible). */
 code, pre, samp { font-family: var(--sb-font); font-variant-numeric: tabular-nums; font-size: 0.95em; }
 kbd { font-family: var(--sb-font); font-size: 11px; padding: 2px 4px; border: 1px solid var(--sb-kbd-border); border-radius: 3px; color: var(--sb-kbd-fg); background: var(--sb-white); }
 
@@ -99,7 +99,7 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px
   display: flex; flex-direction: column; gap: 2px; padding: 22px 12px 16px;
   min-height: 0; overflow-y: auto; scrollbar-width: thin;
 }
-/* M24E — the navigation region scrolls on its own when it outgrows the
+/* the navigation region scrolls on its own when it outgrows the
    viewport; the wordmark above and the account block (Sign out, Switch
    organisation) below stay reachable. On a very short viewport the sidebar
    itself still scrolls as a last resort. */
@@ -121,7 +121,7 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px
 .sidebar .brand .wordmark { display: inline-flex; align-items: baseline; white-space: nowrap; }
 .sidebar .brand .wordmark::after { content: ''; display: inline-block; width: 6px; height: 6px; background: var(--sb-green); margin-left: 3px; border-radius: 1px; }
 :root[data-theme="dark"] .sidebar .brand .wordmark { text-shadow: 0 1px 1px #00000080; }
-/* M24F.2 — the Grassroots LIGHT sidebar is deep navy with white type (the
+/* the Grassroots LIGHT sidebar is deep navy with white type (the
    Founder's ScoutBox Grassroots reference). The tokens are re-declared on
    the sidebar only, so the canvas and the panels keep the light palette. */
 :root[data-app="grass"]:not([data-theme="dark"]) .sidebar {
@@ -138,7 +138,7 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px
 :root[data-app="grass"]:not([data-theme="dark"]) .sidebar select { background: rgba(255, 255, 255, 0.08); color: #ffffff; border-color: rgba(255, 255, 255, 0.2); }
 :root[data-app="grass"]:not([data-theme="dark"]) .sidebar select option { background: #0a3f61; color: #ffffff; }
 /* the ™ beside the wordmark — one recipe everywhere: small, raised, quiet */
-/* M24F.2 — the ™ sits above the green square, tight to the final "x": the
+/* the ™ sits above the green square, tight to the final "x": the
    square is the wordmark's ::after on the baseline (6px in the sidebar, 8px on
    an entry heading); the ™ pulls back over that column (margin-left = −square
    − the flex gap + a 2px optical gap) and rides at the top. One recipe. */
@@ -169,13 +169,13 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px
 .sidebar button.active, .sidebar .nav-child.active, .sidebar .nav-shortcut.active { background: var(--sb-nav-active-bg); color: var(--sb-nav-active-fg); font-weight: 650; }
 .sidebar button.active svg, .sidebar .nav-child.active svg { color: var(--sb-nav-active-icon); }
 :root[data-theme="dark"] .sidebar button.active, :root[data-theme="dark"] .sidebar .nav-child.active { box-shadow: inset 0 1px 0 #ffffff09, inset 3px 0 0 var(--sb-nav-active-icon, var(--sb-green)), 0 2px 3px #00000022; }
-/* M24F.2 — the Agent's active destination is its gold, never the ScoutBox green: gold text, a warm wash, a small gold marker (a shape as well as a colour) */
+/* the Agent's active destination is its gold, never the ScoutBox green: gold text, a warm wash, a small gold marker (a shape as well as a colour) */
 :root[data-app="agent"] .sidebar button.active, :root[data-app="agent"] .sidebar .nav-child.active, :root[data-app="agent"] .sidebar .nav-shortcut.active { color: var(--sb-nav-active-fg); background: var(--sb-nav-active-bg); }
 :root[data-app="agent"] .sidebar button.active svg, :root[data-app="agent"] .sidebar .nav-child.active svg { color: var(--sb-nav-active-icon); }
 :root[data-app="agent"]:not([data-theme="dark"]) .sidebar button.active, :root[data-app="agent"]:not([data-theme="dark"]) .sidebar .nav-child.active { box-shadow: inset 3px 0 0 var(--sb-nav-active-icon); }
 :root[data-app="agent"][data-theme="dark"] .sidebar button.active, :root[data-app="agent"][data-theme="dark"] .sidebar .nav-child.active { box-shadow: inset 0 1px 0 #ffffff09, inset 3px 0 0 var(--sb-nav-active-icon), 0 2px 3px #00000022; }
 :root[data-app="agent"] .sidebar .nav-children .nav-group.has-active > button.nav-group-label { color: var(--sb-nav-active-fg); }
-:root[data-app="agent"]:not([data-theme="dark"]) .sidebar button.active, :root[data-app="agent"]:not([data-theme="dark"]) .sidebar .nav-child.active { border: 1px solid #e7ddc8; box-shadow: inset 3px 0 0 var(--sb-nav-active-icon), inset 0 1px 0 #fff6; padding-top: 9px; padding-bottom: 9px; } /* M24F.2 — the bar is gold too */
+:root[data-app="agent"]:not([data-theme="dark"]) .sidebar button.active, :root[data-app="agent"]:not([data-theme="dark"]) .sidebar .nav-child.active { border: 1px solid #e7ddc8; box-shadow: inset 3px 0 0 var(--sb-nav-active-icon), inset 0 1px 0 #fff6; padding-top: 9px; padding-bottom: 9px; } /* the bar is gold too */
 .sidebar button svg { width: 17px; height: 17px; }
 .sidebar .spacer { flex: 1; }
 .nav-active-bar { display: none; }
@@ -192,7 +192,7 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px
 .nav-children { display: flex; flex-direction: column; gap: 1px; padding: 2px 0 8px; }
 .nav-group-label { font-size: 11px; letter-spacing: 0.8px; font-weight: 650; color: var(--sb-navlabel); text-transform: uppercase; padding: 10px 11px 6px 11px; }
 .nav-children .nav-group-label { padding-left: 38px; }
-/* M24D — inside an expanded section the group heading is a disclosure
+/* inside an expanded section the group heading is a disclosure
    button: one group open at a time, the current page's group by default.
    Same type as the plain label; a small chevron says it folds. */
 .sidebar .nav-children button.nav-group-label { display: flex; align-items: center; gap: 6px; width: 100%; min-height: 32px; padding: 7px 10px 5px 38px; margin: 0; border-radius: 7px; font-size: 11px; font-weight: 650; letter-spacing: 0.8px; text-transform: uppercase; color: var(--sb-navlabel); }
@@ -207,7 +207,7 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px
 .nav-flyout .nav-group-label { padding: 8px 10px 2px; }
 .nav-flyout .nav-child { padding-left: 10px; }
 .nav-divider { border-top: 1px solid var(--sb-rule); margin: 10px 4px; }
-/* M24D — the organisation's standing as one quiet line (was a row of pills). */
+/* the organisation's standing as one quiet line. */
 .org-standing { font-size: 11.5px; line-height: 1.5; color: var(--sb-quiet); padding: 2px 11px 6px; }
 .p-note { font-size: 12px; color: var(--sb-quiet); }
 .nav-badge { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); background: var(--sb-wash); color: var(--sb-ink); font-size: 11px; font-weight: 600; border-radius: 4px; min-width: 18px; text-align: center; padding: 1px 5px; }
@@ -289,7 +289,7 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px
 
 /* pills → the reference's soft chips and dot statuses */
 .pill { display: inline-block; vertical-align: middle; font-size: 11px; font-weight: 600; border-radius: 5px; padding: 3px 8px; border: 1px solid transparent; color: var(--sb-quiet); background: var(--sb-wash); white-space: nowrap; line-height: 1.4; }
-/* M24F — a pill is a label: its first letter is presented in upper case whatever the stored value; sentences are never title-cased */
+/* a pill is a label: its first letter is presented in upper case whatever the stored value; sentences are never title-cased */
 .pill::first-letter { text-transform: uppercase; }
 .pill svg { vertical-align: -2px; margin-right: 4px; }
 .pill.green { color: var(--sb-filter-active-fg); background: var(--sb-filter-active-bg); border-color: var(--sb-filter-active-border); }
@@ -303,7 +303,7 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px
 .f-status.urgent { color: var(--sb-urgent-ink); } .f-status.urgent::before { background: var(--sb-urgent); }
 
 /* panels, rows, stats, tables
-   M24F — a card is not the default primitive: rows, stats, the attention
+   A card is not the default primitive: rows, stats, the attention
    block and the filter bar are ruled by hairlines, not boxed. Panels that
    genuinely hold a workspace (.ag-panel, the ledger, a thread, a player
    card) keep their surface. */
@@ -445,7 +445,7 @@ video.clip { width: 100%; max-height: 300px; border-radius: 10px; background: #0
 
 /* ---------- phone strip, palette, drawer ---------- */
 .subnav { display: none; gap: 2px; padding: 4px 10px 0; border-bottom: 1px solid var(--sb-rule); background: var(--sb-topbar); overflow-x: auto; flex-shrink: 0; position: relative; flex-wrap: nowrap; }
-.subnav button { background: none; border: none; box-shadow: none; border-bottom: 2px solid transparent; border-radius: 0; padding: 8px 10px 10px; color: var(--sb-quiet); white-space: nowrap; font-size: 13px; font-weight: 500; min-height: 40px; flex: 0 0 auto; } /* 13px, not the reference's 12px: the P2.5 readability floor for phone tabs */
+.subnav button { background: none; border: none; box-shadow: none; border-bottom: 2px solid transparent; border-radius: 0; padding: 8px 10px 10px; color: var(--sb-quiet); white-space: nowrap; font-size: 13px; font-weight: 500; min-height: 40px; flex: 0 0 auto; } /* 13px, not the reference's 12px: the readability floor for phone tabs */
 .subnav button.active { color: var(--sb-tab-active); border-bottom-color: var(--sb-tab-line); font-weight: 600; }
 .subnav-more { display: inline-flex; align-items: center; gap: 5px; }
 .subnav-more.active { color: var(--sb-tab-active); border-bottom-color: var(--sb-tab-line); font-weight: 600; }
@@ -470,7 +470,7 @@ video.clip { width: 100%; max-height: 300px; border-radius: 10px; background: #0
 .palette-row:hover .palette-pin, .palette-row.selected .palette-pin, .palette-pin.pinned { opacity: 1; }
 .palette-pin.pinned { color: var(--sb-gold); }
 
-/* ---------- Grassroots turf: barely visible grain and pitch markings — the DARK workspace only (M24F.2) ---------- */
+/* ---------- Grassroots turf: barely visible grain and pitch markings — the DARK workspace only ---------- */
 :root[data-app="grass"] .content { background-color: var(--sb-workspace); }
 :root[data-app="grass"][data-theme="dark"] .content {
   background-image:
@@ -488,7 +488,7 @@ video.clip { width: 100%; max-height: 300px; border-radius: 10px; background: #0
   border: 1px solid var(--grass-line); border-left: 0;
 }
 
-/* ---------- M24F editorial page structure ----------
+/* ---------- editorial page structure ----------
    A card is not the default primitive. These classes compose a page from
    headings, one supporting sentence, underlined fields in a row, hairline
    records and text actions — whitespace and typography do the grouping. */
@@ -588,7 +588,7 @@ video.clip { width: 100%; max-height: 300px; border-radius: 10px; background: #0
 .login { position: relative; }
 .login-toolbar { position: absolute; top: 16px; right: 16px; }
 
-/* ------------------------------------------------------------------ M24B case navigation
+/* ------------------------------------------------------------------ case navigation
    Row 1: the categories of one case (a segmented control — the current one is
    heavier, carries a dot and aria-current). Row 2: the current category's
    subcategories as light underline tabs. Both rows scroll sideways on a phone;
@@ -624,7 +624,7 @@ video.clip { width: 100%; max-height: 300px; border-radius: 10px; background: #0
   .casenav-crumb { display: none; }
 }
 
-/* ------------------------------------------------------------------ M24C authentication
+/* ------------------------------------------------------------------ authentication
    The dark football green page (#173B27, the Football Passport card's green)
    with the approved pitch motif behind it, one centred two-panel card: the
    bright-green introduction (#00E676, ≈45%) and the dark-green form (≈55%),
@@ -651,7 +651,7 @@ video.clip { width: 100%; max-height: 300px; border-radius: 10px; background: #0
     repeating-linear-gradient(90deg, transparent 0 140px, var(--auth-band) 140px 280px);
   color: var(--auth-ink); height: 100vh; height: 100dvh; overflow-y: auto; padding: 32px 20px; gap: 0; justify-content: flex-start; align-items: center;
 }
-/* M24E — the card centres by auto margins, so a short viewport scrolls the
+/* the card centres by auto margins, so a short viewport scrolls the
    page from the top instead of clipping the first row behind the top edge. */
 .auth-card { margin: auto 0; flex-shrink: 0; }
 /* the pitch: boundary, halfway line, centre circle and spot (::before); one penalty area (::after) */
@@ -694,13 +694,13 @@ video.clip { width: 100%; max-height: 300px; border-radius: 10px; background: #0
 .auth-tab:hover { filter: none; color: var(--auth-ink); }
 .auth-tab.on { color: var(--auth-ink); font-weight: 700; }
 .auth-access { color: var(--auth-soft); font-size: 12.5px; line-height: 1.55; margin: 0; }
-/* M24D — choices are rows, not cards: a name, one quiet line, an arrow,
+/* choices are rows, not cards: a name, one quiet line, an arrow,
    hairlines between them. The chosen row is named in the brand green. */
 .auth-form .org-grid { display: flex; flex-direction: column; gap: 0; border-top: 1px solid var(--auth-line); }
 .auth-form .org-card, .auth-form .auth-row { width: 100%; display: flex; flex-direction: row; align-items: center; justify-content: space-between; gap: 14px; padding: 13px 2px; min-height: 52px; border: 0; border-bottom: 1px solid var(--auth-line); border-radius: 0; background: none; color: var(--auth-ink); box-shadow: none; text-align: left; filter: none; }
 .auth-form .org-card:hover, .auth-form .auth-row:hover { filter: none; background: none; }
 .auth-form .org-card:hover .org-name, .auth-form .auth-row:hover .org-name, .auth-form .org-card:hover .auth-row-arrow, .auth-form .auth-row:hover .auth-row-arrow { color: var(--auth-green); }
-/* M24F — hover is the text and the arrow, never a box: the name brightens, the arrow moves 3px */
+/* hover is the text and the arrow, never a box: the name brightens, the arrow moves 3px */
 .auth-row-arrow { transition: transform 0.12s ease, color 0.12s ease; }
 .auth-form .org-card:hover .auth-row-arrow, .auth-form .auth-row:hover .auth-row-arrow { transform: translateX(3px); }
 @media (prefers-reduced-motion: reduce) { .auth-row-arrow { transition: none; } .auth-form .org-card:hover .auth-row-arrow, .auth-form .auth-row:hover .auth-row-arrow { transform: none; } }
@@ -753,8 +753,8 @@ video.clip { width: 100%; max-height: 300px; border-radius: 10px; background: #0
 .auth-form .wordmark { color: var(--auth-ink); }
 /* Grassroots: the bright introduction carries the turf — blades of grass and
    broad mowing bands in the deep green, the same geometry as the Grassroots
-   workspace texture, no lines. (Restored to the M24E state at the Founder's
-   direction: no photograph, no centre circle.) */
+   workspace texture, no lines. (The Founder's direction: no photograph, no
+   centre circle.) */
 :root[data-app="grass"] .auth-promo {
   background-color: var(--auth-promo);
   background-image:
@@ -765,11 +765,11 @@ video.clip { width: 100%; max-height: 300px; border-radius: 10px; background: #0
 :root[data-app="grass"] .auth-points:empty { display: none; }
 /* The environment indicator: a quiet line, not a notice. */
 :root[data-app="grass"] .auth-promo .auth-env { font-size: 11.5px; letter-spacing: 0.4px; text-transform: uppercase; color: var(--auth-promo-ink); opacity: 0.7; margin-top: 18px; }
-/* M24F — the Grassroots club rows are a list whatever theme the person saved:
+/* the Grassroots club rows are a list whatever theme the person saved:
    the shared dark-theme control rules must not box them. Colour and type
-   follow the M24E scheme untouched. */
+   follow the auth scheme untouched. */
 :root[data-theme="dark"] .login.auth-page[data-auth-app="grass"] :is(.org-card, .auth-row) { background: none; box-shadow: none; border-color: transparent; border-bottom-color: var(--auth-line); }
-/* M24F — the LIGHT Agent entry ignores the saved dark theme: the shared
+/* the LIGHT Agent entry ignores the saved dark theme: the shared
    dark-theme control rules must not paint its tabs, rows and fields. These
    win on specificity over the generic dark rules. */
 :root[data-theme="dark"] .login.auth-page[data-auth-app="agent"] :is(.auth-tab, .org-card, .auth-row, button.auth-eye, button:not(.primary)) { background: none; box-shadow: none; color: var(--auth-ink); border-color: var(--auth-line-strong); }
@@ -781,7 +781,7 @@ video.clip { width: 100%; max-height: 300px; border-radius: 10px; background: #0
 :root[data-theme="dark"] .login.auth-page[data-auth-app="agent"] .auth-form .auth-row-meta { color: var(--auth-soft); }
 :root[data-theme="dark"] .login.auth-page[data-auth-app="agent"] .auth-form :is(.org-card:hover, .auth-row:hover, .org-card.selected) :is(.org-name, .auth-row-arrow) { color: var(--auth-green); }
 
-/* ---------------------------------------------------------------- M24F Agent entry
+/* ---------------------------------------------------------------- Agent entry
    ONE fixed LIGHT appearance — the warm cream of the Agent workspace
    (#FDFAF4 / #F9F6EF), dark readable type, the gold held back for the
    label and the focus ring — whatever appearance the person saved inside
@@ -817,7 +817,7 @@ video.clip { width: 100%; max-height: 300px; border-radius: 10px; background: #0
   .auth-card { grid-template-columns: 1fr; border-radius: 12px; }
   :root[data-app="agent"] .auth-promo { border-right: 0; border-bottom: 1px solid rgba(48, 45, 37, 0.08); }
   .auth-card { grid-template-columns: 1fr; border-radius: 12px; }
-  /* M24D — a phone shows the headline and one sentence; the points are desktop reading. */
+  /* a phone shows the headline and one sentence; the points are desktop reading. */
   .auth-promo { padding: 28px 24px; gap: 10px; }
   .auth-promo h2 { font-size: 24px; }
   .auth-points { display: none; }
@@ -828,7 +828,7 @@ video.clip { width: 100%; max-height: 300px; border-radius: 10px; background: #0
   .auth-form button.primary, .auth-form .enter-row button.primary { width: 100%; align-self: stretch; }
 }
 
-/* M24F.3 — progressive disclosure for explanatory copy: an "About" row that
+/* progressive disclosure for explanatory copy: an "About" row that
    opens the paragraph. Native <details>, keyboard and screen-reader ready. */
 .f-about { margin: 2px 0 10px; }
 .f-about > summary { list-style: none; cursor: pointer; display: inline-flex; align-items: center; gap: 5px; color: var(--sb-link); font-size: 12.5px; font-weight: 500; padding: 4px 0; }
@@ -844,7 +844,7 @@ video.clip { width: 100%; max-height: 300px; border-radius: 10px; background: #0
 .f-preview.trial { box-shadow: inset 3px 0 0 var(--sb-trial); }
 .f-label-trial { display: inline-block; font-size: 10.5px; font-weight: 600; letter-spacing: 0.3px; border-radius: 4px; padding: 1px 6px; background: var(--sb-trial-bg); color: var(--sb-trial-ink); }
 
-/* ---------------------------------------------------------------- M24F.4 — Nobody Missed as a coverage tool */
+/* ---------------------------------------------------------------- Nobody Missed as a coverage tool */
 .nm-controls { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; margin-bottom: 18px; font-size: 13px; }
 .nm-coverage-body { display: flex; gap: 22px; align-items: center; flex-wrap: wrap; }
 .nm-ring { flex-shrink: 0; color: var(--sb-ink); }
@@ -863,7 +863,7 @@ video.clip { width: 100%; max-height: 300px; border-radius: 10px; background: #0
 :root[data-theme="dark"] .nm-row-head:hover { background: var(--sb-wash); }
 @media (max-width: 640px) { .nm-row-detail { padding-left: 4px; } }
 
-/* ---------------------------------------------------------------- M24F.4 — Director Dashboard, executive layer */
+/* ---------------------------------------------------------------- Director Dashboard, executive layer */
 .dash .notice[data-principle] { margin-bottom: 16px; }
 .m19-criteria { border: 0; border-top: 1px solid var(--sb-rule); padding: 12px 0 4px; margin: 0 0 12px; min-width: 0; }
 .m19-criteria-title { padding: 0; font-size: 14px; font-weight: 600; color: var(--sb-ink); margin-bottom: 4px; }
@@ -936,18 +936,18 @@ video.clip { width: 100%; max-height: 300px; border-radius: 10px; background: #0
 :root[data-theme="dark"] .dash button.link { background: none; box-shadow: none; }
 @media (max-width: 900px) { .dash-grid { grid-template-columns: 1fr; } }
 
-/* M24F.4 — a player card carries at most three pills; the rest reads as one quiet line */
+/* a player card carries at most three pills; the rest reads as one quiet line */
 .player-card .badges-quiet { gap: 0; margin-top: 4px; }
 .player-card .badges-quiet .pill { background: none; border: 0; padding: 0; color: var(--sb-quiet); font-weight: 500; }
 .player-card .badges-quiet .pill:not(:last-child)::after { content: ' · '; }
 
-/* M24F.5 — at desktop width the three secondary visuals sit side by side under the full-width funnel. */
+/* at desktop width the three secondary visuals sit side by side under the full-width funnel. */
 @media (min-width: 1180px) { .dash .dash-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 
-/* M24F.5 — a bare link in page content reads in the link colour, never the browser's default blue and underline.
+/* a bare link in page content reads in the link colour, never the browser's default blue and underline.
    Zero specificity: any styled link keeps its own treatment. */
 :where(.content a:not([class])) { color: var(--sb-link); text-decoration: none; }
 :where(.content a:not([class])):hover { text-decoration: underline; }
 
-/* M24F.5 — a folded row followed by a new section keeps the section rhythm. */
+/* a folded row followed by a new section keeps the section rhythm. */
 .settings-row + .section { margin-top: 22px; }

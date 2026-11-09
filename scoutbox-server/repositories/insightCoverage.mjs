@@ -1,31 +1,29 @@
 /**
- * S12d — insight and coverage as typed tables (migration `0033_insight_coverage`; docs/architecture/migration.md §4.5
- * S12; sql/07_development_boxcam_discovery.sql).
+ * Insight and coverage.
  *
  * Records:
- *   - An exposure event (F4): one per (organisation, player, kind, UTC day), unique. Recording one is an insert that
- *     does nothing when the day already has it. Every reader looks at the last 90 days only; the insight sweep deletes
- *     what lies before that window (`exposure.prune`), so the table stays bounded without a global cap.
- *   - A review-later deferral (F4): one per (organisation, player), unique; deferring again replaces it. The sweep finds
- *     the due ones by an indexed query and marks each reminded with its notification.
- *   - An evidence suggestion (F6): a gap one rule found for one player, its cited record ids as ordered rows. At most
- *     one open (suggested or requested) suggestion per (organisation, player, rule). `reconcile` is the explicit upsert
- *     the evidence-gaps read used to perform in place. The rule's action copy is the rule registry's, not stored.
- *   - A calibration session (F5): the rubric is the pinned template version (a key to assessment_templates), never a
- *     copy; participants, blind submissions with their ratings, and discussion notes are rows.
- *   - A fixture (F7): an organisation's own record of a match on a real day, with an optional location.
- *   - A coverage plan (F7): a goal of observations over a window.
- *   - A coverage assignment (F7): a scout sent to a fixture. The fixture is the organisation's own (`fixture_id`, a key)
- *     (`fixture_id`), a friendly (`friendly_id`) or an open day (`open_trial_id`), each a key: exactly one is set, by
- *     kind. The two event keys name tables created by 0037 (S13d), so no assignment to an event can be written before
- *     that migration is recorded. Target players and the
- *     warnings raised at creation are rows; the observation, the assessment it produced and a cancellation are columns.
+ *   - An exposure event: one per (organisation, player, kind, UTC day), unique. Recording one is an insert that does
+ *     nothing when the day already has it. Every reader looks at the last 90 days only; the insight sweep deletes what
+ *     lies before that window (`exposure.prune`), so the table stays bounded without a global cap.
+ *   - A review-later deferral: one per (organisation, player), unique; deferring again replaces it. The sweep finds the
+ *     due ones by an indexed query and marks each reminded with its notification.
+ *   - An evidence suggestion: a gap one rule found for one player, its cited record ids as ordered rows. At most one
+ *     open (suggested or requested) suggestion per (organisation, player, rule). `reconcile` is the explicit upsert the
+ *     evidence-gaps read calls. The rule's action copy is the rule registry's, not stored.
+ *   - A calibration session: the rubric is the pinned template version (a key to assessment_templates), never a copy;
+ *     participants, blind submissions with their ratings, and discussion notes are rows.
+ *   - A fixture: an organisation's own record of a match on a real day, with an optional location.
+ *   - A coverage plan: a goal of observations over a window.
+ *   - A coverage assignment: a scout sent to a fixture. The fixture is the organisation's own (`fixture_id`), a friendly
+ *     (`friendly_id`) or an open day (`open_trial_id`), each a key: exactly one is set, by kind. The two event keys name
+ *     tables created by 0037, so no assignment to an event can be written before that migration is recorded. Target
+ *     players and the warnings raised at creation are rows; the observation, the assessment it produced and a
+ *     cancellation are columns.
  *
- * WRITES are explicit operations; every write joins the open unit of work, the caller's transaction or its own.
- * READS are SQL: no mirror. Fresh, deep-frozen records; lists decode child rows in one batch. Modules receive the
- * queries as `insightReads`.
+ * Every write joins the open unit of work, the caller's transaction or its own. Records are deep-frozen; lists decode
+ * child rows in one batch. Modules receive the queries as `insightReads`.
  *
- * References. Player, media and assessment ids carry no key (tolerant: records outlive an account deletion, as before).
+ * References. Player, media and assessment ids carry no key (tolerant: records outlive an account deletion).
  * Organisations, the staff named and the calibration template version are RESTRICT keys; so are the keys inside the
  * domain (an assignment's own fixture, a submission's participant). Child rows cascade with their owner.
  */
@@ -173,7 +171,7 @@ export const INSIGHT_COVERAGE_DDL = [
     ...ASSIGNMENT_COLUMNS.slice(0, 2), oneOf('kind', 'fixture_kind', FIXTURE_KINDS, req), idf('fixtureId', 'fixture_id'), idf('friendlyId', 'friendly_id'), idf('openTrialId', 'open_trial_id'), ...ASSIGNMENT_COLUMNS.slice(2),
   ], [
     rowOf('orgs', 'org_id'), rowOf('fixtures', 'fixture_id'), rowOf('org_users', 'scout_user_id'), DAY_GLOB('fixture_date'),
-    // S13d: friendlies and open days are never hard-deleted by a route (deleting an open day stamps it).
+    // Friendlies and open days are never hard-deleted by a route (deleting an open day stamps it).
     rowOf('friendlies', 'friendly_id'), rowOf('open_trials', 'open_trial_id'),
     "CHECK ((fixture_kind = 'own') = (fixture_id IS NOT NULL))", "CHECK ((fixture_kind = 'friendly_board') = (friendly_id IS NOT NULL))",
     "CHECK ((fixture_kind = 'open_trial') = (open_trial_id IS NOT NULL))",
@@ -420,7 +418,7 @@ function decodeAssignments(sqlite, rows) {
   });
 }
 
-// ------------------------------------------------------------------ snapshot (fixtures and the persistence batteries)
+// ------------------------------------------------------------------ whole-domain read (the test suites)
 export const insightCoverageLive = (sqlite) => migrationApplied(sqlite, INSIGHT_COVERAGE_MIGRATION);
 function readAll(sqlite) {
   const all = (t) => sqlite.prepare(`SELECT * FROM ${t} ORDER BY rowid`).all();
@@ -434,7 +432,7 @@ function readAll(sqlite) {
     coverageAssignments: decodeAssignments(sqlite, all('coverage_assignments')),
   };
 }
-/** The whole domain read back as plain records (`readAllRecords` in index.mjs: the test suites' read-back); null before its migration. */
+/** The whole domain read back as plain records (`readAllRecords` in index.mjs: the test suites' read-back). */
 export const INSIGHT_COVERAGE_RECORDS = {
   names: INSIGHT_COVERAGE_COLLECTIONS,
   read(sqlite) { return insightCoverageLive(sqlite) ? readAll(sqlite) : null; },
@@ -664,7 +662,7 @@ export function createInsightCoverageRepository({ sqlite, unit = null, now = Dat
     forOrg: (orgId) => q('SELECT * FROM fixtures WHERE org_id = ? ORDER BY fixture_date, rowid').all(orgId).map((r) => deepFreeze(decodeFixture(r))),
   };
 
-  // ---- the fixtures an organisation can observe (S13d): its own, every friendly on the board and every open day that
+  // ---- the fixtures an organisation can observe: its own, every friendly on the board and every open day that
   // is not deleted, one SQL union ordered by (date, public id). An event's location is its host club's.
   const OBSERVABLE = `SELECT 'own' AS kind, f.id AS ref, f.id AS public_id, f.fixture_date AS date, f.competition, f.home, f.away, f.lat, f.lng, f.city
       FROM fixtures f WHERE f.org_id = @org

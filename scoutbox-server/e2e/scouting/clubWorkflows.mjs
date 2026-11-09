@@ -1,9 +1,10 @@
-// M12 acceptance suite. Run against a freshly seeded ISOLATED server:
+// Club scouting workflows: evidence, assessments, video, recruitment, tactical fit, opportunities, campaigns,
+// development, trial days, outcomes and access, including the negative permission paths. Run against a freshly
+// seeded ISOLATED server:
 //   DATA_DIR=$(mktemp -d) PORT=4102 node server.mjs &
 //   API_URL=http://localhost:4102 node e2e/scouting/clubWorkflows.mjs
-// Covers all 12 feature areas' acceptance criteria including the negative
-// permission paths. §11 additionally restarts the server (SIGKILL) to prove
-// scheduled work survives — pass RESTART_CMD handling via the wrapper below.
+// The outcomes section restarts the server (SIGKILL) to prove scheduled work survives — pass RESTART_CMD handling
+// via the wrapper below.
 import { spawn, execSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -63,7 +64,7 @@ const hack = await orgLogin('org-hackneymarsh', 'Dee Mensah', 'Head Coach', 'gra
 const HACK = hack.token;
 ok(!!(KOLA && SVEN && GUNI && AMARA && MARIA && SAM && NORTH && HACK && OSEI), 'all seed identities log in');
 
-// ============================================================ §1 evidence
+// ============================================================ evidence
 let r = await post('/player/evidence', { claimType: 'statistic', label: 'League goals 2025/26', value: 14, units: 'goals', season: '2025/26' }, bearer(KOLA));
 ok(r.status === 201 && r.body.evidence.verification.status === 'self_reported', 'player files a self-reported claim');
 const ev1 = r.body.evidence.id;
@@ -75,11 +76,11 @@ ok(r.status === 409, 'double corroboration refused');
 // ---- one event, one instant -------------------------------------------------
 //
 // Creating a record is ONE event, so every timestamp it stamps is ONE instant.
-// `newEvidence` used to call `Date.now()` three times, which made
-// `recordedAt` and `verification.reviewedAt` usually equal and occasionally
-// 1ms apart — whenever a millisecond boundary fell between two statements.
+// Reading the clock more than once would make `recordedAt` and
+// `verification.reviewedAt` occasionally 1ms apart — whenever a millisecond
+// boundary fell between two statements.
 //
-// M18's Second Look reads `reviewedAt > recordedAt` to tell a LATER upgrade
+// Second Look reads `reviewedAt > recordedAt` to tell a LATER upgrade
 // from a tier the record was born with, so that 1ms made a brand-new upload
 // look like a later upgrade of itself: one record, two material changes, and a
 // club told its evidence had improved when nothing had been reviewed. Same
@@ -126,7 +127,7 @@ const disp = r.body.items[0];
 ok(r.body.items.length === 1 && disp.evidenceId === ev2, 'T&S sees the dispute queue');
 r = await post(`/admin/evidence/disputes/${disp.id}/resolve`, { resolution: 'upheld', note: 'club evidence stronger', downgrade: true }, admin);
 ok(r.status === 200 && r.body.evidence.verification.method === 'downgraded after dispute', 'T&S resolves; downgrade recorded with method');
-// S9a: valid input only — junk is refused with the field named, and nothing is written
+// Valid input only — junk is refused with the field named, and nothing is written
 {
   const before = (await j('/player/passport', {}, bearer(KOLA))).body.records.length;
   for (const [body, field] of [
@@ -137,43 +138,43 @@ ok(r.status === 200 && r.body.evidence.verification.method === 'downgraded after
     [{ claimType: 'statistic', label: 'Goals', mediaIds: 'clip-1' }, 'mediaIds'],
   ]) {
     const bad = await post('/player/evidence', body, bearer(KOLA));
-    ok(bad.status === 400 && bad.body.error === 'FIELD_INVALID' && bad.body.field === field, `S9a evidence with a junk ${field} is refused (400 FIELD_INVALID, field named)`);
+    ok(bad.status === 400 && bad.body.error === 'FIELD_INVALID' && bad.body.field === field, `evidence with a junk ${field} is refused (400 FIELD_INVALID, field named)`);
   }
-  ok((await j('/player/passport', {}, bearer(KOLA))).body.records.length === before, 'S9a and no refused claim was recorded');
+  ok((await j('/player/passport', {}, bearer(KOLA))).body.records.length === before, 'and no refused claim was recorded');
   const longLabel = await post('/player/evidence', { claimType: 'statistic', label: 'x'.repeat(500), value: '12 goals' }, bearer(KOLA));
-  ok(longLabel.status === 201 && longLabel.body.evidence.label.length === 120 && longLabel.body.evidence.value === '12 goals', 'S9a over-long text is still shortened, and a text value is kept as text');
+  ok(longLabel.status === 201 && longLabel.body.evidence.label.length === 120 && longLabel.body.evidence.value === '12 goals', 'over-long text is still shortened, and a text value is kept as text');
   const badReason = await post(`/player/evidence/${longLabel.body.evidence.id}/correct`, { reason: { why: 'x' } }, bearer(KOLA));
-  ok(badReason.status === 400 && badReason.body.field === 'reason', 'S9a a correction reason that is not text is refused');
+  ok(badReason.status === 400 && badReason.body.field === 'reason', 'a correction reason that is not text is refused');
   const badFrom = await post('/org/coaches', { coachName: 'Pat Doe', role: 'Coach', from: 'last spring' }, bearer(HACK));
-  ok(badFrom.status === 400 && badFrom.body.error === 'DATE_INVALID' && badFrom.body.field === 'from', 'S9a a coach affiliation start that is not a day is refused');
+  ok(badFrom.status === 400 && badFrom.body.error === 'DATE_INVALID' && badFrom.body.field === 'from', 'a coach affiliation start that is not a day is refused');
   const badNote = await post('/org/squad/invite', { playerId: 'pl-adeyemi', note: 7 }, bearer(MARIA));
-  ok(badNote.status === 400 && badNote.body.field === 'note', 'S9a a squad invitation note that is not text is refused');
+  ok(badNote.status === 400 && badNote.body.field === 'note', 'a squad invitation note that is not text is refused');
 }
-// S9a: names from other domains fit the evidence tables' 200 characters (a player's name is at most 120 since S14h)
+// Names from other domains fit the evidence tables' 200 characters (a player's name is at most 120)
 {
   const refused = await post('/auth/player/signup', { name: 'A'.repeat(230), dob: '1999-01-01', country: 'GB', password: 'longenough1', position: 'CM' });
-  ok(refused.status === 400 && refused.body.field === 'name', 'S14h a 230-character player name is refused at sign-up');
+  ok(refused.status === 400 && refused.body.field === 'name', 'a 230-character player name is refused at sign-up');
   const longName = 'A'.repeat(120);
   const su = await post('/auth/player/signup', { name: longName, dob: '1999-01-01', country: 'GB', password: 'longenough1', position: 'CM' });
   const LONG = su.body.token;
   const filed = await post('/player/evidence', { claimType: 'statistic', label: 'Goals', value: 3 }, bearer(LONG));
-  ok(filed.status === 201 && filed.body.evidence.source.name === longName, 'S9a a player with a 120-character name files evidence (the whole name)');
+  ok(filed.status === 201 && filed.body.evidence.source.name === longName, 'a player with a 120-character name files evidence (the whole name)');
   const corrected = await post(`/player/evidence/${filed.body.evidence.id}/correct`, { value: 4, reason: 'miscounted' }, bearer(LONG));
-  ok(corrected.status === 201, 'S9a and corrects it');
+  ok(corrected.status === 201, 'and corrects it');
   const disputed = await post(`/player/evidence/${corrected.body.evidence.id}/dispute`, { reason: 'the club entry is wrong' }, bearer(LONG));
-  ok(disputed.status === 201 && disputed.body.dispute.by.name.length === 120, 'S9a and disputes it');
+  ok(disputed.status === 201 && disputed.body.dispute.by.name.length === 120, 'and disputes it');
   const reg = await post('/auth/org/register-grassroots', { name: 'C'.repeat(120), city: 'London', lat: 51.5, lng: -0.12, federation: 'FA', registrationId: 'S9A-LONG', scoutName: 'S'.repeat(120) });
   const oseiClaim = await post('/player/evidence', { claimType: 'statistic', label: 'Assists', value: 5 }, bearer(OSEI));
   const orgDispute = await post(`/org/evidence/${oseiClaim.body.evidence.id}/dispute`, { reason: 'our records differ' }, bearer(reg.body.token));
-  ok(reg.status === 201 && orgDispute.status === 201 && orgDispute.body.dispute.by.name.length === 200, 'S9a a club whose scout and club names total 243 characters files a dispute');
+  ok(reg.status === 201 && orgDispute.status === 201 && orgDispute.body.dispute.by.name.length === 200, 'a club whose scout and club names total 243 characters files a dispute');
   const queue = await j('/admin/evidence/disputes?limit=200', {}, admin);
-  ok(queue.body.items.some((d) => d.id === orgDispute.body.dispute.id) && queue.body.items.some((d) => d.id === disputed.body.dispute.id), 'S9a and both disputes reach the T&S queue');
+  ok(queue.body.items.some((d) => d.id === orgDispute.body.dispute.id) && queue.body.items.some((d) => d.id === disputed.body.dispute.id), 'and both disputes reach the T&S queue');
 }
 // legacy relabelling
 r = await j('/player/passport', {}, bearer(KOLA));
 ok(r.body.legacy.every((l) => l.tier !== 'independent'), 'no legacy surface claims independent measurement');
 
-// ======================================================= §10 coach identity
+// ======================================================= coach identity
 r = await post('/org/coaches', { coachName: 'Dee Mensah', role: 'Head Coach', conflictOfInterest: 'none declared' }, bearer(HACK));
 ok(r.status === 201 && r.body.affiliation.status === 'confirmed' && r.body.affiliation.confirmedBy.name === 'Dee Mensah', 'club confirms a coach affiliation');
 const affId = r.body.affiliation.id;
@@ -212,7 +213,7 @@ ok(r.status === 403 || r.status === 404, 'the child cannot approve their own squ
 r = await post(`/guardian/squad-invites/${invG}/respond`, { accept: true }, bearer(AMARA));
 ok(r.status === 200 && r.body.invite.status === 'approved', 'guardian approves; player lands on the squad list');
 
-// ========================================================= §2 assessments
+// ========================================================= assessments
 r = await j('/org/assessment-templates', {}, bearer(MARIA));
 ok(r.body.templates.length >= 4, 'position templates seeded');
 r = await post('/org/assessments', { playerId: 'pl-adeyemi', positionGroup: 'ATT', context: { fixture: 'Eastport U23 v Harbour U23', viewing: 'live', minutesWatched: 90 } }, bearer(MARIA));
@@ -265,7 +266,7 @@ ok(r.body.items.length === 1 && r.body.items[0].text.includes('pressing triggers
 r = await post(`/org/assessments/${assS}/publish-feedback`, { text: 'x' }, bearer(MARIA));
 ok(r.status === 200 || r.status === 400 || r.status === 403, 'lead may also publish (allowed) — non-authors who are not leads cannot (checked below)');
 
-// ============================================================== §7 video
+// ============================================================== video
 r = await j('/org/players/pl-adeyemi', {}, bearer(MARIA));
 const mediaId = (r.body.media ?? []).find((m) => m.kind === 'video')?.id;
 ok(!!mediaId, 'player has seeded footage visible to the club');
@@ -290,18 +291,18 @@ r = await post(`/org/playlists/${plId}/segments`, { segmentId: segId }, bearer(M
 ok(r.status === 200 && r.body.playlist.segmentIds.includes(segId), 'playlist collects segments');
 r = await post(`/org/playlists/${plId}/segments`, { segmentId: segId }, bearer(MARIA));
 ok(r.status === 200 && r.body.playlist.segmentIds.filter((s) => s === segId).length === 1, 'adding a segment twice keeps it once');
-// S9b: valid input only — junk is refused with the field named, and nothing is written
+// Valid input only — junk is refused with the field named, and nothing is written
 {
   const draftA = (await post('/org/assessments', { playerId: 'pl-adeyemi', positionGroup: 'ATT', context: { fixture: 'Eastport 3–0 Harbour', date: '2026-10-31', minutesWatched: 75 } }, bearer(SAM))).body.assessment;
-  ok(draftA?.context.date === '2026-10-31' && draftA.context.minutesWatched === 75, 'S9b a valid context is stored as sent');
+  ok(draftA?.context.date === '2026-10-31' && draftA.context.minutesWatched === 75, 'a valid context is stored as sent');
   for (const [context, field, code] of [
     [{ mood: 'tense' }, 'context.mood', 'FIELD_INVALID'], [{ date: 'last week' }, 'context.date', 'DATE_INVALID'],
     [{ minutesWatched: 'ninety' }, 'context.minutesWatched', 'FIELD_INVALID'], [{ viewing: 'radio' }, 'context.viewing', 'FIELD_INVALID'], [{ fixture: 7 }, 'context.fixture', 'FIELD_INVALID'],
   ]) {
     const bad = await post('/org/assessments', { playerId: 'pl-adeyemi', positionGroup: 'ATT', context }, bearer(SAM));
-    ok(bad.status === 400 && bad.body.error === code && bad.body.field === field, `S9b an assessment context with a junk ${field} is refused (400 ${code}, field named)`);
+    ok(bad.status === 400 && bad.body.error === code && bad.body.field === field, `an assessment context with a junk ${field} is refused (400 ${code}, field named)`);
     const badPut = await put(`/org/assessments/${draftA.id}`, { context }, bearer(SAM));
-    ok(badPut.status === 400 && badPut.body.field === field, `S9b and the same junk is refused when a draft is edited (${field})`);
+    ok(badPut.status === 400 && badPut.body.field === field, `and the same junk is refused when a draft is edited (${field})`);
   }
   const rating = (extra) => ({ ratings: [{ attrId: 'finishing', rating: 4, ...extra }] });
   for (const [body, check, label] of [
@@ -317,29 +318,29 @@ ok(r.status === 200 && r.body.playlist.segmentIds.filter((s) => s === segId).len
     [rating({ confidence: false }), (b) => b.error === 'CONFIDENCE_INVALID', 'a confidence that is not a level'],
   ]) {
     const bad = await put(`/org/assessments/${draftA.id}`, body, bearer(SAM));
-    ok(bad.status === 400 && check(bad.body), `S9b ${label} is refused (400)`);
+    ok(bad.status === 400 && check(bad.body), `${label} is refused (400)`);
   }
   const after = (await j(`/org/assessments?playerId=pl-adeyemi`, {}, bearer(SAM))).body.items.find((a) => a.id === draftA.id);
-  ok(after.ratings.length === 0 && after.recommendation === null && after.context.minutesWatched === 75, 'S9b and no refused edit wrote anything');
+  ok(after.ratings.length === 0 && after.recommendation === null && after.context.minutesWatched === 75, 'and no refused edit wrote anything');
   const badSeg = await post(`/org/media/${mediaId}/segments`, { startS: '12', endS: 26 }, bearer(MARIA));
-  ok(badSeg.status === 400 && badSeg.body.error === 'TIMESTAMPS_INVALID', 'S9b segment timestamps that are not numbers are refused');
+  ok(badSeg.status === 400 && badSeg.body.error === 'TIMESTAMPS_INVALID', 'segment timestamps that are not numbers are refused');
   const badLabels = await post(`/org/media/${mediaId}/segments`, { startS: 1, endS: 2, labels: [{ tag: 'x' }] }, bearer(MARIA));
-  ok(badLabels.status === 400 && badLabels.body.field === 'labels', 'S9b segment labels that are not text are refused');
+  ok(badLabels.status === 400 && badLabels.body.field === 'labels', 'segment labels that are not text are refused');
   const badDrawing = await post(`/org/media/${mediaId}/segments`, { startS: 1, endS: 2, drawing: 'circle' }, bearer(MARIA));
-  ok(badDrawing.status === 400 && badDrawing.body.field === 'drawing', 'S9b a drawing that is not an object is refused');
+  ok(badDrawing.status === 400 && badDrawing.body.field === 'drawing', 'a drawing that is not an object is refused');
   const badAnchors = await post('/org/assessment-templates', { positionGroup: 'GK', attributes: [{ id: 'a', label: 'A', anchors: { 9: 'x' } }, { id: 'b', label: 'B' }] }, bearer(MARIA));
-  ok(badAnchors.status === 400 && badAnchors.body.field === 'attributes[0].anchors', 'S9b template anchors outside levels 1–5 are refused');
+  ok(badAnchors.status === 400 && badAnchors.body.field === 'attributes[0].anchors', 'template anchors outside levels 1–5 are refused');
   for (const positionGroup of [true, ['MID'], {}]) {
     const noTemplate = await post('/org/assessments', { playerId: 'pl-adeyemi', positionGroup }, bearer(SAM));
-    ok(noTemplate.status === 400 && noTemplate.body.error === 'NO_TEMPLATE', `S9b a position group of ${JSON.stringify(positionGroup)} names no template (400, not a server error)`);
+    ok(noTemplate.status === 400 && noTemplate.body.error === 'NO_TEMPLATE', `a position group of ${JSON.stringify(positionGroup)} names no template (400, not a server error)`);
   }
   const badName = await post('/org/playlists', { name: ['x'] }, bearer(MARIA));
-  ok(badName.status === 400 && badName.body.field === 'name', 'S9b a playlist name that is not text is refused');
+  ok(badName.status === 400 && badName.body.field === 'name', 'a playlist name that is not text is refused');
   const templates = (await j('/org/assessment-templates', {}, bearer(MARIA))).body.templates;
-  ok(templates.filter((t) => t.positionGroup === 'GK').length === 1, 'S9b and the refused template published no version');
+  ok(templates.filter((t) => t.positionGroup === 'GK').length === 1, 'and the refused template published no version');
 }
 
-// ========================================================= §3 recruitment
+// ========================================================= recruitment
 r = await post('/org/cases', { playerId: 'pl-svensson', priority: 'high' }, bearer(MARIA));
 const caseId = r.body.case.id;
 ok(r.status === 201 && r.body.case.stage === 'identified', 'case opens at identified (pro flow)');
@@ -375,7 +376,7 @@ ok(r.body.case.history.some((h) => h.byName === 'Sam Ellis'), 'history stays att
 r = await post('/org/cases', { playerId: 'pl-osei' }, bearer(HACK));
 ok(r.status === 201 && r.body.case.stage === 'review', 'grassroots cases use the simple flow (review → … → decision)');
 
-// ========================================================= §4 tactical fit
+// ========================================================= tactical fit
 r = await post('/org/tactical', { formation: '4-3-3', planningHorizon: '2 windows', windows: [{ name: 'Summer 2027', opens: '2027-06-01', closes: '2027-08-31' }], roles: [
   { name: 'Pressing 9', positionGroup: 'ATT', description: 'Leads the press, attacks depth', category: 'mens',
     required: [{ key: 'positionGroup', value: 'ATT' }, { key: 'maxAge', value: 23 }],
@@ -385,7 +386,7 @@ ok(r.status === 403, 'tactical setup is lead-only');
 r = await post('/org/tactical', { formation: '4-3-3', planningHorizon: '2 windows', roles: [
   { name: 'Pressing 9', positionGroup: 'ATT', description: 'Leads the press, attacks depth',
     required: [{ key: 'positionGroup', value: 'ATT' }, { key: 'maxAge', value: 23 }],
-    preferred: [{ key: 'foot', value: 'left' }, { key: 'minAppearances', value: 10 }] }, // S9c: the player vocabulary ('L' never matched a player)
+    preferred: [{ key: 'foot', value: 'left' }, { key: 'minAppearances', value: 10 }] }, // the player vocabulary ('L' never matches a player)
 ] }, bearer(MARIA));
 ok(r.status === 200, 'lead defines formation + role');
 const roleId = r.body.tactical.roles[0].id;
@@ -402,50 +403,50 @@ r = await post('/org/squad/shadow', { playerId: cand.playerId, roleId }, bearer(
 ok(r.status === 201, 'candidate added to the shadow squad');
 r = await j('/org/squad-planner', {}, bearer(MARIA));
 ok(r.body.shadow.length === 1 && r.body.vacancies.length === 1, 'squad planner shows shadow squad + vacancies');
-// S9c: the club setup is typed tables. Junk is refused naming the field; a re-save keeps role ids (and the vacancy its
+// The club setup: junk is refused naming the field; a re-save keeps role ids (and the vacancy its
 // role); a role from another club is refused; the shadow list is not the squad.
 {
   const role0 = (await j('/org/tactical', {}, bearer(MARIA))).body.tactical.roles[0];
-  ok(role0.id === roleId && role0.preferred.some((c) => c.key === 'foot' && c.value === 'left'), 'S9c the setup reads back from the tables, role id and criteria intact');
+  ok(role0.id === roleId && role0.preferred.some((c) => c.key === 'foot' && c.value === 'left'), 'the setup reads back from the tables, role id and criteria intact');
   const base = { formation: '4-3-3', roles: [{ id: roleId, name: 'Pressing 9', positionGroup: 'ATT', required: [{ key: 'maxAge', value: 23 }] }] };
   const refused = async (body, field, error = 'FIELD_INVALID') => { const x = await post('/org/tactical', body, bearer(MARIA)); return x.status === 400 && x.body.error === error && x.body.field === field; };
-  ok(await refused({ ...base, roles: [{ ...base.roles[0], positionGroup: 'STRIKER' }] }, 'roles[0].positionGroup'), 'S9c an unknown position group is refused, not turned into MID');
-  ok(await refused({ ...base, roles: [{ ...base.roles[0], category: 'veterans' }] }, 'roles[0].category'), 'S9c an unknown category is refused, not turned into mixed');
-  ok(await refused({ ...base, roles: [{ ...base.roles[0], required: [{ key: 'height', value: 180 }] }] }, 'roles[0].required[0].key'), 'S9c an unknown criterion key is refused, not dropped');
-  ok(await refused({ ...base, roles: [{ ...base.roles[0], preferred: [{ key: 'foot', value: 'L' }] }] }, 'roles[0].preferred[0].value'), 'S9c a foot outside the player vocabulary (left / right) is refused');
-  ok(await refused({ ...base, roles: [{ ...base.roles[0], required: [{ key: 'maxAge', value: '23' }] }] }, 'roles[0].required[0].value'), 'S9c an age that is not a whole number is refused');
-  ok(await refused({ ...base, roles: [{ ...base.roles[0], id: 'role-of-someone-else' }] }, 'roles[0].id'), "S9c a role id that is not one of this club's roles is refused");
-  ok(await refused({ ...base, windows: [{ name: 'Summer', opens: 'next June' }] }, 'windows[0].opens', 'DATE_INVALID'), 'S9c a window date that is not a day is refused');
-  ok(await refused({ ...base, roles: Array.from({ length: 16 }, (_, i) => ({ name: `R${i}`, positionGroup: 'MID' })) }, 'roles'), 'S9c more than fifteen roles are refused, not cut off');
+  ok(await refused({ ...base, roles: [{ ...base.roles[0], positionGroup: 'STRIKER' }] }, 'roles[0].positionGroup'), 'an unknown position group is refused, not turned into MID');
+  ok(await refused({ ...base, roles: [{ ...base.roles[0], category: 'veterans' }] }, 'roles[0].category'), 'an unknown category is refused, not turned into mixed');
+  ok(await refused({ ...base, roles: [{ ...base.roles[0], required: [{ key: 'height', value: 180 }] }] }, 'roles[0].required[0].key'), 'an unknown criterion key is refused, not dropped');
+  ok(await refused({ ...base, roles: [{ ...base.roles[0], preferred: [{ key: 'foot', value: 'L' }] }] }, 'roles[0].preferred[0].value'), 'a foot outside the player vocabulary (left / right) is refused');
+  ok(await refused({ ...base, roles: [{ ...base.roles[0], required: [{ key: 'maxAge', value: '23' }] }] }, 'roles[0].required[0].value'), 'an age that is not a whole number is refused');
+  ok(await refused({ ...base, roles: [{ ...base.roles[0], id: 'role-of-someone-else' }] }, 'roles[0].id'), "a role id that is not one of this club's roles is refused");
+  ok(await refused({ ...base, windows: [{ name: 'Summer', opens: 'next June' }] }, 'windows[0].opens', 'DATE_INVALID'), 'a window date that is not a day is refused');
+  ok(await refused({ ...base, roles: Array.from({ length: 16 }, (_, i) => ({ name: `R${i}`, positionGroup: 'MID' })) }, 'roles'), 'more than fifteen roles are refused, not cut off');
   const kept = await post('/org/tactical', { ...base, roles: [...base.roles, { name: 'Ball-winning 6', positionGroup: 'MID', category: 'mixed' }] }, bearer(MARIA));
-  ok(kept.status === 200 && kept.body.tactical.roles[0].id === roleId && kept.body.tactical.roles.length === 2, 'S9c re-saving the setup keeps the role id and adds the new role');
-  ok((await j(`/org/vacancies/${vacId}/candidates`, {}, bearer(MARIA))).status === 200, 'S9c the vacancy keeps its role across the re-save');
+  ok(kept.status === 200 && kept.body.tactical.roles[0].id === roleId && kept.body.tactical.roles.length === 2, 're-saving the setup keeps the role id and adds the new role');
+  ok((await j(`/org/vacancies/${vacId}/candidates`, {}, bearer(MARIA))).status === 200, 'the vacancy keeps its role across the re-save');
   const marked = (await j(`/org/vacancies/${vacId}/candidates`, {}, bearer(MARIA))).body.candidates.find((c) => c.playerId === cand.playerId);
-  ok(!marked || (marked.shadowed === true && marked.onSquad === false), 'S9c a shadowed candidate is marked shadowed, not on the squad');
+  ok(!marked || (marked.shadowed === true && marked.onSquad === false), 'a shadowed candidate is marked shadowed, not on the squad');
   const list = await j('/org/vacancies', {}, bearer(MARIA));
-  ok(list.status === 200 && Array.isArray(list.body.items) && list.body.items[0].id === vacId && 'nextCursor' in list.body, 'S9c the vacancy list pages ({ items, nextCursor })');
-  ok((await j('/org/vacancies?limit=0', {}, bearer(MARIA))).status === 400, 'S9c a junk page limit is refused');
-  ok((await post('/org/vacancies', { roleId, notes: { x: 1 } }, bearer(MARIA))).status === 400, 'S9c vacancy notes that are not text are refused');
-  ok((await post('/org/squad/shadow', { playerId: 'pl-svensson', roleId: 'role-of-someone-else' }, bearer(MARIA))).status === 404, "S9c a shadow entry naming a role that is not the club's is refused");
+  ok(list.status === 200 && Array.isArray(list.body.items) && list.body.items[0].id === vacId && 'nextCursor' in list.body, 'the vacancy list pages ({ items, nextCursor })');
+  ok((await j('/org/vacancies?limit=0', {}, bearer(MARIA))).status === 400, 'a junk page limit is refused');
+  ok((await post('/org/vacancies', { roleId, notes: { x: 1 } }, bearer(MARIA))).status === 400, 'vacancy notes that are not text are refused');
+  ok((await post('/org/squad/shadow', { playerId: 'pl-svensson', roleId: 'role-of-someone-else' }, bearer(MARIA))).status === 404, "a shadow entry naming a role that is not the club's is refused");
   const dropped = await post('/org/tactical', { formation: '4-4-2', roles: [{ name: 'Target man', positionGroup: 'ATT', category: 'mens' }] }, bearer(MARIA));
-  ok(dropped.status === 200 && !dropped.body.tactical.roles.some((x) => x.id === roleId), 'S9c a role left out of the save is dropped');
-  ok((await j(`/org/vacancies/${vacId}/candidates`, {}, bearer(MARIA))).status === 409, 'S9c a vacancy whose role was dropped answers ROLE_DELETED');
+  ok(dropped.status === 200 && !dropped.body.tactical.roles.some((x) => x.id === roleId), 'a role left out of the save is dropped');
+  ok((await j(`/org/vacancies/${vacId}/candidates`, {}, bearer(MARIA))).status === 409, 'a vacancy whose role was dropped answers ROLE_DELETED');
   const closed = await post(`/org/vacancies/${vacId}/close`, {}, bearer(MARIA));
-  ok(closed.status === 200 && closed.body.vacancy.status === 'closed' && Number.isInteger(closed.body.vacancy.closedAt), 'S9c a vacancy closes');
-  // The defect S9c fixes: shadowing a player made them a member of the club's squad everywhere.
+  ok(closed.status === 200 && closed.body.vacancy.status === 'closed' && Number.isInteger(closed.body.vacancy.closedAt), 'a vacancy closes');
+  // Shadowing a player must not make them a member of the club's squad anywhere.
   const sh = await post('/org/squad/shadow', { playerId: 'pl-osei' }, bearer(HACK));
-  ok(sh.status === 201 && sh.body.entry.source === 'shadow', 'S9c a grassroots club can shadow a player');
+  ok(sh.status === 201 && sh.body.entry.source === 'shadow', 'a grassroots club can shadow a player');
   const sq = await j('/org/squad', {}, bearer(HACK));
-  ok(sq.status === 200 && !sq.body.entries.some((e) => e.playerId === 'pl-osei'), 'S9c a shadowed player is not on the grassroots squad');
+  ok(sq.status === 200 && !sq.body.entries.some((e) => e.playerId === 'pl-osei'), 'a shadowed player is not on the grassroots squad');
   const md = await post('/org/matchday', { fixture: 'S9c friendly', date: '2026-10-03', playerIds: ['pl-osei'] }, bearer(HACK));
-  ok(md.status === 201 && md.body.credited === 0, 'S9c a shadowed player gets no match-day attendance from that club');
+  ok(md.status === 201 && md.body.credited === 0, 'a shadowed player gets no match-day attendance from that club');
   const plan = (await j('/org/squad-planner', {}, bearer(HACK))).body;
-  ok(plan.shadow.some((s) => s.playerId === 'pl-osei') && !plan.current.some((s) => s.playerId === 'pl-osei'), 'S9c the planner shows the player on the shadow list only');
+  ok(plan.shadow.some((s) => s.playerId === 'pl-osei') && !plan.current.some((s) => s.playerId === 'pl-osei'), 'the planner shows the player on the shadow list only');
 }
 r = await post(`/org/cases/${caseId}/link`, {}, bearer(MARIA));
 ok(r.status === 200, 'case link endpoint tolerates empty link (no-op)');
 
-// ====================================================== §5 opportunities
+// ====================================================== opportunities
 const future = new Date(Date.now() + 21 * 86_400_000).toISOString().slice(0, 10);
 r = await post('/org/opportunities', { type: 'trial', title: 'U23 open trial — attackers', deadline: future, eligibility: { minAge: 16, positionGroup: 'ATT' }, requirements: ['Bring boots', 'One highlight clip'] }, bearer(MARIA));
 const oppId = r.body.opportunity.id;
@@ -474,7 +475,7 @@ r = await post(`/org/opportunities/${oppId}/close`, {}, bearer(MARIA));
 ok(r.status === 200, 'opportunity closes once every applicant has an answer');
 r = await j('/player/applications', {}, bearer(KOLA));
 ok(r.body[0].status === 'accepted' && r.body[0].opportunity.title.includes('U23'), 'player sees application status + final outcome');
-// S9d: junk is refused with the field named, not coerced or passed through.
+// Junk is refused with the field named, not coerced or passed through.
 for (const [body, field] of [
   [{ type: 'trial', title: 'X', deadline: future, category: 'veterans' }, 'category'],
   [{ type: 'trial', title: 'X', deadline: future, eligibility: { positionGroup: 'FWD' } }, 'eligibility.positionGroup'],
@@ -483,19 +484,19 @@ for (const [body, field] of [
   [{ type: 'trial', title: 'X', deadline: future, requirements: ['a', 'b', 'c', 'd', 'e', 'f', 'g'] }, 'requirements'],
 ]) {
   r = await post('/org/opportunities', body, bearer(MARIA));
-  ok(r.status === 400 && r.body.error === 'FIELD_INVALID' && r.body.field === field, `S9d an opportunity with a bad ${field} is refused, naming the field`);
+  ok(r.status === 400 && r.body.error === 'FIELD_INVALID' && r.body.field === field, `an opportunity with a bad ${field} is refused, naming the field`);
 }
-// S9d: a guardian's withdrawal is recorded as the guardian's act.
+// A guardian's withdrawal is recorded as the guardian's act.
 r = await post(`/guardian/applications/${(await j('/guardian/applications', {}, bearer(AMARA))).body.find((a) => a.opportunityId === oppKids).id}/withdraw`, {}, bearer(AMARA));
-ok(r.status === 200 && r.body.application.status === 'withdrawn' && r.body.application.history.at(-1).byKind === 'guardian' && r.body.application.history.at(-1).byId === 'gd-amara', 'S9d a guardian withdrawal is recorded as the guardian\'s');
-// S9d: the club's opportunity list pages by cursor, newest first, with the application counts.
+ok(r.status === 200 && r.body.application.status === 'withdrawn' && r.body.application.history.at(-1).byKind === 'guardian' && r.body.application.history.at(-1).byId === 'gd-amara', 'a guardian withdrawal is recorded as the guardian\'s');
+// The club's opportunity list pages by cursor, newest first, with the application counts.
 r = await j('/org/opportunities?limit=1', {}, bearer(MARIA));
-ok(r.status === 200 && r.body.items.length === 1 && r.body.items[0].id === oppKids && typeof r.body.nextCursor === 'string' && r.body.items[0].applications === 0, 'S9d the club opportunity list pages, newest first, with live application counts');
+ok(r.status === 200 && r.body.items.length === 1 && r.body.items[0].id === oppKids && typeof r.body.nextCursor === 'string' && r.body.items[0].applications === 0, 'the club opportunity list pages, newest first, with live application counts');
 r = await j(`/org/opportunities?limit=1&cursor=${r.body.nextCursor}`, {}, bearer(MARIA));
-ok(r.body.items[0]?.id === oppId && r.body.items[0].applications === 1 && r.body.items[0].outstanding === 0 && r.body.items[0].open === false, 'S9d the next page continues where the first stopped');
-ok((await j('/org/opportunities?cursor=junk', {}, bearer(MARIA))).status === 400, 'S9d a junk cursor is refused');
+ok(r.body.items[0]?.id === oppId && r.body.items[0].applications === 1 && r.body.items[0].outstanding === 0 && r.body.items[0].open === false, 'the next page continues where the first stopped');
+ok((await j('/org/opportunities?cursor=junk', {}, bearer(MARIA))).status === 400, 'a junk cursor is refused');
 
-// ========================================================= §6 campaigns
+// ========================================================= campaigns
 r = await post('/org/campaigns', { title: 'Remote sprint assessment', deadline: future, attemptsAllowed: 2,
   drills: [{ name: '30m sprint', instructions: 'Two cones 30m apart, one run per clip.', recording: { camera: 'Fixed, side-on, full run in frame' } }],
   rubric: [{ criterion: 'Full run visible', guidance: 'Start and finish cones both in frame' }] }, bearer(MARIA));
@@ -521,55 +522,55 @@ r = await post(`/player/campaigns/${campId}/submit`, { mediaId: sprintMedia, dri
 ok(r.status === 201, 'returned attempt frees the slot — resubmission accepted');
 r = await post(`/org/campaign-attempts/${(r.body.attempt.id)}/review`, { decision: 'accepted', rubricNotes: 'Clean run, both cones visible.' }, bearer(MARIA));
 ok(r.status === 200, 'reviewer accepts the resubmission');
-// S9d: campaign junk is refused (it used to be cut off or clamped), and an attempt names one of the campaign's drills.
+// Campaign junk is refused (not cut off or clamped), and an attempt names one of the campaign's drills.
 for (const [body, field] of [
   [{ title: 'X', deadline: future, drills: [{ name: 'a' }], attemptsAllowed: 9 }, 'attemptsAllowed'],
   [{ title: 'X', deadline: future, drills: Array.from({ length: 7 }, (_, i) => ({ name: `d${i}` })) }, 'drills'],
   [{ title: 'X', deadline: future, drills: [{ name: 'a' }, { name: 'a' }] }, 'drills[1].name'],
 ]) {
   r = await post('/org/campaigns', body, bearer(MARIA));
-  ok(r.status === 400 && r.body.error === 'FIELD_INVALID' && r.body.field === field, `S9d a campaign with a bad ${field} is refused, naming the field`);
+  ok(r.status === 400 && r.body.error === 'FIELD_INVALID' && r.body.field === field, `a campaign with a bad ${field} is refused, naming the field`);
 }
 r = await post(`/player/campaigns/${campId}/submit`, { mediaId: sprintMedia, drillName: 'keepy-uppies' }, bearer(KOLA));
-ok(r.status === 400 && r.body.field === 'drillName', 'S9d an attempt at a drill the campaign does not have is refused');
+ok(r.status === 400 && r.body.field === 'drillName', 'an attempt at a drill the campaign does not have is refused');
 r = await j('/org/campaigns', {}, bearer(MARIA));
-ok(r.body.items[0]?.id === campId && r.body.items[0].submissions === 1 && r.body.items[0].awaitingReview === 0 && 'nextCursor' in r.body, 'S9d the club campaign list pages, with submission counts');
+ok(r.body.items[0]?.id === campId && r.body.items[0].submissions === 1 && r.body.items[0].awaitingReview === 0 && 'nextCursor' in r.body, 'the club campaign list pages, with submission counts');
 r = await j('/player/drill-guidance', {}, bearer(KOLA));
 ok(r.body.items.every((g) => g.coachReview.status === 'unreviewed') && r.body.note.includes('honestly'), 'drill library shows unreviewed guidance as unreviewed');
-// S12a: a review is a row of the development repository; a reviewer that is not text is refused, not coerced.
+// A reviewer that is not text is refused, not coerced.
 const drillId = r.body.items[0].drillId;
 r = await post(`/admin/drill-guidance/${drillId}/review`, { reviewer: 42 }, admin);
-ok(r.status === 400 && r.body.field === 'reviewer', 'S12a a reviewer that is not text is refused');
+ok(r.status === 400 && r.body.field === 'reviewer', 'a reviewer that is not text is refused');
 r = await post(`/admin/drill-guidance/${drillId}/review`, { reviewer: 'Coach Ade' }, admin);
-ok(r.status === 200 && r.body.guidance.coachReview.status === 'reviewed' && r.body.guidance.coachReview.reviewer === 'Coach Ade', 'S12a a named review is recorded');
+ok(r.status === 200 && r.body.guidance.coachReview.status === 'reviewed' && r.body.guidance.coachReview.reviewer === 'Coach Ade', 'a named review is recorded');
 r = await j('/player/drill-guidance', {}, bearer(KOLA));
-ok(r.body.items.find((g) => g.drillId === drillId).coachReview.reviewer === 'Coach Ade' && r.body.items.filter((g) => g.coachReview.status === 'reviewed').length === 1, 'S12a the player sees that one drill reviewed, the rest still unreviewed');
+ok(r.body.items.find((g) => g.drillId === drillId).coachReview.reviewer === 'Coach Ade' && r.body.items.filter((g) => g.coachReview.status === 'reviewed').length === 1, 'the player sees that one drill reviewed, the rest still unreviewed');
 
-// ======================================================== §8 development
+// ======================================================== development
 r = await j('/player/feedback', {}, bearer(KOLA));
 const fbId = r.body.items[0].id;
 r = await post('/player/objectives', { feedbackId: assV, objectives: [{ text: 'x' }] }, bearer(KOLA));
 ok(r.status === 404, 'a PRIVATE assessment cannot seed an objective');
-// S12a: junk is refused naming the field (it used to be cut off, dropped or stored as given).
+// Junk is refused naming the field, not cut off, dropped or stored as given.
 r = await post('/player/objectives', { feedbackId: fbId, objectives: [{ text: 42 }] }, bearer(KOLA));
-ok(r.status === 400 && r.body.field === 'objectives[0].text', 'S12a an objective that is not text is refused');
+ok(r.status === 400 && r.body.field === 'objectives[0].text', 'an objective that is not text is refused');
 r = await post('/player/objectives', { feedbackId: fbId, objectives: [{ text: 'Press', exerciseRefs: ['a', 'b', 'c', 'd', 'e'] }] }, bearer(KOLA));
-ok(r.status === 400 && r.body.field === 'objectives[0].exerciseRefs', 'S12a a fifth exercise reference is refused, not cut off');
+ok(r.status === 400 && r.body.field === 'objectives[0].exerciseRefs', 'a fifth exercise reference is refused, not cut off');
 r = await post('/player/objectives', { feedbackId: fbId, objectives: [{ text: 'Press', baselineEvidenceIds: ['ev-not-mine'] }] }, bearer(KOLA));
-ok(r.status === 400 && r.body.error === 'EVIDENCE_INVALID' && r.body.field === 'objectives[0].baselineEvidenceIds[0]', 'S12a baseline evidence that is not the player\'s is refused, not dropped');
+ok(r.status === 400 && r.body.error === 'EVIDENCE_INVALID' && r.body.field === 'objectives[0].baselineEvidenceIds[0]', 'baseline evidence that is not the player\'s is refused, not dropped');
 r = await post('/player/objectives', { feedbackId: fbId, objectives: [{ text: 'Press' }], reviewAt: 'after the break' }, bearer(KOLA));
-ok(r.status === 400 && r.body.error === 'DATE_INVALID' && r.body.field === 'reviewAt', 'S12a a review date that is not a date is refused');
+ok(r.status === 400 && r.body.error === 'DATE_INVALID' && r.body.field === 'reviewAt', 'a review date that is not a date is refused');
 r = await post('/player/objectives', { feedbackId: fbId, objectives: [{ text: 'Set the press on the trigger, not the chase', baselineEvidenceIds: [ev2] }] }, bearer(KOLA));
 const objId = r.body.objective.id;
 ok(r.status === 201, 'published feedback becomes an agreed objective with baseline evidence');
 r = await post(`/player/objectives/${objId}/progress`, { note: 'Two pressing sessions with Sunday league', evidenceId: ev2 }, bearer(KOLA));
 ok(r.status === 201, 'player records progress against the objective');
 r = await post(`/player/objectives/${objId}/progress`, { note: 'x', objectiveId: 'objx-not-this-one' }, bearer(KOLA));
-ok(r.status === 400 && r.body.field === 'objectiveId', 'S12a progress against an item of another objective is refused');
+ok(r.status === 400 && r.body.field === 'objectiveId', 'progress against an item of another objective is refused');
 r = await post(`/player/objectives/${objId}/progress`, { note: 42 }, bearer(KOLA));
-ok(r.status === 400 && r.body.field === 'note', 'S12a a progress note that is not text is refused');
+ok(r.status === 400 && r.body.field === 'note', 'a progress note that is not text is refused');
 r = await post(`/player/objectives/${objId}/share`, { orgId: 'org-eastport', enabled: 'yes' }, bearer(KOLA));
-ok(r.status === 400 && r.body.field === 'enabled', 'S12a sharing needs a true or false');
+ok(r.status === 400 && r.body.field === 'enabled', 'sharing needs a true or false');
 r = await post(`/player/objectives/${objId}/reassessment`, {}, bearer(KOLA));
 ok(r.status === 409 && r.body.error === 'SHARING_REQUIRED', 'reassessment needs the player’s explicit sharing choice first');
 r = await j('/org/players/pl-adeyemi/objectives', {}, bearer(MARIA));
@@ -582,11 +583,11 @@ r = await post(`/player/objectives/${objId}/reassessment`, {}, bearer(KOLA));
 const rasId = r.body.reassessment.id;
 ok(r.status === 201, 'authorised reassessment request reaches the club');
 r = await post(`/org/reassessments/${rasId}/outcome`, { note: 'Better.', evidenceIds: ['ev-not-theirs'] }, bearer(MARIA));
-ok(r.status === 400 && r.body.error === 'EVIDENCE_INVALID', 'S12a outcome evidence that is not the player\'s is refused, not dropped');
+ok(r.status === 400 && r.body.error === 'EVIDENCE_INVALID', 'outcome evidence that is not the player\'s is refused, not dropped');
 r = await post(`/org/reassessments/${rasId}/outcome`, { note: 'Pressing triggers much sharper — evidenced in the linked sessions. Keep the second objective for spring.', evidenceIds: [ev2] }, bearer(MARIA));
 ok(r.status === 200 && r.body.reassessment.outcome.evidenceIds.includes(ev2), 'reviewer records an evidence-supported outcome');
 
-// ========================================================== §9 trial-day
+// ========================================================== trial-day
 r = await post('/org/players/pl-svensson/request', { type: 'trial', message: 'Trial with the U23s?', proposedDate: future, venue: 'Eastport Training Ground' }, bearer(MARIA));
 const reqId = r.body.requestId;
 ok(r.status === 201, 'trial request sent');
@@ -625,7 +626,7 @@ r = await j(`/player/trials/${trial.id}/safety-pack`, {}, bearer(SVEN));
 ok(r.body.pack.staff[0].check.status === 'reviewed' && r.body.pack.checksExplained.includes('truth'), 'safety pack shows who was checked and what that means');
 r = await post(`/org/trials/${trial.id}/postpone`, { reason: 'Waterlogged pitch', newDate: future }, bearer(MARIA));
 ok(r.status === 200, 'postponement recorded + parties notified');
-// M23 P4A-D9: a block ends the club's standing to read the family's emergency contact.
+// A block ends the club's standing to read the family's emergency contact.
 r = await j(`/org/trials/${trial.id}/day`, {}, bearer(MARIA));
 ok(r.status === 200 && r.body.trial.emergency?.phone === '+46 70 000 11 22', 'before any block, the day view carries the emergency contact');
 r = await post('/player/block', { orgId: 'org-eastport', reason: 'no further contact' }, bearer(SVEN));
@@ -639,7 +640,7 @@ ok(r.status === 200, 'Trust & Safety lifts the block');
 r = await j(`/org/trials/${trial.id}/day`, {}, bearer(MARIA));
 ok(r.status === 200 && r.body.trial.emergency?.phone === '+46 70 000 11 22' && r.body.trial.emergencyWithheld === null, 'once lifted, the contact is readable again — the block is evaluated on every read, nothing was deleted');
 
-// =========================================================== §11 outcomes
+// =========================================================== outcomes
 r = await post('/org/players/pl-svensson/signing', { note: 'U23 contract' }, bearer(MARIA));
 ok(r.status === 201 || r.status === 200, 'signing recorded');
 await post('/admin/sweep', {}, admin);
@@ -669,7 +670,7 @@ r = await j('/admin/outcomes', {}, admin);
 const eastRow = r.body.rows.find((x) => x.orgId === 'org-eastport');
 ok(eastRow.suppressed === true, 'aggregate reporting suppresses groups under 3 records');
 
-// ======================================================== §12 access
+// ======================================================== access
 // resumable uploads
 const fileBuf = crypto.randomBytes(700 * 1024);
 const sha = crypto.createHash('sha256').update(fileBuf).digest('hex');
@@ -695,7 +696,7 @@ const badUp = r.body.upload;
 await put(`/player/uploads/${badUp.id}/chunks/0`, { data: crypto.randomBytes(512).toString('base64') }, bearer(KOLA));
 r = await post(`/player/uploads/${badUp.id}/finalise`, {}, bearer(KOLA));
 ok(r.status === 409 && r.body.error === 'INTEGRITY_FAILED', 'integrity mismatch refuses finalisation');
-// S13e: an upload session is a row; junk is refused at session open, naming the field (it was coerced).
+// Junk is refused at upload session open, naming the field, not coerced.
 r = await post('/player/uploads', { size: 1.5, mime: 'video/webm', title: 'half a byte' }, bearer(KOLA));
 ok(r.status === 400 && r.body.field === 'size', 'a size that is not a whole number of bytes is refused, naming the field');
 r = await post('/player/uploads', { size: 512, mime: 'video/webm', title: 'short sha', sha256: 'abc' }, bearer(KOLA));

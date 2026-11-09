@@ -1,10 +1,10 @@
-// M20 demo mirror — the Director Dashboard with no server.
+// Demo mirror — the Director Dashboard with no server.
 //
 // The demo's dataset is deliberately small: nine rooms, one club, one quarter.
 // That means several of its rates fall below the small-n threshold and are
 // withheld — and that is the point of the demonstration, not a shortcoming of
 // it. A demo that quietly showed "33%" over three records would teach exactly
-// the habit this milestone was built to prevent.
+// the habit the dashboard exists to prevent.
 //
 // Every limitation sentence below is the server's, word for word. The
 // acceptance suite reads both and fails if they drift apart: a caveat that

@@ -1,5 +1,4 @@
-// Players and guardians (S14h: the identity repository's explicit writes and SQL reads), against a real server on a
-// temporary data directory with the synthetic seed.
+// Players and guardians, against a real server on a temporary data directory with the synthetic seed.
 //
 //   A a write's response is the stored record: availability, the switches, medical sharing, stats, badges, quiet
 //     hours, a guardian's child settings
@@ -94,7 +93,7 @@ section('B — junk refused at the route, naming the field');
   neg(refusedField(await j('GET', '/org/players?country=GB&country=ES', undefined, maria), 'country'), 'a directory filter sent twice');
   const dir = await j('GET', '/org/players?position=CM', undefined, maria);
   ok(dir.status === 200 && dir.body.items.length >= 1 && dir.body.items.every((p) => p.position === 'CM'), 'the directory filters in SQL');
-  // S14i: the directory and the other hot player reads page by cursor in SQL; junk filters are refused, not read as "any".
+  // The directory and the other hot player reads page by cursor in SQL; junk filters are refused, not read as "any".
   neg(refusedField(await j('GET', '/org/players?ageGroup=u99', undefined, maria), 'ageGroup'), 'an unknown age group');
   neg(refusedField(await j('GET', '/org/players?newDays=soon', undefined, maria), 'newDays'), 'a day count that is not a number');
   neg(refusedField(await j('GET', '/org/players?newDays=0', undefined, maria), 'newDays'), 'a day count of zero');

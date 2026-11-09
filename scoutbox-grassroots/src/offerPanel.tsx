@@ -1,9 +1,9 @@
 import { RecordFacts, DetailItems } from './RecordDetails';
-// M23 P6 — the canonical Offer, inside the Room's Offer tab.
+// The canonical Offer, inside the Room's Offer tab.
 //
 //   Recruitment Decision ≠ Offer ≠ Offer Acceptance ≠ Signing
 //
-// A positive decision (P5) opens the door to considering an Offer and creates
+// A positive decision opens the door to considering an Offer and creates
 // none. The club drafts one here — an explicit act — edits it as a DRAFT,
 // then ISSUES an exact, immutable revision, which moves the case to Offer
 // made. From then on the recipient answers: an acceptance or a decline is
@@ -27,7 +27,7 @@ interface Props {
 }
 
 const statusLabel = (s: string) => t(`rm.st.${s}`, s.replace(/_/g, ' '));
-/** Text + a glyph for every Offer status — never colour alone (§44). */
+/** Text + a glyph for every Offer status — never colour alone. */
 export const OFFER_GLYPH: Record<OfferStatus, string> = { DRAFT: '○', ISSUED: '➤', ACCEPTED: '✓', DECLINED: '✕', WITHDRAWN: '⊘', EXPIRED: '◷', SUPERSEDED: '↻' };
 export const offerStatusLabel = (s: OfferStatus | null) => (s ? `${OFFER_GLYPH[s] ?? ''} ${t(`of.st.${s}`, s)}` : '');
 

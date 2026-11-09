@@ -1,22 +1,22 @@
 /**
- * M23 P5.6C — ScoutBox Agent Conflict & Compliance Engine: routes.
+ * ScoutBox Agent Conflict & Compliance Engine: routes.
  *
- * The governing principle (mandate §2, §99): ScoutBox is infrastructure. The
+ * The governing principle: ScoutBox is infrastructure. The
  * licensed agent performs the regulated service; this module decides only
  * whether ScoutBox may PERMIT a workflow action under encoded, versioned
  * platform policy. It never negotiates, never advises, never infers a missing
  * permission, and never turns uncertainty into permission.
  *
  * Four routers:
- *   /auth/reviewer/login       credentialed Trust & Safety reviewer login (G-C0)
+ *   /auth/reviewer/login       credentialed Trust & Safety reviewer login
  *   /ts/*                      attributed reviewer routes — the ONLY authoritative compliance mutations
  *   /org/agent/compliance/*    the agent's own compliance workspace (agency session + membership)
- *   /org/compliance/*          a CLUB party's consent lane (club session + M14 signatory authority)
+ *   /org/compliance/*          a CLUB party's consent lane (club session + verification signatory authority)
  *   /player/agent/consents/*   the PLAYER party's consent lane
  *   /admin/compliance/*        the legacy shared key: READ-ONLY, non-authoritative
  *
  * Every regulated mutation re-derives, at mutation time, in this order
- * (mandate §55): authenticate → actor → agent profile → affiliation → conceal
+ * (the step numbers in the routes count along this list): authenticate → actor → agent profile → affiliation → conceal
  * foreign resource → role → client relationship → scope/status → blocks →
  * applicable policy set → licence/registration/authorisation → conflict →
  * consents → minor gate → manual review → rev/idempotency → mutate →
@@ -45,7 +45,7 @@ import { readPage, pageOf, sendPageError } from '../../platform/paging.mjs';
 export { REVIEWER_ROLES, REVIEW_KINDS, REVIEW_STATUSES };
 
 export const CONSENT_STATUSES = Object.freeze(['requested', 'granted', 'declined', 'revoked']);
-/** Reason codes only a policy version can settle: a reviewer may not "approve" past them (mandate §37). */
+/** Reason codes only a policy version can settle: a reviewer may not "approve" past them. */
 export const POLICY_LEVEL_REASONS = Object.freeze(['RULE_STATUS_UNCERTAIN', 'POLICY_NOT_ENCODED', 'NO_ACTIVE_RULE_DECIDES', 'SCOPE_MIXED', 'EXCLUSIVITY_WINDOW_DOUBTFUL']);
 
 const REVIEWER_LEGACY_NOTE = 'Records made before P5.6C through the shared admin key carry attribution "shared_admin_key" and are preserved as legacy/unattributed. They were never rewritten and are not authoritative compliance decisions.';
@@ -59,8 +59,6 @@ export function registerCompliance(rawCtx) {
   } = rawCtx;
 
   const provider = verificationProvider ?? createVerificationProvider({ synthetic: process.env.AGENT_VERIFICATION_TEST_PROVIDER === '1' });
-  // S11b-1: reviewers and policy versions are tables of repositories/compliancePolicies.mjs; S11b-2: contexts,
-  // evaluations, reviews and consents are tables of repositories/complianceRecords.mjs.
   if (typeof compliancePolicies?.reviewers?.update !== 'function') throw new TypeError('registerCompliance needs the compliance policies repository from the data layer');
   if (typeof complianceRecords?.contexts?.update !== 'function') throw new TypeError('registerCompliance needs the compliance records repository from the data layer');
   const now = () => Date.now();
@@ -79,15 +77,15 @@ export function registerCompliance(rawCtx) {
     if (!k.ok) { sendComplianceError(res, { error: 'COMPLIANCE_CLIENT_KEY_INVALID', message: k.message }, 'clientKey'); return undefined; }
     return k.key;
   };
-  // S11a: the agent core is tables of repositories/agentCore.mjs; this module reads it through SQL and writes a facet or
-  // an agreement only through its explicit operations, inside the route's unit of work.
+  // This module writes a facet or an agreement only through the agent core's explicit operations, inside the route's
+  // unit of work.
   if (typeof agentCore?.profiles?.update !== 'function' || typeof unit !== 'function') throw new TypeError('registerCompliance needs the agent core repository and unit from the data layer');
   const agentReads = agentCore.reads;
   const profileOf = (userId) => agentReads.profiles.forUser(userId);
   const activeAffiliationOf = (userId, orgId) => agentReads.affiliations.activeFor(userId, orgId, now());
   const agencyJurisdictions = (orgId) => agentReads.settings.forOrg(orgId).jurisdictions;
 
-  // ============================================================ G-C0 — reviewer identity
+  // ============================================================ reviewer identity
   const { reviewers, policies } = compliancePolicies;
   const reviewerById = (id) => reviewers.byId(id);
   const publicReviewer = (r) => ({ id: r.id, name: r.name, role: r.role, status: r.status, createdAt: r.createdAt, revokedAt: r.revokedAt ?? null, ...revMeta(r) });
@@ -116,7 +114,7 @@ export function registerCompliance(rawCtx) {
   app.post('/auth/reviewer/login', (req, res) => {
     const id = String(req.body?.reviewerId ?? '').trim();
     const secret = String(req.body?.secret ?? '');
-    // P5.6F: the compliance lane is the one where a guessed credential buys the
+    // The compliance lane is the one where a guessed credential buys the
     // most, so the per-identifier failed-login budget is checked here BEFORE the
     // secret is verified. An unknown id, a wrong secret and a revoked reviewer
     // already share one refusal; the lockout shares it too, so the 429 tells an
@@ -216,7 +214,7 @@ export function registerCompliance(rawCtx) {
     if (!/^jp-[a-z]{2,6}-[0-9a-z-]{2,20}$/i.test(String(b.id ?? ''))) errs.push('id');
     if (!JURISDICTIONS.includes(b.jurisdiction)) errs.push('jurisdiction');
     if (!Number.isInteger(b.policyVersion) || b.policyVersion < 1) errs.push('policyVersion');
-    // M23 P5.7 (T-4): a real calendar day in bounds, not merely the shape of one.
+    // A real calendar day in bounds, not merely the shape of one.
     if (!parseStrictDateOnly(b.effectiveFrom).ok) errs.push('effectiveFrom');
     if (b.effectiveTo != null && !parseStrictDateOnly(b.effectiveTo).ok) errs.push('effectiveTo');
     if (b.effectiveTo != null && parseStrictDateOnly(b.effectiveFrom).ok && parseStrictDateOnly(b.effectiveTo).ok && !(b.effectiveFrom < b.effectiveTo)) errs.push('effectiveTo');
@@ -298,7 +296,6 @@ export function registerCompliance(rawCtx) {
   /** Set a facet on a profile DRAFT (inside `profiles.update`); the stored facet keeps no stale marker from before. */
   const setFacet = (d, facet, ma, next) => { const rec = { staleNotifiedAt: null, ...next }; if (facet === 'fifa_licence') d.facets.fifa_licence = rec; else d.facets[facet][ma] = rec; };
 
-  // S11b-2: contexts (with their evaluations), reviews and consents are tables of repositories/complianceRecords.mjs.
   const { contexts, reviews, consents } = complianceRecords;
   const reviewPublic = (r, { forReviewer = false } = {}) => ({
     id: r.id, kind: r.kind, status: r.status, agencyOrgId: r.agencyOrgId, agentUserId: r.agentUserId ?? null,
@@ -326,17 +323,17 @@ export function registerCompliance(rawCtx) {
     return out;
   }
 
-  /** Hook for m24: a facet submission that ended MANUAL_REVIEW_REQUIRED becomes a review item. Idempotent per facet. */
+  /** Hook for the agent core: a facet submission that ended MANUAL_REVIEW_REQUIRED becomes a review item. Idempotent per facet. */
   function facetNeedsReview(profile, { facet, memberAssociation }, by) {
     if (reviews.openForFacet(profile.id, facet, memberAssociation ?? null)) return null;
     return createReview({ kind: 'verification_facet', agencyOrgId: profile.agencyOrgId, agentUserId: profile.userId, subject: { profileId: profile.id, userId: profile.userId, facet, memberAssociation: memberAssociation ?? null }, reasons: [{ code: 'NO_PROVIDER', ruleId: null, ruleStatus: null, policyVersion: null }], policyVersions: policySetFor([memberAssociation].filter(Boolean)).policies.map((p) => p.id), requestedBy: by });
   }
-  /** Hook for m24: a client's dispute becomes a review item (P5.6A C6). */
+  /** Hook for the agent core: a client's dispute becomes a review item. */
   function representationDisputed(a, by) {
     if (reviews.openForAgreement(a.id)) return null;
     return createReview({ kind: 'representation_dispute', agencyOrgId: a.agencyOrgId, agentUserId: a.agentUserId, subject: { agreementId: a.id }, reasons: [{ code: 'CLIENT_DISPUTE', ruleId: null, ruleStatus: null, policyVersion: null }], policyVersions: policySetFor([a.jurisdiction].filter(Boolean)).policies.map((p) => p.id), requestedBy: by });
   }
-  /** Hook for m24's request route: the policy layer's verdict on an Approach (exclusivity window, USA domestic authorisation …). */
+  /** Hook for the agent core's request route: the policy layer's verdict on an Approach (exclusivity window, USA domestic authorisation …). */
   function authorizeApproach({ profile, jurisdiction, player, agentUserId }) {
     const set = policySetFor([jurisdiction]);
     const others = agentReads.agreements.forClient(player.id).filter((a) => a.agentUserId !== agentUserId && a.exclusive && effectiveAgreementStatus(a, now()) === 'active' && a.confirmedAt).map((a) => ({ endAt: a.endAt ?? null }));
@@ -344,7 +341,7 @@ export function registerCompliance(rawCtx) {
     return { decision: d, policySet: set };
   }
 
-  /** Re-check a facet against the provider (mandate §31): STALE needs a recheck or attributed review. */
+  /** Re-check a facet against the provider: STALE needs a recheck or attributed review. */
   orgRouter.post('/agent/compliance/facets/:facet/recheck', (req, res) => {
     if (!agent.resolveMembership(req, res)) return;
     if (!agent.requireCap(req, res, 'verification.submit')) return;
@@ -399,7 +396,7 @@ export function registerCompliance(rawCtx) {
       const push = (facet, ma, rec) => { if (!rec) return; const st = effectiveFacetState(rec, now()); freshness.push({ facet, memberAssociation: ma, state: st, storedState: rec.state, recheckAt: rec.recheckAt ?? null, daysUntilRecheck: typeof rec.recheckAt === 'number' ? Math.ceil((rec.recheckAt - now()) / 86_400_000) : null, provenance: rec.provenance ?? null, verifiedAt: rec.verifiedAt ?? null }); };
       push('fifa_licence', null, p.facets?.fifa_licence);
       for (const f of ['national_registration', 'domestic_authorisation', 'minors_authorisation']) for (const [ma, rec] of Object.entries(p.facets?.[f] ?? {})) push(f, ma, rec);
-      // A STALE facet is told once (mandate §70) — by the agent core's sweep (S11a), not by this read.
+      // A STALE facet is told once — by the agent core's sweep, not by this read.
     }
     const mine = (x) => x.agentUserId === req.orgUser.id || can(req.tiers, 'agency.compliance.read');
     const reviewList = reviews.forAgency(req.org.id).filter(mine).map((r) => reviewPublic(r));
@@ -480,19 +477,19 @@ export function registerCompliance(rawCtx) {
     }
     const parties = c.parties.map((p) => {
       const pl = p.subjectKind === 'player' ? findPlayer(p.subjectId) : null;
-      // A block or a lost visibility removes the party from the evaluation: a regulatory CLEAR never overrides safety (mandate §54).
+      // A block or a lost visibility removes the party from the evaluation: a regulatory CLEAR never overrides safety.
       const gone = p.subjectKind === 'player' ? (!pl || !org || !orgCanSee(org, pl)) : !byId.org(p.subjectId);
       return { partyRole: p.partyRole, subjectKind: p.subjectKind, subjectId: p.subjectId, removed: !!p.removed || gone, isMinor: pl ? !isAdult(pl) : false };
     });
     const set = policySetFor(c.jurisdictions);
     return {
-      // Other Services and declared interests have no route that records them (no store since S11b-2): the engine reads none.
+      // Other Services and declared interests have no route that records them: the engine reads none.
       transaction: { id: c.id, type: c.type, jurisdictions: c.jurisdictions.map((ma) => ({ memberAssociation: ma })), parties, representations: reps, otherServices: [], evaluateAgentUserIds: [c.agentUserId] },
       agents, consents: engineConsentsFor(c.id), interests: [],
       policySet: set.policies, missingPolicies: set.missing, now: now(),
     };
   }
-  /** Player account removal: contexts and consents naming the player keep only the id (mandate §AJ). */
+  /** Player account removal: contexts and consents naming the player keep only the id. */
   function onPlayerDeleted(playerId, at = now()) {
     complianceRecords.forgetPlayer(playerId, at, () => ({ id: nextId('aud'), at: now(), action: 'compliance_context_party_removed', by: bySystem('account deletion'), detail: { partyRole: 'individual' } }));
   }
@@ -612,7 +609,7 @@ export function registerCompliance(rawCtx) {
         d.parties.push(party);
         hist(d, 'compliance_context_party_added', byOrg(req), { partyRole: party.partyRole, kind: party.subjectKind });
       });
-      // A party change invalidates every prior check (mandate §44): re-evaluate now.
+      // A party change invalidates every prior check: re-evaluate now.
       const result = evaluateAndRecord(c, byOrg(req));
       return { result, ctx: bumpContext(c.id, req) };
     });
@@ -620,7 +617,7 @@ export function registerCompliance(rawCtx) {
   });
 
   /**
-   * THE regulated mutation of P5.6C: the agent records that they perform
+   * THE regulated mutation: the agent records that they perform
    * Football Agent Services for a party in this context. Full pipeline, at
    * mutation time, every time.
    */
@@ -752,7 +749,7 @@ export function registerCompliance(rawCtx) {
   /**
    * Request a party's prior written consent to multiple representation.
    *
-   * Extracted from the route body so the P5.6D transaction workspace requests a
+   * Extracted from the route body so the transaction workspace requests a
    * consent through EXACTLY this code (its own route resolves the transaction
    * and hands over the linked context). A second implementation would be a
    * second set of rules about when a consent may exist, which is the one thing
@@ -776,7 +773,7 @@ export function registerCompliance(rawCtx) {
     if (limitedOr429(res, 'compliance_consent_request', req.orgUser.id)) return;
     const p = profileOf(req.orgUser.id);
     if (!p || !facetGate(req, res, p, c.jurisdictions)) return;
-    // Consent exists only where an ACTIVE encoded rule makes it the permitted route (no generic bypass, mandate §38).
+    // Consent exists only where an ACTIVE encoded rule makes it the permitted route (no generic bypass).
     const set = policySetFor(c.jurisdictions);
     const { scope, memberAssociations } = resolveScope(c.jurisdictions);
     const nationalPolicy = scope === 'national' ? set.policies.find((x) => x.jurisdiction === memberAssociations[0]) : null;
@@ -857,7 +854,7 @@ export function registerCompliance(rawCtx) {
       });
       const c = contextById(k.contextId);
       if (c && c.status === 'open') evaluateAndRecord(c, by);
-      // Literal event names: the M18.2 registry audit reads call sites textually.
+      // Literal event names: the event-registry contract (e2e/platform/contracts.mjs) reads call sites textually.
       if (action === 'grant') broadcast('regulatory_consent_granted', { orgId: k.agencyOrgId, consentId: k.id, ctxId: k.contextId });
       else broadcast('regulatory_consent_declined', { orgId: k.agencyOrgId, consentId: k.id, ctxId: k.contextId });
       notify({ kind: 'org_user', id: k.agentUserId }, action === 'grant' ? 'regulatory_consent_granted' : 'regulatory_consent_declined', action === 'grant' ? 'A party granted written consent to multiple representation for one transaction context. It is specific to that context and can be revoked.' : 'A party declined consent to multiple representation. You may continue to act for your first party only.', k.id);
@@ -878,7 +875,7 @@ export function registerCompliance(rawCtx) {
   for (const action of ['grant', 'decline', 'revoke']) {
     playerRouter.post(`/agent/consents/:id/${action}`, (req, res) => consentAnswer(req, res, { action, who: playerWho(req), by: byPlayer(req), rateKey: req.player.id }));
   }
-  // Club lane: only a club user with M14 verification authority (the recorded signatory) may bind the club (DR-19).
+  // Club lane: only a club user with verification authority (the recorded signatory) may bind the club (DR-19).
   const clubWho = (req) => (k) => {
     if (req.org.type !== 'club') return { ok: false, error: 'CONSENT_NOT_FOUND' };
     if (k.subject?.kind !== 'club' || k.subject.id !== req.org.id) return { ok: false, error: 'CONSENT_NOT_FOUND' };
@@ -896,7 +893,7 @@ export function registerCompliance(rawCtx) {
   // ============================================================ reviews — the attributed lane
   const reviewById = (id) => (typeof id === 'string' ? reviews.byId(id) : null);
   /**
-   * The queue, by cursor (`?status=&limit=&cursor=`): open items first, each part oldest first. S11b-2: the T&S app reads
+   * The queue, by cursor (`?status=&limit=&cursor=`): open items first, each part oldest first. The T&S app reads
    * the first page (a "load more" is still to be built).
    */
   const queuePage = (req, res, { forReviewer }) => {
@@ -917,7 +914,7 @@ export function registerCompliance(rawCtx) {
     if (!r) return sendComplianceError(res, { error: 'REVIEW_NOT_FOUND' }, 'review');
     res.json({ review: reviewPublic(r, { forReviewer: true }), subjectDetail: reviewSubjectDetail(r) });
   });
-  /** What a reviewer may see of the subject: states and ids, no client data beyond the review's need (mandate §62). */
+  /** What a reviewer may see of the subject: states and ids, no client data beyond the review's need. */
   function reviewSubjectDetail(r) {
     if (r.kind === 'verification_facet') { const p = agentReads.profiles.byId(r.subject.profileId); const rec = p ? facetRecord(p, r.subject.facet, r.subject.memberAssociation) : null; return { agentDisplayName: p?.displayName ?? null, facet: r.subject.facet, memberAssociation: r.subject.memberAssociation, reference: rec?.reference ?? null, state: rec ? effectiveFacetState(rec, now()) : null, submittedAt: rec?.submittedAt ?? null }; }
     if (r.kind === 'representation_dispute') { const a = agentReads.agreements.byId(r.subject.agreementId); return a ? { agreementId: a.id, status: effectiveAgreementStatus(a, now()), disputedAt: a.disputedAt ?? null, hadReason: !!a.disputeReason, scope: a.scope, jurisdiction: a.jurisdiction ?? null } : null; }
@@ -959,7 +956,7 @@ export function registerCompliance(rawCtx) {
     if (!reasonCode || !reason) return sendComplianceError(res, { error: 'REVIEW_INPUT_INVALID', field: !reasonCode ? 'reasonCode' : 'reason', message: 'A reason code and a written reason are required.' }, 'resolve');
     if (outcome === 'APPROVED' && !evidenceRefs.length) return sendComplianceError(res, { error: 'REVIEW_INPUT_INVALID', field: 'evidenceRefs', message: 'An approval must cite at least one evidence reference.' }, 'resolve');
     if (r.status !== 'PENDING' && r.status !== 'IN_REVIEW') return sendComplianceError(res, { error: 'REVIEW_NOT_PENDING', status: r.status }, 'resolve');
-    // Override limits (mandate §37): a reviewer resolves missing or uncertain FACTS; a reviewer never rewrites active policy.
+    // Override limits: a reviewer resolves missing or uncertain FACTS; a reviewer never rewrites active policy.
     if (outcome === 'APPROVED') {
       if (r.snapshot?.outcome === 'PROHIBITED_CONFLICT' || (r.reasons ?? []).some((x) => ['PROHIBITED_COMBINATION', 'COMBINATION_NOT_PERMITTED'].includes(x.code))) return sendComplianceError(res, { error: 'REVIEW_CANNOT_OVERRIDE_ACTIVE_RULE', message: 'An objectively prohibited combination under an ACTIVE rule cannot be approved by review.' }, 'resolve');
       if (r.kind === 'conflict_evaluation' && (r.reasons ?? []).some((x) => POLICY_LEVEL_REASONS.includes(x.code))) return sendComplianceError(res, { error: 'REVIEW_REQUIRES_POLICY_VERSION', reasons: r.reasons.filter((x) => POLICY_LEVEL_REASONS.includes(x.code)), message: 'The deciding rule\'s status is uncertain or not encoded. Only a published policy version (dual control) can settle that; a review cannot approve past it. It may be rejected (the workflow does not proceed) or left pending.' }, 'resolve');
@@ -1030,11 +1027,10 @@ export function registerCompliance(rawCtx) {
     const c = contextById(r.subject?.contextId);
     if (!c) return { contextOutcome: null, note: 'context gone' };
     if (r.kind === 'representation_declared') {
-      // P5.6D: when the declaration belongs to a transaction, the
-      // `transactionRepresentations` row is the TRUTH and the context's array is
-      // its evaluation projection — so the reviewer's decision must land on the
-      // row, not only on the projection. The hook is filled in by m26 at
-      // registration; absent (P5.6C-only builds) nothing changes.
+      // When the declaration belongs to a transaction, the transaction's
+      // representation row is the TRUTH and the context's array is its
+      // evaluation projection — so the reviewer's decision must land on the
+      // row, not only on the projection.
       if (r.subject?.transactionId && transactionHooks.representationReviewed) {
         transactionHooks.representationReviewed({ transactionId: r.subject.transactionId, representationId: r.subject.representationId, outcome, by, reviewId: r.id });
       }
@@ -1076,7 +1072,7 @@ export function registerCompliance(rawCtx) {
     }));
     res.json({ review: reviewPublic(out, { forReviewer: true }) });
   });
-  /** Reconsideration never rewrites a final decision: a new review supersedes it, with the old one retained (mandate §79). */
+  /** Reconsideration never rewrites a final decision: a new review supersedes it, with the old one retained. */
   tsRouter.post('/compliance/reviews/:id/supersede', (req, res) => {
     const r = reviewById(req.params.id);
     if (!r) return sendComplianceError(res, { error: 'REVIEW_NOT_FOUND' }, 'supersede');
@@ -1100,7 +1096,7 @@ export function registerCompliance(rawCtx) {
     res.status(201).json({ review: reviewPublic(next, { forReviewer: true }), superseded: reviewPublic(old, { forReviewer: true }) });
   });
   tsRouter.get('/compliance/audit', (req, res) => res.json({ items: reviewerDecisionRows(complianceRecords.reads, 200), legacyNote: REVIEWER_LEGACY_NOTE }));
-  /** Process metrics only (mandate §72): counts and durations; never a person, never a ranking. */
+  /** Process metrics only: counts and durations; never a person, never a ranking. */
   tsRouter.get('/compliance/metrics', (_req, res) => {
     let stale = 0;
     for (const f of agentReads.profiles.facetStates()) if (effectiveFacetState(f, now()) === 'STALE') stale += 1;
@@ -1118,33 +1114,31 @@ export function registerCompliance(rawCtx) {
     res.json({ ...page, readOnly: true, note: 'Read-only. Starting, resolving, cancelling or superseding a review requires an authenticated reviewer session (/ts). The shared key can adjudicate nothing.' });
   });
 
-  /** Hook for m24's request route: an Approach whose deciding rule is uncertain records an attributed review item. */
+  /** Hook for the agent core's request route: an Approach whose deciding rule is uncertain records an attributed review item. */
   function createApproachReview({ req, decision, playerId, jurisdiction }) {
     return createReview({ kind: 'conflict_evaluation', agencyOrgId: req.org.id, agentUserId: req.orgUser.id, subject: { approach: true, playerId, jurisdiction }, reasons: decision.reasons.filter((r) => r.code !== 'FACET_VERIFIED'), policyVersions: decision.policyVersions, snapshot: { outcome: 'MANUAL_REGULATORY_REVIEW_REQUIRED', evaluatedAt: now() }, requestedBy: byOrg(req) });
   }
 
-  // ============================================================ P5.6D seam
+  // ============================================================ transaction seam
   /**
-   * What the transaction workspace (m26) is allowed to do with the compliance
-   * layer, and nothing more.
+   * What the transaction workspace (domains/agents/transactions) is allowed to
+   * do with the compliance layer, and nothing more.
    *
    * The seam exists because a transaction must not own a second conflict
    * engine, a second consent ledger or a second policy resolver. A transaction
-   * OWNS one `complianceContexts` row — the evaluation record P5.6C already
-   * knows how to evaluate, flag on policy publication, tombstone on account
-   * deletion and attach reviews to — and reads its verdict. The transaction is
-   * the multi-party workspace; the context is the evaluation artifact. Neither
+   * OWNS one compliance context — which this module already knows how to
+   * evaluate, flag on policy publication, tombstone on account deletion and
+   * attach reviews to — and reads its verdict. The transaction is the
+   * multi-party workspace; the context is the evaluation artifact. Neither
    * replaces the other and no fact lives in both as truth.
    *
-   * The context stays PERSONAL to the agent who opened it: a club party never
-   * reads it, because the frozen privacy matrix gives a club the outcome and
-   * its reason codes (row 14), never the evaluation's internals. The
+   * The context stays PERSONAL to the agent who opened it: a club party gets
+   * the outcome and its reason codes, never the evaluation's internals. The
    * transaction's own projection is what a club sees.
    */
   /**
-   * Filled in by m26 at registration. A P5.6C-only build leaves it empty and
-   * every branch that consults it is a no-op, which is why it is an object with
-   * null members rather than an optional import.
+   * Filled in by the transaction workspace at registration (server.mjs), after
+   * this module is built; until then every branch that consults it is a no-op.
    */
   const transactionHooks = { representationReviewed: null };
 
@@ -1165,8 +1159,8 @@ export function registerCompliance(rawCtx) {
     /**
      * Project the transaction's parties and representation bindings into the
      * context the engine reads. The transaction's own stores remain the truth;
-     * this is the evaluation input, rebuilt from them every time, so a stale
-     * mirror cannot exist.
+     * this is the evaluation input, rebuilt from them every time, so it
+     * cannot go stale.
      */
     project(c, { parties, representations }) {
       contexts.update(c.id, (d) => {
@@ -1176,7 +1170,7 @@ export function registerCompliance(rawCtx) {
     },
     evaluate(c, by, opts = {}) { return evaluateAndRecord(c, by, opts); },
     lastEvaluation,
-    /** The evaluation row a transaction's snapshot names (S11c: the snapshot reads its outcome, reasons and versions from it). */
+    /** The evaluation row a transaction's snapshot names (the snapshot reads its outcome, reasons and versions from it). */
     evaluationById: (id) => contexts.evaluationById(id),
     /** How long each answered consent of a transaction's context waited (the transaction metrics). */
     consentAnswerWaits: () => consents.transactionAnswerWaits(),
@@ -1208,7 +1202,7 @@ export function registerCompliance(rawCtx) {
   };
 
   /**
-   * M23 P5.6E — the ONE narrow seam the cross-app integration layer asks. It
+   * The ONE narrow seam the cross-app integration layer asks. It
    * answers a single question: under the encoded policy in force right now, is
    * this agent clear to perform this regulated action in this jurisdiction?
    *

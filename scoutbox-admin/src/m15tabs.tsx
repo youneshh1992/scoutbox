@@ -1,5 +1,5 @@
 import { fmtClock, fmtStamp } from '../../design-system/time';
-// M15 Trust & Safety additions — the Football Passport back office:
+// Trust & Safety tabs — the Football Passport back office:
 // the correction queue (records are never silently edited; every resolution
 // carries a written reason), the share registry (any link can be killed
 // instantly), and the source-graph inspector that shows exactly which

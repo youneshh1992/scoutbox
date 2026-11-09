@@ -1,13 +1,8 @@
-// S12b — Box Cam, the At-Home Combine and the production CV results as typed tables with explicit writes
-// (repositories/boxCam.mjs, migration 0031). What this suite proves: the migration creates the STRICT tables (no JSON
-// column) and inserts the two ScoutBox challenges, nothing else; the typers refuse junk with the record and field named
-// (a plain nonce, an unknown field, an observation without its timestamps or with an unknown quality, a challenge with
-// an org name but no org, a malformed due date, a CV result claiming Combine Verified); records are created and read
-// back whole, the derived parts (a calibration's required checks, the experimental note, default preferences) worked
-// out on read; recordBatch appends observations in order and closes the open pause; an update keeps the fields that
-// never change and only grows the integrity history; the queries answer what the routes need (the dispute queue pages);
-// a rolled-back unit leaves nothing; and a fixture written through the repository is typed, refuses a missing
-// reference (nothing written) and reads back what it wrote. Temporary databases only; nothing touches DATA_DIR. Run with: npm test
+// Box Cam, the At-Home Combine and the production CV results (repositories/boxCam.mjs, migration 0031): the STRICT
+// tables and the two seeded ScoutBox challenges, the typers' refusals (a plain nonce is never stored; a CV result
+// cannot claim Combine Verified), records read back whole with their derived parts, recordBatch, updates that keep
+// what never changes, the routes' queries, units of work and fixtures. Temporary databases only; nothing touches
+// DATA_DIR. Run with: npm test
 
 import assert from 'node:assert/strict';
 import fs from 'node:fs';

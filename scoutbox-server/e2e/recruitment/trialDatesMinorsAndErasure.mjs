@@ -1,28 +1,26 @@
-// M23 P4A closure suite — the three Mediums the architecture milestone left
-// open, closed and proved, plus the smaller findings closed with them.
+// Trial dates, a minor's guardian-decision notification, and account erasure.
 //
-//   P4A-D1   Trial dates: one validator, refusal before persistence, one
-//            report-deadline derivation from one clock, read-side defence for
-//            legacy rows (no 500, no fabricated date), restart consistency.
-//   P4A-D10  A minor hears their guardian's decision: the outcome is a
-//            request outcome (`guardian_decision` → "Messages and requests"),
-//            not a discovery nudge that is off by default.
-//   P4A-D14  A player who removes their account leaves an id-only tombstone
-//            behind on their trials and requests; the recruitment case is not
-//            moved, nothing person-shaped is retained, nothing new can be
-//            written about them, and every reader copes.
-//   P4A-D2/D4/D5/D12/D13 closed alongside (report date, one accept writer,
-//            finalize rate limit, unknown slot refused, respondedBy on both
-//            paths).
+//   Trial dates: one validator, refusal before persistence, one
+//     report-deadline derivation from one clock, read-side defence for
+//     legacy rows (no 500, no fabricated date), restart consistency.
+//   A minor hears their guardian's decision: the outcome is a request outcome
+//     (`guardian_decision` → "Messages and requests"), not a discovery nudge
+//     that is off by default.
+//   A player who removes their account leaves an id-only tombstone behind on
+//     their trials and requests; the recruitment case is not moved, nothing
+//     person-shaped is retained, nothing new can be written about them, and
+//     every reader copes.
+//   Also: the report date, one accept writer, the finalize rate limit, an
+//     unknown slot refused, respondedBy on both paths.
 //
 // Groups:
-//   A  pure — the validator against every malformed shape the mandate lists
-//   B  HTTP — D1 on the request, accept, calendar, postpone and feed paths
-//   C  HTTP — D10, preferences, prototype keys, the privacy sentinel
-//   D  HTTP — D14 cascade matrix, gate, readers, foreign org, guardian path
+//   A  pure — the validator against every malformed shape
+//   B  HTTP — trial dates on the request, accept, calendar, postpone and feed paths
+//   C  HTTP — the guardian decision, preferences, prototype keys, the privacy sentinel
+//   D  HTTP — the erasure cascade matrix, gate, readers, foreign org, guardian path
 //   L  legacy rows injected into the store: read-side defence, signed
 //      invariant, restart consistency
-//   R  D5 finalize rate limit; clean-boot schema unchanged
+//   R  the finalize rate limit; clean-boot schema unchanged
 //
 // No assertion is `status !== 200`: every refusal names its status and code.
 
@@ -125,7 +123,7 @@ section('A — one Trial date validator, every malformed shape refused before pe
   ok(chooseTrialSlot({ proposedDate: '2026-10-03', altSlots: ['2026-10-10'] }, '2026-10-10').date === '2026-10-10', 'A11 an offered alternative is chosen');
   ok(chooseTrialSlot({ proposedDate: '2026-10-03', altSlots: ['2026-10-10'] }, undefined).date === '2026-10-03' && chooseTrialSlot({ proposedDate: '2026-10-03' }, '').date === '2026-10-03' && chooseTrialSlot({ proposedDate: '2026-10-03' }, null).date === '2026-10-03', 'A11b no choice means the proposed day');
   const unknown = chooseTrialSlot({ proposedDate: '2026-10-03', altSlots: ['2026-10-10'] }, '2026-10-04');
-  neg(unknown.ok === false && unknown.error === 'TRIAL_SLOT_INVALID' && JSON.stringify(unknown.offered) === JSON.stringify(['2026-10-03', '2026-10-10']), 'A12 a day the club never offered is refused and the offered days are listed (P4A-D12)');
+  neg(unknown.ok === false && unknown.error === 'TRIAL_SLOT_INVALID' && JSON.stringify(unknown.offered) === JSON.stringify(['2026-10-03', '2026-10-10']), 'A12 a day the club never offered is refused and the offered days are listed');
   for (const v of [{}, [], 0, true, 42, ['2026-10-03'], { toString: () => '2026-10-03' }]) {
     neg(chooseTrialSlot({ proposedDate: '2026-10-03' }, v).error === 'TRIAL_SLOT_INVALID', `A12b a ${JSON.stringify(v)} slot is refused, not coerced`);
   }
@@ -140,19 +138,18 @@ section('A — one Trial date validator, every malformed shape refused before pe
   ok(parseTrialDate('2026-12-31').t === Date.UTC(2026, 11, 31) && parseTrialDate('2027-01-01').t === parseTrialDate('2026-12-31').t + DAY, 'A14d consecutive days across the year boundary are one day apart');
 }
 
-// ============================================================ D10 — pure taxonomy
+// ============================================================ C0 — pure taxonomy
 section('C0 — the guardian decision is a request outcome in the notification taxonomy');
 {
   ok(TYPE_CATEGORY.guardian_decision === 'messages' && categoryOf('guardian_decision') === 'messages', 'C0a guardian_decision → messages ("Messages and requests")');
   ok(CATEGORIES.messages.default === true && CATEGORIES.messages.mandatory === false, 'C0b that category is on by default for every existing, new and migrated person, and may be muted like every other request outcome');
   ok(TYPE_CATEGORY.accepted === 'messages' && TYPE_CATEGORY.declined === 'messages', 'C0c the club-side outcome rows live in the same category — one taxonomy, no parallel system');
   neg(TYPE_CATEGORY.update === 'discovery_nudges' && CATEGORIES.discovery_nudges.default === false, 'C0d `update` still means a discovery nudge (off by default) — the type was wrong for the child, the category was not changed to fit it');
-  // P4A's point stands: a milestone must not make its own traffic unmutable to get
-  // attention. The set has grown by exactly one since, and deliberately: P5.6C's
-  // `compliance` carries regulatory review, consent and verification, where muting
-  // would mute an obligation rather than a preference. Pinned as a set so the next
-  // milestone that wants to add a third has to come and change this line.
-  neg(Object.keys(CATEGORIES).filter((k) => CATEGORIES[k].mandatory).sort().join() === 'compliance,security_account', 'C0e the mandatory categories are still exactly two — security_account and P5.6C\'s compliance; no milestone has quietly added a third');
+  // A feature must not make its own traffic unmutable to get attention. Besides
+  // security, `compliance` is the one deliberate exception: it carries regulatory
+  // review, consent and verification, where muting would mute an obligation rather
+  // than a preference. Pinned as a set so adding a third has to change this line.
+  neg(Object.keys(CATEGORIES).filter((k) => CATEGORIES[k].mandatory).sort().join() === 'compliance,security_account', 'C0e the mandatory categories are still exactly two — security_account and compliance; no milestone has quietly added a third');
 }
 
 // =================================================================== HTTP
@@ -207,8 +204,8 @@ let amara = await guardianLogin('gd-amara');
 let marek = await guardianLogin('gd-marek');
 ok(!!maria.token && !!harbour.token && !!kola.token && !!elias.token && !!mateus.token && !!guni.token && !!tomasz.token && !!amara.token && !!marek.token, 'every identity the suite needs logged in');
 
-// ============================================================ B — D1 over HTTP
-section('B — D1: a malformed trial date never reaches the store');
+// ============================================================ B — trial dates over HTTP
+section('B — a malformed trial date never reaches the store');
 const B = {};
 {
   const before = (await j('GET', '/player/inbox', undefined, kola.token)).body.items.length;
@@ -251,7 +248,7 @@ const B = {};
   // accept: unknown slot refused BEFORE the answer is recorded
   const trialsBefore = (await orgTrials(maria.token)).length;
   const wrong = await j('POST', `/player/requests/${B.reqId}/respond`, { accept: true, chosenSlot: FUTURE4 }, kola.token);
-  neg(expect(wrong, 400, 'TRIAL_SLOT_INVALID') && JSON.stringify(wrong.body.offered) === JSON.stringify([FUTURE, FUTURE2, FUTURE3]), 'B6 a day the club never offered is refused and the offered days are listed (P4A-D12)');
+  neg(expect(wrong, 400, 'TRIAL_SLOT_INVALID') && JSON.stringify(wrong.body.offered) === JSON.stringify([FUTURE, FUTURE2, FUTURE3]), 'B6 a day the club never offered is refused and the offered days are listed');
   for (const v of [{}, [], 0, true, 'bad', '2026-02-31']) {
     neg(expect(await j('POST', `/player/requests/${B.reqId}/respond`, { accept: true, chosenSlot: v }, kola.token), 400, 'TRIAL_SLOT_INVALID'), `B6b chosenSlot ${JSON.stringify(v)} → 400 TRIAL_SLOT_INVALID`);
   }
@@ -263,9 +260,9 @@ const B = {};
   B.trialId = t.id;
   ok(t.proposedDate === FUTURE3, 'B7b the trial is dated on the chosen alternative');
   ok(t.reportDueAt === utcDay(FUTURE3) + 7 * DAY, 'B7c the report deadline is exactly the trial day + 7 days (UTC), from the one derivation');
-  ok(Number.isFinite(t.acceptedAt) && t.acceptedBy === 'player' && t.guardianApproved === false, 'B7d acceptedAt is finite; the adult path stamps acceptedBy=player and guardianApproved=false (P4A-D4: one writer)');
+  ok(Number.isFinite(t.acceptedAt) && t.acceptedBy === 'player' && t.guardianApproved === false, 'B7d acceptedAt is finite; the adult path stamps acceptedBy=player and guardianApproved=false (one writer)');
   const reqRow = (await j('GET', '/org/requests', undefined, maria.token)).body.items.find((r) => r.id === B.reqId);
-  ok(reqRow.respondedBy === 'player' && reqRow.respondedAt === t.acceptedAt, 'B7e the request carries respondedBy=player (P4A-D13) and the same instant as the trial — one clock');
+  ok(reqRow.respondedBy === 'player' && reqRow.respondedAt === t.acceptedAt, 'B7e the request carries respondedBy=player and the same instant as the trial — one clock');
 
   // calendar export
   const ics = await j('GET', `/org/trials/${B.trialId}/ics`, undefined, maria.token);
@@ -308,8 +305,8 @@ const B = {};
   ok(gReqRow.respondedBy === 'guardian' && gReqRow.respondedAt === gt.acceptedAt, 'B13e respondedBy=guardian, same clock as the trial');
 }
 
-// ============================================================ C — D10 over HTTP
-section('C — D10: a minor hears their guardian\'s decision');
+// ============================================================ C — guardian decision over HTTP
+section('C — a minor hears their guardian\'s decision');
 {
   const gn = await notifs('/player/notifications', guni.token);
   const rows = gn.filter((n) => n.type === 'guardian_decision');
@@ -347,7 +344,7 @@ section('C — D10: a minor hears their guardian\'s decision');
   neg(!view.categories.some((c) => ['constructor', 'toString', '__proto__'].includes(c.id)), 'C3b and the preferences view carries no prototype name');
   neg(expect(await j('PUT', '/player/notification-preferences', { categories: { security_account: false } }, guni.token), 400, 'PREF_CATEGORY_MANDATORY'), 'C3c the mandatory category still cannot be muted');
   neg(expect(await j('PUT', '/player/notification-preferences', { categories: [] }, guni.token), 400, 'PREFS_INVALID'), 'C3d a list is not a preferences object');
-  // S14e (approved design change): a non-boolean value is refused, no longer coerced with !!v; the stored value is untouched.
+  // A non-boolean value is refused, not coerced (approved design change); the stored value is untouched.
   neg(expect(await j('PUT', '/player/notification-preferences', { categories: { messages: 'yes' } }, guni.token), 400, 'PREFS_INVALID') && (await j('GET', '/player/notification-preferences', undefined, guni.token)).body.preferences.categories.find((c) => c.id === 'messages').enabled === true, 'C3e a truthy non-boolean is refused (400 PREFS_INVALID), nothing stored');
   neg(expect(await j('PUT', '/player/notification-preferences', { categories: { security_account: 0 } }, guni.token), 400, 'PREFS_INVALID'), 'C3f a numeric 0 on the mandatory category is refused, never stored as "off"');
   neg(expect(await j('PUT', '/player/notification-preferences', { emailIntent: 'yes' }, guni.token), 400, 'PREFS_INVALID'), 'C3g a non-boolean emailIntent is refused');
@@ -385,8 +382,8 @@ section('C — D10: a minor hears their guardian\'s decision');
   ok(JSON.stringify((await j('GET', `/org/rooms/${RID}`, undefined, maria.token)).body).includes(SENTINEL), 'C5c (control) the club\'s own Room does carry the sentinel — the sweep is real');
 }
 
-// ============================================================ D — D14 over HTTP
-section('D — D14: an account removal leaves an honest tombstone and moves no case');
+// ============================================================ D — account erasure over HTTP
+section('D — an account removal leaves an honest tombstone and moves no case');
 const D = {};
 {
   // Kola: room + reported trial (from group B). Elias: room + trial awaiting report, with the whole trial day filled in.
@@ -563,19 +560,19 @@ section('L — legacy rows in the store: read-side defence, signed invariant, re
   const planted = { cases: [], signings: [], trials: [], requests: [] };
   const kase = db.recruitmentCases.find((c) => c.id === MID);
   kase.room.status = 'signed'; // TEST FIXTURE ONLY: a legacy `signed` case with its signing record
-  // the D14 matrix: one legacy case per lifecycle position, all for the same player (fixture rows; no route can reach these today)
+  // the erasure matrix: one legacy case per lifecycle position, all for the same player (fixture rows; no route can reach these today)
   const mariaId = db.users.find((u) => u.orgId === 'org-eastport' && u.name === 'Maria Keane').id;
   const MATRIX = ['trial_requested', 'trial_scheduled', 'trial_completed', 'offer_consideration', 'offer_made', 'offer_accepted', 'archived', 'withdrawn', 'closed'];
   for (const st of MATRIX) {
     const clone = JSON.parse(JSON.stringify(kase));
-    // S8b: each clone is a whole case of its own — its own history entries (the one entry shape, with ids), and no
+    // Each clone is a whole case of its own — its own history entries (the one entry shape, with ids), and no
     // copy of the original's draft or handoff (those belong to the original case).
     clone.id = `case-matrix-${st}`; clone.room.status = st; clone.room.rev = 3; clone.decisionDraft = null; clone.transactionHandoff = null;
     clone.history = [{ id: `aud-matrix-${st}-1`, at: Date.now() - 20 * DAY, byKind: 'org', byId: mariaId, byName: 'Maria Keane', action: 'room_created', detail: { status: 'watching' } }, { id: `aud-matrix-${st}-2`, at: Date.now() - 10 * DAY, byKind: 'org', byId: mariaId, byName: 'Maria Keane', action: 'room_status_changed', detail: { from: 'watching', to: st } }];
     planted.cases.push(clone);
   }
   planted.signings.push({ id: 'sign-legacy-1', playerId: 'pl-carvalho', playerName: 'Mateus Carvalho', orgId: 'org-eastport', orgName: 'Eastport FC', userId: mariaId /* the real staff id: a signing names its staff member by a key */, scoutName: 'Maria Keane', ts: Date.now() - 5 * DAY });
-  // legacy trial rows written before the validator existed. S8a (§4.3): a typed row holds a day-shaped value only, so
+  // legacy trial rows written before the validator existed. A typed row holds a day-shaped value only, so
   // the bad dates planted here are the ones a row can still carry — an impossible month, an impossible day, a day
   // outside the accepted range, no date — and the read side must still defend against each. The shapes a row cannot
   // hold (free text, a NaN deadline, no acceptance instant) are refused by the save with their ids (L1b below).
@@ -591,14 +588,14 @@ section('L — legacy rows in the store: read-side defence, signed invariant, re
     legacyTrial({ id: 'trial-legacy-null', requestId: 'req-legacy-3', proposedDate: null }),
     legacyTrial({ id: 'trial-legacy-old', requestId: 'req-legacy-4', proposedDate: '1999-01-01' }),
   );
-  // S8a-core: a trial names its request by a real key (trials.request_id → recruitment_requests), so the four legacy
+  // A trial names its request by a real key (trials.request_id → recruitment_requests), so the four legacy
   // trials get the accepted invitation each of them came from, in the legacy direct-request literal; a trial naming an
   // absent request is refused at the write with its id (PAIR_MISMATCH), never repaired. The garbage this section
   // proves tolerated lives in the trial rows above, which are unchanged.
   for (const n of [1, 2, 3, 4]) planted.requests.push({ id: `req-legacy-${n}`, playerId: 'pl-carvalho', playerName: 'Mateus Carvalho', orgId: 'org-eastport', orgName: 'Eastport FC', orgType: 'club', orgVerified: true, orgSafeguardingCertified: true, userId: mariaId, scoutName: 'Maria Keane', scoutRole: 'Head of Recruitment', type: 'trial', message: 'legacy accepted invitation', trialDetails: { proposedDate: '1999-01-01', altSlots: [], venue: null, notes: '' }, status: 'accepted', createdAt: Date.now() - 41 * DAY, respondedAt: Date.now() - 40 * DAY, respondedBy: 'player', routedTo: 'player', guardianId: null, contactChannel: null });
-  planted.requests.push({ id: 'req-legacy-5', playerId: 'pl-carvalho', playerName: 'Mateus Carvalho', orgId: 'org-eastport', orgName: 'Eastport FC', orgType: 'club', orgVerified: true, orgSafeguardingCertified: true, userId: mariaId /* S8a-core: the real staff id (a request names its staff member by a key) */, scoutName: 'Maria Keane', scoutRole: 'Head of Recruitment', type: 'trial', message: 'legacy pending invitation', trialDetails: { proposedDate: '2026-13-01', altSlots: ['2026-02-30'], venue: null, notes: '' }, status: 'pending', createdAt: Date.now() - 3 * DAY, routedTo: 'player', guardianId: null, contactChannel: null });
+  planted.requests.push({ id: 'req-legacy-5', playerId: 'pl-carvalho', playerName: 'Mateus Carvalho', orgId: 'org-eastport', orgName: 'Eastport FC', orgType: 'club', orgVerified: true, orgSafeguardingCertified: true, userId: mariaId /* the real staff id (a request names its staff member by a key) */, scoutName: 'Maria Keane', scoutRole: 'Head of Recruitment', type: 'trial', message: 'legacy pending invitation', trialDetails: { proposedDate: '2026-13-01', altSlots: ['2026-02-30'], venue: null, notes: '' }, status: 'pending', createdAt: Date.now() - 3 * DAY, routedTo: 'player', guardianId: null, contactChannel: null });
   for (const junk of unstorable) {
-    // Rewritten in S14a: "nothing written" compared store.revision() (the blob's save sequence); now the file's contents.
+    // "nothing written" is proved on the file's contents.
     let refused = null; const dumpBefore = JSON.stringify(readRecords(DATA_DIR));
     const L = openLayer(DATA_DIR);
     try { L.unit(() => { L.layer.recruitment.requests.create(planted.requests.find((q) => q.id === junk.requestId)); L.layer.recruitment.trials.create(junk); }); } catch (e) { refused = e; } finally { L.close(); }
@@ -626,7 +623,7 @@ section('L — legacy rows in the store: read-side defence, signed invariant, re
   const survived = (await orgTrials(maria.token)).find((t) => t.id === mt.id);
   const survivedReq = (await j('GET', '/org/requests', undefined, maria.token)).body.items.find((r) => r.id === D.mateusReq);
   neg(!!survived && survivedReq?.status === 'accepted' && !!survivedReq.contactChannel,
-    'L2c the trial accepted a moment before the SIGKILL survived with its request and channel — the acceptance is ONE save (P4A-D15: it used to be saved before the trial row existed)');
+    'L2c the trial accepted a moment before the SIGKILL survived with its request and channel — the acceptance is ONE save');
 
   // read-side defence
   neg(expect(await j('GET', '/org/trials/trial-legacy-garbage/ics', undefined, maria.token), 422, 'TRIAL_DATE_INVALID'), 'L3 the calendar export of a garbage-dated legacy trial is 422 TRIAL_DATE_INVALID, not 500');
@@ -650,7 +647,7 @@ section('L — legacy rows in the store: read-side defence, signed invariant, re
   const repaired = (await orgTrials(maria.token)).find((t) => t.id === 'trial-legacy-garbage');
   ok(repaired.reportDueAt === utcDay(FUTURE) + 7 * DAY && (await j('GET', '/org/trials/trial-legacy-garbage/ics', undefined, maria.token)).status === 200, 'L6b its deadline is derived and its calendar export now works');
 
-  // the D14 matrix before deletion
+  // the erasure matrix before deletion
   const matrixBefore = {};
   for (const st of ['trial_requested', 'trial_scheduled', 'trial_completed', 'offer_consideration', 'offer_made', 'offer_accepted', 'archived', 'withdrawn', 'closed']) {
     const r = await j('GET', `/org/rooms/case-matrix-${st}`, undefined, maria.token);
@@ -682,9 +679,8 @@ section('L — legacy rows in the store: read-side defence, signed invariant, re
   await restart();
   maria = await login('org-eastport', 'Maria Keane', 'Head of Recruitment');
   const afterRestart = (await orgTrials(maria.token)).filter((t) => t.playerId === 'pl-carvalho');
-  // S8a-core: a trial read back from the tables carries its keys in the stored shape's order (the blob kept the
-  // writer's insertion order — e.g. `blockedBy` moved after `revBy`); every value is identical, so the comparison is
-  // canonical (keys sorted at every level) rather than textual.
+  // A trial read back from the tables carries its keys in the stored shape's order, not the writer's insertion
+  // order; every value is identical, so the comparison is canonical (keys sorted at every level) rather than textual.
   const canonical = (v) => JSON.stringify(v, (k, x) => (x && typeof x === 'object' && !Array.isArray(x) ? Object.fromEntries(Object.keys(x).sort().map((k2) => [k2, x[k2]])) : x));
   ok(afterRestart.length === legacyAfter.length && canonical(afterRestart) === canonical(legacyAfter), 'L8 after a restart the tombstones are identical (every key and value; key order follows the stored shape)');
   const signedRestart = (await j('GET', `/org/rooms/${MID}`, undefined, maria.token)).body.room;
@@ -703,7 +699,7 @@ section('L — legacy rows in the store: read-side defence, signed invariant, re
 }
 
 // ============================================================ R — D5 + clean boot
-section('R — D5: the finalize rate limit is enforced; a clean boot needs no schema advance');
+section('R — the finalize rate limit is enforced; a clean boot needs no schema advance');
 {
   const guniR = await playerLogin('pl-guni');
   ok(RATE_LIMIT_POLICY.box_cv_finalize && RATE_LIMIT_POLICY.box_cv_finalize.max === 80 && RATE_LIMIT_POLICY.box_cv_finalize.scope === 'player', 'R1 the declared policy: 80 per hour per player');

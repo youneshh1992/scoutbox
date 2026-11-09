@@ -1,24 +1,10 @@
-// S6b, explicit since S14b, through the REAL server (server.mjs booted as a child process on temporary data
-// directories, synthetic seed records only): the eight audit collections as tables —
-// every writer through its route (guardian and player blocks, the three report callers
-// and the automatic escalation, moderation hits, organisation notes, the ledger, the
-// IDV queue, source changes, ops events), every reader (the admin triage, lists and
-// counts, the reporters' own lists, the guardian's log, the org ledger and notes, the
-// data-layer report), the admin actions (report resolution, the block lift — Q5: the
-// row is deleted — and the IDV toggle on the FIRST entry), what a route stores
-// without a lookup (a report naming an unknown player, Q4) and the junk it refuses (404
-// ORG_NOT_FOUND for a block or report naming no organisation; 400 FIELD_INVALID for a
-// numeric targetPlayerId, an object orgId or reason, an object documentType, an
-// over-long reason or note; TEXT_REQUIRED for a non-text note), a REAL adult account
-// deletion that retains every audit row with its now-unresolved id — through the admin
-// backup and a restore into a new directory — plus the cutover: migration 0013 recorded
-// at boot, a block and its ledger row committed together before the response, the IDV
-// entry committed with the guardian's column (both failure seams, real COMMIT failure,
-// SIGKILL, retry), an urgent report and its suspension block failing together at the
-// real COMMIT and landing once on retry, and the admin backup (a database copy)
-// restored row for row into a new directory. Every database read goes through a second
-// read-only connection. Nothing here touches DATA_DIR or real data.
-// Run with: npm test
+// The eight audit collections through the REAL server (server.mjs booted as a child process on temporary data
+// directories, synthetic seed records only): every writer and reader through its route, the admin actions (the block
+// lift deletes the row: Q5), a report naming an unknown player stored without a lookup (Q4), the junk the routes
+// refuse, an account deletion that retains every audit row with its now-unresolved id, the coupled units (a block and
+// its ledger row, the IDV entry and the guardian's column, an urgent report and its suspension block) under failure
+// seams, real COMMIT failures and SIGKILL, and backup/restore. Every database read goes through a second read-only
+// connection. Nothing here touches DATA_DIR or real data. Run with: npm test
 import assert from 'node:assert/strict';
 import { spawnChild } from './testChildren.mjs';
 import { freePort } from './testPort.mjs';
@@ -75,7 +61,7 @@ async function boot(dir, env = {}, server = SERVER) {
 const snap = (dir, fn) => { const s = new DatabaseSync(path.join(dir, 'scoutbox.db'), { readOnly: true }); try { s.exec('BEGIN'); try { return fn({ get: (sql, ...p) => { const r = s.prepare(sql).get(...p); return r ? { ...r } : r; }, all: (sql, ...p) => s.prepare(sql).all(...p).map((r) => ({ ...r })) }); } finally { s.exec('COMMIT'); } } finally { s.close(); } };
 const q1 = (dir, sql, ...p) => snap(dir, (c) => c.get(sql, ...p));
 const live = (dir) => !!q1(dir, 'SELECT 1 AS one FROM data_migrations WHERE id = ?', MIGRATION);
-/** Whether the file still has the retired blob table (dropped by migration 0039, S14a). */
+/** Whether the file still has the retired blob table (dropped by migration 0039). */
 const hasBlobTable = (dir) => !!q1(dir, "SELECT 1 AS one FROM sqlite_master WHERE type = 'table' AND name = 'collections'");
 /** The typed record: every key of the collection in the writer's order, an absent key null. */
 const ordered = (row, keys) => Object.fromEntries(keys.map((k) => [k, row[k] === undefined ? null : row[k]]));
@@ -102,8 +88,8 @@ async function audited(S, maria) {
   return { reports: await adminReports(S), blocks: await adminBlocks(S), moderation: await adminModeration(S), idv: await adminIdv(S), ledger: await orgLedger(S, maria) };
 }
 
-// ============================================================= [compat] the behaviour the storage move must preserve
-await test('[compat] every writer through its route and every reader: a guardian\'s block and report (urgent → the suspension block and the frozen request), a report naming an unknown player (accepted: Q4), the junk the routes refuse (a block or a report naming an organisation that does not exist — 404 ORG_NOT_FOUND since S14b —, a NUMERIC targetPlayerId, an object targetOrgId, an object orgId or reason on a block, a non-text note, an object documentType — 400, nothing stored), an organisation\'s report and private note, two moderation hits (a contact hit; a grooming hit that escalates to an automatic urgent report with no targetPlayerId key), the IDV entry, a source change, a backup ops event, the ledger rows the blocks write; the admin triage order, the reporters\' own lists, the guardian\'s log, the org ledger, the data; report resolution, the block lift (Q5: the row is deleted and returned once), the IDV toggle (the FIRST entry); the stored rows equal the views; a restart serves the same', async () => {
+// ============================================================= [compat] the routes' behaviour
+await test('[compat] every writer through its route and every reader: a guardian\'s block and report (urgent → the suspension block and the frozen request), a report naming an unknown player (accepted: Q4), the junk the routes refuse (a block or a report naming an organisation that does not exist — 404 ORG_NOT_FOUND —, a NUMERIC targetPlayerId, an object targetOrgId, an object orgId or reason on a block, a non-text note, an object documentType — 400, nothing stored), an organisation\'s report and private note, two moderation hits (a contact hit; a grooming hit that escalates to an automatic urgent report with no targetPlayerId key), the IDV entry, a source change, a backup ops event, the ledger rows the blocks write; the admin triage order, the reporters\' own lists, the guardian\'s log, the org ledger, the data; report resolution, the block lift (Q5: the row is deleted and returned once), the IDV toggle (the FIRST entry); the stored rows equal the views; a restart serves the same', async () => {
   const dir = tempDir('s6b-compat'); let S = await boot(dir);
   const maria = await orgLogin(S); const amara = await guardianLogin(S, 'gd-amara'); const { pid, token: adult } = await signupAdult(S, 'Audit Adult');
   // Guardian: a block of the child, then an urgent report against the club that suspends the pending request.
@@ -111,7 +97,7 @@ await test('[compat] every writer through its route and every reader: a guardian
   assert.equal((await S.j('POST', '/guardian/block', { orgId: 'org-harbour', playerId: 'pl-guni', reason: 'synthetic guardian block' }, amara)).status, 201);
   const gRep = await S.j('POST', '/guardian/report', { targetKind: 'club', targetOrgId: 'org-eastport', reason: 'Synthetic urgent guardian report.', urgent: true }, amara); assert.equal(gRep.status, 201, gRep.text); assert.equal(gRep.body.suspended, true);
   assert.equal((await S.j('GET', '/guardian/inbox', undefined, amara)).body.items.find((r) => r.id === req.body.requestId)?.status, 'suspended', 'the pending request froze with the suspension block');
-  // Adult: a block or a report naming an organisation that does not exist is refused (S14b: organisations are keys); a report naming an unknown player is accepted (Q4).
+  // Adult: a block or a report naming an organisation that does not exist is refused (organisations are keys); a report naming an unknown player is accepted (Q4).
   for (const [route, body] of [['/player/block', { orgId: 'org-does-not-exist', reason: 'synthetic' }], ['/player/report', { targetKind: 'club', targetOrgId: 'org-does-not-exist', reason: 'Synthetic report naming no club.' }]]) {
     const r = await S.j('POST', route, body, adult); assert.deepEqual([r.status, r.body?.error], [404, 'ORG_NOT_FOUND'], `${route}: an unknown organisation is refused (${r.text})`);
   }
@@ -193,12 +179,12 @@ await test('[compat] a REAL adult account deletion retains every audit row that 
   assert.equal((await S.j('POST', `/org/players/${pid}/notes`, { text: 'Synthetic note about the adult.' }, maria)).status, 201);
   assert.equal((await S.j('PATCH', '/player/football-passport/prefs', { positions: { primary: 'CM', secondary: [] } }, adult)).status, 200);
   assert.equal((await S.j('GET', `/org/players/${pid}`, undefined, maria)).status, 200, 'the club reads the adult before the deletion');
-  const bkBefore = await S.j('POST', '/admin/backup', {}, null, A); assert.equal(bkBefore.status, 201); // flushes every pending write
+  const bkBefore = await S.j('POST', '/admin/backup', {}, null, A); assert.equal(bkBefore.status, 201);
   const before = storedAll(dir);
   const naming = (rows) => rows.filter((r) => r.playerId === pid || r.targetPlayerId === pid);
   assert.deepEqual([naming(before.blocks).length, naming(before.reports).length, naming(before.orgNotes).length, naming(before.ledger).length >= 1, naming(before.sourceChanges).length], [1, 1, 1, true, 1], 'rows in all five player-audit tables name the adult');
   const del = await S.j('DELETE', '/player/account', {}, adult); assert.equal(del.status, 200, del.text);
-  assert.ok(Number.isInteger(q1(dir, 'SELECT deleted_at FROM players WHERE id = ?', pid)?.deleted_at), 'the player row is the retained record (S4b-R, migration 0014; a hard delete before it) — the audit rows below are unchanged either way');
+  assert.ok(Number.isInteger(q1(dir, 'SELECT deleted_at FROM players WHERE id = ?', pid)?.deleted_at), 'the player row is the retained record (migration 0014) — the audit rows below are unchanged either way');
   const after = storedAll(dir);
   for (const n of COLLECTIONS) assert.equal(JSON.stringify(after[n]), JSON.stringify(before[n]), `${n}: every row exactly as before the deletion (the id now resolves to nothing)`);
   assert.equal((await S.j('GET', `/org/players/${pid}`, undefined, maria)).status, 404);
@@ -218,13 +204,13 @@ await test('[compat] a REAL adult account deletion retains every audit row that 
   rm(dir, bkBefore.body.dir, bk.body.dir, restored);
 });
 
-// ============================================================= [cutover] the tables, the save points, the strict reference at boot
-await test('[cutover] the cutover and the save points: a fresh boot records 0013_safety_audit after 0012 and creates the eight tables and the file has no blob table (the data layer reports the domain); a player\'s block and its ledger row are committed together before the 201 (S14b: explicit writes); the IDV entry commits with the guardian\'s column before the 200 — both failure seams and the real COMMIT leave nothing, the retry lands, a SIGKILL right after the response loses nothing, a restart serves it; an urgent report whose unit fails at the REAL COMMIT is answered 500 and leaves neither the report nor its suspension block, and the retry lands each ONCE; the block lift is durable before its response', async () => {
+// ============================================================= [cutover] the tables, the coupled units, the strict reference at boot
+await test('[cutover] the cutover and the save points: a fresh boot records 0013_safety_audit after 0012 and creates the eight tables and the file has no blob table (the data layer reports the domain); a player\'s block and its ledger row are committed together before the 201; the IDV entry commits with the guardian\'s column before the 200 — both failure seams and the real COMMIT leave nothing, the retry lands, a SIGKILL right after the response loses nothing, a restart serves it; an urgent report whose unit fails at the REAL COMMIT is answered 500 and leaves neither the report nor its suspension block, and the retry lands each ONCE; the block lift is durable before its response', async () => {
   const dir = tempDir('s6b-cutover'); let S = await boot(dir, { M13_FAST_RETRY: '' });
-  assert.ok(live(dir), 'the boot recorded 0013'); // fails on 1792fc7: no such record
-  assert.deepEqual(snap(dir, (c) => c.all('SELECT id FROM data_migrations ORDER BY applied_at, id').map((r) => r.id).filter((id) => id < '0019').slice(-7)), ['0012_channels', MIGRATION, '0014_player_erasure', '0015_recruitment', '0016_recruitment_cases', '0017_recruitment_contacts_offers', '0018_signings_follow_ups']); // S4b-R, S8a, S8b and S8c registered after this step
+  assert.ok(live(dir), 'the boot recorded 0013');
+  assert.deepEqual(snap(dir, (c) => c.all('SELECT id FROM data_migrations ORDER BY applied_at, id').map((r) => r.id).filter((id) => id < '0019').slice(-7)), ['0012_channels', MIGRATION, '0014_player_erasure', '0015_recruitment', '0016_recruitment_cases', '0017_recruitment_contacts_offers', '0018_signings_follow_ups']);
   for (const t of Object.values(TABLES)) assert.ok(q1(dir, "SELECT 1 AS one FROM sqlite_master WHERE type = 'table' AND name = ?", t), `${t} exists`);
-  assert.equal(hasBlobTable(dir), false, 'no blob table (rewritten in S14a)');
+  assert.equal(hasBlobTable(dir), false, 'no blob table');
   const cap = (await S.j('GET', '/capabilities')).body; const domains = cap?.persistence?.dataLayer?.domains ?? cap?.dataLayer?.domains ?? {}; assert.ok(domains.safetyAudit, `the data layer reports the safetyAudit domain (${Object.keys(domains).join(', ')})`);
   // A block and its ledger row: one unit, committed before the response (read in one read transaction).
   const { pid, token: adult } = await signupAdult(S, 'Cutover Adult');
@@ -292,10 +278,8 @@ await test('[cutover] the admin backup and a restore: the backup\'s database cop
   rm(dir, restored);
 });
 
-// S12b: the Box Cam preferences are a typed row (repositories/boxCam.mjs): a partial row ({ playerId } only, which the
-// blob could hold) cannot be stored any more, so the check that it was served and updated as it was is replaced by the
-// typed behaviour: a player with no row reads the defaults, the PATCH writes the whole row, and its ledger row records
-// the share and the clip choice together.
+// The Box Cam preferences are a typed row (repositories/boxCam.mjs): a player with no row reads the defaults, the
+// PATCH writes the whole row, and its ledger row records the share and the clip choice together.
 await test('the real authenticated PATCH /player/box-cam/prefs { retainClips: true } from the defaults: answered 200 with the whole preferences, the box_prefs_changed ledger row recorded with detail { by, share, retainClips }; the prefs and the row survive a SIGKILL and a restart; the admin backup carries the row exactly', async () => {
   const dir = tempDir('s6b-f2'); let S = await boot(dir);
   const { pid, token } = await signupAdult(S, 'Prefs Adult');

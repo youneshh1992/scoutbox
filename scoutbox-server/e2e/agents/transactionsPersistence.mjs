@@ -1,25 +1,10 @@
-// M23 P5.6D — persistence, migration and restart audit for the Agent
-// Transaction Workspace.
-//
-//   1  migration 0029: registered once; the three stores are tables, EMPTY on a
-//      clean database, and reopening the file changes nothing
-//   2  a database with a recruitment case, a compliance context and an
-//      agreement: NOTHING becomes or gains a transaction, and a partial record
-//      is refused
-//   3  a real boot over that database: /healthz reports the schema, the transaction lanes
-//      answer, and an empty workspace is an empty list rather than an error
-//   4  clean boot → transaction → confirmations → representation → document →
-//      note → terms → hold → stop → read back → reboot: bytes survive (party
-//      history, the compliance snapshot reference, document metadata and its
-//      version chain, the timeline, revs and idempotency keys), and no
-//      migration runs twice
-//   5  corruption is contained and named: a transaction whose context is gone,
-//      a document whose transaction is gone and an unknown status are rows the
-//      typed tables cannot hold (the repository refuses them, naming them); a party
-//      revision that no longer matches the facts is planted and reads STALE
+// Persistence, migration and restart audit for the Agent Transaction Workspace:
+// (1) migration 0029 and its empty tables, (2) no existing case, context or
+// agreement becomes a transaction, (3) a real boot over that database, (4) a full
+// workspace survives a restart byte for byte, (5) corruption is refused by the
+// typed tables or, where a row can hold it, planted and read as STALE.
 //
 // Nothing is rewritten, re-ordered or "repaired" on boot.
-// S14a: the blob store and its snapshot registry (steps 2307/2308) are retired; schema checks read data_migrations.
 
 import { spawn } from 'node:child_process';
 import { mkdtempSync } from 'node:fs';
@@ -88,8 +73,6 @@ const fixture = (dir, collections) => writeFixture(dir, collections, { idCounter
 const plant = (dir, work) => { const L = openLayer(dir); try { return L.unit(() => work(L.layer)); } finally { L.close(); } };
 
 // ============================================================ 1
-// Rewritten in S14a: sections 1 and 2 described the retired snapshot registry (step m260_001 at 2307, P7 at 2308,
-// runMigrations over in-memory snapshots, the store contract). They now check the table migration and the file.
 section('1 — migration 0029: registered once; the three stores are tables, EMPTY on a clean database');
 {
   const ids = DATA_MIGRATIONS.map((m) => m.id);
@@ -115,19 +98,19 @@ section('2 — a case, a context and an agreement: nothing moves, and nothing is
   db.players.push({ id: 'pl-1', name: 'Adult Player', dob: '1998-04-02', country: 'GB', city: 'London', media: [], attendance: [], trialReports: [], badges: [], timeline: [], medical: { shared: false, records: [], conditionStatus: 'unknown' }, level: 'amateur', location: { lat: 51.5, lng: -0.1 } });
   db.users.push({ id: 'usr-1', orgId: 'org-a', name: 'Agency Agent', role: 'Agent', createdAt: 1 }); // the agent the context and the agreement name, and the case's owner
   db.recruitmentCases.push({ id: 'case-1', orgId: 'org-a', playerId: 'pl-1', playerName: 'Adult Player', vacancyId: null, ownerUserId: 'usr-1', ownerName: 'Agency Agent', stage: 'identified', priority: 'medium', deadline: null, restricted: false, assignments: [], tasks: [], approvals: [], decision: null, links: { requestIds: [], trialIds: [], signingId: null }, createdAt: 1, history: [], room: null, decisionDraft: null, transactionHandoff: null, budget: null, subjectRemovedAt: null }); // the M12 case literal (the typed table refuses a partial one)
-  // S11b-2: the context is a row of the compliance records, planted in the writer's whole literal.
+  // The context is a row of the compliance records, planted in the writer's whole literal.
   db.complianceContexts = [{ id: 'ctx-1', agencyOrgId: 'org-a', agentUserId: 'usr-1', type: 'transfer', jurisdictions: ['ENG'], parties: [], representations: [], resolvedFacts: [], reEvaluationPending: false, reviewRejectedAt: null, status: 'open', openedAt: 1, closedAt: null, keys: {}, rev: 1, revAt: 1, revBy: null, history: [] }];
-  // S11a: the agreement is a row of the agent core, planted in the writer's whole literal (the typed create refuses a partial one).
+  // The agreement is a row of the agent core, planted in the writer's whole literal (the typed create refuses a partial one).
   db.representationAgreements = [{ id: 'rep-1', agentUserId: 'usr-1', agencyOrgId: 'org-a', clientKind: 'player', clientId: 'pl-1', jurisdiction: 'ENG', exclusive: false, termMonths: 12, startAt: 1, endAt: null, status: 'active', proposedAt: 1, confirmedAt: 1, confirmedBy: { kind: 'player', id: 'pl-1' }, declinedAt: null, terminatedAt: null, terminatedBy: null, terminationReasonCode: null, disputedAt: null, disputeReason: null, shareWithAgencyStaff: false, scope: ['transfer'], policyVersions: [], keys: {}, createdAt: 1, rev: 1, revAt: 1, revBy: null, history: [] }];
-  // S11c: a partial transaction record is not a row the typed table can hold: the repository refuses it, naming it.
+  // A partial transaction record is not a row the typed table can hold: the repository refuses it, naming it.
   let refusedPartial = null;
   try { fixture(mkdtempSync(path.join(tmpdir(), 'sbx-m26p-partial-')), { ...db, agentTransactions: [{ id: 'atx-partial' }] }); } catch (e) { refusedPartial = e; }
   neg(refusedPartial?.code === 'AGENT_TRANSACTIONS_INPUT_INVALID' && /atx-partial/.test(refusedPartial.message), 'a partial transaction record is refused by the repository, naming it — nothing is written');
   fixture(dir, db);
   const back = readRecords(dir);
-  neg(STORES.every((s) => back[s].length === 0), 'no transaction row appears (S11c: the stores are tables, empty until a route writes one)');
+  neg(STORES.every((s) => back[s].length === 0), 'no transaction row appears (the tables are empty until a route writes one)');
   const c = back.recruitmentCases.find((x) => x.id === 'case-1');
-  neg(c && c.stage === 'identified' && c.transactionHandoff === null && !('transactionId' in c), 'the recruitment case did not become a transaction and gained no transaction field (§3)');
+  neg(c && c.stage === 'identified' && c.transactionHandoff === null && !('transactionId' in c), 'the recruitment case did not become a transaction and gained no transaction field');
   const ctx = back.complianceContexts.find((x) => x.id === 'ctx-1');
   neg(ctx && ctx.status === 'open' && !ctx.transactionId && ctx.rev === 1, 'the compliance context is not reinterpreted as a transaction either');
   neg(back.representationAgreements.length === 1 && back.representationAgreements[0].status === 'active' && back.representationAgreements[0].rev === 1 && back.players.some((p) => p.id === 'pl-1'), 'no agreement and no player row was touched');
@@ -205,7 +188,7 @@ section('4 — a real workspace survives a restart byte for byte');
   ok(snap && Number(recordsAtStop.at(-1)?.id.slice(0, 4)) === SCHEMA_VERSION && snap.agentTransactions.length === 1 && snap.transactionRepresentations.length === 1 && snap.transactionDocuments.length === 2, `the file holds one transaction, one representation binding and two document versions, at schema ${SCHEMA_VERSION}`);
   const row = snap.agentTransactions[0];
   ok(row.status === 'ON_HOLD' && row.holdReasonCode === 'awaiting_document' && row.parties.length === 2 && row.parties.every((p) => p.confirmedAt), 'the status, its reason code and both party confirmations are on disk');
-  // S11c: the snapshot names its evaluation row ('<context>#<n>'); the policy versions are that evaluation's own.
+  // The snapshot names its evaluation row ('<context>#<n>'); the policy versions are that evaluation's own.
   const ctxRow = snap.complianceContexts.find((c) => c.id === row.contextId);
   const evaluation = ctxRow?.evaluations[Number(String(row.compliance?.evaluationId).split('#').pop()) - 1];
   ok(row.compliance?.evaluationId?.startsWith(`${row.contextId}#`) && row.compliance.partyRevision && evaluation?.policyVersions.length >= 1, 'the compliance snapshot reference — the evaluation row of its context, the party revision and (through the evaluation) the policy versions — is on disk');
@@ -250,7 +233,7 @@ section('5 — corruption on disk is contained and named by its effect, never re
   const dir = globalThis.LIVE_DIR;
   const TX = globalThis.LIVE_TX;
   const db = readRecords(dir);
-  // S11c: three of the old corruptions are rows the typed tables cannot hold — the repository refuses each, naming it,
+  // Three corruptions are rows the typed tables cannot hold — the repository refuses each, naming it,
   // and writes nothing (the fixture is one unit of work): (a) a transaction whose compliance context is gone, (b) a
   // document whose transaction is gone, (c) a status nobody wrote.
   const refusedWrite = (collections) => { try { fixture(dir, collections); return null; } catch (e) { return e; } };
@@ -263,8 +246,8 @@ section('5 — corruption on disk is contained and named by its effect, never re
   const odd = refusedWrite({ agentTransactions: [copy({ id: 'atx-odd', status: 'HALF_WRITTEN' })] });
   neg(odd?.code === 'AGENT_TRANSACTIONS_INPUT_INVALID' && /atx-odd\.status/.test(odd.message), `(c) a status nobody wrote is refused by the repository, naming the row (${odd?.message})`);
   neg(stableJson(readRecords(dir)) === stableJson(db), 'and nothing of the refused writes is on disk');
-  // A policy version published for the jurisdiction flags the transaction's compliance context (P5.6C). S11c: the
-  // transaction reads that flag — its snapshot is POLICY_CHANGED and authorises nothing until it is re-evaluated.
+  // A policy version published for the jurisdiction flags the transaction's compliance context. The transaction
+  // reads that flag — its snapshot is POLICY_CHANGED and authorises nothing until it is re-evaluated.
   const ctxId = db.agentTransactions[0].contextId;
   plant(dir, (L) => L.complianceRecords.contexts.update(ctxId, (d) => { d.reEvaluationPending = true; d.history.push({ id: 'aud-plant-policy', at: Date.now(), action: 'compliance_context_policy_changed', by: { kind: 'system', userId: null, name: 'policy publication' }, detail: { policyVersions: ['jp-eng-2026-27-1'] } }); }));
   const sp = await bootOn(dir, globalThis.LIVE_PORT + 3);

@@ -1,18 +1,18 @@
 /**
- * M21 — Development Hub: the vocabulary, the limits, and the rules that are
+ * Development Hub: the vocabulary, the limits, and the rules that are
  * pure functions of a record.
  *
  * Everything in this file is data or a pure function. No route, no store, no
- * clock beyond the one it is handed. That matters because the whole milestone
- * rests on a small number of decisions that must be readable in one place and
+ * clock beyond the one it is handed. That matters because the hub rests on a
+ * small number of decisions that must be readable in one place and
  * asserted at boot rather than discovered in production:
  *
  *   • what a Plan, a Goal and an Action may be — status by status
  *   • which transitions are possible, so "invalid transition" is a refusal
  *     with a reason rather than a silently accepted write
- *   • what M21 will never build
+ *   • what the hub will never build
  *
- * The last one is the point of the milestone. ScoutBox documents and
+ * The last one is the point. ScoutBox documents and
  * coordinates development; it does not claim to measure a player's worth,
  * ceiling or future. There is no Development Score here and no place to put
  * one: `assertDevelopmentVocabulary()` runs at boot and refuses to start a
@@ -33,7 +33,7 @@ export const DEVELOPMENT_PRINCIPLE =
 // ---------------------------------------------------------------- never built
 
 /**
- * Names M21 refuses. Not a lint list — `assertDevelopmentVocabulary()` scans
+ * Names the hub refuses. Not a lint list — `assertDevelopmentVocabulary()` scans
  * every label this module exports against it at boot, and the routes refuse a
  * client-supplied field whose name matches one.
  *
@@ -83,13 +83,13 @@ export const REFUSED_CLIENT_FIELDS = Object.freeze([
  * Who owns a Plan. Exactly two, and ownership is fixed for the life of the
  * record: a player's own plan is never "handed to" a club, and a club's plan
  * is never adopted by the player. A club that wants its own plan creates one;
- * a player who wants a club to see theirs shares it (§8).
+ * a player who wants a club to see theirs shares it.
  */
 export const PLAN_OWNER_KINDS = Object.freeze(['player', 'org']);
 
 /**
  * Visibility is stated at creation and never derived from who created the
- * record (§9). The two look identical for a coach-created plan and mean
+ * record. The two look identical for a coach-created plan and mean
  * opposite things:
  *
  *   org_private       the club's own working plan; the player does not see it
@@ -117,9 +117,9 @@ export const VISIBILITY_BY_OWNER = Object.freeze({
 });
 
 /**
- * Plan status. Deliberately unlike M17's `ROOM_STATUSES`, which does contain
- * `closed`: a Room closes, a plan does not, and §10 asks for the ambiguity to
- * be removed rather than copied.
+ * Plan status. Deliberately unlike the rooms' `ROOM_STATUSES`, which does
+ * contain `closed`: a Room closes, a plan does not, and the ambiguity is
+ * removed rather than copied.
  */
 export const PLAN_STATUSES = Object.freeze(['draft', 'active', 'paused', 'completed', 'archived']);
 export const PLAN_TERMINAL = Object.freeze(['archived']);
@@ -135,14 +135,12 @@ export const PLAN_TRANSITIONS = Object.freeze({
 // -------------------------------------------------------------- goal vocabulary
 
 /**
- * Goal categories (§13).
+ * Goal categories.
  *
- * `availability / rehabilitation` is DELIBERATELY ABSENT. §13 permits it
- * "ONLY if repository already supports safely", and the repository does not:
- * there is no medical vocabulary, no consent model for health data and no
- * retention rule for it anywhere in ScoutBox. Adding the category would create
- * a place for a coach to type a diagnosis into a record built for football
- * coaching. The gap is documented rather than filled.
+ * `availability / rehabilitation` is DELIBERATELY ABSENT: there is no medical
+ * vocabulary, no consent model for health data and no retention rule for it
+ * anywhere in ScoutBox. Adding the category would create a place for a coach
+ * to type a diagnosis into a record built for football coaching.
  */
 export const GOAL_CATEGORIES = Object.freeze([
   'technical', 'tactical', 'physical', 'psychological',
@@ -176,12 +174,12 @@ export const GOAL_TRANSITIONS = Object.freeze({
 });
 
 /**
- * Structured reasons a goal is blocked (§48).
+ * Structured reasons a goal is blocked.
  *
  * `injury_or_unavailable` is ABSENT for the same reason the availability
- * category is: §48 allows it only "if safe current vocabulary exists", and it
- * does not. A blocked goal can say `other` with the author's own words, which
- * keeps health information out of a structured, filterable field.
+ * category is: there is no safe vocabulary for it. A blocked goal can say
+ * `other` with the author's own words, which keeps health information out of
+ * a structured, filterable field.
  */
 export const BLOCK_REASONS = Object.freeze([
   'waiting_for_assessment', 'schedule', 'facility', 'coach_review', 'other',
@@ -189,7 +187,7 @@ export const BLOCK_REASONS = Object.freeze([
 
 /**
  * The sentence that travels with every achieved goal, in the payload, so no
- * surface can render the word without it (§16).
+ * surface can render the word without it.
  */
 export const ACHIEVED_MEANING =
   'Achieved means the plan owner or reviewer marked this agreed objective complete. It is not a ScoutBox finding that the player permanently possesses this ability.';
@@ -217,8 +215,8 @@ export const ASSIGNEE_KINDS = Object.freeze(['player', 'guardian', 'org_user']);
 // ---------------------------------------------------------- evidence vocabulary
 
 /**
- * Canonical stores a development link may point at (§23). Every one of these
- * is READ; none is written by M21, and the link record carries no content
+ * Canonical stores a development link may point at. Every one of these
+ * is READ; none is written by the hub, and the link record carries no content
  * from any of them — only `{sourceType, sourceId}`.
  */
 export const EVIDENCE_SOURCES = Object.freeze([
@@ -255,7 +253,7 @@ export const SHARE_SCOPES = Object.freeze(['summary', 'goals', 'actions']);
 // ----------------------------------------------------------------------- limits
 
 /**
- * Bounds, in one table (§106). These bound abuse, not ambition: a plan with
+ * Bounds, in one table. These bound abuse, not ambition: a plan with
  * twenty goals is already a plan nobody will work through, and the refusal
  * says so rather than truncating silently.
  */
@@ -277,7 +275,7 @@ export const M21_LIMITS = Object.freeze({
 // ------------------------------------------------------------- the goal library
 
 /**
- * A small, fixed list of common development themes (§67). It is identical for
+ * A small, fixed list of common development themes. It is identical for
  * every player and every position, it is offered as text to paste into a title,
  * and it is not a recommendation. Nothing here reads the player, so nothing
  * here can be mistaken for a personalised suggestion.
@@ -296,7 +294,7 @@ export const GOAL_LIBRARY_NOTE =
   'Common development themes. The same list is shown to everyone — it is not a recommendation and it does not read this player’s record.';
 
 /**
- * Plan templates (§65/§66): structure only. A template contains headings, not
+ * Plan templates: structure only. A template contains headings, not
  * advice, and makes no claim about what suits a position or a player.
  */
 export const PLAN_TEMPLATES = Object.freeze([
@@ -319,7 +317,7 @@ export const TEMPLATE_NOTE =
 
 // ------------------------------------------------------------------ pure helpers
 
-/** UTC calendar day — the M18.2 date semantics, reused, not re-derived (§87). */
+/** UTC calendar day — the brief date semantics, reused, not re-derived. */
 export const utcDay = (ms) => {
   const d = new Date(ms);
   return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
@@ -331,7 +329,7 @@ export const daysBetween = (a, b) => Math.round((utcDay(b) - utcDay(a)) / 86_400
 /**
  * Due state for a dated thing. Derived at READ time, every time.
  *
- * There is no scheduler in this build (§84/§85). Nothing wakes up at midnight
+ * There is no scheduler in this build. Nothing wakes up at midnight
  * to mark an action overdue, and nothing will send a reminder to a player who
  * does not open the app. This function is the entire mechanism, and the copy
  * that renders it says so rather than implying a background service.
@@ -345,7 +343,7 @@ export function dueState(dueAt, now) {
   return { state: 'upcoming', days };
 }
 
-/** Review due state from `nextReviewAt` (§86). Same read-time honesty. */
+/** Review due state from `nextReviewAt`. Same read-time honesty. */
 export function reviewDueState(nextReviewAt, now) {
   const d = dueState(nextReviewAt, now);
   if (d.state === 'no_due_date') return { state: 'no_review_scheduled', days: null };
@@ -354,7 +352,7 @@ export function reviewDueState(nextReviewAt, now) {
   return { state: 'review_upcoming', days: d.days };
 }
 
-/** Bounded, trimmed text. Returns null for empty; never truncates silently; refuses anything that is not text (S12a). */
+/** Bounded, trimmed text. Returns null for empty; never truncates silently; refuses anything that is not text. */
 export function boundedText(raw, max, { field }) {
   if (raw == null || raw === '') return { value: null };
   if (typeof raw !== 'string') return { error: 'FIELD_INVALID', field, detail: `${field} is text.` };
@@ -368,16 +366,16 @@ export function boundedText(raw, max, { field }) {
 
 /**
  * A date the caller supplied, as an instant. Rejects nonsense rather than
- * repairing it. M23 P5.7 (T-7): a calendar day (`YYYY-MM-DD`, read as the
- * start of that UTC day), an ISO 8601 date-time WITH an offset or Z, or an
- * integer timestamp. A bare local time and an ambiguous `02/03/2026` used to
- * be read in the server's zone and the engine's locale; both are refused now.
+ * repairing it. Accepted: a calendar day (`YYYY-MM-DD`, read as the start of
+ * that UTC day), an ISO 8601 date-time WITH an offset or Z, or an integer
+ * timestamp. A bare local time and an ambiguous `02/03/2026` are refused:
+ * they would be read in the server's zone and the engine's locale.
  */
 export function parseDate(raw, { field }) {
   if (raw == null || raw === '') return { value: null };
   const p = parseDateOrInstant(raw, { dayEdge: 'start' });
   if (!p.ok) return { error: 'DATE_INVALID', field, detail: `${field} is not a date (${p.why}).`, expected: p.expected };
-  // S12a: an instant is stored as an integer column; one beyond the safe range is refused, not stored.
+  // An instant is stored as an integer column; one beyond the safe range is refused, not stored.
   if (!Number.isSafeInteger(p.ms)) return { error: 'DATE_INVALID', field, detail: `${field} is not a date (out of range).` };
   return { value: p.ms };
 }
@@ -389,7 +387,7 @@ export function transitionAllowed(table, from, to) {
 }
 
 /**
- * Action counts, as counts (§46). The shape deliberately has no ratio field:
+ * Action counts, as counts. The shape deliberately has no ratio field:
  * a client renders "3 of 5 actions completed", and there is no number here
  * that reads as a percentage of a player.
  */
@@ -416,7 +414,7 @@ export function completionPhrase(counts) {
 /**
  * Refuse to boot a development server whose own vocabulary has drifted.
  *
- * This is the M20 pattern (`assertMetricRegistry`) applied to the risk M21
+ * The same pattern as `assertMetricRegistry`, applied to the risk the hub
  * actually carries. It checks three things:
  *
  *   1. no label, category, status or template title contains a forbidden name;
@@ -501,7 +499,7 @@ export function assertDevelopmentVocabulary({ mode = process.env.NODE_ENV ?? 'de
 }
 
 /**
- * Refuse a client body that tries to send something the server derives (§93).
+ * Refuse a client body that tries to send something the server derives.
  * Returns the offending keys; the caller answers 400 rather than stripping
  * them, because a client that sent `targetMet` believes it is authoritative
  * and needs to be told it is not.
@@ -513,7 +511,7 @@ export function refusedClientFields(body) {
 }
 
 /**
- * Walk a response payload and report any key that names something M21 refuses
+ * Walk a response payload and report any key that names something the hub refuses
  * to compute. Used by the acceptance suite against real responses, so "there
  * is no Development Score" is verified on the wire rather than asserted in a
  * document. Arrays and nested objects are walked; values are never inspected.

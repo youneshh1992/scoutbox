@@ -1,4 +1,4 @@
-// M15 player/guardian data surface — the Football Passport.
+// Player/guardian data surface — the Football Passport.
 // The passport arrives as ONE server-built, viewer-filtered projection;
 // the app renders it and never reconstructs history from raw endpoints.
 // Adults manage their own sharing; a minor's sharing is guardian-managed

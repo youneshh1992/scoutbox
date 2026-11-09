@@ -1,7 +1,6 @@
-// M15-Nav / M23 P2.5 LIVE browser journeys (N1–N12) — real backend, separate
-// contexts. P2.5 regrouped the sidebar (accordion + groups, no desktop tab
-// strip, one-row top bar with an h1) and restructured the Player tabs. Every
-// journey below drives the REAL interface; nothing reads the config to
+// LIVE navigation journeys (N1–N12) — real backend, separate contexts. The
+// sidebar is grouped (accordion + groups, no desktop tab strip, one-row top bar
+// with an h1), and so are the Player tabs. Every journey below drives the REAL interface; nothing reads the config to
 // decide what "should" be there.
 //   N1.  Ordinary scout: compact sidebar, NO Organisation; Recruitment opens
 //        on Players; the accordion lists its pages by group; no desktop tab
@@ -99,7 +98,7 @@ async function clubLogin(ctx, name, role) {
   return page;
 }
 const goHash = async (page, id) => { await page.evaluate((h) => { location.hash = h; }, `#/${id}`); await page.waitForTimeout(300); };
-// P2.5: the page title is the top bar's h1 — the ONE title on the page.
+// The page title is the top bar's h1 — the ONE title on the page.
 const title = async (page) => (await page.locator('.topbar h1.page-title').innerText()).replace(/\s+/g, ' ').trim();
 const sectionLabels = (page) => page.locator('nav.sidebar button.nav-section').allInnerTexts();
 const activeChild = async (page) => (await page.locator('nav.sidebar .nav-child.active').allInnerTexts()).join('|');
@@ -122,7 +121,7 @@ const scout = await clubLogin(scoutCtx, 'Noa Winter', 'First-Team Scout');
   if (!(await title(scout)).includes('Players')) fail(`N1: Recruitment must open on Players (${await title(scout)})`);
   const groups = await scout.locator('nav.sidebar .nav-sec.open .nav-group-label').allInnerTexts();
   if (groups.length < 7 || groups[0].toLowerCase() !== 'discover') fail(`N1: Recruitment accordion groups (${groups.join('|')})`);
-  // M24D — one group open at a time: the Discover pages are listed, the other
+  // One group open at a time: the Discover pages are listed, the other
   // six groups are folded headings, so the sidebar never shows twenty links.
   const pages = await scout.locator('nav.sidebar .nav-sec.open .nav-child').count();
   if (pages < 3 || pages > 5) fail(`N1: Recruitment lists only the open group's pages in the sidebar (${pages})`);
@@ -295,7 +294,7 @@ const lead = await clubLogin(leadCtx, 'Maria Keane', 'Head of Recruitment');
   const drawer = await scout.evaluate(() => { const s = document.querySelector('nav.sidebar'); const cs = getComputedStyle(s); return { dir: cs.flexDirection, w: Math.round(s.getBoundingClientRect().width) }; });
   if (drawer.dir !== 'column' || drawer.w < 200) fail(`N5: the drawer must be a column (${JSON.stringify(drawer)})`);
   say('N5: the drawer is a vertical list, not a row');
-  // P2.5 closure: in the drawer a section tap EXPANDS the section (its pages
+  // In the drawer a section tap EXPANDS the section (its pages
   // are why the drawer was opened); a page tap navigates and closes it.
   const recBtn = scout.locator('nav.sidebar button.nav-section:has-text("Recruitment")');
   if ((await recBtn.getAttribute('aria-expanded')) !== 'true') await recBtn.click(); // this context opened Recruitment earlier; a tap toggles
@@ -469,8 +468,8 @@ const grassCtx = await browser.newContext({ viewport: { width: 1280, height: 800
   say(`N8: all ${toured + 1} legacy T&S destinations remain reachable through the grouped navigation`);
 }
 
-// ===================== N13 — a phone strip with More: Intelligence (M24D)
-// Pipeline is four pages and shows whole since M24D; Intelligence's four names
+// ===================== N13 — a phone strip with More: Intelligence
+// Pipeline is four pages and shows whole; Intelligence's four names
 // fit a 360px row only two at a time, so it is the group that carries the
 // explicit More menu. Same mechanism, same guarantees, exercised there.
 {
@@ -529,7 +528,7 @@ const grassCtx = await browser.newContext({ viewport: { width: 1280, height: 800
   await scout.waitForTimeout(400);
   if ((await title(scout)) !== 'Recruitment / Nobody Missed' || !(await strip()).more.active) fail('N13: refresh keeps the More-held page active');
   say('N13: direct refresh on a More-held page keeps the page and the active state');
-  // Browser history: in-app clicks replace the hash (M15-Nav: Back leaves the
+  // Browser history: in-app clicks replace the hash (Back leaves the
   // workspace, it does not replay every tab), so the history walk uses the
   // three deep links — Matching, Watchlists, Nobody Missed — and checks the strip follows.
   await goHash(scout, 'recruitment/matching'); await goHash(scout, 'recruitment/watchlists'); await goHash(scout, 'recruitment/nobody-missed');
@@ -550,7 +549,7 @@ const grassCtx = await browser.newContext({ viewport: { width: 1280, height: 800
   if ((await scout.locator('nav.subnav [role="menu"]').count()) !== 0) fail('N13: outside click closes the menu');
   say('N13: an outside click closes the menu');
   // The phone strip goes through the same unsaved-change guard as every exit
-  // (M24D: Briefs sits in Outreach beside Campaigns — a two-page strip).
+  // (Briefs sits in Outreach beside Campaigns — a two-page strip).
   await goHash(scout, 'briefs');
   await scout.click('button:has-text("New brief")');
   await scout.waitForSelector('[aria-label="Recruitment brief criteria"]', { timeout: 15000 });
@@ -615,7 +614,7 @@ const TASKS = [
   ['Trials', 'Recruitment', 'Trials & Reports', 'Recruitment / Trials & Reports'],
   ['Analytics', 'Recruitment', 'Director Dashboard', 'Recruitment / Director Dashboard'],
 ];
-// M24D — the group each task's page sits in (one group open at a time).
+// The group each task's page sits in (one group open at a time).
 const GROUP_OF = { Players: 'Discover', 'Dynamic Watchlists': 'Intelligence', Cases: 'Pipeline', 'Recruitment Rooms': 'Pipeline', 'Second Look': 'Intelligence', 'Trials & Reports': 'Evaluation', 'Director Dashboard': 'Analytics' };
 const matrix = {};
 // Fresh state for every task: reload on Home. Accordion state is not persisted,
@@ -632,7 +631,7 @@ const fresh = async (p) => { await goHash(p, 'feed'); await p.reload(); await p.
     await p.click(`nav.sidebar button.nav-section:has-text("${section}")`); n++;
     await p.waitForTimeout(250);
     if ((await title(p)) !== expect) {
-      // M24D: one group open at a time — a page in a folded group is one more
+      // One group open at a time — a page in a folded group is one more
       // tap away, through its visible group heading.
       let child = p.locator(`nav.sidebar .nav-sec.open .nav-child:text-is("${page}")`);
       if (!(await child.isVisible())) {
@@ -712,7 +711,7 @@ const fresh = async (p) => { await goHash(p, 'feed'); await p.reload(); await p.
 
 // ======================= N16 — accessibility tree: groups are not links
 {
-  // M24D: a group heading is a disclosure button — aria-expanded and
+  // A group heading is a disclosure button — aria-expanded and
   // aria-controls on a real <button> — never a link and never a destination
   // (no aria-current, no href, no navigation).
   await goHash(scout, 'search');
@@ -758,7 +757,7 @@ const fresh = async (p) => { await goHash(p, 'feed'); await p.reload(); await p.
   say('N7: player app — Home / Football / Opportunities / Inbox / You; Profile and Upload stay routes (href: null); Football has page tabs and + Add evidence (browser journeys live in the player suites)');
 }
 
-// ================= N17 — the login screen fits a phone (M23 P3 closure, D4)
+// ================= N17 — the login screen fits a phone
 //
 // D4: at 390px the club login's organisation grid (four 240px cards, no
 // wrap) and enter row (name + password + role + button, no wrap) widened the
@@ -794,7 +793,7 @@ for (const width of [390, 360]) {
     if (!box || box.left < 0 || box.right > box.iw) fail(`N17 ${width}px: ${sel} is clipped (${JSON.stringify(box)})`);
   }
   // Keyboard: name → password → (show/hide) → role → button, and the button shows its focus ring.
-  // M24C: the password field carries a show / hide control, so the walk is
+  // The password field carries a show / hide control, so the walk is
   // "Tab until the submit", at most five presses.
   await page.focus('.enter-row input');
   let focus = null;
@@ -811,7 +810,7 @@ for (const width of [390, 360]) {
   say(`N17 ${width}px: the login fits (innerWidth ${m.iw} = scrollWidth ${m.sw}), every field and the button are inside the viewport, keyboard login works`);
   await ctx.close();
 }
-// Desktop (M24C): the two-panel authentication card — the introduction on
+// Desktop: the two-panel authentication card — the introduction on
 // the left, the form on the right, the fields stacked in the form, the card
 // no wider than ~1000px and nothing widening the document.
 {

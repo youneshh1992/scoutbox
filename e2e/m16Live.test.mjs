@@ -1,4 +1,4 @@
-// M16 LIVE browser journeys (B1–B12) — real backend, separate contexts,
+// LIVE browser journeys (B1–B12) — real backend, separate contexts,
 // a fake camera device (Chromium fake-media flags) so the live Box Cam
 // capture flow runs end to end. The web-limited provider verifies presence
 // + active duration; the deep integrity/abuse coverage lives in
@@ -79,10 +79,10 @@ await player.locator('text=Enter').nth(0).click();          // Kola (adult)
 await player.waitForSelector('text=Your visibility right now', { timeout: 20000 });
 await player.click('a[href="/football"]');
 await player.getByRole('tab', { name: 'Box Cam' }).click();
-await player.waitForSelector('[data-testid="boxcam-start"]', { timeout: 20000 }); // M24F.4 — the root is session-led: the hero, one row, Start session
+await player.waitForSelector('[data-testid="boxcam-start"]', { timeout: 20000 }); // the root is session-led: the hero, one row, Start session
 say('B-live: player Football tab shows Box Cam with its Start session action');
 {
-  await player.getByText('Start session', { exact: true }).click(); // M24F.4 — the primary action reads "Start session"
+  await player.getByText('Start session', { exact: true }).click(); // the primary action reads "Start session"
   // Box Cam Ready Check against the fake camera, then start.
   await player.waitForSelector('text=Box Cam Ready Check', { timeout: 20000 });
   say('B-live: Box Cam Ready Check runs against the (fake) camera');
@@ -156,10 +156,10 @@ await admin.goto('http://localhost:8594/');
 await admin.fill('input[type="password"]', 'scoutbox-admin');
 await admin.click('button:has-text("Enter")');
 await admin.waitForSelector('nav.sidebar', { timeout: 20000 });
-await admin.click('nav.sidebar button:has-text("Evidence")'); // M24D: Passport, Box Cam and Trust left Cases for Evidence
+await admin.click('nav.sidebar button:has-text("Evidence")'); // Passport, Box Cam and Trust left Cases for Evidence
 await admin.click('nav.subnav button:has-text("Box Cam")');
 await admin.waitForSelector('text=Box Cam disputes', { timeout: 15000 });
-await admin.locator('.f-about > summary').first().click().catch(() => {}); // M24F.3 — the statement sits behind About
+await admin.locator('.f-about > summary').first().click().catch(() => {}); // the statement sits behind About
 const adminBody = await admin.locator('body').innerText();
 if (!adminBody.includes('never fabricates')) fail('B12-live: T&S Box Cam tab must state results are never fabricated');
 say('B12-live: T&S Box Cam case tab reachable and states results are server-derived, never fabricated');

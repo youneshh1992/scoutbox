@@ -1,10 +1,7 @@
 /**
- * Message threads (S7d) get their own tables: channels, messages and message_attachments.
- * REGISTERED in DATA_MIGRATIONS. `up()` is the DDL only: the tables start empty and are written
- * through the repository. Amended in place in S14c (6 November 2026): the request key (the table
- * 0015 creates), the activity time that orders the inboxes, the sender as typed columns by kind
- * (staff a key to org_users), length CHECKs and the retry id unique per thread and sender; re-seed a
- * development database.
+ * Message threads: channels, messages and message_attachments. A channel names its recruitment request with a real
+ * key (the table 0015 creates); the sender is typed columns by kind (staff a key to org_users); the retry id is
+ * unique per thread and sender.
  */
 import { migrationApplied } from '../database.mjs';
 import { OUTBOX_PUSH_MIGRATION } from '../outboxPush.mjs';

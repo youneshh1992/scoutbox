@@ -1,14 +1,12 @@
 /**
- * M20 — the reporting context and the dashboard assembly.
+ * Recruitment analytics: the reporting context and the dashboard assembly.
  *
  * Two things happen here and nothing else.
  *
- * **One pass, then many metrics.** ScoutBox's store is a snapshot store: the
- * working set is in memory and there is no query planner to lean on. Twenty
- * metrics computed independently would be twenty linear scans of every
- * recruitment collection. So each collection is filtered to this organisation
- * exactly once, projected to the few fields the metrics declared, indexed, and
- * then every family reads from that.
+ * **One pass, then many metrics.** Twenty metrics computed independently would
+ * be twenty reads of every recruitment collection. So each collection is read
+ * for this organisation exactly once, projected to the few fields the metrics
+ * declared, indexed, and then every family reads from that.
  *
  * **Each family fails alone.** A dashboard that drops a panel when one
  * projection throws is lying about coverage — the director reads five panels
@@ -45,7 +43,7 @@ export { ROOM_PRIORITIES };
 /**
  * Project one Room to the fields the metric registry declared, and no others.
  *
- * `history` is kept because every duration in M20 is derived from it, but the
+ * `history` is kept because every analytics duration is derived from it, but the
  * projection strips `byId` and `byName` off every entry: the analytics layer
  * must not be able to attribute a status change to a person even by accident,
  * because that is the raw material of a leaderboard.
@@ -69,10 +67,9 @@ function projectRoom(c) {
 }
 
 /**
- * The decision fields analytics may read. `note` and `by` are not among them.
- * P5 (D-P5-2) adds kind, state and the outcome WORD for decision_outcomes.
+ * The decision fields analytics may read. `note` and `by` are not among them;
+ * kind, state and the outcome WORD are, for decision_outcomes.
  */
-/** P5 (D-P5-2): kind, state and the outcome WORD for decision_outcomes — never the note. */
 const formalFields = (d) => ({
   kind: d.kind === 'formal' ? 'formal' : 'recommendation',
   state: d.state === 'draft' ? 'draft' : 'final',
@@ -127,8 +124,8 @@ export function buildReportingContext({
     decisionsByRoom.get(d.roomId).push(d);
   }
 
-  // S12c: the briefs, reviews, Second Look items, watchlists and their transitions come from SQL (`reads.discovery`, the
-  // data layer's discoveryReads); a context built without it (a unit fixture) has none.
+  // The briefs, reviews, Second Look items, watchlists and their transitions come from `reads.discovery`; a context
+  // built without it (a unit fixture) has none.
   const discovery = reads.discovery ?? null;
   let briefs = [...(discovery?.briefs.forOrg(orgId) ?? [])];
   if (filters.briefId) {
@@ -177,17 +174,16 @@ export function buildReportingContext({
     watchlists: discovery?.watchlists.forOrg(orgId) ?? [],
     watchlistHistory: discovery?.events.forOrg(orgId) ?? [],
     trials: reads.trials?.forOrg(orgId) ?? [],
-    // M23 P8 — the canonical records the journey funnel counts. Org-scoped and
+    // The canonical records the journey funnel counts. Org-scoped and
     // room-filtered like decisions; ids, states and instants only reach the
     // projection (the metric's `reads` declaration is asserted at boot).
-    // The contacts, offers, packages and signings come from SQL (§4.3 step 2): `reads` is the data layer's recruitmentReads; a context built
-    // without it (a unit fixture over plain collections) has none, as it had none without the collections.
+    // A context built without `reads` (a unit fixture) has none.
     contacts: (reads.contacts?.forOrg(orgId) ?? []).filter((c) => keptRoomIds.has(c.caseId)),
-    assessments: reads.assessments?.forOrg(orgId) ?? [], // S9b: SQL
+    assessments: reads.assessments?.forOrg(orgId) ?? [],
     offers: (reads.offers?.forOrg(orgId) ?? []).filter((o) => keptRoomIds.has(o.caseId)),
     packages: (reads.signingPackages?.forOrg(orgId) ?? []).filter((p) => keptRoomIds.has(p.caseId)),
     signings: reads.signings?.forOrg(orgId) ?? [],
-    // M23 P4B: trial invitations (requests of type trial tied to a case) for
+    // Trial invitations (requests of type trial tied to a case) for
     // the process counts. Ids, states and times only reach the projection.
     requests: (reads.requests?.forOrg(orgId) ?? []).filter((r) => r.type === 'trial'),
     typicalDaysToTerminal,
@@ -307,7 +303,7 @@ function buildTrend(ctx) {
  * family throwing leaves the others intact and produces a named failure rather
  * than a silently shorter page.
  *
- * `fault` is the M18.2 fault-injection hook, so the partial-failure path is
+ * `fault` is the audit log's fault-injection hook, so the partial-failure path is
  * exercised by a test rather than asserted in prose.
  */
 export function buildDashboard(ctx, { families = FAMILY_IDS, stallDays = DEFAULT_STALL_DAYS, fault = null } = {}) {
@@ -355,7 +351,7 @@ export function buildDashboard(ctx, { families = FAMILY_IDS, stallDays = DEFAULT
     families: wanted,
     partial: failed.length > 0,
     unavailable: failed,
-    // The sentence the whole milestone is built around. It is on the wire, not
+    // The sentence the whole analytics page is built around. It is on the wire, not
     // only in the client, so an integrator cannot strip it by accident.
     note: 'These figures measure your recruitment process — how work moves, how long it takes and what is waiting. They do not measure any player’s ability or potential, and they do not measure any colleague’s performance.',
     data: out,

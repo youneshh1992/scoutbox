@@ -1,5 +1,5 @@
 import { GuidanceNote } from './InformationRows';
-// M16.2 — the ScoutBox Trust Score surface for the player/guardian app.
+// The ScoutBox Trust Score surface for the player/guardian app.
 //
 // The score answers one question: how strongly is this player's football
 // record supported by trustworthy, current, attributable evidence? It is not
@@ -14,7 +14,7 @@ import { GuidanceNote } from './InformationRows';
 // Everything shown is derived server-side and rendered verbatim: this screen
 // never computes, adjusts or predicts a score.
 //
-// M24F.3 — the root is the score, the band and one line; the derivation, the
+// The root is the score, the band and one line; the derivation, the
 // strengths, the gaps, the policy version and the demo note are one tap away
 // under "View breakdown". The disclaimer still travels with the number: it is
 // the first line of the breakdown and the accessible description of the score.

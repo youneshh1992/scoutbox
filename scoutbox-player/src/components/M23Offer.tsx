@@ -1,8 +1,8 @@
 import { GuidanceNote } from './InformationRows';
-// M23 P6 — the recipient's Offers: a club's proposal, exactly as issued, with
+// The recipient's Offers: a club's proposal, exactly as issued, with
 // its revision number, its expiry and its documents. Accepting or declining
 // is the recipient's own act, behind a second explicit step so it cannot be
-// triggered by accident (§46). An acceptance is NOT a signing, and the screen
+// triggered by accident. An acceptance is NOT a signing, and the screen
 // says so every time it matters.
 //
 // A minor's own device shows nothing: in this build no Offer is issued to a
@@ -37,7 +37,7 @@ const keyFor = (oid: string, rid: string, what: string) => `of-${what}-${oid}-${
 
 export type OfferView = 'all' | 'offer' | 'documents' | 'response';
 
-// M24B — one read, three views: the Offer (terms + your act), its documents, your answer and sharing.
+// One read, three views: the Offer (terms + your act), its documents, your answer and sharing.
 export function OfferSection({ actor, view = 'all' }: { actor: Actor; view?: OfferView }) {
   const colors = useColors();
   const [offers, setOffers] = useState<FamilyOffer[] | null>(null);
@@ -46,7 +46,7 @@ export function OfferSection({ actor, view = 'all' }: { actor: Actor; view?: Off
   const [reason, setReason] = useState<Record<string, string>>({});
   const [msg, setMsg] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
-  // P6.1 (stale UX): the tab keeps this screen mounted, so an Offer the club
+  // The tab keeps this screen mounted, so an Offer the club
   // paused, withdrew or revised while the player was elsewhere would stay on
   // screen as it was. Every return to the tab re-reads the list.
   const [focusTick, setFocusTick] = useState(0);
@@ -95,7 +95,7 @@ export function OfferSection({ actor, view = 'all' }: { actor: Actor; view?: Off
     finally { setBusy(null); }
   };
 
-  // M24F.4 — the Offer reads like a document, not a form: the kicker, the
+  // The Offer reads like a document, not a form: the kicker, the
   // club large, the role, the dates, the status, then Accept / Decline. Every
   // condition, message, document, earlier revision and the agent sharing sit
   // behind "View terms" (the Documents and Response views still show their
@@ -104,7 +104,7 @@ export function OfferSection({ actor, view = 'all' }: { actor: Actor; view?: Off
   const statusColor = (st: OfferStatus | null) => (tone(st) === 'red' ? colors.danger : tone(st) === 'gold' ? colors.gold : tone(st) === 'green' ? colors.accentText : colors.muted);
   return (
     <Card testID="offer-section" flush={offers.length > 0 && view === 'offer'}>
-      {/* M24F.5 — the tab already says Offer and each offer carries its own kicker; the heading only names an empty section. */}
+      {/* The tab already says Offer and each offer carries its own kicker; the heading only names an empty section. */}
       {offers.length === 0 || view !== 'offer' ? <SectionTitle>{pt('offersTitle')}</SectionTitle> : null}
       {offers.length === 0 && <View style={{ marginTop: 6 }}><Muted size={12.5}>{pt('offersNone')}</Muted></View>}
       {offers.map((o) => {

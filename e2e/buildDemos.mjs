@@ -63,7 +63,7 @@ for (const f of ['scoutbox-club-demo.html', 'scoutbox-admin-demo.html', 'scoutbo
 // commit it was built from. Never injected into connected/live builds.
 const sha = execSync('git rev-parse --short HEAD', { cwd: ROOT }).toString().trim();
 const built = new Date().toISOString().slice(0, 10);
-// M24F.5 — Inter like the product; bottom-right, and above the Player tab bar so it never covers a label.
+// Inter like the product; bottom-right, and above the Player tab bar so it never covers a label.
 const badgeFor = (bottom) => `<div data-demo-badge style="position:fixed;right:8px;bottom:${bottom}px;z-index:2147483000;background:rgba(11,18,32,.78);border:1px solid #263a5e;color:#8fa3c8;font:10px/1.4 Inter,system-ui,sans-serif;border-radius:8px;padding:2px 7px;pointer-events:none">Interactive demo — sample data · build ${sha} · ${built}</div>`;
 for (const f of ['scoutbox-club-demo.html', 'scoutbox-admin-demo.html', 'scoutbox-grassroots-demo.html', 'scoutbox-agent-demo.html', 'scoutbox-player-demo.html']) {
   const p = path.join(OUT, f);
@@ -74,7 +74,7 @@ for (const f of ['scoutbox-club-demo.html', 'scoutbox-admin-demo.html', 'scoutbo
   if (!doc.includes('data-demo-badge')) doc += badge; // no </body> — append
   fs.writeFileSync(p, doc);
 }
-// P2.5 closure — stamp each bundle with a fingerprint of the source it was
+// Stamp each bundle with a fingerprint of the source it was
 // built from (content hash, not a timestamp) and the build commit.
 // `demoFreshness.test.mjs` recomputes the fingerprint from the working tree
 // and fails when a bundle is stale.
@@ -84,7 +84,7 @@ for (const [f, { app, extra }] of Object.entries(DEMO_APPS)) {
   const p = path.join(OUT, f);
   let doc = fs.readFileSync(p, 'utf8');
   doc = doc.replace(/<meta name="sb-source-fingerprint" content="[^"]*">/g, '').replace(/<meta name="sb-build-sha" content="[^"]*">/g, '').replace(/<link rel="icon" data-sb-icon[^>]*>/g, '');
-  // M24F.5 freeze — an inline icon, so a browser serving the single-file bundle never asks the host for /favicon.ico (no 404).
+  // An inline icon, so a browser serving the single-file bundle never asks the host for /favicon.ico (no 404).
   const stamp = `<meta name="sb-source-fingerprint" content="${sourceFingerprint(app, extra)}"><meta name="sb-build-sha" content="${sha}">${ICON}`;
   doc = doc.includes('<head>') ? doc.replace('<head>', `<head>${stamp}`) : stamp + doc;
   fs.writeFileSync(p, doc);

@@ -1,8 +1,8 @@
-// M18 demo spotcheck — drives the self-contained demo bundles (the exact
+// Demo spotcheck — drives the self-contained demo bundles (the exact
 // artifact HTML) through Second Look, Nobody Missed and Recruitment Briefs.
 //
 // A passing `vite build` does NOT catch the circular-import class of bug that
-// crashed the M16.1 bundle — only actually booting the bundle does, so this
+// crashes a bundle at boot — only actually booting the bundle does, so this
 // suite loads all four bundles and fails on any page error.
 //
 // The boundaries it asserts hardest: neither system exists in the player app;
@@ -11,15 +11,11 @@
 // previous value that was never recorded reads "Previous detail unavailable",
 // never a fabricated number.
 //
-// Requires `node serve.mjs` on :8099.
+// Needs freshly built demo bundles (buildDemos.mjs).
 import { chromium } from 'playwright-core';
 import { ensureDemoHost } from './demoHost.mjs';
 
-// D7 (M22 §74-§76): this test OWNS its demo host rather than assuming one
-// is already listening. The old comment above said "Requires node
-// serve.mjs on :8099" — an instruction nobody followed, because
-// crosstab and demoOffline happened to leave a host behind. They no
-// longer do.
+// This test owns its demo host: it starts one if none is running (see demoHost.mjs).
 const demo = await ensureDemoHost();
 const BASE = demo.host.replace('localhost', '127.0.0.1');
 const EXE = process.env.CHROMIUM || '/opt/pw-browsers/chromium';
@@ -60,7 +56,7 @@ for (const [name, path] of [['club', 'club/'], ['grassroots', 'grassroots/'], ['
   await p.close();
 }
 
-// ---- 2. the three M18 deep links land on the right screen in both org apps
+// ---- 2. the three deep links land on the right screen in both org apps
 for (const [name, path] of [['club', 'club/'], ['grassroots', 'grassroots/']]) {
   const { p, errors } = await open(`${BASE}/${path}`);
   await login(p);
@@ -103,7 +99,7 @@ for (const [name, path] of [['club', 'club/'], ['grassroots', 'grassroots/']]) {
   // Nobody Missed: coverage arithmetic and the "Why shown" block.
   await p.evaluate(() => { window.location.hash = '#/recruitment/nobody-missed'; });
   await p.waitForTimeout(1200);
-  // M24F.4 — the rows are compact; the "Why shown" block opens behind the first row.
+  // The rows are compact; the "Why shown" block opens behind the first row.
   { const toggle = p.locator('[data-testid="nm-row-toggle"]').first(); if (await toggle.count()) { await toggle.click(); await p.waitForTimeout(300); } }
   body = (await p.textContent('body')) ?? '';
   ok(/Evaluation Coverage/.test(body), `${name} Nobody Missed shows Evaluation Coverage`);

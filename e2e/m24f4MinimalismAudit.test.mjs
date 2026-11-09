@@ -1,4 +1,4 @@
-// M24F.4 — static minimalism gates. No browser: the source tree is the evidence.
+// Static minimalism gates. No browser: the source tree is the evidence.
 // Run from e2e/: node m24f4MinimalismAudit.test.mjs
 //
 //  1. Player root screens carry no greeting, no day/date line, no "View your

@@ -1,16 +1,14 @@
 /**
- * M23 P5.7 — the platform's ONE temporal layer.
+ * The platform's ONE temporal layer.
  *
  * Every date or time a security, lifecycle or compliance decision depends on
- * is read through this module. It exists because P5.6F found the same defect
- * five times under five names (F-2, F-3, F-8, F-12, F-12b): a value that could
- * not be read was treated as ABSENT or as VALID, and the decision that
- * depended on it failed open. The engine is polite — `new Date(null)` is the
+ * is read through this module, so that a value that cannot be read is never
+ * treated as ABSENT or as VALID by a decision that would then fail open. The engine is polite — `new Date(null)` is the
  * epoch, `new Date('2010-02-30')` is 2 March, `Date.parse('2026-03-01T10:00')`
  * is whatever zone the server happens to run in — and politeness is exactly
  * what a permission check cannot afford.
  *
- * The principles this file freezes (M23_P57_TEMPORAL_TYPE_CONTRACT.md):
+ * The principles this file freezes:
  *
  *   A. A value is one of FOUR types and never two: DATE_ONLY (`YYYY-MM-DD`,
  *      a calendar day, no zone), UTC_INSTANT (finite integer milliseconds, or
@@ -55,7 +53,7 @@ export const TEMPORAL_ERRORS = Object.freeze({
   LOCAL_TIME_AMBIGUOUS: 'LOCAL_TIME_AMBIGUOUS',
 });
 
-/** Reasonableness bounds (§24). Nothing on this platform is dated before 1900 or after 2100. */
+/** Reasonableness bounds. Nothing on this platform is dated before 1900 or after 2100. */
 export const YEAR_MIN = 1900;
 export const YEAR_MAX = 2100;
 
@@ -184,7 +182,7 @@ function zoneSet() {
  * Current IANA names that older ICU builds still canonicalise to a legacy
  * alias. The runtime formats them correctly; it only REPORTS the old name
  * (Asia/Kolkata → Asia/Calcutta), which would fail an exact-name check and
- * refuse a real city (P4B defect D-P4B-1). Exact case on both sides.
+ * refuse a real city. Exact case on both sides.
  */
 export const MODERN_ZONE_ALIASES = Object.freeze({
   'Asia/Kolkata': 'Asia/Calcutta', 'Europe/Kyiv': 'Europe/Kiev', 'Asia/Ho_Chi_Minh': 'Asia/Saigon', 'Asia/Kathmandu': 'Asia/Katmandu',
@@ -349,7 +347,7 @@ export function ageOnMs(dob, nowMs) {
 /** A finite age or null — the reader for a JSON projection. */
 export const ageOrNull = (dob, nowMs) => { const a = ageOnMs(dob, nowMs); return Number.isFinite(a) ? a : null; };
 
-/** The oldest a living person plausibly is (§24). */
+/** The oldest a living person plausibly is. */
 export const DOB_MAX_AGE_YEARS = 120;
 
 /**

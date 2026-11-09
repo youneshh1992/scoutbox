@@ -1,8 +1,5 @@
 /**
- * The mail outbox, the push log and the device push tokens (S7c) get their own tables. Amended in place in S14d:
- * vocabulary and length CHECKs, an address on every outbox row, one row per device token.
- * REGISTERED in DATA_MIGRATIONS. `up()` is the DDL only: the tables start empty and are written
- * through the repository.
+ * The mail outbox, the push log and the device push tokens (one row per device token).
  */
 import { migrationApplied } from '../database.mjs';
 import { DISPATCHES_MIGRATION } from '../dispatches.mjs';

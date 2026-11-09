@@ -1,6 +1,6 @@
 import { DetailFact, RecordIdentity } from './RecordDetails';
 import { GuidanceNote } from './InformationRows';
-// M23 P5.6C — "Agent consent": the player's decision about an agent who would
+// "Agent consent": the player's decision about an agent who would
 // act for more than one party in the same transaction.
 //
 // The card shows exactly what the decision needs: who is asking, the agent's
@@ -120,7 +120,7 @@ export function AgentConsentSection({ playerId, isMinor }: { playerId: string; i
             )}
             {k.status === 'declined' && <GuidanceNote icon="info" size={11.5}>{pt('m25declinedNote')}</GuidanceNote>}
             {k.status === 'revoked' && <GuidanceNote icon="info" size={11.5}>{pt('m25revokedNote')}</GuidanceNote>}
-            {/* M24F.5 — a pending consent shows every word before it is given; an answered one keeps its words one tap away. */}
+            {/* A pending consent shows every word before it is given; an answered one keeps its words one tap away. */}
             {k.status === 'requested' ? <GuidanceNote icon="info" size={11}>{k.honest}</GuidanceNote> : (
               <Disclosure label={pt('m25aboutConsent')} testID={`agent-consent-about-${k.id}`}>
                 <GuidanceNote size={11.5}>{pt('m25whatItMeans')}</GuidanceNote>

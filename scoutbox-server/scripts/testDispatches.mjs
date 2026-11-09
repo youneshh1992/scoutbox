@@ -1,5 +1,4 @@
-// Delivery dispatches as typed tables with explicit writes (repositories/dispatches.mjs, migration 0010; explicit since
-// S14d): the schema (vocabulary and length CHECKs, the staff audience's organisation as a deferred RESTRICT key, the
+// Delivery dispatches as typed tables with explicit writes (repositories/dispatches.mjs, migration 0010): the schema (vocabulary and length CHECKs, the staff audience's organisation as a deferred RESTRICT key, the
 // total attempt-shape CHECK, the unique provider message id, the address of an e-mail dispatch that is not skipped);
 // the repository's writes (create, recordAttempt, patch: typed input, unknown fields and wrong types refused by field
 // and id) and SQL reads (fresh frozen records, the sweep's queries, the organisation's page newest first, the

@@ -1,5 +1,5 @@
 /// <reference types="jest" />
-// The player's recruitment navigation model (M24B/M24D): the rules the
+// The player's recruitment navigation model: the rules the
 // portals' e2e/caseNav.test.mjs asserts, and the `?cat=&tab=` resolution the
 // Opportunities screen relies on.
 import { PLAYER_NAV, PLAYER_LEGACY_SUBS, playerDefaultLocation, playerLocation, playerCategoryFor } from '../caseNav';

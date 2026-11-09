@@ -40,7 +40,7 @@ for (const app of APPS) {
 }
 
 // The two Vite apps that share scoutbox-club's dependency set (identical
-// lockfiles): Grassroots since M8, Agent since M23 P5.6B.
+// lockfiles): Grassroots and Agent.
 for (const shared of ['scoutbox-grassroots', 'scoutbox-agent']) {
   const link = path.join(ROOT, shared, 'node_modules');
   if (!fs.existsSync(link)) {

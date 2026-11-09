@@ -1,8 +1,5 @@
 /**
- * S10b — the Football Passport's own records as typed tables (migration `0024_passport`; docs/architecture/migration.md
- * §4.5 S10; sql/05_verification_passport.sql).
- *
- * Records: a player's Passport preferences (bio, positions, availability, the position history and the public
+ * The Football Passport's own records: a player's Passport preferences (bio, positions, availability, the position history and the public
  * selections), self-submitted career entries, achievements (with a verified club's confirmation), share links (token
  * hashes only) and correction requests. Every field is a typed column with its vocabulary and length CHECKs; there are no
  * JSON columns. Football dates are stored as the player gave them, to the precision given: 'YYYY', 'YYYY-MM' or
@@ -15,11 +12,11 @@
  * a row exists only once a player or guardian saved, and the position history only grows. A share's view count is
  * `shares.recordView(id)`.
  *
- * READS are SQL: no mirror, and every db.passport* name throws, naming this repository. Queries decode fresh, deep-frozen
- * records in insertion (rowid) order unless they say otherwise. Modules receive them in `verificationReads`.
+ * Queries decode deep-frozen records in insertion (rowid) order unless they say otherwise. Modules receive them in
+ * `verificationReads`.
  *
  * References. Player and guardian ids carry no key (tolerant, as recruitment, scouting and verification: an account
- * deletion leaves these rows under the old id, as before). A confirmation's organisation → orgs is an immediate RESTRICT
+ * deletion leaves these rows under the old id). A confirmation's organisation → orgs is an immediate RESTRICT
  * key; the preferences' child rows cascade with their preferences.
  */
 import { isPlainObject, ids, describe } from './recruitment.mjs';
@@ -37,7 +34,7 @@ export const SUBMITTERS = Object.freeze(['player', 'guardian']);
 export const SHARE_MODES = Object.freeze(['public', 'recruitment']);
 export const CORRECTION_TARGETS = Object.freeze(['timeline_event', 'career_entry', 'club_history', 'reference', 'trial', 'assessment', 'achievement', 'signing']);
 export const CORRECTION_OUTCOMES = Object.freeze(['corrected', 'rejected', 'referred']);
-/** Text limits: the routes shorten free text to these (as they always did); ids, codes and lists over them are refused. */
+/** Text limits: the routes shorten free text to these; ids, codes and lists over them are refused. */
 export const PASSPORT_LIMITS = Object.freeze({
   id: 80, bio: 400, orgName: 100, role: 60, note: 200, title: 120, reason: 500, resolutionReason: 400, targetId: 80,
   selection: 120, selections: 100, secondary: 3, name: 200, shareDays: { min: 1, max: 90, default: 30 },
@@ -235,14 +232,14 @@ function writePrefs(st, rec, knownHistory = new Set()) {
   rec.publicSelections.forEach((s, i) => st.selIns.run(rec.playerId, i, s));
 }
 
-// ------------------------------------------------------------------ snapshot (fixtures and the persistence batteries)
+// ------------------------------------------------------------------ whole-domain read (the test suites)
 export const passportLive = (sqlite) => migrationApplied(sqlite, PASSPORT_MIGRATION);
 function readAll(sqlite) {
   const out = { passportPrefs: decodePrefs(sqlite, prefsStatements(sqlite).all.all()) };
   for (const [name, e] of Object.entries(ENTITIES)) out[name] = sqlite.prepare(`SELECT * FROM ${e.table} ORDER BY rowid`).all().map((r) => decodeFlat(name, r));
   return out;
 }
-/** The whole domain read back as plain records (`readAllRecords` in index.mjs: the test suites' read-back); null before its migration. */
+/** The whole domain read back as plain records (`readAllRecords` in index.mjs: the test suites' read-back). */
 export const PASSPORT_RECORDS = {
   names: PASSPORT_COLLECTIONS,
   read(sqlite) { return passportLive(sqlite) ? readAll(sqlite) : null; },

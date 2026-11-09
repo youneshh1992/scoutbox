@@ -1,4 +1,4 @@
-// M24F.1 — the Player profile, live, in a real browser: the live Player
+// The Player profile, live, in a real browser: the live Player
 // bundle against a live scoutbox-server (Kola Adeyemi, seeded; a freshly
 // signed-up player with a long name and a long city) and the self-contained
 // demo bundle (Kola with a pending trial invitation — the current-action

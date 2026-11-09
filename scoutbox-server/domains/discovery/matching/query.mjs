@@ -1,8 +1,8 @@
 /**
- * S14j — the match reads shared by matching, the Dynamic Watchlists and Nobody Missed: one SQL query over the players
- * an organisation may see (identity's visibleWhere, the whole visibility rule, first) joined to their stored facts
+ * The match reads shared by matching, the Dynamic Watchlists and Nobody Missed: one SQL query over the players an
+ * organisation may see (identity's visibleWhere, the whole visibility rule, first) joined to their stored facts
  * (repositories/matchFacts.mjs), each required criterion a condition beside its JS test (match.mjs criterionSql).
- * Pages are keyset pages (§4.3 paging); only a page's players are decoded into the engine's facts.
+ * Pages are keyset pages; only a page's players are decoded into the engine's facts.
  */
 import { criterionSql, factsOfRow, BAND_RANK_SQL, AGE_SQL } from './match.mjs';
 import { readPage } from '../../platform/paging.mjs';
@@ -30,7 +30,7 @@ export function createMatchReads({ players, matchFacts }) {
     return factsOfRows(rows, org, at);
   }
 
-  /** The keyset order of a sort (every one ends on the player id, so two reads return the same order, M18.2) and its cursor shape. */
+  /** The keyset order of a sort (every one ends on the player id, so two reads return the same order) and its cursor shape. */
   const NO_DISTANCE = 10_000_000_000;
   function matchOrder(sort, org, at, extra = {}) {
     // The distance exists only where the club may see it (a Grassroots club's, the org view's rule): elsewhere every
@@ -50,8 +50,8 @@ export function createMatchReads({ players, matchFacts }) {
   }
   const keyOfRow = (r) => [r.k0, r.k1];
   /**
-   * `limit` and `cursor` from a body or a query (§4.3 paging; junk refused with 400). An `offset` is refused: these
-   * lists page by cursor since S14j, so a client cannot walk a large result by position.
+   * `limit` and `cursor` from a body or a query (junk refused with 400). An `offset` is refused: these lists page by
+   * cursor, so a client cannot walk a large result by position.
    */
   function readMatchPage(input, shape) {
     if (input?.offset !== undefined) throw Object.assign(new Error('PAGE_OFFSET_UNSUPPORTED: page with cursor, the previous response\'s nextCursor'), { code: 'PAGE_OFFSET_UNSUPPORTED', status: 400, pageError: true });

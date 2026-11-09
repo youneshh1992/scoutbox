@@ -1,24 +1,24 @@
-// M22 — fixture variation families and the false-touch stress suite.
+// Fixture variation families and the false-touch stress suite.
 //
-// Fix A (§2, §3): key fixtures become PARAMETERISED FAMILIES, varying factors
+// Variation families: key fixtures become PARAMETERISED FAMILIES, varying factors
 // independently and in combination, each with its expected semantic result
 // declared before execution and never read back out of the engine.
 //
-// Fix B (§4): a dedicated stress group whose entire purpose is to try to make
+// The false-touch stress suite: a dedicated group whose entire purpose is to try to make
 // the engine count a touch that did not happen. Every case in it expects
 // ZERO touches. Any touch there is a P0.
 //
 // No demographic labels appear anywhere: the player is a rectangle, and the
-// variation axes are geometric and photometric (§2).
+// variation axes are geometric and photometric.
 
 import {
   sequence, jugglePath, touchPath, stationaryPath, rollPath,
   independentBouncePath, nearMissPath, DEFAULT_PERSON, DEFAULT_BALL_RN,
 } from './scenes.mjs';
 
-// The supported render sizes. §16 asks for 480p/720p/1080p-equivalent; the
-// gray8 transport caps a frame at 320x240 (policy FRAME_LIMITS), so these are
-// the proportional synthetic dimensions §16 explicitly permits instead. The
+// The supported render sizes: the 480p/720p/1080p-equivalent sizes would exceed
+// the gray8 transport's 320x240 frame cap (policy FRAME_LIMITS), so these are
+// proportional synthetic dimensions instead. The
 // ratio between smallest and largest is 2x on each axis — enough that a
 // pixel-space threshold would fail loudly.
 export const RESOLUTIONS = Object.freeze([
@@ -30,7 +30,7 @@ export const RESOLUTIONS = Object.freeze([
 export const FRAME_RATES = Object.freeze([15, 24, 30]);
 
 // =========================================================================
-// FIX A — variation families
+// Variation families
 // =========================================================================
 
 /**
@@ -188,11 +188,8 @@ export function variationFamilies() {
   });
 
   // --- Family 10: legitimate touch pace ----------------------------------
-  // §7: each real touch counted once, at every plausible pace. Slow, normal,
+  // Each real touch counted once, at every plausible pace. Slow, normal,
   // fast, and near the supported maximum.
-  // Pace varies; the strike itself does not. `strikeMs` is held constant
-  // except where the pace is faster than the strike, in which case the
-  // strike is the pace (touchPath clamps it).
   // Pace varies; the strike itself is identical in every variant. That is
   // what "pace" means — a player tapping once a second is not tapping more
   // softly than one tapping twice a second, they are resting longer between.
@@ -204,7 +201,7 @@ export function variationFamilies() {
   // detector: under-counting costs recall, and the alternative — relaxing
   // the refractory or separation rules until the fastest pace fits — buys
   // those four touches by weakening the defences that keep the false-touch
-  // suite at zero. §60 is explicit that a conservative engine which refuses
+  // suite at zero. A conservative engine which refuses
   // or under-counts is preferable to one that verifies falsely.
   //
   // 260 ms is therefore retained as a DECLARED LIMITATION case below, not as
@@ -227,7 +224,7 @@ export function variationFamilies() {
         path: touchPath({ touches: p.touches, periodMs: p.periodMs }), seed: 23,
       }),
       // Rapid legitimate touches must NOT be collapsed by the refractory
-      // interval (§7). The near-max pace at 260 ms is comfortably outside
+      // interval. Even the fastest supported pace is comfortably outside
       // the 180 ms refractory, so all of them must survive.
       expected: { state: 'accepted', count: p.touches, tolerance: 2 },
     })),
@@ -273,7 +270,7 @@ export function variationFamilies() {
   });
 
   // --- Family 12: cadence jitter -----------------------------------------
-  // §22: input is never perfectly periodic. Same event, increasingly
+  // Input is never perfectly periodic. Same event, increasingly
   // irregular arrival times, using the trusted timestamps throughout.
   fams.push({
     family: 'cadence_jitter',
@@ -292,7 +289,7 @@ export function variationFamilies() {
 }
 
 // =========================================================================
-// FIX B — the false-touch stress suite (§4)
+// The false-touch stress suite
 //
 // Twenty ways to try to make the engine count a touch that never happened.
 // EVERY case expects zero. A count here is a P0 for exact measurement.

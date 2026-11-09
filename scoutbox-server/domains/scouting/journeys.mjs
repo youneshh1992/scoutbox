@@ -1,5 +1,5 @@
-// F5 — Structured opportunity board · F6 — Club-run assessment campaigns ·
-// F9 — Trial-day experience. (F8 objectives and the F6 drill guidance: domains/development/objectives.mjs.)
+// The structured opportunity board, club-run assessment campaigns and the trial-day experience. (Objectives and the
+// campaign drill guidance: domains/development/objectives.mjs.)
 //
 // Everything guardian-routed for minors, everything eligibility-checked
 // server-side (fail-closed on missing location), grassroots 50 km preserved.
@@ -55,14 +55,12 @@ export function registerJourneys(ctx) {
     players, users, unit, recruitment, opportunitiesCampaigns,
   } = ctx;
   if (typeof opportunitiesCampaigns?.opportunities?.create !== 'function') throw new TypeError('registerJourneys needs the opportunities and campaigns repository from the data layer');
-  // S8a: a trial-day change is an explicit write of the trial (recruitment.trials.update); the records the views hand out are read-only.
+  // A trial-day change is a write of the trial (recruitment.trials.update); the records the views hand out are read-only.
   const trials = recruitment?.trials;
   if (!trials) throw new TypeError('registerJourneys needs the recruitment repository from the data layer');
 
-  // ================================================================== F5
-  // S9d: opportunities and applications are rows of the opportunities and campaigns repository
-  // (repositories/opportunitiesCampaigns.mjs), written by explicit operations and read through SQL. Junk is refused with
-  // the field named (400 FIELD_INVALID); over-long text is still shortened.
+  // ===================================================== opportunity board
+  // Over-long text is shortened.
   const OPP_TYPES = OPPORTUNITY_TYPES;
   const fieldInvalid = (res, field, message) => { res.status(400).json({ error: 'FIELD_INVALID', field, message }); return undefined; };
   const optionalText = (v) => v === undefined || v === null || typeof v === 'string';
@@ -120,7 +118,7 @@ export function registerJourneys(ctx) {
 
   const oppOpen = (o) => o.status === 'published' && o.deadline >= today();
 
-  // §4.3: a club's opportunities grow without limit (they are closed, never deleted), so the list pages, newest first.
+  // A club's opportunities grow without limit (they are closed, never deleted), so the list pages, newest first.
   orgRouter.get('/opportunities', (req, res) => {
     let page;
     try { page = readPage(req.query, ['number']); } catch (e) { return sendPageError(res, e); }
@@ -129,12 +127,12 @@ export function registerJourneys(ctx) {
     res.json({ items: items.map((r) => ({ ...opportunityView(r.opportunity), open: oppOpen(r.opportunity), ...counts[r.opportunity.id] })), nextCursor });
   });
 
-  // M23 P5.6B: the board is a pure module-level function so the Agent
+  // The board is a pure module-level function so the Agent
   // workspace can project a confirmed client's board through exactly the
   // same eligibility and mutual-visibility rules — one engine, not two.
   const boardFor = (player) => opportunityBoardFor(ctx.grassrootsReads, player, { orgCanSee, checkEligibility, distanceBand, scoutingReads, orgOf: byId.org });
 
-  // S13d: the board pages by (deadline, id), a page cut after the per-player visibility and eligibility filters. It is
+  // The board pages by (deadline, id), a page cut after the per-player visibility and eligibility filters. It is
   // bounded by the open opportunities and upcoming open days, not by the player base. `cursor` is `[deadline, id]`.
   const boardKey = (o) => [String(o.deadline), String(o.id)];
   const cmpBoard = (a, b) => a[0].localeCompare(b[0]) || a[1].localeCompare(b[1]);
@@ -223,7 +221,7 @@ export function registerJourneys(ctx) {
     const a = scoutingReads.applications.ofPlayers(req.params.id, allowedPlayerIds);
     if (!a) return res.status(404).json({ error: 'APPLICATION_NOT_FOUND' });
     if (a.status !== 'submitted') return res.status(409).json({ error: 'NOT_WITHDRAWABLE', status: a.status });
-    // S9d: a guardian's withdrawal is recorded as the guardian's (it used to be audited as the player's).
+    // A guardian's withdrawal is recorded as the guardian's.
     const withdrawn = opportunitiesCampaigns.applications.update(a.id, (d) => { d.status = 'withdrawn'; d.history.push(historyEntry(actor.kind, actor.id, actor.name, 'withdrawn')); });
     res.json({ application: applicationView(withdrawn) });
   }
@@ -283,7 +281,7 @@ export function registerJourneys(ctx) {
     res.json({ opportunity: opportunityView(closed) });
   });
 
-  // ================================================================== F6
+  // ============================================================= campaigns
   // Campaigns: structured remote assessments. The machine checks FILES; a
   // HUMAN checks football. The two verdicts are never conflated.
 
@@ -339,7 +337,7 @@ export function registerJourneys(ctx) {
     res.status(201).json({ campaign: campaignView(camp) });
   });
 
-  // §4.3: a club's campaigns grow without limit (never deleted), so the list pages, newest first.
+  // A club's campaigns grow without limit (never deleted), so the list pages, newest first.
   orgRouter.get('/campaigns', (req, res) => {
     let page;
     try { page = readPage(req.query, ['number']); } catch (e) { return sendPageError(res, e); }
@@ -480,7 +478,7 @@ export function registerJourneys(ctx) {
     res.json({ attempt: attemptView(reviewed) });
   });
 
-  // ================================================================== F9
+  // ============================================================= trial day
   // Trial-day: named staff with check STATES (a reference on file is not a
   // completed check), event consent, restricted emergency info, check-in
   // feeding existing attendance without duplicates, honest cancellation.
@@ -489,14 +487,14 @@ export function registerJourneys(ctx) {
     const found = trials.byId(req.params.id);
     const t = found && found.orgId === req.org.id ? found : null;
     if (!t) { res.status(404).json({ error: 'TRIAL_NOT_FOUND' }); return null; }
-    // M23 P4A-D14: a tombstoned trial (its subject removed their account) can
+    // A tombstoned trial (its subject removed their account) can
     // still be READ — the record of what happened is the club's — but nothing
     // new is written about a person who left.
     if (t.subjectRemovedAt && req.method !== 'GET') {
       res.status(409).json({ error: 'TRIAL_SUBJECT_REMOVED', message: 'This player removed their ScoutBox account. The trial stays on record; it can no longer be changed.' });
       return null;
     }
-    return t; // S8a: every trial reads back with its trial-day container
+    return t;
   }
 
   orgRouter.get('/trials/:id/day', (req, res) => {
@@ -505,10 +503,10 @@ export function registerJourneys(ctx) {
   });
 
   /**
-   * M23 P5.7 (T-2): a REVIEWED background check whose expiry cannot be read
-   * used to read `reviewed` for ever (`NaN < now` is false). A check nobody
-   * can date is not a current check: it reads `expired`, which is the state
-   * the trial-day gate refuses. A missing expiry stays "no expiry recorded".
+   * A REVIEWED background check whose expiry cannot be read is not a current
+   * check: it reads `expired` (the state the trial-day gate refuses), not
+   * `reviewed` for ever (`NaN < now` is false). A missing expiry stays "no
+   * expiry recorded".
    */
   function checkState(c, now = Date.now()) {
     if (!c) return 'missing';
@@ -545,14 +543,14 @@ export function registerJourneys(ctx) {
       // scout browsing — it appears here and NOWHERE else (no profile views,
       // no analytics, no exports).
       //
-      // M23 P4A-D9: a block placed by the player or guardian ends the
+      // A block placed by the player or guardian ends the
       // organisation's standing to hold the family's contact details. The
       // block is evaluated on every read, like every other block in the
       // product, so the number is withheld the moment the block exists and
       // returns if Trust & Safety lifts it. The rest of the day view (the
       // club's own staff, arrival and status history) is unchanged here;
-      // what a blocked club may still DO with a trial is a P4B policy
-      // decision (M23_P4A_DECISION_REGISTER.md D-16), not a read-side one.
+      // what a blocked club may still DO with a trial is a policy decision,
+      // not a read-side one.
       const blocked = ctx.isBlocked(t.playerId, t.orgId);
       base.emergency = blocked ? null : (day.emergency ?? null);
       base.emergencyWithheld = blocked ? 'BLOCKED' : null;
@@ -608,7 +606,7 @@ export function registerJourneys(ctx) {
     if (!t) return;
     const { reason, newDate } = req.body ?? {};
     if (!reason) return res.status(400).json({ error: 'REASON_REQUIRED' });
-    // M23 P4A-D1: a postponement date goes through the one Trial date
+    // A postponement date goes through the one Trial date
     // validator like every other trial date, and the report deadline is
     // re-derived from the new day by the one derivation — never computed here.
     const moved = kind === 'postponed' ? parseTrialDate(newDate) : { ok: true, value: null };
@@ -644,17 +642,17 @@ export function registerJourneys(ctx) {
     }
     if (t.day.checkins.some((c) => c.playerId === t.playerId)) return res.status(409).json({ error: 'ALREADY_CHECKED_IN' });
     const checkedInAt = Date.now();
-    // ONE unit of work (S5): the check-in and the attendance records on the
-    // trial (a blob), the player's attendance row and activity, and the ledger
-    // row commit together before the response.
+    // ONE unit of work: the check-in and the attendance records on the
+    // trial, the player's attendance row and activity, and the ledger row
+    // commit together before the response.
     const fresh = unit(() => {
     const checkedIn = trials.update(t.id, (d) => {
     d.day.checkins.push({ playerId: d.playerId, at: checkedInAt, byUserId: req.orgUser.id, byName: req.orgUser.name });
-    // M23 P4B (D-8): a check-in is the strongest attendance source. If the
-    // trial carries a confirmed P4B schedule, the session whose window holds
+    // A check-in is the strongest attendance source. If the
+    // trial carries a confirmed schedule, the session whose window holds
     // this moment (from two hours before its start) gets an `attended`
     // record with source `checkin` — once, append-only, never a judgement.
-    // A trial without a P4B schedule records nothing new here.
+    // A trial without a schedule records nothing new here.
     const sessions = d.schedule?.confirmedAt ? d.schedule.sessions : [];
     const live = sessions.find((s) => s.startsAt - 2 * 3600_000 <= checkedInAt && checkedInAt <= s.endsAt) ?? null;
     if (live && !d.attendance.some((a) => a.sessionId === live.id && a.state === 'attended')) {
@@ -683,7 +681,7 @@ export function registerJourneys(ctx) {
     const found = trials.byId(req.params.id);
     const t = found && playerIds.includes(found.playerId) ? found : null;
     if (!t) { res.status(404).json({ error: 'TRIAL_NOT_FOUND' }); return null; }
-    return t; // S8a: every trial reads back with its trial-day container
+    return t;
   }
 
   function giveConsent(req, res, t, by, scope) {
@@ -740,11 +738,11 @@ export function registerJourneys(ctx) {
   // The family's list of their own trials (safety pack entry point).
   const familyTrials = (playerIds, { minorDevice = false } = {}) => trials.forPlayers(playerIds)
     .map((t) => {
-      // P4B: the workflow edge (state, confirmed sessions, completion) rides
-      // beside the P2 day view. Family view only — never the club's internals.
-      // A minor's own device carries the guardian-managed OUTCOME LINE only
-      // (privacy matrix §112): never the sessions, the address, the
-      // instructions or the history the guardian holds.
+      // The workflow edge (state, confirmed sessions, completion) rides
+      // beside the day view. Family view only — never the club's internals.
+      // A minor's own device carries the guardian-managed OUTCOME LINE only:
+      // never the sessions, the address, the instructions or the history the
+      // guardian holds.
       return { ...trialDayView(t, 'family'), workflow: minorDevice ? trialOutcomeLine(t) : trialFamilyView(t) };
     });
   playerRouter.get('/trials', (req, res) => res.json(familyTrials([req.player.id], { minorDevice: !!req.playerIsMinor })));
@@ -763,7 +761,7 @@ export function registerJourneys(ctx) {
   // honest states, nothing auto-approved.
   adminRouter.get('/staff-checks', (req, res) => {
     // Paged by cursor (domains/platform/paging.mjs): { items, nextCursor }, oldest trial first. The admin app reads the
-    // first page only; a "load more" is not built yet (the decision of 4 November 2026).
+    // first page only; a "load more" is not built yet (a product decision).
     let page;
     try { page = readPage(req.query, ['number', 'number']); } catch (e) { return sendPageError(res, e); }
     const { items, nextCursor } = trials.staffChecksPage({ pendingOnly: req.query.all !== '1', ...page });
@@ -794,9 +792,7 @@ export function registerJourneys(ctx) {
  * The player's opportunity board — what they could actually apply to, with
  * eligibility computed the same way the application gate computes it.
  * Pure over the reads and the injected rules; shared by the player, guardian and
- * (M23 P5.6B) Agent client-workspace readers. S9d: the open opportunities come
- * from SQL (published, deadline today or later) and the player's own live
- * applications in one query; S13d: the upcoming open days are one query too.
+ * Agent client-workspace readers.
  */
 export function opportunityBoardFor(grassrootsReads, player, { orgCanSee, checkEligibility, distanceBand, scoutingReads, orgOf }) {
   if (!scoutingReads?.opportunities || !grassrootsReads?.openTrials || typeof orgOf !== 'function') throw new TypeError('opportunityBoardFor needs grassrootsReads, scoutingReads and orgOf');

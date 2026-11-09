@@ -1,7 +1,6 @@
-// M23 P2.5 — Football: the player's football record in one destination.
-// Passport, Development, Box Cam and Combine were the 9th–13th sections of
-// the You tab; they are page tabs here, and "+ Add evidence" is the primary
-// action (it opens the existing Upload screen, whose route is unchanged).
+// Football: the player's football record in one destination.
+// Passport, Development, Box Cam and Combine are page tabs here, and
+// "+ Add evidence" is the primary action (it opens the Upload screen).
 import { useEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { Text } from '../../components/Text';
@@ -47,7 +46,7 @@ export default function Football() {
             </Link>
           )}
         />
-        {/* M24C — the reference's profile introduction: avatar, name, one line, status. */}
+        {/* The reference's profile introduction: avatar, name, one line, status. */}
         {me ? (
           <ProfileIntro
             name={me.name}
@@ -59,10 +58,10 @@ export default function Football() {
         ) : null}
         <PageTabs tabs={TABS} value={tab} onChange={setTab} />
 
-        {/* M16.2 — the Passport payload carries no numeric score, so the Trust
+        {/* The Passport payload carries no numeric score, so the Trust
             Profile is fetched from its own endpoint and composed at the head of
             the Passport, exactly as before. */}
-        {/* M24F.5 — the Trust section's rule sits on the tab bar's line: one rule under the tabs, not two. */}
+        {/* The Trust section's rule sits on the tab bar's line: one rule under the tabs, not two. */}
         {actor && tab === 'passport' ? <View style={{ marginTop: 0 }}><TrustProfileSection actor={actor} /></View> : null}
         {actor && tab === 'passport' ? <FootballPassportSection actor={actor} isMinor={isMinor} /> : null}
         {actor && tab === 'development' ? <DevelopmentHubSection actor={actor} /> : null}

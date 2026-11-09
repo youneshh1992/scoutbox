@@ -87,7 +87,7 @@ export const useTheme = () => useContext(ThemeContext);
 /** Authentication retains its approved deep-green brand palette. */
 export const AUTH_PANEL: Palette = {
   ...palettes.dark,
-  // M24C.3 — the entry palette: the dark football green of the Football
+  // The entry palette: the dark football green of the Football
   // Passport card for the surfaces, white and #CFDFD0 for the text, the
   // bright brand green for the primary action, links and focus.
   bg: '#173b27', bg2: '#113822', panel: '#113822', panel2: '#1d4a33', line: 'rgba(207,223,208,0.35)',

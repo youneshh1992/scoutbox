@@ -1,4 +1,4 @@
-// M18.2 — two administrative panels under Organisation.
+// Two administrative panels under Organisation.
 //
 // Notification preferences: every non-critical category can be turned off,
 // the mandatory category is shown locked with the reason, and the email row

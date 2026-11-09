@@ -1,11 +1,6 @@
-// S9a — the evidence passport, coach affiliations and squad invitations as typed tables with explicit writes
-// (repositories/scoutingEvidence.mjs, migration 0019). What this suite proves: the migration creates the seven typed
-// tables and a fresh database holds no row; the typers refuse junk with the record and field named (never the content);
-// create/update write rows at once and return fresh, deep-frozen records, refuse an unknown field, an identity change, a
-// duplicate id, a second pending invitation and an update from inside its own update; a correction commits with its
-// superseded original; the queries (current records, the dispute queue, the coach lookup, the pending invitations) match
-// the rows; a rolled-back unit leaves nothing; there is no db.* view; and a fixture written through the repository is
-// typed, refuses missing references and uniqueness (nothing written) and reads back what it wrote.
+// The evidence passport, coach affiliations and squad invitations (repositories/scoutingEvidence.mjs, migration 0019):
+// the tables, the typers' refusals (naming the field, never the content), typed writes and their guards (one pending
+// invitation), a correction committed with its superseded original, the queries, units of work and fixtures.
 // Temporary databases only; nothing touches DATA_DIR. Run with: npm test
 
 import assert from 'node:assert/strict';

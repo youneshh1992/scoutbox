@@ -1,4 +1,4 @@
-// M18.1 LIVE browser journeys — the hardening, in a real browser.
+// LIVE browser journeys — the hardening, in a real browser.
 //
 // H1  two scouts edit the same Recruitment Brief; the second is refused,
 //     told so in words, and nothing of the first one's work is lost
@@ -7,7 +7,7 @@
 // H4  evidence confidence that cannot be read says so — never "—", never 0
 // H5  a failed load offers a retry, and retrying recovers
 // H6  the four Second Look tabs have four different empty states
-// H7  every M17/M18 surface fits a 390px phone with no sideways page scroll
+// H7  every Rooms, Second Look and Nobody Missed surface fits a 390px phone with no sideways page scroll
 // H8  the Second Look tabs are reachable and operable from the keyboard
 // H9  the notification bell is actionable, dated, and collapses repeats
 // H10 "Trust Score" means evidence confidence everywhere; the older number
@@ -242,7 +242,7 @@ await scout.route(/\/org\/rooms\/[^/]+\/status$/, async (route) => {
   say('H2: a colleague moved the room while this page’s own request was in flight');
   if (server.status !== 'under_review') fail('H2: the stale transition was applied — the colleague’s move was overwritten');
   say('H2: the stale transition is refused — the colleague’s move stands');
-  // M18.2: the shared ConflictNotice leads with its own sentence and names the colleague.
+  // The shared ConflictNotice leads with its own sentence and names the colleague.
   if (!/Someone else changed this while you were working on it|This changed while you were editing/i.test(body)) {
     const toast = await scout.locator('.toast').innerText().catch(() => '(no toast on screen)');
     console.error(`  toast said: ${toast}`);

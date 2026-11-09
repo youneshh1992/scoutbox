@@ -1,35 +1,21 @@
 /**
- * Recruitment contacts and offers as typed tables with EXPLICIT writes (migration `0017_recruitment_contacts_offers`,
- * docs/architecture/migration.md §4.3; the S8d repository, repositories/signingsFollowUps.mjs, is the template).
+ * Recruitment contacts (attempts, history) and offers (revisions and their documents, responses, read receipts,
+ * history, keys).
  *
- * Tables (file 02):
- *   recruitment_contacts, contact_attempts, contact_history                      → db.recruitmentContacts
- *   recruitment_offers, offer_revisions, offer_revision_documents, offer_responses,
- *   offer_read_receipts, offer_history, offer_keys                               → db.recruitmentOffers
- *
- * EVERY FIELD IS A TYPED COLUMN with the vocabulary and length CHECKs of the domain rules (domains/recruitment/lifecycle/contact.mjs,
- * domains/recruitment/offers/offer.mjs). There is no `absent_keys_json`, `offtype_json`, `extra_json` or `raw_json`. A record the columns
- * cannot hold — an unknown field at any level included — is REFUSED with its id, at a repository write (the unit
- * rolls back). The idempotency keys are columns of their owner
- * (`create_key`, `send_key`, …) and the offer's per-act key lists the rows of `offer_keys`.
- *
- * EXPLICIT WRITES, SQL READS. There is no in-memory mirror and no `db.<collection>` view (§4.3 step 2): readers
- * call the repository's queries (`contacts.byId`, `contacts.forCase`, `offers.forPlayers`, …), and every record they
- * get is a fresh, deep-frozen decode, so an in-place edit throws. A route changes a record by calling an operation:
- * `contacts.create(record)`, `contacts.update(id, (draft) => { … })`, `offers.create`, `offers.update`, and the
- * deletion unit's `redactPlayer`. `update` hands the caller a plain copy to change, types the result whole, writes
- * the record's rows at once and returns it read back from the tables. An operation joins the open unit of work
- * (store.unit) or runs a transaction of its own.
+ * Every field is a typed column with the vocabulary and length CHECKs of the domain rules
+ * (domains/recruitment/lifecycle/contact.mjs, domains/recruitment/offers/offer.mjs). A record the columns cannot hold,
+ * an unknown field at any level included, is refused with its id at a repository write (the unit rolls back). The
+ * idempotency keys are columns of their owner (`create_key`, `send_key`, …) and the offer's per-act key lists are the
+ * rows of `offer_keys`.
  *
  * References. `org_id` → orgs and `case_id` → recruitment_cases (RESTRICT). A contact's `request_id` →
  * recruitment_requests is DEFERRABLE INITIALLY DEFERRED (checked at COMMIT): a send writes its contact before the
- * request row it names. Staff ids →
- * org_users. Player ids: no key, tolerant and counted (Q8c-a). Guardian ids: no key (the routes resolve the
- * guardian before they write, Q8c-b). The offer's own pointers (current revision,
- * response, supersedes, superseded by, discarded by, a receipt's or response's revision) must name a row of the
- * same offer.
+ * request row it names. Staff ids → org_users. Player ids: no key, tolerant and counted (Q8c-a in docs/decisions.md).
+ * Guardian ids: no key (the routes resolve the guardian before they write, Q8c-b). The offer's own pointers (current
+ * revision, response, supersedes, superseded by, discarded by, a receipt's or response's revision) must name a row of
+ * the same offer.
  *
- * Refusals name tables, fields and ids — never a subject, a body, a note, a message or a name.
+ * Refusals name tables, fields and ids, never a subject, a body, a note, a message or a name.
  */
 import { transaction, migrationApplied, newestHistory, childRowsOf } from './database.mjs';
 import { isPlainObject, ids } from './recruitment.mjs';
@@ -355,7 +341,7 @@ const contactStaff = (v, label, field, { required = false } = {}) => {
   oneOf(v.kind, ['org'], label, `${field}.kind`);
   return { kind: 'org', userId: str(v.userId, label, `${field}.userId`, { required: true }), name: str(v.name, label, `${field}.name`) };
 };
-/** m28 byOrg(req): `{kind:'org', id, name, role}`. */
+/** domains/recruitment/offers byOrg(req): `{kind:'org', id, name, role}`. */
 const offerStaff = (v, label, field, { required = false } = {}) => {
   if (v === undefined || v === null) { if (required) fail(label, field, 'is required'); return null; }
   onlyKeys(v, ['kind', 'id', 'name', 'role'], label, field);
@@ -463,7 +449,7 @@ function typeRevision(r, L) {
     supersedesRevisionId: str(r.supersedesRevisionId, L, 'supersedesRevisionId'), supersededByRevisionId: str(r.supersededByRevisionId, L, 'supersededByRevisionId'), supersededAt: int(r.supersededAt, L, 'supersededAt'),
     recipientSnapshot, readinessSnapshot, rev: int(r.rev, L, 'rev', { required: true, min: 1 }), revAt: int(r.revAt, L, 'revAt'), revBy: revBy(r.revBy, L),
   };
-  // Present only on a draft an acceptance discarded (m28 respondHandler); every other revision has no such key.
+  // Present only on a draft an acceptance discarded (domains/recruitment/offers respondHandler); every other revision has no such key.
   const discarded = str(r.discardedByResponseId, L, 'discardedByResponseId');
   if (discarded !== null) out.discardedByResponseId = discarded;
   return out;
@@ -638,11 +624,11 @@ function statements(sqlite) {
   stmtCache.set(sqlite, s); return s;
 }
 
-/** Write a typed contact whole: the row upserted (its rowid, and so its place in the mirror, kept), the children replaced. */
 /** The case a contact or an offer names is written first (an immediate key): a miss is named with the ids. */
 function caseMustExist(st, table, r) {
   if (!st.caseExists.get(r.caseId)) throw refusal('CONTACTS_OFFERS_REFERENCE_MISSING', `${table} holds 1 row(s) naming a recruitment_cases row that is not there (${r.id} → recruitment_cases ${r.caseId}); the write was rolled back`);
 }
+/** Write a typed contact whole: the row upserted (its rowid, and so its insertion order, kept), the children replaced. */
 function writeContact(st, c) {
   caseMustExist(st, 'recruitment_contacts', c);
   st.contact.run(contactRow(c));
@@ -662,8 +648,8 @@ function writeOffer(st, o) {
 }
 
 /**
- * The statements `decodeContact` and `decodeOffer` read children through, answered for many records at once (§4.3
- * step 4): each child table read once for the whole list (an offer's documents through its revisions) instead of two
+ * The statements `decodeContact` and `decodeOffer` read children through, answered for many records at once: each
+ * child table read once for the whole list (an offer's documents through its revisions) instead of two
  * queries a contact and five an offer plus one a revision. Same rows, same order.
  */
 function batchStatements(sqlite, st, { contactIds = [], offerIds = [] }) {
@@ -764,19 +750,9 @@ const TABLE_OF = { recruitmentContacts: 'recruitment_contacts', recruitmentOffer
 export const CONTACTS_OFFERS_RECORDS = {
   names: RECRUITMENT_CONTACTS_OFFERS_COLLECTIONS,
   read(sqlite) { if (!recruitmentContactsOffersLive(sqlite)) return null; return { recruitmentContacts: readContacts(sqlite), recruitmentOffers: readOffers(sqlite) }; },
-  /**
-   * Type the supplied collections (an omitted one is retained whole, an array is the whole final collection), check
-   * the guardian references against the final guardians (Q8c-b), and remove the departing records. Returns the plan
-   * `write` takes, or null before the 0017 record.
-   */
-
-  /** The supplied records written (after the cases and requests of the same snapshot are in place). */
-
-  /** Every key and the contact/request pairs, named with ids before COMMIT would refuse them anonymously. */
-
 };
 
-// ------------------------------------------------------------------ the repository (explicit writes; SQL reads; the participant)
+// ------------------------------------------------------------------ the repository
 const deepFreeze = (v) => { if (v !== null && typeof v === 'object' && !Object.isFrozen(v)) { Object.freeze(v); for (const k of Object.keys(v)) deepFreeze(v[k]); } return v; };
 const CONTACT_READS = {
   forCase: 'SELECT * FROM recruitment_contacts WHERE case_id = ? ORDER BY rowid',
@@ -800,12 +776,9 @@ const OFFER_READS = {
  * returns the record read back from the tables. A route that writes a contact naming a request created in the same act
  * runs inside a unit, whose COMMIT checks the deferred request key.
  *
- * READS ARE SQL (§4.3 step 2). There is no in-memory mirror and no `db.recruitmentContacts` / `db.recruitmentOffers`:
- * callers ask the repository (`contacts.byId`, `contacts.forCase`, `offers.forPlayer`, …). Every query runs on the
- * one connection, so a read inside a unit of work sees the unit's own uncommitted writes, and a rolled-back unit
- * leaves nothing to restore. Each record handed out is a fresh, deep-frozen decode of its rows: an in-place edit
- * throws, and a change is `update(id, (draft) => …)`. Lists come back in insertion (rowid) order, the order the
- * mirrors had.
+ * Every query runs on the one connection, so a read inside a unit of work sees the unit's own uncommitted writes. Each
+ * record handed out is a fresh, deep-frozen decode of its rows: an in-place edit throws, and a change is
+ * `update(id, (draft) => …)`. Lists come back in insertion (rowid) order.
  */
 export function createRecruitmentContactsOffersRepository({ sqlite, unit = null, now = Date.now, log = () => {} } = {}) {
   if (!sqlite) throw new TypeError('the recruitment contacts/offers repository needs a SQLite connection (node:sqlite)');
@@ -889,7 +862,7 @@ export function createRecruitmentContactsOffersRepository({ sqlite, unit = null,
     forPlayers: inList('recruitmentOffers', 'recruitment_offers', 'player_id'),
     /** The offers of several cases (a player's journeys), in insertion order. */
     forCases: inList('recruitmentOffers', 'recruitment_offers', 'case_id'),
-    /** The deletion unit (P6.1 §66): ids, states and times stay; the player's name and words go; subject_removed_at set. */
+    /** The deletion unit: ids, states and times stay; the player's name and words go; subject_removed_at set. */
     redactPlayer(playerId, at) {
       return operation(() => {
         const ids = sqlite.prepare('SELECT id FROM recruitment_offers WHERE player_id = ? ORDER BY rowid').all(playerId).map((r) => r.id);
@@ -908,7 +881,7 @@ export function createRecruitmentContactsOffersRepository({ sqlite, unit = null,
     contacts, offers,
     /** The queries alone, for the pure projectors and providers that must not write (the evidence provider, the journey). */
     reads: Object.freeze({ contacts: readOnly(contacts), offers: readOnly(offers) }),
-    /** Check the tables are authoritative (0017 recorded); there is nothing to load. */
+    /** Check migration 0017 is recorded; there is nothing to load. */
     attach() {
       if (!recruitmentContactsOffersLive(sqlite)) throw new Error(`the recruitment contacts/offers repository needs ${RECRUITMENT_CONTACTS_OFFERS_MIGRATION} recorded; it never imports an in-memory array`);
       return { counts: this.counts() };

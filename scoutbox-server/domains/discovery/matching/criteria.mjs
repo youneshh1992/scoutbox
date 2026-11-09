@@ -1,12 +1,12 @@
 /**
- * M19 — the canonical criteria schema.
+ * The canonical criteria schema.
  *
  * A criterion is a fact test the CLUB wrote. ScoutBox evaluates it and says
  * whether it was met. There is no weighting, no scoring and no hidden rule:
  * everything a match depends on is one of the typed criteria below, and every
  * one of them is shown to the person who wrote it.
  *
- * Two classes, and the distinction is the whole point of M19:
+ * Two classes, and the distinction is the whole point:
  *
  *   required   decides whether the player is in the match set at all
  *   preferred  adds context; a player still matches when it is not met
@@ -16,7 +16,7 @@
  * club's own criteria is a fact; a score would be a judgement ScoutBox has no
  * business making.
  *
- * Operators live in ONE table (§98). A client submits criteria, never an
+ * Operators live in ONE table. A client submits criteria, never an
  * evaluator: there is no path by which a caller can supply code, a weight or
  * a result.
  */
@@ -36,7 +36,7 @@ export const CRITERION_CLASSES = ['required', 'preferred'];
 /**
  * Every operator ScoutBox can evaluate, and what it means. Nothing else is
  * accepted; an unknown operator is a refusal, never a silently skipped
- * criterion (§18).
+ * criterion.
  */
 export const OPERATORS = {
   in: { arity: 'list', note: 'the fact is one of the listed values' },
@@ -65,7 +65,7 @@ export const AVAILABILITY_VALUES = ['available_now', 'end_of_season', 'loan_open
 /**
  * The v1 criterion vocabulary. Only facts ScoutBox can evaluate honestly from
  * data it already holds — nothing inferred from video, nothing speculative,
- * and no training-volume proxy for ability (§15).
+ * and no training-volume proxy for ability.
  */
 export const CRITERION_TYPES = {
   position: {
@@ -102,7 +102,7 @@ export const CRITERION_TYPES = {
     validate: (c) => {
       const km = Number(c.value);
       // A negative or absurd radius is a refusal, not a clamp that quietly
-      // means something else than the club asked for (abuse 19).
+      // means something else than the club asked for.
       if (!Number.isFinite(km) || km <= 0 || km > LIMITS.maxRadiusKm) return 'CRITERION_VALUE_OUT_OF_RANGE';
       return null;
     },
@@ -189,8 +189,8 @@ export const CRITERION_TYPES = {
 };
 export const CRITERION_TYPE_NAMES = Object.freeze(Object.keys(CRITERION_TYPES));
 
-/** Bounds that stop a pathological criteria set (§101) without constraining a
- *  legitimate club. Extends the M18 table rather than starting a second one. */
+/** Bounds that stop a pathological criteria set without constraining a
+ *  legitimate club. */
 export const LIMITS = {
   maxCriteria: 24,
   maxRequired: 16,
@@ -208,7 +208,7 @@ export const LIMITS = {
 const uniqStrings = (v) => (Array.isArray(v) ? [...new Set(v.map((x) => String(x)))] : []);
 
 /** A criterion type that names a protected characteristic is refused outright,
- *  in whatever shape it arrives (§19). */
+ *  in whatever shape it arrives. */
 export const isProhibitedCriterion = (type) => {
   const k = String(type ?? '').toLowerCase().replace(/[^a-z]+/g, '_');
   return PROHIBITED_BRIEF_FIELDS.some((p) => k === p || k.includes(p));
@@ -217,10 +217,8 @@ export const isProhibitedCriterion = (type) => {
 /**
  * Validate and normalise a whole criteria set.
  *
- * Returns `{ ok: true, criteria }` where `criteria` is
- * `{ required: [...], preferred: [...], schemaVersion }` with every criterion
- * carrying a stable id, or `{ ok: false, error, details }`. Nothing is ever
- * silently dropped: an unknown type, operator or value is a refusal.
+ * Every criterion carries a stable id. Nothing is ever silently dropped: an
+ * unknown type, operator or value is a refusal.
  */
 export function validateCriteria(input = {}, { orgLevel = 'pro', protocols = null } = {}) {
   const details = [];
@@ -295,7 +293,7 @@ export function criteriaVersion(criteria = {}) {
 
 /**
  * The version of a criteria SET is a property of the set, and a matching run
- * asks for it once per candidate. The M19 performance probe measured that
+ * asks for it once per candidate. Profiling showed that recomputing it
  * recomputing it dominated the cost of a match: 3.3 µs of a 5.1 µs
  * eight-criterion evaluation was this hash, run again for every player.
  *
@@ -312,7 +310,7 @@ function hash32(s) {
   return h.toString(16).padStart(8, '0');
 }
 
-/** The criteria set in plain language, for a summary line (§64). */
+/** The criteria set in plain language, for a summary line. */
 export function describeCriteria(criteria = {}) {
   const one = (c) => {
     switch (c.type) {

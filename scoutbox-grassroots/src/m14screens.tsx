@@ -1,11 +1,11 @@
 import { RecordFacts, DetailItems } from './RecordDetails';
 import { sentenceCase } from './presentation';
 import { CountChart } from './ScoutVisuals';
-// M14 org screens: the Verification workspace — your own verification, the
+// Org screens: the Verification workspace — your own verification, the
 // organisation console (requests, staff, domains, administrators), licences,
 // references, squad invitations and conflict declarations.
 //
-// Copy rules (§65): a badge always names the verified FACT ("Role verified:
+// Copy rules: a badge always names the verified FACT ("Role verified:
 // Academy Scout"), never a bare "Verified", and never implies endorsement.
 // Badge state never relies on colour alone: every pill carries text.
 import { Hint } from '../../design-system/About';
@@ -34,7 +34,7 @@ function useAsync<T>(fn: () => Promise<T>, deps: unknown[]): [T | null, () => vo
 }
 
 // ------------------------------------------------ central badge component
-// The ONE badge renderer for this app (§21/§44). Text-first, keyboard
+// The ONE badge renderer for this app. Text-first, keyboard
 // accessible; the <details> body explains provenance in plain English.
 export function VerificationBadge({ badge }: { badge: VerBadge }) {
   const glyph = badge.historical ? '◷' : '✓';
@@ -92,7 +92,7 @@ function ClaimRow({ claim, session, notify, onChange }: { claim: SubjectClaim; s
           </div>
         )}
       </span>
-      {/* M24F.5 — disputing is a rare act: one quiet link, and the reason field only once asked for. */}
+      {/* Disputing is a rare act: one quiet link, and the reason field only once asked for. */}
       {['verified', 'suspended', 'revoked', 'expired'].includes(claim.status) && !claim.disputedAt && (
         disputing ? (
           <span style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
@@ -173,7 +173,7 @@ function MeTab({ session, notify, me, reloadMe }: { session: Session; notify: Sc
         {!me?.claims.length && <div className="dim">{t('m14.me.noClaims')}</div>}
       </div>
 
-      {/* M24F.5 — once every step is done the start forms fold into one row; anyone still verifying sees them open. */}
+      {/* Once every step is done the start forms fold into one row; anyone still verifying sees them open. */}
       {allStepsDone ? (
         <details className="settings-row" data-testid="verify-start-more">
           <summary><span className="settings-row-title">{t('m14.me.start')}</span></summary>

@@ -1,4 +1,4 @@
-// M24B — case navigation acceptance (no browser).
+// Case navigation acceptance (no browser).
 //
 // Compiles the REAL category → subcategory models of Pro, Grassroots, Agent
 // and Player with rolldown and asserts the hard rule — NO recruitment

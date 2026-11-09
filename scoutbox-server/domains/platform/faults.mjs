@@ -1,10 +1,7 @@
 /**
- * M18.2 — deterministic fault injection for development and test.
- *
- * "What does the Room look like when Trust is slow?" could not be answered
- * without editing server code. This is a middleware that answers it from an
- * environment variable, and that REFUSES to exist in production: the module
- * exports nothing usable when NODE_ENV=production, and a production boot with
+ * Deterministic fault injection for development and test ("what does the Room
+ * look like when Trust is slow?"), driven by an environment variable. It
+ * REFUSES to exist in production: the module exports nothing usable when NODE_ENV=production, and a production boot with
  * SCOUTBOX_FAULTS set is a fatal configuration problem (capabilities.mjs).
  *
  *   SCOUTBOX_FAULTS='delay:/org/players/STAR/trust:1500;unavailable:/org/rooms/STAR'
@@ -26,7 +23,7 @@
 
 export const FAULT_KINDS = ['delay', 'unavailable', 'timeout', 'retryable', 'fatal', 'internal'];
 // `internal:STEP[:N]` is not a route fault: a domain that owns a multi-store unit
-// of work (M23 P7 signing completion) asks `shouldFail(STEP)` at a named seam
+// of work (signing completion) asks `shouldFail(STEP)` at a named seam
 // and throws when a rule names it, for the first N hits (default 1). It proves
 // the rollback path with a real failure, and cannot exist in production.
 

@@ -1,16 +1,16 @@
-// ScoutBox Agent — the ONE navigation source of truth (M15-Nav pattern).
+// ScoutBox Agent — the ONE navigation source of truth.
 //
 // Five sections and one utility destination: an agent's day is their clients,
 // the transactions they act in, the opportunities those clients can legitimately
 // see, their own regulatory standing and their agency. The transaction workspace
-// (P5.6D) is a permissioned multi-party record — it is NOT an offer workflow and
+// is a permissioned multi-party record — it is NOT an offer workflow and
 // NOT a negotiation surface, and nothing in it agrees or signs anything.
 //
 // Visibility filtering here is CONVENIENCE ONLY. The server enforces every
 // permission through its matrix on every request; hiding a destination never
 // becomes authorization, and typing a hidden route still hits the same rules.
 import type { ScreenId } from './App';
-// M24B — the client and transaction cases are category → subcategory (caseNav.ts).
+// The client and transaction cases are category → subcategory (caseNav.ts).
 import { CLIENT_NAV, TRANSACTION_NAV } from './caseNav';
 import { allSubs, caseSegments, parseCaseSegments, resolveTab, type CaseLocation } from '../../design-system/caseNav';
 
@@ -49,7 +49,7 @@ export const NAV_SECTIONS: NavSection[] = [
     children: [
       { id: 'home', labelKey: 'nav.home', aliases: ['dashboard', 'accueil', 'overview'] },
       { id: 'profile', labelKey: 'nav.profile', shortKey: 'navshort.profile', aliases: ['verification', 'licence', 'license', 'fifa', 'registration', 'my profile', 'vérification', 'licence fifa'] },
-      // P5.6C: the agent's own regulatory standing, conflict contexts, consents
+      // The agent's own regulatory standing, conflict contexts, consents
       // and attributed review items. Not a transaction room (no offer, no terms).
       { id: 'compliance', labelKey: 'nav.compliance', shortKey: 'navshort.compliance', aliases: ['conflict', 'conflicts', 'consent', 'consents', 'policy', 'policies', 'review', 'regulatory', 'conformité', 'conflit', 'consentement'] },
     ],
@@ -61,7 +61,7 @@ export const NAV_SECTIONS: NavSection[] = [
     ],
   },
   {
-    // P5.6D: the multi-party transaction workspace. Reading is every member's;
+    // The multi-party transaction workspace. Reading is every member's;
     // opening one, changing its parties and moving its status are the licensed
     // individual's, and the server refuses the rest whatever this list shows.
     id: 'transactions', labelKey: 'navsec.transactions', icon: 'target',
@@ -191,19 +191,19 @@ export function searchNav(query: string, ctx: NavContext, translate: (key: strin
 }
 
 // ------------------------------------------------------------- deep links
-// "#/<screenId>" is the flat contract. Two parameterised routes, each parsed
+// "#/<screenId>" is the flat contract. Each parameterised route is parsed
 // by its own strict pattern:
 //   "#/clients/:id"                       → one client relationship
 //   "#/clients/:id/<tab>"                 → …opened on a tab
 //   "#/agency/<tab>"                      → the Agency workspace on a tab
-//   "#/compliance/<ctxId>"                → one compliance context (P5.6C)
-//   "#/transactions/:id"                  → one transaction workspace (P5.6D)
+//   "#/compliance/<ctxId>"                → one compliance context
+//   "#/transactions/:id"                  → one transaction workspace
 //   "#/transactions/:id/<tab>"            → …opened on a tab
-// M23 P5.6E adds two READ tabs: the club contacts a club routed to this agent,
+// Two READ tabs: the club contacts a club routed to this agent,
 // and the client's trials as scheduling (never assessment). Both are gated on the
 // client's own disclosure choice, and both refuse plainly when it is off.
-// M24B — a link names "<category>/<sub>"; the old flat "<tab>" form and the server's
-// notification tabs (contacts, offers) still resolve to their subcategory.
+// A link names "<category>/<sub>"; a flat "<tab>" link and the server's
+// notification tabs (contacts, offers) also resolve to their subcategory.
 export const CLIENT_TABS = allSubs(CLIENT_NAV) as readonly string[];
 export type ClientTab = string;
 export const AGENCY_TABS = ['overview', 'team', 'compliance', 'settings'] as const;

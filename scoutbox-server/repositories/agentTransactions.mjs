@@ -1,6 +1,5 @@
 /**
- * S11c — the Agent Transaction Workspace as typed tables (migration `0029_agent_transactions`;
- * docs/architecture/migration.md §4.5 S11c; sql/06_agent_compliance_transactions.sql).
+ * The Agent Transaction Workspace: transactions, representation bindings and documents.
  *
  * Records:
  *   - A transaction: the multi-party workspace an agent opens. Ordered jurisdictions and parties (one live party per
@@ -25,7 +24,7 @@
  * an update from inside its own update are refused. History, notes, terms, linked threads and keys only grow. An
  * account deletion is `forgetPlayer`.
  *
- * READS are SQL: no mirror. Records are fresh and deep-frozen; a list decodes its child rows in one batch.
+ * Records are deep-frozen; a list decodes its child rows in one batch.
  *
  * References. Agencies → orgs and staff → org_users (RESTRICT); the context and the snapshot's evaluation →
  * compliance_contexts / compliance_evaluations; a representation's agreement and reviews → representation_agreements /
@@ -743,7 +742,7 @@ function decodeDocuments(sqlite, rows) {
   });
 }
 
-// ------------------------------------------------------------------ snapshot (fixtures and the persistence batteries)
+// ------------------------------------------------------------------ whole-domain read (the test suites)
 export const agentTransactionsLive = (sqlite) => migrationApplied(sqlite, AGENT_TRANSACTIONS_MIGRATION);
 function readAll(sqlite) {
   return {
@@ -752,7 +751,7 @@ function readAll(sqlite) {
     transactionDocuments: decodeDocuments(sqlite, sqlite.prepare('SELECT * FROM transaction_documents ORDER BY rowid').all()),
   };
 }
-/** The whole domain read back as plain records (`readAllRecords` in index.mjs: the test suites' read-back); null before its migration. */
+/** The whole domain read back as plain records (`readAllRecords` in index.mjs: the test suites' read-back). */
 export const AGENT_TRANSACTIONS_RECORDS = {
   names: AGENT_TRANSACTIONS_COLLECTIONS,
   read(sqlite) { return agentTransactionsLive(sqlite) ? readAll(sqlite) : null; },
@@ -882,7 +881,7 @@ export function createAgentTransactionsRepository({ sqlite, unit = null, now = D
     forAgency: many(decodeTransactions, 'SELECT * FROM agent_transactions WHERE agency_org_id = ? ORDER BY rowid'),
     /** The live transactions, oldest first (the stale-snapshot figure). */
     live: many(decodeTransactions, `SELECT * FROM agent_transactions WHERE ${LIVE_SQL} ORDER BY rowid`),
-    /** The process figures (§76): counts by status, type and reason code, end-to-end durations and the compliance-pending spans. */
+    /** The process figures: counts by status, type and reason code, end-to-end durations and the compliance-pending spans. */
     metrics: () => {
       const count = (col) => Object.fromEntries(q(`SELECT ${col} AS k, COUNT(*) AS n FROM agent_transactions WHERE ${col} IS NOT NULL GROUP BY ${col}`).all().map((r) => [r.k, r.n]));
       const durations = q(`SELECT COALESCE(cancelled_at, closed_at, updated_at) - created_at AS d FROM agent_transactions WHERE ${TERMINAL_SQL} ORDER BY d`).all().map((r) => r.d);
@@ -978,7 +977,7 @@ export function createAgentTransactionsRepository({ sqlite, unit = null, now = D
   };
 
   /**
-   * A player's account removal (§71): every transaction naming them keeps its ids, roles, states and times and loses
+   * A player's account removal: every transaction naming them keeps its ids, roles, states and times and loses
    * the person — the party row is tombstoned, the player's confirmation and their own history entries lose their
    * id and name (another player once named keeps theirs), the player's own documents are removed and lose their owner, every live binding is withdrawn,
    * and the tombstone is recorded (`entryOf()` gives the history entry). Returns the transaction ids touched.

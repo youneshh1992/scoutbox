@@ -1,5 +1,5 @@
 import { GuidanceNote } from './InformationRows';
-// M24F.2 — the Clubs page in four categories: Current, Requests, Development,
+// The Clubs page in four categories: Current, Requests, Development,
 // History. Each category composes the sections the page already had (the same
 // clients, the same rules) so nothing is lost — it is grouped. Development is
 // recomposed: a club's latest feedback, the current objective and the

@@ -1,8 +1,8 @@
 /**
- * M23 P7 — the Signing domain error contract. ONE table, no default branch,
- * a public-field allowlist (the M23 / P5.6D / P6 pattern, unchanged).
+ * The Signing domain error contract. ONE table, no default branch,
+ * a public-field allowlist.
  *
- * Concealment (§64, §82): a signing package that does not exist, one in
+ * Concealment: a signing package that does not exist, one in
  * another organisation, one addressed to another player, one an agent is
  * not entitled to, and a document that is not on a revision the caller may
  * read all answer `SIGNING_NOT_FOUND` / `SIGNING_DOCUMENT_NOT_FOUND` with

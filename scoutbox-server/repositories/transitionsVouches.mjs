@@ -1,29 +1,25 @@
 /**
- * S10c — transition cases and coach references (vouches) as typed tables (migration `0025_transitions_vouches`;
- * docs/architecture/migration.md §4.5 S10; sql/05_verification_passport.sql).
+ * Transition cases and coach references (vouches).
  *
  * Records:
- *   - A transition case (M13 F2): a player or guardian shares an evidence pack with clubs they choose, each grant
+ *   - A transition case: a player or guardian shares an evidence pack with clubs they choose, each grant
  *     individual, expiring and revocable. The pack's items, the grants (recipients) and the case history are ordered
  *     child rows; a placement and its follow-up are columns. `caseOwner` is not stored: it is always `startedBy`.
  *   - A coach reference (vouch): requested by a player or guardian (a coach proves their mailbox with a one-time code,
  *     stored only as its SHA-256 hash and cleared when used) or written straight onto the profile by a club releasing
  *     the player. `verificationMethod` and `identityVerified` are not stored: an email code proves mailbox control,
- *     never identity, so every view says 'email_code' and false (as every reader defaulted before).
- *
- * The M13 F10 legacy representations are not part of this step: their writer has refused since M23 P5.6E, but step
- * 2305 mirrors their rows into the agent agreements, so the collection moves with the agent stores in S11.
+ *     never identity, so every view says 'email_code' and false.
  *
  * WRITES are explicit: `create(record)` and `update(id, (draft) => …)` type the whole record and write it at once,
  * joined into the open unit of work, the caller's open transaction, or a transaction of their own; an unknown field and
  * an update from inside its own update are refused. A case's pack, owner, note and period never change; its grants
  * only gain rows (a grant's revocation and last view are the only fields that change); its history only grows.
  *
- * READS are SQL: no mirror. Queries decode fresh, deep-frozen records in insertion (rowid) order unless they say
- * otherwise. Modules receive them in `verificationReads` (`transitionCases`, `vouches`).
+ * Queries decode deep-frozen records in insertion (rowid) order unless they say otherwise. Modules receive them in
+ * `verificationReads` (`transitionCases`, `vouches`).
  *
  * References. Player and guardian ids carry no key (tolerant, as the rest of verification: an account deletion leaves
- * these rows under the old id, as before). A grant's and a placement's organisation → orgs are immediate RESTRICT
+ * these rows under the old id). A grant's and a placement's organisation → orgs are immediate RESTRICT
  * keys; a case's pack items, grants and history cascade with the case (a case is never deleted).
  */
 import crypto from 'node:crypto';
@@ -42,7 +38,7 @@ export const TRANSITION_ACTIONS = Object.freeze(['opened', 'recipient_added', 'r
 /** The pack's lists and the item kind each is stored as. */
 export const PACK_KINDS = Object.freeze({ mediaIds: 'media', evidenceIds: 'evidence', feedbackIds: 'feedback' });
 export const VOUCH_STATUSES = Object.freeze(['pending', 'published', 'revoked']);
-/** Text limits: the routes shorten free text to these (as they always did); ids, names, emails and lists over them are refused. */
+/** Text limits: the routes shorten free text to these; ids, names, emails and lists over them are refused. */
 export const TRANSITION_LIMITS = Object.freeze({
   id: 80, name: 200, note: 500, placementNote: 300, packItems: 100,
   periodDays: Object.freeze({ min: 14, max: 180, default: 90 }), grantDays: Object.freeze({ min: 1, max: 90, default: 30 }),
@@ -245,7 +241,7 @@ function decodeCases(sqlite, rows) {
 const decodeVouch = (row) => ({ ...decode(VOUCH_SPEC, row), verificationMethod: 'email_code', identityVerified: false });
 const encodeVouch = (rec) => { const { verificationMethod: _m, identityVerified: _i, ...r } = rec; return encode(VOUCH_SPEC, r); };
 
-// ------------------------------------------------------------------ snapshot (fixtures and the persistence batteries)
+// ------------------------------------------------------------------ whole-domain read (the test suites)
 export const transitionsLive = (sqlite) => migrationApplied(sqlite, TRANSITIONS_MIGRATION);
 function readAll(sqlite) {
   return {
@@ -253,7 +249,7 @@ function readAll(sqlite) {
     vouches: sqlite.prepare('SELECT * FROM vouches ORDER BY rowid').all().map(decodeVouch),
   };
 }
-/** The whole domain read back as plain records (`readAllRecords` in index.mjs: the test suites' read-back); null before its migration. */
+/** The whole domain read back as plain records (`readAllRecords` in index.mjs: the test suites' read-back). */
 export const TRANSITIONS_RECORDS = {
   names: TRANSITIONS_COLLECTIONS,
   read(sqlite) { return transitionsLive(sqlite) ? readAll(sqlite) : null; },

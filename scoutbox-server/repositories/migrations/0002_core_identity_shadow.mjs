@@ -1,13 +1,7 @@
 /**
- * Core identity tables — organisations and sessions — created as a shadow of the blob snapshot (migration plan step
- * S1). Both have since cut over: sessions (0003), orgs (0004). S14h: the players, guardians and guardian–child links
- * are no longer created here; 0005 creates their final tables.
- *
- * S14f amended the sessions table in place: an org session's staff member and organisation are one key,
+ * Organisations and sessions. An org session's staff member and organisation are one key,
  * (org_user_id, ref_id) → org_users(id, org_id), so a session cannot name staff of another organisation.
- *
- * The DDL is the identity section of docs/architecture/sql/01_identity.sql
- * (the player_* sub-record tables of that file arrive with step S5).
+ * 0004 replaces this definition of `orgs`.
  */
 export const id = '0002_core_identity_shadow';
 export const note = 'orgs and sessions tables (shadow of the snapshot)';

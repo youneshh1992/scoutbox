@@ -1,4 +1,4 @@
-// M23 P7 — Signing & Contract Completion: the end-to-end proof.
+// Signing & Contract Completion: the end-to-end proof.
 //
 //   Offer accepted → package opened (explicit club act) → exact document
 //   attached (digest) → presented → each required party confirms the exact
@@ -10,8 +10,8 @@
 // J evidence · K completion · L lifecycle · M db.signings · N under_contract ·
 // O affiliation/invoice/level · P concurrency · Q idempotency · R expiry ·
 // S blocks · T privacy · U deep links · V events · W notifications ·
-// X legacy · Y temporal · Z signing boundary. The 50 adversarial cases of
-// P7 §83 are marked `#n`. Every refusal asserts its exact status AND code.
+// X legacy · Y temporal · Z signing boundary. The adversarial cases are
+// marked `#n`. Every refusal asserts its exact status AND code.
 
 import { spawn } from 'node:child_process';
 import { mkdtempSync, readFileSync, readdirSync, statSync } from 'node:fs';
@@ -28,7 +28,7 @@ import {
   payloadFingerprint, validateContractDates, validateExpiry, requiredPartiesFor, effectiveStatus, canStart, canCompleteParty, completionGate,
   signingIntegrity, signingConsistency, signingCorrupt, SIGNING_CORRUPTION, signingRecipientView, signingAgentView, signingClubView, cleanText,
 } from '../../domains/recruitment/signings/signing.mjs';
-const LATEST_SCHEMA = Number(DATA_MIGRATIONS.map((m) => m.id).sort().at(-1).slice(0, 4)); // S14a: the latest table migration's number
+const LATEST_SCHEMA = Number(DATA_MIGRATIONS.map((m) => m.id).sort().at(-1).slice(0, 4)); // the latest table migration's number
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SERVER = path.join(HERE, '..', '..', 'server.mjs');
@@ -63,10 +63,9 @@ const SHA_A = sha256(DOC_A); const SHA_B = sha256(DOC_B);
 // ================================================================ A — model / store (pure)
 section('A — model and store: vocabulary, validators, gates, integrity, error taxonomy, the closed minor pathway');
 {
-  // A1–A3 rewritten in S14a: they described the blob's m280 step and the store contract. That nothing is backfilled
-  // or reinterpreted is proved on a planted legacy file in signingsPersistence §1.
+  // That nothing is backfilled or reinterpreted is proved on a planted legacy file in signingsPersistence section 1.
   ok(DATA_MIGRATIONS.length === LATEST_SCHEMA && DATA_MIGRATIONS.some((m) => m.id === '0018_signings_follow_ups'), 'A1 every table migration; the signing tables are 0018');
-  ok(TABLE_BACKED.includes('signingPackages') && TABLE_BACKED.includes('signings'), 'A2 signingPackages and signings are tables read through SQL (§4.3 step 2)');
+  ok(TABLE_BACKED.includes('signingPackages') && TABLE_BACKED.includes('signings'), 'A2 signingPackages and signings are tables read through SQL');
   ok(SIGNING_STATUSES.length === 8 && SIGNING_STORED_STATUSES.length === 6 && !SIGNING_STORED_STATUSES.includes('EXPIRED') && !SIGNING_STORED_STATUSES.includes('SUPERSEDED'), 'A4 eight statuses; EXPIRED is derived and SUPERSEDED is a revision status — neither is ever stored on a package');
   neg(!SIGNING_STATUSES.includes('SIGNED'), 'A5 no SIGNED workflow status: the word belongs to the case lifecycle alone');
   ok(PARTY_TYPES.join() === 'PLAYER,GUARDIAN,CLUB_SIGNATORY' && SIGNING_METHODS.join() === 'PLATFORM_ACKNOWLEDGMENT,UPLOAD_EXECUTED_DOCUMENT', 'A6 three party types; only the two implemented methods');
@@ -99,7 +98,7 @@ section('A — model and store: vocabulary, validators, gates, integrity, error 
   neg(canCompleteParty(pkg(), { partyType: 'PLAYER', actorKind: 'player', actorId: 'p1', revisionId: 'spr-1', documentSha256: SHA_A }, T + 8 * DAY).error === 'SIGNING_EXPIRED', 'A27 no party completes an expired package');
   const gateCtx = (p, extra = {}) => completionGate(p, { now: T + 2 * H, offer: { id: 'rof-1', status: 'ACCEPTED', orgId: 'o1', playerId: 'p1', caseId: 'c1' }, offerRevision: { id: 'rofr-1', status: 'ACCEPTED' }, kase: { id: 'c1', orgId: 'o1', playerId: 'p1', room: { status: 'offer_accepted' } }, ...extra });
   neg(gateCtx(pkg()).includes('PARTIES_INCOMPLETE'), '#16 #26 A28 a package with no party complete cannot complete');
-  const done = pkg({ status: 'IN_PROGRESS' }, { status: 'IN_PROGRESS' }); for (const p of done.revisions[0].requiredParties) Object.assign(p, { status: 'COMPLETED', completedAt: T + 90 * 60 * 1000, completedBy: { kind: p.partyType === 'PLAYER' ? 'player' : 'org', id: 'x' }, method: 'PLATFORM_ACKNOWLEDGMENT', evidenceRef: { kind: 'platform_acknowledgment', id: 'sgev-x', revisionId: 'spr-1', documentSha256: SHA_A, at: T + 90 * 60 * 1000, actorKind: p.partyType === 'PLAYER' ? 'player' : 'org', actorId: 'x', session: 'authenticated' } }); // P7.1: a real evidence reference names the revision, the digest, the actor and the instant
+  const done = pkg({ status: 'IN_PROGRESS' }, { status: 'IN_PROGRESS' }); for (const p of done.revisions[0].requiredParties) Object.assign(p, { status: 'COMPLETED', completedAt: T + 90 * 60 * 1000, completedBy: { kind: p.partyType === 'PLAYER' ? 'player' : 'org', id: 'x' }, method: 'PLATFORM_ACKNOWLEDGMENT', evidenceRef: { kind: 'platform_acknowledgment', id: 'sgev-x', revisionId: 'spr-1', documentSha256: SHA_A, at: T + 90 * 60 * 1000, actorKind: p.partyType === 'PLAYER' ? 'player' : 'org', actorId: 'x', session: 'authenticated' } }); // a real evidence reference names the revision, the digest, the actor and the instant
   ok(gateCtx(done).length === 0, 'A29 every party complete against the exact digest: the gate is empty');
   neg(gateCtx(done, { blocked: true }).includes('BLOCKED') && gateCtx(done, { otherCompleted: true }).includes('CONFLICTING_COMPLETED_SIGNING') && gateCtx(done, { kase: { id: 'c1', orgId: 'o1', playerId: 'p1', room: { status: 'on_hold' } } }).includes('LIFECYCLE_CONFLICT') && gateCtx(done, { offer: { id: 'rof-1', status: 'ACCEPTED', orgId: 'o1', playerId: 'p2', caseId: 'c1' } }).includes('REFERENCE_MISMATCH'), 'A30 a block, a conflicting completed signing, a paused case and a player mismatch each close the gate');
   const bad = JSON.parse(JSON.stringify(done)); bad.revisions[0].requiredParties[0].evidenceRef.documentSha256 = SHA_B;
@@ -424,9 +423,9 @@ section('I/J/K — required parties, evidence, the completion gate and the canon
   const after = await orgPlayer('pl-adeyemi');
   const pl = after.player ?? after;
   ok(pl.contractStatus === 'under_contract' && pl.availability === 'not_seeking' && pl.level === 'pro', '#25 K6 under_contract, not seeking, level moved by the pro club');
-  const inv = (await j('GET', '/org/invoices', undefined, maria.token)).body?.items ?? []; // S13e: paged (newest first)
+  const inv = (await j('GET', '/org/invoices', undefined, maria.token)).body?.items ?? []; // paged (newest first)
   ok(inv.filter((i) => i.signingId === row.id).length === (row.insideAttributionWindow ? 1 : 0) && inv.length - before.invoices <= 1, 'O1 the success-fee invoice is issued at most once, only inside the attribution window');
-  { // S13e: the invoice is stored exactly in minor units and answered in whole euros; the list pages by cursor.
+  { // the invoice is stored exactly in minor units and answered in whole euros; the list pages by cursor.
     const mine = inv.find((i) => i.signingId === row.id);
     ok(!row.insideAttributionWindow ? !mine : (!!mine && mine.amount === 1500 && mine.currency === 'EUR' && Object.keys(mine).sort().join() === 'amount,currency,description,id,orgId,orgName,playerName,provider,signingId,status,ts'), 'the success fee reads back as EUR 1,500 for a Pro club, from an allowlisted invoice');
     const one = (await j('GET', '/org/invoices?limit=1', undefined, maria.token)).body;
@@ -491,7 +490,7 @@ section('L — lifecycle: only the canonical completion reaches signed');
   const nRev = async () => (await sGet(sv(s).id)).body.signing.rev;
   neg(expect(await clubSign(sv(s).id, { expectedRev: await nRev(), revisionId: revOf(r).id, documentSha256: SHA_A, clientKey: key() }), 409, 'SIGNING_LIFECYCLE_CONFLICT'), 'L6 the club signatory cannot sign on a paused case');
   const resume = await lifecycle(N.RID, 'resumeCase');
-  // M23 P8.1 (D-P81-1): a hold is a pause, not a rewind — the resume returns the
+  // A hold is a pause, not a rewind — the resume returns the
   // case to Offer accepted, where it was held from, and the signing continues;
   // the package itself was never touched by the hold.
   ok(resume.status === 200 && (await stage(N.RID)) === 'offer_accepted', 'L7 resumed to where it was held from (offer_accepted)');
@@ -716,10 +715,10 @@ section('AD — reference mismatches, a voided package, and a completion that fa
   const vr = await sRoom(V.RID, rita.token);
   ok(vr.body.requirements.startBlockers.length === 0 && vr.body.livePackageId === null && (await j('GET', `/org/offers/${V.OID}`, undefined, rita.token, at(T0))).body.offer.status === 'ACCEPTED', 'AD9 the accepted Offer is unchanged and a new signing can be opened');
 
-  // #48 (HTTP, §87): a completion that fails AFTER the db.signings row, and one that fails AFTER the case moved, both leave NOTHING behind.
+  // #48 (HTTP): a completion that fails AFTER the db.signings row, and one that fails AFTER the case moved, both leave NOTHING behind.
   const setFaults = (rules) => j('POST', '/__faults', { rules });
   const plKey = (p) => { const x = p?.player ?? p ?? {}; return JSON.stringify([x.contractStatus ?? null, x.availability ?? null, x.level ?? null, (x.timeline ?? []).length]); };
-  // S4a: the completion is one unit of work; a third seam fires at the unit's last statement, just before COMMIT (the row, the lifecycle and the player's columns are all written by then).
+  // The completion is one unit of work; a third seam fires at the unit's last statement, just before COMMIT (the row, the lifecycle and the player's columns are all written by then).
   for (const [who, playerId, seam] of [['after the db.signings row was written', 'pl-imani', 'signing.complete.after_row'], ['after the case moved to signed', 'pl-martin', 'signing.complete.after_lifecycle'], ['at the last statement of the unit, before COMMIT', 'pl-nowak', 'signing.complete.at_commit']]) {
     const F = await presented(rita.token, playerId);
     const fs1 = await pSign(F.SID, { revisionId: F.SREV, documentSha256: SHA_A, clientKey: key() }, P[playerId].token);
@@ -748,10 +747,10 @@ section('Z — the boundary: ONE writer of db.signings, signed and under_contrac
   const walk = (d) => { for (const f of readdirSync(d)) { const p = path.join(d, f); if (f === 'node_modules' || f === 'scripts' || f === 'e2e' || f.startsWith('.')) continue; if (statSync(p).isDirectory()) walk(p); else if (f.endsWith('.mjs')) files.push(p); } };
   walk(root);
   const src = Object.fromEntries(files.map((f) => [path.relative(root, f), readFileSync(f, 'utf8')]));
-  // S8d: the signing row is written through the domain repository (`signings.record(...)`), never pushed on the view; the ONE writer is still domains/recruitment/signings/index.mjs.
+  // The signing row is written through the domain repository (`signings.record(...)`); the ONE writer is domains/recruitment/signings/index.mjs.
   const pushes = Object.entries(src).filter(([, s]) => /db\.signings\.push\(|signings\.record\(/.test(s)).map(([f]) => f).filter((f) => !f.startsWith('repositories/'));
   neg(pushes.length === 1 && pushes[0] === 'domains/recruitment/signings/index.mjs', `#23 Z1 the signing row is written (signings.record / db.signings.push) in exactly one file outside the repositories: ${pushes.join(', ')}`);
-  // S4a: the column is written through the identity repository (`players.update(id, { contractStatus: 'under_contract' })`), never assigned on the record.
+  // The column is written through the identity repository (`players.update(id, { contractStatus: 'under_contract' })`), never assigned on the record.
   const uc = Object.entries(src).filter(([, s]) => /contractStatus\s*=\s*'under_contract'|players\.update\([^\n]*contractStatus: 'under_contract'/.test(s)).map(([f]) => f);
   neg(uc.length === 1 && uc[0] === 'domains/recruitment/signings/index.mjs', `#25 Z2 contractStatus 'under_contract' is written in exactly one file: ${uc.join(', ')}`);
   neg(!/db\.signings\.push|contractStatus = 'under_contract'|playerLevelAfterSigning\(/.test(src['server.mjs'].slice(src['server.mjs'].indexOf("orgRouter.post('/players/:id/signing'"), src['server.mjs'].indexOf("orgRouter.get('/signings'"))), 'Z3 the legacy route itself writes nothing: it delegates to the ONE writer');

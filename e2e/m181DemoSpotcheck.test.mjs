@@ -1,28 +1,24 @@
-// M18.1 demo spotcheck — the hardening, as it appears in the SHIPPED bundles.
+// Demo spotcheck — the hardening, as it appears in the SHIPPED bundles.
 //
 // The demo bundles are the artifact HTML. A passing `vite build` does not
-// catch the circular-import class of bug that once crashed the M16.1 bundle,
+// catch the circular-import class of bug that can crash a bundle at boot,
 // and it certainly does not catch a terminology regression or a layout that
 // breaks at 390px. Booting the real bundles does.
 //
-// What this asserts, specifically, is the M18.1 surface work:
+// What this asserts, specifically:
 //   • two numbers, two names — "Profile completeness" is not "Trust Score"
 //   • a missing value is words, never "—" and never 0
 //   • each Second Look tab has its own empty state
 //   • the toast is a live region and the emoji-only controls have names
-//   • every M17/M18 surface survives a 390px phone
+//   • every Rooms, Second Look and Nobody Missed surface survives a 390px phone
 //   • the demo is unmistakably a demo, and no simulated Combine result is
 //     dressed up as production evidence
 //
-// Requires `node serve.mjs` on :8099.
+// Needs freshly built demo bundles (buildDemos.mjs).
 import { chromium } from 'playwright-core';
 import { ensureDemoHost } from './demoHost.mjs';
 
-// D7 (M22 §74-§76): this test OWNS its demo host rather than assuming one
-// is already listening. The old comment above said "Requires node
-// serve.mjs on :8099" — an instruction nobody followed, because
-// crosstab and demoOffline happened to leave a host behind. They no
-// longer do.
+// This test owns its demo host: it starts one if none is running (see demoHost.mjs).
 const demo = await ensureDemoHost();
 const BASE = demo.host.replace('localhost', '127.0.0.1');
 const EXE = process.env.CHROMIUM || '/opt/pw-browsers/chromium';
@@ -54,7 +50,7 @@ async function login(p) {
   await p.waitForTimeout(900);
 }
 
-// ---- 1. every bundle still boots clean after the M18.1 client work
+// ---- 1. every bundle boots clean
 for (const [name, path] of [['club', 'club/'], ['grassroots', 'grassroots/'], ['admin', 'admin/'], ['player', 'player/']]) {
   const { p, errors } = await open(`${BASE}/${path}`);
   const body = ((await p.textContent('body')) ?? '').trim();
@@ -119,7 +115,7 @@ for (const [name, path] of [['club', 'club/'], ['grassroots', 'grassroots/']]) {
   //    Missed always has a candidate in the demo, and reviewing one toasts.
   await p.evaluate(() => { window.location.hash = '#/recruitment/nobody-missed'; });
   await p.waitForTimeout(1400);
-  { const toggle = p.locator('[data-testid="nm-row-toggle"]').first(); if (await toggle.count()) { await toggle.click(); await p.waitForTimeout(300); } } // M24F.4 — actions sit behind the row
+  { const toggle = p.locator('[data-testid="nm-row-toggle"]').first(); if (await toggle.count()) { await toggle.click(); await p.waitForTimeout(300); } } // actions sit behind the row
   {
     const review = p.locator('button:has-text("Review player")').first();
     if (await review.count()) {
@@ -180,7 +176,7 @@ for (const [name, path] of [['club', 'club/'], ['grassroots', 'grassroots/']]) {
   // Terminology: the player's own completeness figure is not called Trust.
   ok(!/\bTrust\s+\d{1,3}%/.test(body), 'the player app does not label completeness "Trust NN%"');
 
-  // The M18 systems remain club-internal.
+  // Second Look and Nobody Missed remain club-internal.
   ok(!/second look|nobody missed|worth another look|evaluation coverage/i.test(body),
     'the player app carries no Second Look / Nobody Missed surface');
 

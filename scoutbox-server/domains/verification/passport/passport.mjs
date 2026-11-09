@@ -1,4 +1,4 @@
-// M15 — Football Passport assembly + routes.
+// Football Passport assembly + routes.
 //
 // The server assembles ONE canonical projection per (player, viewer) from
 // existing domain records; clients never rebuild the Passport from raw
@@ -12,10 +12,10 @@ import {
   buildTimeline, clubHistory, currentStatus, temporalConflicts, completeness,
   projectPassport, passportRevision, normWhen, whenDisplay, evId, PROVENANCE_COPY,
 } from './shared.mjs';
-// M16: the Passport PROJECTS Box Cam data — it never copies it.
+// The Passport PROJECTS Box Cam data — it never copies it.
 import { developmentActivity as boxDevelopmentActivity, fmtMs as boxFmtMs } from '../../development/boxcam/shared.mjs';
 import { DRILLS as BOX_DRILLS, latestDrill as boxLatestDrill } from '../../development/boxcam/drills.mjs';
-// M16.1 At-Home Combine — the Passport PROJECTS verified Combine results, it
+// At-Home Combine — the Passport PROJECTS verified Combine results, it
 // never copies them. Computed with the pure engine so this stays independent
 // of module registration order.
 import { combineProtocol as combineProtocolDef, personalBest as combinePersonalBest, formatCombineValue } from '../../development/boxcam/combineShared.mjs';
@@ -32,16 +32,15 @@ export function registerPassportCore(ctx) {
     moderateOrRefuse, vmetric, passport, unit,
   } = ctx;
   const vreads = ctx.verificationReads;
-  const boxReads = ctx.boxCamReads; // S12b: Box Cam, Combine and the CV results are read through SQL
+  const boxReads = ctx.boxCamReads;
   if (typeof boxReads?.sessions?.forPlayer !== 'function') throw new TypeError('registerPassportCore needs boxCamReads from the data layer');
-  // §4.3 step 2: the signings are read through SQL (the signings repository's queries).
   const reads = ctx.recruitmentReads;
   if (typeof reads?.signings?.forPlayer !== 'function') throw new TypeError('registerPassportCore needs recruitmentReads (signings) from the data layer');
 
   const orgCanSee = (org, p) => !!p && visibleToOrg(p, org) && !isBlocked(p.id, org.id);
   const guardianOwnsChild = (g, id) => g.childIds.includes(id);
   const orgOf = (id) => byId.org(id) ?? null;
-  // S10b: reading preferences never creates a row; a player who never saved has the blank ones.
+  // Reading preferences never creates a row; a player who never saved has the blank ones.
   const prefsFor = (playerId) => vreads.passportPrefs.forPlayer(playerId) ?? blankPrefs(playerId);
   ctx.orgCanSee = orgCanSee;
 
@@ -72,25 +71,25 @@ export function registerPassportCore(ctx) {
 
   // ------------------------------------------------------ source assembly
   // Reads existing collections; writes nothing. `light` skips the timeline
-  // for batch summaries (§62 — no full history for 100 players).
+  // for batch summaries (no full history for 100 players).
   /**
-   * The club-history inputs of one player (S14j: one definition, read by the Passport and by the trust band's
+   * The club-history inputs of one player (one definition, read by the Passport and by the trust band's
    * history source, which needs nothing else of the Passport).
    */
   function historyInputs(pid) {
-    // Club relationships: squad rows (invite-approved), accepted M14 squad
+    // Club relationships: squad rows (invite-approved), accepted squad
     // invitations, signings; plus self/guardian-submitted career entries.
-    // S9c: the player's squad rows in one indexed query; a club's shadow list is not a relationship.
+    // A club's shadow list is not a relationship.
     const squads = [];
     for (const row of ctx.scoutingReads.squad.forPlayer(pid)) {
       const o = orgOf(row.orgId);
-      if (!o || o.suspended) continue; // a suspended organisation lends no CURRENT relationship (§79#20)
+      if (!o || o.suspended) continue; // a suspended organisation lends no CURRENT relationship
       squads.push({ orgId: o.id, orgName: o.name, rowId: row.id, addedAt: row.addedAt, orgVerified: !!o.verified });
     }
     for (const inv of ctx.verificationReads.playerInvites.acceptedForPlayer(pid)) {
       if (!squads.some((s) => s.orgId === inv.orgId)) {
         const o = orgOf(inv.orgId);
-        if (!o || o.suspended) continue; // same suspension rule as squad rows (§79#20)
+        if (!o || o.suspended) continue; // same suspension rule as squad rows
         squads.push({ orgId: inv.orgId, orgName: o.name, rowId: inv.id, addedAt: inv.acceptedAt, orgVerified: !!o.verified });
       }
     }
@@ -99,7 +98,7 @@ export function registerPassportCore(ctx) {
     const signingRows = signings.map((s) => {
       const ended = outcomes.find((o) => o.signingId === s.id && ['released', 'ended', 'left'].includes(String(o.registrationStatus ?? '')));
       // Suspension suppresses the CURRENT relationship at read time (same
-      // policy as M14 badges); the historical signing fact is untouched.
+      // policy as verification badges); the historical signing fact is untouched.
       return { id: s.id, orgId: s.orgId, orgName: s.orgName, ts: s.ts, endedAt: ended?.at ?? null, orgSuspended: !!orgOf(s.orgId)?.suspended };
     });
     const careerEntries = vreads.careerEntries.forPlayer(pid);
@@ -131,22 +130,22 @@ export function registerPassportCore(ctx) {
       tier: e.verification?.status ?? 'self_reported', sourceKind: e.source?.kind ?? 'player',
       superseded: !!e.supersededBy, expired: e.expiresAt ? e.expiresAt < now : false,
     }));
-    // S12a: read through SQL. An objective has no completion instant (no route ever set one), so completedAt is null.
+    // An objective has no completion instant (no route ever set one), so completedAt is null.
     const objectives = ctx.developmentReads.objectives.forPlayer(pid).map((o) => ({
       id: o.id, orgId: o.orgId, orgName: orgOf(o.orgId)?.name ?? null, createdAt: o.createdAt,
       status: o.status, completedAt: null, sharingOrgIds: [...o.sharing.orgIds],
     }));
-    // S9d: read through SQL, and built from an allowlist (the player's own application, as before).
+    // Built from an allowlist (the player's own application).
     const applications = ctx.scoutingReads.applications.forPlayers([pid]).map((a) => ({
       ...applicationView(a), orgName: orgOf(a.orgId)?.name ?? null,
       opportunityTitle: ctx.scoutingReads.opportunities.byId(a.opportunityId)?.title ?? null,
     }));
-    const transitions = vreads.transitionCases.forPlayer(pid); // S10c: read through SQL
+    const transitions = vreads.transitionCases.forPlayer(pid);
     /**
-     * The canonical P5.6B relationships, shaped for the projection: a named
+     * The canonical agent relationships, shaped for the projection: a named
      * licensed individual, their agency, the scope and the dates. Read here so
      * the Passport's representation headline comes from the authoritative lane
-     * rather than being blind to it (M23 P5.6E §2/§5).
+     * rather than being blind to it.
      */
     const agentAgreements = ctx.agentReads.agreements.forClient(pid)
       .map((a) => ({
@@ -159,7 +158,7 @@ export function registerPassportCore(ctx) {
     const achievements = vreads.achievements.forPlayer(pid);
     const vouches = vreads.vouches.publishedFor(pid);
 
-    // M16 Box Cam — displayable (verified/partially verified, never
+    // Box Cam — displayable (verified/partially verified, never
     // invalidated) sessions, challenge completions and the aggregate
     // development-activity summary.
     const boxSessionsAll = boxReads.sessions.finishedForPlayer(pid).filter((s) => s.finalizedAt && !['cancelled', 'invalidated'].includes(s.verificationState));
@@ -198,8 +197,7 @@ export function registerPassportCore(ctx) {
       : null;
 
     const history = clubHistory({ affiliations: [], squads, careerEntries, signingRows });
-    // M23 P5.7 (T-8): THE age rule. The local-getter version here gave a
-    // different answer around a birthday in any non-UTC zone.
+    // THE shared age rule (UTC), so the answer around a birthday doesn't depend on the server's zone.
     const age = ageOrNull(player.dob, now);
 
     const fullMatchEvidence = evidence.filter((e) => e.claimType === 'footage' && !e.superseded);
@@ -248,7 +246,7 @@ export function registerPassportCore(ctx) {
         active: vreads.shares.activeCount(pid, now),
       },
       assessments, trials, objectives, // raw-ish, filtered again at projection
-      // Canonical inputs the M18.1 passport revision hashes. Kept separate from
+      // Canonical inputs the passport revision hashes. Kept separate from
       // the projected fields so the revision depends on source truth rather
       // than on anything a viewer or a clock could change.
       revisionSources: { evidence, careerEntries: careerEntries.map((c) => ({ id: c.id, withdrawnAt: c.withdrawnAt ?? null })) },
@@ -271,7 +269,7 @@ export function registerPassportCore(ctx) {
   ctx.assemblePassport = assemble;
   ctx.passportHistoryFor = historyFor;
   /**
-   * The canonical Passport CONTENT revision for a player (M18.1). Exposed so a
+   * The canonical Passport CONTENT revision for a player. Exposed so a
    * decision snapshot can record which Passport truth the club was looking at
    * without freezing a copy of the Passport itself.
    */
@@ -287,14 +285,12 @@ export function registerPassportCore(ctx) {
       full.assessmentsForOrg = full.assessments.filter((a) => a.orgId === opts.orgId);
       full.trialsForOrg = full.trials.filter((t) => t.orgId === opts.orgId);
     }
-    // NOTE (M16.2): the Trust Score is deliberately NOT embedded here. The
-    // Passport projection carries no numeric score of any kind — that is a
-    // standing M15 guarantee, because a number inside a Football Passport
-    // has always meant a talent rating. The Trust Score is a SEPARATE derived
+    // The Trust Score is deliberately NOT embedded here. The Passport projection
+    // carries no numeric score of any kind, because a number inside a Football
+    // Passport reads as a talent rating. The Trust Score is a SEPARATE derived
     // evidence-confidence summary (GET /player/trust-profile and the org
     // equivalent) that consumes the Passport; clients compose it into the
-    // Passport header. Keeping it out of this payload preserves both the M15
-    // invariant and the M14/M15/M16.2 separation of concerns.
+    // Passport header.
     return projectPassport(full, viewerKind, opts);
   }
   ctx.buildFootballPassport = buildFor;
@@ -316,8 +312,8 @@ export function registerPassportCore(ctx) {
   });
 
   // ------------------------------------------------------- input and views
-  // S10b: every field is checked before anything is written; junk is refused naming the field. Free text is still
-  // shortened to its limit, as it always was.
+  // Every field is checked before anything is written; junk is refused naming the field. Free text is
+  // shortened to its limit.
   const fieldInvalid = (res, field, message) => { res.status(400).json({ error: 'FIELD_INVALID', field, message }); return null; };
   const dateInvalid = (res, field) => { res.status(400).json({ error: 'DATE_INVALID', field, message: 'Use a year (YYYY), a month (YYYY-MM) or a day (YYYY-MM-DD).' }); return null; };
   const NOT_TEXT = Symbol('not text');
@@ -371,7 +367,7 @@ export function registerPassportCore(ctx) {
     let historyRow = null;
     if (body.positionHistoryAdd) {
       const h = body.positionHistoryAdd;
-      // `from` is the FOOTBALL date the player started playing this position; `recordedAt` (M18.1) is when the row was
+      // `from` is the FOOTBALL date the player started playing this position; `recordedAt` is when the row was
       // written. They are different events and are never used for each other.
       const from = footballDate(h?.from);
       if (!from) { res.status(400).json({ error: 'DATE_REQUIRED', message: 'Position history needs at least a year.' }); return null; }
@@ -402,7 +398,7 @@ export function registerPassportCore(ctx) {
         if (historyRow) d.positionHistory.push(historyRow);
         d.updatedAt = Date.now();
       });
-      // M18.1 — a canonical source-change event with its OWN clock: positionHistory.from is the football date the player
+      // A canonical source-change event with its OWN clock: positionHistory.from is the football date the player
       // STARTED playing the position, and prefs.updatedAt is bumped by any preference edit at all. Only a genuine change
       // of the primary position is recorded, so re-saving the same preferences emits nothing.
       const nowPrimary = p.positions?.primary ?? null;
@@ -489,7 +485,7 @@ export function registerPassportCore(ctx) {
     const when = body.when == null || body.when === '' ? null : footballDate(body.when);
     if (body.when != null && body.when !== '' && !when) return dateInvalid(res, 'when');
     if (!moderateOrRefuse(res, title, { kind: 'passport_achievement', playerId: player.id })) return;
-    // A client can NEVER assert authoritative provenance for itself (§79#16): whatever the body claims, a new
+    // A client can NEVER assert authoritative provenance for itself: whatever the body claims, a new
     // achievement is player/guardian-submitted (the fields it names are not read).
     const a = passport.achievements.create({
       id: nextId('pach'), playerId: player.id, title, orgName, when, submittedBy, confirmation: null, createdAt: Date.now(), withdrawnAt: null,
@@ -590,7 +586,7 @@ export function registerPassportCore(ctx) {
     res.json(buildFor(p, viewer, { orgId: req.org.id }));
   });
 
-  // Batch summaries for list surfaces — light assembly, no timelines (§62).
+  // Batch summaries for list surfaces — light assembly, no timelines.
   orgRouter.get('/football-passports', (req, res) => {
     const ids = String(req.query.ids ?? '').split(',').filter(Boolean).slice(0, 100);
     const items = [];

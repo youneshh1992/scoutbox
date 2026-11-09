@@ -1,8 +1,5 @@
 /**
- * Recruitment contacts and offers (S8c) get their own typed tables (ten tables). Runs with foreign keys off.
- * REGISTERED in DATA_MIGRATIONS. `up()` is the DDL only: the tables start empty and are written
- * through the repository. Amended in place on 3 November 2026 (migration.md §1.2) when the domain moved to typed
- * columns and explicit writes: re-seed a database created before.
+ * Recruitment contacts and offers (ten tables). Runs with foreign keys off.
  */
 import { migrationApplied } from '../database.mjs';
 import { RECRUITMENT_CASES_MIGRATION } from '../recruitmentCases.mjs';

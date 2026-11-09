@@ -1,4 +1,4 @@
-// M21 demo mirror (org side) — the Development Hub with no server.
+// Demo mirror (org side) — the Development Hub with no server.
 //
 // The demo reproduces the server's rules rather than flattering them:
 //
@@ -8,7 +8,7 @@
 //     asserted;
 //   • the demo Combine result is simulated, so the objective target reads
 //     `no_current_valid_measurement` and says exactly why. A demo number
-//     crossing a production threshold would be the dishonesty §149 forbids;
+//     crossing a production threshold would be dishonest;
 //   • completing an action leaves the goal where it was;
 //   • one evidence link resolves as unavailable, because that is a real state
 //     and hiding it would make the demo easier than the product.

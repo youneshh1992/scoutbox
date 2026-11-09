@@ -1,22 +1,22 @@
-// M23 P6 acceptance suite — the canonical Offer workflow.
+// Acceptance suite for the canonical Offer workflow.
 //
-// The governing principle this suite exists to enforce (mandate §3):
+// The governing principle this suite exists to enforce:
 //
 //   Recruitment Decision ≠ Offer ≠ Offer Acceptance ≠ Signing
 //
-// A positive P5 decision authorises CONSIDERING an Offer and creates none. An
+// A positive recruitment decision authorises CONSIDERING an Offer and creates none. An
 // explicit club act drafts one; issuing freezes an exact, immutable revision
 // and moves the case to `offer_made` through the ONE validator and the ONE
 // writer; the recipient's own acceptance or decline — nobody else's — moves
 // it to `offer_accepted` / `offer_declined`. An accepted Offer is NOT signed:
 // no `db.signings` row, no `signed`, no `under_contract`.
 //
-// Groups (mandate §66), with the 52 adversarial cases of §64 marked #n:
+// Groups, with the adversarial cases marked #n:
 //   A model/store   B create draft   C edit draft   D issue   E lifecycle
 //   F Player read   G guardian       H Agent        I privacy J expiry
 //   K revisioning   L withdraw       M supersede    N accept  O decline
 //   P races         Q idempotency    R blocks       S minors  T transaction
-//   U P5 privacy    V notifications  W deep links   X legacy states
+//   U decision privacy V notifications  W deep links   X legacy states
 //   Y rate limits   Z temporal regressions
 //
 // No assertion here is `status !== 200`. Every refusal names the status and
@@ -44,8 +44,8 @@ import { canTransitionRecruitmentCase, LIFECYCLE_ACTIONS, NULL_EVIDENCE_PROVIDER
 import { DATA_MIGRATIONS, TABLE_BACKED } from '../../repositories/index.mjs';
 import { isAdult } from '../../domain.mjs';
 import { isExpiredAt, parseInstant } from '../../temporal.mjs';
-import { createEvidenceProvider } from '../../scripts/recruitmentReadsFixture.mjs'; // §4.3 step 2: the contacts/offers queries over the plain arrays
-const LATEST_SCHEMA = Number(DATA_MIGRATIONS.map((m) => m.id).sort().at(-1).slice(0, 4)); // S14a: the latest table migration's number
+import { createEvidenceProvider } from '../../scripts/recruitmentReadsFixture.mjs'; // the contacts/offers queries over plain arrays
+const LATEST_SCHEMA = Number(DATA_MIGRATIONS.map((m) => m.id).sort().at(-1).slice(0, 4)); // the latest table migration's number
 
 const PORT = 6700 + Math.floor(Math.random() * 200);
 const BASE = `http://localhost:${PORT}`;
@@ -82,34 +82,32 @@ const key = () => `k-${Math.random().toString(36).slice(2, 10)}`;
 // ================================================================ A — model
 section('A — model and store: seven statuses, terminal at revision level, one type, no migration');
 {
-  ok(OFFER_STATUSES.join() === 'DRAFT,ISSUED,ACCEPTED,DECLINED,WITHDRAWN,EXPIRED,SUPERSEDED', 'A1 exactly the seven statuses of §5');
+  ok(OFFER_STATUSES.join() === 'DRAFT,ISSUED,ACCEPTED,DECLINED,WITHDRAWN,EXPIRED,SUPERSEDED', 'A1 exactly the seven statuses');
   ok(OFFER_TERMINAL_STATUSES.every((s) => OFFER_REVISION_TRANSITIONS[s].length === 0) && OFFER_REVISION_TRANSITIONS.DRAFT.join() === 'ISSUED,WITHDRAWN' && OFFER_REVISION_TRANSITIONS.ISSUED.join() === 'ACCEPTED,DECLINED,WITHDRAWN,EXPIRED,SUPERSEDED', 'A2 the revision transitions: a draft is issued or withdrawn; an issued revision is answered, withdrawn, expires or is superseded; everything else is terminal');
-  neg(!OFFER_STATUSES.includes('SIGNED') && !OFFER_STATUSES.includes('VIEWED') && !Object.values(OFFER_REVISION_TRANSITIONS).flat().some((s) => /SIGN|CONTRACT/i.test(s)), 'A3 no signed status, no viewed status, no contract state (§40, §83)');
-  ok(OFFER_STATUS_LABELS.ACCEPTED === 'Offer accepted — signing pending', 'A4 the accepted label says "signing pending" (§83)');
-  ok(OFFER_TYPES.join() === 'direct_recruitment' && OFFER_RESPONSE_TYPES.join() === 'accepted,declined' && OFFER_RESPONSE_ACTORS.join() === 'player,guardian', 'A5 one Offer context, two response kinds, two recipient actor kinds — an agent is not one of them (§12)');
+  neg(!OFFER_STATUSES.includes('SIGNED') && !OFFER_STATUSES.includes('VIEWED') && !Object.values(OFFER_REVISION_TRANSITIONS).flat().some((s) => /SIGN|CONTRACT/i.test(s)), 'A3 no signed status, no viewed status, no contract state');
+  ok(OFFER_STATUS_LABELS.ACCEPTED === 'Offer accepted — signing pending', 'A4 the accepted label says "signing pending"');
+  ok(OFFER_TYPES.join() === 'direct_recruitment' && OFFER_RESPONSE_TYPES.join() === 'accepted,declined' && OFFER_RESPONSE_ACTORS.join() === 'player,guardian', 'A5 one Offer context, two response kinds, two recipient actor kinds — an agent is not one of them');
   for (const k of PROTO_KEYS) neg(OFFER_STATUS_LABELS[k] === undefined && OFFER_REVISION_TRANSITIONS[k] === undefined, `A6 "${k}" is not a status (null-prototype tables)`);
   ok(OFFER_LIMITS.revisions === 20 && OFFER_LIMITS.documents === 10 && OFFER_LIMITS.internalNote === 2000 && OFFER_LIMITS.minExpiryMs === H && OFFER_LIMITS.maxExpiryMs === 180 * DAY, 'A7 explicit bounds: 20 revisions, 10 documents, notes of 2000, expiry within 1 h … 180 d');
-  neg(Object.values(MINOR_OFFER_PATHWAY_ENABLED).every((v) => v === false) && minorOfferPathwayOpen('GB') === false && minorOfferPathwayOpen('XX') === false && minorOfferPathwayOpen(undefined) === false && minorOfferPathwayOpen('__proto__') === false, 'A8 the minor pathway is CLOSED in every jurisdiction, including unknown ones and prototype names (§13 fail-closed)');
+  neg(Object.values(MINOR_OFFER_PATHWAY_ENABLED).every((v) => v === false) && minorOfferPathwayOpen('GB') === false && minorOfferPathwayOpen('XX') === false && minorOfferPathwayOpen(undefined) === false && minorOfferPathwayOpen('__proto__') === false, 'A8 the minor pathway is CLOSED in every jurisdiction, including unknown ones and prototype names (fail-closed)');
   ok(minorOfferPathwayOpen('GB', { GB: true, DEFAULT: false }) === true && minorOfferPathwayOpen('FR', { GB: true, DEFAULT: false }) === false, 'A8b opening it is a policy-table change, per jurisdiction');
-  // The store: no db collection since §4.3 step 2 (rewritten, it described the old storage) — the offers are their
-  // tables, read through SQL; still created without a P6 migration.
-  // A9–A11 rewritten in S14a: they described the store contract and the blob schema numbers.
-  ok(TABLE_BACKED.includes('recruitmentOffers'), 'A9 the offers are their tables, read through SQL (§4.3 step 2)');
+  // The store: the offers are their tables, read through SQL.
+  ok(TABLE_BACKED.includes('recruitmentOffers'), 'A9 the offers are their tables, read through SQL');
   ok(DATA_MIGRATIONS.length === LATEST_SCHEMA && DATA_MIGRATIONS.filter((m) => /offer/i.test(m.id)).map((m) => m.id).join() === '0017_recruitment_contacts_offers', 'A10 every table migration; the only one naming an Offer is 0017 (contacts and offers)');
-  ok(TABLE_BACKED.includes('signings'), 'A11 the signings are a table read through SQL (§4.3 step 2)');
+  ok(TABLE_BACKED.includes('signings'), 'A11 the signings are a table read through SQL');
   // Capabilities.
-  ok(roomCan('viewer', 'offer_view') && roomCan('contributor', 'offer_view') && !roomCan('contributor', 'offer_draft') && !roomCan('contributor', 'offer_issue') && roomCan('room_lead', 'offer_draft') && roomCan('room_lead', 'offer_issue') && roomCan('recruitment_admin', 'offer_issue') && !roomCan('viewer', 'offer_draft'), 'A12 roomCan: anyone who reads the room reads Offers; drafting and issuing sit with the room lead (§16)');
+  ok(roomCan('viewer', 'offer_view') && roomCan('contributor', 'offer_view') && !roomCan('contributor', 'offer_draft') && !roomCan('contributor', 'offer_issue') && roomCan('room_lead', 'offer_draft') && roomCan('room_lead', 'offer_issue') && roomCan('recruitment_admin', 'offer_issue') && !roomCan('viewer', 'offer_draft'), 'A12 roomCan: anyone who reads the room reads Offers; drafting and issuing sit with the room lead');
   for (const k of PROTO_KEYS) neg(roomCan('room_lead', k) === false, `A13 "${k}" is not a capability`);
   // Rate policies, events, notification category.
-  ok(RATE_LIMIT_POLICY.offer_draft_write?.scope === 'org' && RATE_LIMIT_POLICY.offer_issue?.scope === 'org' && RATE_LIMIT_POLICY.offer_withdraw?.scope === 'org' && RATE_LIMIT_POLICY.offer_response?.scope === 'actor', 'A14 four rate policies: three per organisation, responses per actor (§47)');
+  ok(RATE_LIMIT_POLICY.offer_draft_write?.scope === 'org' && RATE_LIMIT_POLICY.offer_issue?.scope === 'org' && RATE_LIMIT_POLICY.offer_withdraw?.scope === 'org' && RATE_LIMIT_POLICY.offer_response?.scope === 'actor', 'A14 four rate policies: three per organisation, responses per actor');
   ok(RATE_LIMIT_POLICY.offer_issue.max <= RATE_LIMIT_POLICY.offer_draft_write.max, 'A14b issuing has the tighter budget');
   const evs = ['offer_draft_created', 'offer_draft_updated', 'offer_issued', 'offer_superseded', 'offer_withdrawn', 'offer_responded'];
-  ok(evs.every((e) => EVENT_REGISTRY[e]?.audience === 'org_private' && EVENT_REGISTRY[e].privacyClass === 'org_internal'), 'A15 six Offer events, all org-private (§35, §36)');
+  ok(evs.every((e) => EVENT_REGISTRY[e]?.audience === 'org_private' && EVENT_REGISTRY[e].privacyClass === 'org_internal'), 'A15 six Offer events, all org-private');
   neg(evs.every((e) => EVENT_REGISTRY[e].payload.every((k) => ['orgId', 'roomId', 'offerId', 'status'].includes(k))), 'A15b and no event payload may carry a term, a note, an expiry, a reason or a recipient');
-  ok(CATEGORIES.offer_updates?.mandatory === false && CATEGORIES.offer_updates.default === true && TYPE_CATEGORY.recruitment_offer === 'offer_updates', 'A16 one notification category, on by default, not mandatory: a recipient may choose not to hear about Offers (§37)');
+  ok(CATEGORIES.offer_updates?.mandatory === false && CATEGORIES.offer_updates.default === true && TYPE_CATEGORY.recruitment_offer === 'offer_updates', 'A16 one notification category, on by default, not mandatory: a recipient may choose not to hear about Offers');
   // Errors.
   const codes = Object.keys(M28_ERROR_HTTP);
-  ok(codes.length === 23 && codes.every((c) => /^OFFER_/.test(c)) && [400, 403, 404, 409, 422, 500].every((s) => Object.values(M28_ERROR_HTTP).includes(s)), 'A17 23 OFFER_* codes across six status bands, in one table (OFFER_STORE_MISSING left with the db collection, §4.3 step 2)');
+  ok(codes.length === 23 && codes.every((c) => /^OFFER_/.test(c)) && [400, 403, 404, 409, 422, 500].every((s) => Object.values(M28_ERROR_HTTP).includes(s)), 'A17 23 OFFER_* codes across six status bands, in one table');
   neg(M28_ERROR_HTTP.__proto__ === undefined && M28_ERROR_HTTP.constructor === undefined && M28_ERROR_HTTP.toString === undefined, 'A18 the error table has no prototype: an unknown code cannot inherit a status');
   ok(M28_ERROR_HTTP.OFFER_NOT_FOUND === 404 && M28_ERROR_HTTP.OFFER_DOCUMENT_NOT_FOUND === 404 && M28_ERROR_HTTP.OFFER_BLOCKED === 403 && M28_ERROR_HTTP.OFFER_EXPIRED === 409 && M28_ERROR_HTTP.OFFER_RECIPIENT_INVALID === 422 && M28_ERROR_HTTP.OFFER_COMPLIANCE_BLOCKED === 422, 'A19 the bands: concealment 404, own standing 403, state 409, world 422');
   neg(publicErrorBody({ error: 'OFFER_STATE_UNKNOWN', message: 'x', stack: 's', detail: 'd' }).message !== 'x' && !has(publicErrorBody({ error: 'OFFER_STATE_INVALID', message: 'm', stack: 's', internal: 'i' }), 'stack'), 'A20 a 500 body is generic and no body carries a field outside the allowlist');
@@ -120,13 +118,13 @@ section('A — model and store: seven statuses, terminal at revision level, one 
   const produced = new Set([...src.matchAll(/(?:error: |err\(res, )'(OFFER_[A-Z_]+)'/g)].map((m) => m[1]));
   const unmapped = [...produced].filter((c) => M28_ERROR_HTTP[c] === undefined);
   neg(produced.size >= 20 && unmapped.length === 0, `A22 every OFFER_* code the m28 source produces (${produced.size}) is in the table${unmapped.length ? `: ${unmapped.join(',')}` : ''}`);
-  neg(!/db\.signings|under_contract|'signed'/.test(src), 'A23 the m28 source never names db.signings, under_contract or the signed state (§83)');
-  neg(!/case\.status\s*=|room\.status\s*=|\.status = verdict\.to/.test(src) && /applyLifecycleTransition/.test(src), 'A24 m28 never assigns a case status; it calls the ONE writer (§18)');
-  // Evidence kinds are now answerable, from the same provider.
+  neg(!/db\.signings|under_contract|'signed'/.test(src), 'A23 the m28 source never names db.signings, under_contract or the signed state');
+  neg(!/case\.status\s*=|room\.status\s*=|\.status = verdict\.to/.test(src) && /applyLifecycleTransition/.test(src), 'A24 m28 never assigns a case status; it calls the ONE writer');
+  // Evidence kinds are answerable from the same provider.
   ok(EVIDENCE_KINDS.includes('offer_sent') && EVIDENCE_KINDS.includes('offer_accepted_by_recipient') && EVIDENCE_KINDS.includes('offer_declined_by_recipient'), 'A25 the three offer evidence kinds exist on the ONE provider');
-  ok(STATUS_EVIDENCE_REQUIRED.offer_made.kind === 'offer_sent' && STATUS_EVIDENCE_REQUIRED.offer_accepted.kind === 'offer_accepted_by_recipient' && STATUS_EVIDENCE_REQUIRED.offer_declined.kind === 'offer_declined_by_recipient' && STATUS_EVIDENCE_REQUIRED.signed.kind === 'confirmed_join', 'A26 the precondition table is unchanged: P6 added no state and removed no gate (§19)');
+  ok(STATUS_EVIDENCE_REQUIRED.offer_made.kind === 'offer_sent' && STATUS_EVIDENCE_REQUIRED.offer_accepted.kind === 'offer_accepted_by_recipient' && STATUS_EVIDENCE_REQUIRED.offer_declined.kind === 'offer_declined_by_recipient' && STATUS_EVIDENCE_REQUIRED.signed.kind === 'confirmed_join', 'A26 the precondition table is unchanged: P6 added no state and removed no gate');
   ok(ROOM_STATUSES.length === 19 || ROOM_STATUSES.length >= 15, `A27 ROOM_STATUSES unchanged in kind (${ROOM_STATUSES.length})`);
-  neg(!ROOM_TRANSITIONS.offer_declined.includes('offer_consideration') && !ROOM_TRANSITIONS.offer_accepted.includes('offer_consideration'), 'A28 no new lifecycle edge: a declined case returns through shortlist, an accepted one is not re-offered (documented, §18)');
+  neg(!ROOM_TRANSITIONS.offer_declined.includes('offer_consideration') && !ROOM_TRANSITIONS.offer_accepted.includes('offer_consideration'), 'A28 no new lifecycle edge: a declined case returns through shortlist, an accepted one is not re-offered (documented)');
 }
 
 section('A — pure engine: validation, status derivation, gates, integrity, evidence');
@@ -138,12 +136,12 @@ section('A — pure engine: validation, status derivation, gates, integrity, evi
   // terms
   ok(validateTerms(undefined).ok && validateTerms({}).terms.offerType === 'direct_recruitment' && validateTerms({}).terms.startDate === null, 'A31 empty terms are a valid draft (every field optional on a draft)');
   neg(validateTerms({}, { requireComplete: true }).error === 'OFFER_TERMS_INVALID' && validateTerms({}, { requireComplete: true }).field === 'startDate', 'A32 but an ISSUED revision names its start day');
-  for (const bad of ['transfer', 'loan', 'trial', 'signing', ...PROTO_KEYS]) neg(validateTerms({ offerType: bad }).error === 'OFFER_TERMS_INVALID' && validateTerms({ offerType: bad }).field === 'offerType', `A33 offerType "${bad}" refused (one context, §8)`);
+  for (const bad of ['transfer', 'loan', 'trial', 'signing', ...PROTO_KEYS]) neg(validateTerms({ offerType: bad }).error === 'OFFER_TERMS_INVALID' && validateTerms({ offerType: bad }).field === 'offerType', `A33 offerType "${bad}" refused (one context)`);
   for (const bad of [[], 'x', 1, true]) neg(validateTerms(bad).field === 'terms', `A34 terms of type ${JSON.stringify(bad)} refused`);
   neg(validateTerms({ role: 'x'.repeat(81) }).field === 'role' && validateTerms({ squad: 1 }).field === 'squad' && validateTerms({ conditions: 'x'.repeat(1001) }).field === 'conditions', 'A35 role/squad/conditions bounded and typed');
   ok(validateTerms({ role: ' Winger\n' }).terms.role === 'Winger' && validateTerms({ conditions: 'a\u0000b' }).terms.conditions === 'ab', 'A36 text is trimmed, one-lined and stripped of control characters');
-  neg(!Object.keys(validateTerms({ salary: 1, wage: 2, fee: 3, role: 'x' }).terms).some((k) => /salary|wage|fee|compensation/.test(k)), 'A37 no compensation field exists and none is invented (§7)');
-  for (const bad of ['2027-02-29', '2027-13-01', '01/07/2027', '2027-7-1', 'next season', 1, '2027-07-01T00:00:00Z']) neg(validateTerms({ startDate: bad }).field === 'startDate', `A38 startDate ${JSON.stringify(bad)} is not a calendar day (P5.7 strict DATE_ONLY)`);
+  neg(!Object.keys(validateTerms({ salary: 1, wage: 2, fee: 3, role: 'x' }).terms).some((k) => /salary|wage|fee|compensation/.test(k)), 'A37 no compensation field exists and none is invented');
+  for (const bad of ['2027-02-29', '2027-13-01', '01/07/2027', '2027-7-1', 'next season', 1, '2027-07-01T00:00:00Z']) neg(validateTerms({ startDate: bad }).field === 'startDate', `A38 startDate ${JSON.stringify(bad)} is not a calendar day (strict DATE_ONLY)`);
   ok(validateTerms({ startDate: '2028-02-29' }).terms.startDate === '2028-02-29', 'A38b a real leap day is accepted');
   neg(validateTerms({ startDate: '2027-07-01', endDate: '2027-07-01' }).field === 'endDate' && validateTerms({ startDate: '2027-07-01', endDate: '2027-06-30' }).field === 'endDate', 'A39 the end day must be after the start day');
   // messages
@@ -152,7 +150,7 @@ section('A — pure engine: validation, status derivation, gates, integrity, evi
   // expiry (#10, #11, #12, #52)
   neg(validateExpiry(undefined, { now: T, required: true }).error === 'OFFER_EXPIRY_INVALID' && validateExpiry(undefined, { now: T }).ms === null, 'A42 a draft may carry no expiry; an issued revision must');
   for (const bad of ['2026-03-08T02:30:00', '2026-03-08 02:30', '2026-03-08', 'tomorrow', '2026-02-30T00:00:00Z', 'NaN', NaN, Infinity, -1, 0, true, {}, [], '1e12', '2026-03-08T02:30:00+25:00']) {
-    neg(validateExpiry(bad, { now: T }).error === 'OFFER_EXPIRY_INVALID', `A43 expiresAt ${JSON.stringify(bad)} refused — an explicit offset or Z, through P5.7 parseInstant only (#10, #12, #52)`);
+    neg(validateExpiry(bad, { now: T }).error === 'OFFER_EXPIRY_INVALID', `A43 expiresAt ${JSON.stringify(bad)} refused — an explicit offset or Z, through parseInstant only (#10, #12, #52)`);
   }
   neg(validateExpiry(T - 1, { now: T }).error === 'OFFER_EXPIRY_INVALID' && validateExpiry(T + H - 1, { now: T }).error === 'OFFER_EXPIRY_INVALID', 'A44 a past expiry, or one under an hour ahead, is refused (#11)');
   ok(validateExpiry(T + H, { now: T }).ms === T + H && validateExpiry(new Date(T + 30 * DAY).toISOString(), { now: T }).ms === T + 30 * DAY, 'A44b one hour ahead, inclusive, is accepted; ISO with Z is accepted');
@@ -162,12 +160,12 @@ section('A — pure engine: validation, status derivation, gates, integrity, evi
   // documents
   ok(validateDocumentRefs(undefined).documents === undefined && validateDocumentRefs([]).documents.length === 0, 'A47 documents are optional');
   for (const bad of ['x', {}, [{}], [{ evidenceId: '' }], [{ evidenceId: 1 }], [null], [{ evidenceId: 'a' }, { evidenceId: 'a' }], [{ evidenceId: 'a', label: 'x'.repeat(121) }], Array.from({ length: 11 }, (_, i) => ({ evidenceId: `e${i}` }))]) neg(validateDocumentRefs(bad).error === 'OFFER_DOCUMENT_INVALID', `A48 ${JSON.stringify(bad).slice(0, 40)} is not a document list`);
-  neg(!has(validateDocumentRefs([{ evidenceId: 'e', label: 'l', bytes: 'AAAA', path: '/etc/passwd' }]).documents, 'AAAA') && !has(validateDocumentRefs([{ evidenceId: 'e', path: '/x' }]).documents, '/x'), 'A49 a reference carries an id and a label only — no bytes, no path (§31)');
-  // status derivation and lazy expiry (§21)
+  neg(!has(validateDocumentRefs([{ evidenceId: 'e', label: 'l', bytes: 'AAAA', path: '/etc/passwd' }]).documents, 'AAAA') && !has(validateDocumentRefs([{ evidenceId: 'e', path: '/x' }]).documents, '/x'), 'A49 a reference carries an id and a label only — no bytes, no path');
+  // status derivation and lazy expiry
   const issued = (over = {}) => ({ id: 'r1', revisionNumber: 1, status: 'ISSUED', expiresAt: T + DAY, issuedAt: T, ...over });
   ok(effectiveRevisionStatus(issued(), T) === 'ISSUED' && effectiveRevisionStatus(issued(), T + DAY + 1) === 'EXPIRED', 'A50 an issued revision reads EXPIRED once its expiry passes — no write needed');
   ok(effectiveRevisionStatus(issued(), T + DAY) === (isExpiredAt(T + DAY, T + DAY) ? 'EXPIRED' : 'ISSUED'), 'A50b the boundary instant follows the ONE temporal helper');
-  for (const bad of [null, undefined, NaN, 'soon', '2026-02-30T00:00:00Z', {}, Infinity]) neg(effectiveRevisionStatus(issued({ expiresAt: bad }), T) === 'EXPIRED', `A51 an ISSUED revision with an unreadable expiry (${JSON.stringify(bad)}) reads EXPIRED — fail closed, never open (P5.7)`);
+  for (const bad of [null, undefined, NaN, 'soon', '2026-02-30T00:00:00Z', {}, Infinity]) neg(effectiveRevisionStatus(issued({ expiresAt: bad }), T) === 'EXPIRED', `A51 an ISSUED revision with an unreadable expiry (${JSON.stringify(bad)}) reads EXPIRED — fail closed, never open`);
   neg(effectiveRevisionStatus({ status: 'VIEWED' }, T) === null && effectiveRevisionStatus({ status: 'signed' }, T) === null && effectiveRevisionStatus(null, T) === null, 'A52 a status this build does not know reads as corruption, not as a state');
   ok(effectiveRevisionStatus({ status: 'ACCEPTED', expiresAt: T - DAY }, T) === 'ACCEPTED' && effectiveRevisionStatus({ status: 'DECLINED', expiresAt: T - DAY }, T) === 'DECLINED', 'A53 an answered revision does not expire afterwards');
   // gates
@@ -184,7 +182,7 @@ section('A — pure engine: validation, status derivation, gates, integrity, evi
   ok(canWithdrawRevision(offer([issued()], 'r1'), T).ok && canWithdrawRevision(offer([issued({ status: 'DRAFT' })], 'r1'), T).ok, 'A61 a draft or an unanswered issued revision may be withdrawn');
   neg(canWithdrawRevision(offer([issued({ status: 'ACCEPTED' })], 'r1'), T).error === 'OFFER_ALREADY_RESPONDED' && canWithdrawRevision(offer([issued()], 'r1'), T + 2 * DAY).error === 'OFFER_STATE_INVALID', 'A62 an accepted or expired one may not');
   neg(canRevise(offer([issued({ status: 'ACCEPTED' })], 'r1'), T).error === 'OFFER_STATE_INVALID' && canRevise(offer([issued({ status: 'DRAFT' })], 'r1'), T).error === 'OFFER_STATE_INVALID', 'A63 no revision over an accepted Offer, and no second draft over a live one');
-  ok(canRevise(offer([issued()], 'r1'), T).from === 'ISSUED' && canRevise(offer([issued()], 'r1'), T + 2 * DAY).from === 'EXPIRED' && canRevise(offer([issued({ status: 'DECLINED' })], 'r1'), T).from === 'DECLINED', 'A64 an issued, expired or declined Offer may be revised (§25)');
+  ok(canRevise(offer([issued()], 'r1'), T).from === 'ISSUED' && canRevise(offer([issued()], 'r1'), T + 2 * DAY).from === 'EXPIRED' && canRevise(offer([issued({ status: 'DECLINED' })], 'r1'), T).from === 'DECLINED', 'A64 an issued, expired or declined Offer may be revised');
   neg(canRevise(offer(Array.from({ length: 20 }, (_, i) => issued({ id: `r${i}`, revisionNumber: i + 1, status: i === 19 ? 'ISSUED' : 'SUPERSEDED' })), 'r19'), T).error === 'OFFER_STATE_INVALID', 'A65 twenty revisions is the limit');
   // responder rule (#20, #21, #23, #25)
   ok(responderMatches(R1, { kind: 'player', actorId: 'p1', playerId: 'p1' }), 'A66 the adult recipient answers their own Offer');
@@ -196,13 +194,13 @@ section('A — pure engine: validation, status derivation, gates, integrity, evi
   ok(offerIntegrity(offer([R1], 'r1'), { orgId: 'org-A', caseId: 'c1' }).length === 0, 'A70 a well-formed Offer has no integrity problems');
   neg(offerIntegrity(offer([R1], 'r1'), { orgId: 'org-B' }).includes('org_mismatch') && offerIntegrity(offer([R1], 'r9')).includes('current_revision') && offerIntegrity(offer([issued({ status: 'ACCEPTED' })], 'r1')).includes('response') && offerIntegrity(offer([issued({ expiresAt: 'soon' })], 'r1')).includes('expires_at') && offerIntegrity({ ...offer([R1], 'r1'), type: 'loan' }).includes('type'), 'A71 wrong org, dangling current revision, an accepted revision with no response, an unreadable expiry, an unknown type — each named');
   neg(offerIntegrity(offer([R1, R1], 'r1')).includes('revision_id') && offerIntegrity(offer([R1], 'r1', [{ revisionId: 'r1', responseType: 'accepted', actorType: 'player' }, { revisionId: 'r1', responseType: 'declined', actorType: 'player' }])).includes('duplicate_response'), 'A72 duplicate revision ids and two responses to one revision are corruption, not a race winner');
-  // evidence (§18, §19)
+  // evidence
   const kase = { id: 'c1', orgId: 'org-A', playerId: 'p1' };
   neg(offerEvidence(undefined, kase, 'offer_sent', T).reason === 'offers_store_unavailable' && offerEvidence([], kase, 'offer_sent', T).reason === 'no_issued_offer', 'A73 no store → not satisfied; no Offer → not satisfied');
   neg(offerEvidence([offer([issued({ status: 'DRAFT' })], 'r1')], kase, 'offer_sent', T).satisfied === false, 'A74 a DRAFT is not an Offer sent (#16 precondition)');
   ok(offerEvidence([offer([R1], 'r1')], kase, 'offer_sent', T).satisfied === true && offerEvidence([offer([R1], 'r1')], kase, 'offer_sent', T).sourceType === 'recruitment_offer', 'A75 an ISSUED current revision satisfies offer_sent');
   neg(offerEvidence([offer([R1], 'r1')], kase, 'offer_sent', T + 2 * DAY).satisfied === false, 'A75b an expired one no longer does');
-  neg(offerEvidence([offer([R1], 'r1')], { ...kase, id: 'c2' }, 'offer_sent', T).satisfied === false && offerEvidence([offer([R1], 'r1')], { ...kase, orgId: 'org-B' }, 'offer_sent', T).satisfied === false, 'A76 another case or another org\'s Offer is not this case\'s evidence (§51)');
+  neg(offerEvidence([offer([R1], 'r1')], { ...kase, id: 'c2' }, 'offer_sent', T).satisfied === false && offerEvidence([offer([R1], 'r1')], { ...kase, orgId: 'org-B' }, 'offer_sent', T).satisfied === false, 'A76 another case or another org\'s Offer is not this case\'s evidence');
   neg(offerEvidence([offer([issued({ ...R1, status: 'ACCEPTED' })], 'r1')], kase, 'offer_accepted_by_recipient', T).satisfied === false, 'A77 an ACCEPTED status with no recipient response row is NOT acceptance evidence (a status word cannot be asserted)');
   ok(offerEvidence([offer([{ ...R1, status: 'ACCEPTED' }], 'r1', [{ revisionId: 'r1', responseType: 'accepted', actorType: 'player', actorId: 'p1' }])], kase, 'offer_accepted_by_recipient', T).satisfied === true, 'A78 a response row by the snapshotted recipient is (#32)');
   neg(offerEvidence([offer([{ ...R1, status: 'ACCEPTED' }], 'r1', [{ revisionId: 'r1', responseType: 'accepted', actorType: 'player', actorId: 'p2' }])], kase, 'offer_accepted_by_recipient', T).satisfied === false, 'A79 a response by someone else is not');
@@ -223,8 +221,8 @@ section('A — pure engine: validation, status derivation, gates, integrity, evi
   const full = { ...offer([{ ...R1, terms: { offerType: 'direct_recruitment', role: 'W', squad: null, startDate: '2027-07-01', endDate: null, conditions: null }, internalNote: S_NOTE, recipientMessage: S_MSG, documents: [{ id: 'd1', evidenceId: 'vevd-1', label: 'L', mime: 'application/pdf' }], withdrawReason: S_WITHDRAW, readinessSnapshot: { blockers: ['X'] } }], 'r1'), decisionId: 'dec-1', transactionId: 'atx-1', agentShare: { agentUserId: 'u', at: T }, readReceipts: [{ revisionId: 'r1', viewerKind: 'player', viewerId: 'p1', firstViewedAt: T + 1 }], history: [] };
   const cv = offerClubView(full, T); const rv = offerRecipientView(full, T); const av = offerAgentView(full, T);
   ok(has(cv, S_NOTE) && cv.decisionId === 'dec-1' && cv.transactionId === 'atx-1' && cv.firstViewedAt === T + 1 && cv.agentShared === true, 'A87 the club view: the internal note, the decision and transaction references, the first-viewed receipt');
-  neg(!has(rv, S_NOTE) && !has(rv, 'dec-1') && !has(rv, 'atx-1') && !has(rv, S_WITHDRAW) && !has(rv, 'readiness') && !has(rv, 'blockers') && has(rv, S_MSG) && rv.currentRevision.documents[0].id === 'd1' && !has(rv, 'vevd-1'), 'A88 the recipient view: the message and the document by its Offer id — never the note, the decision, the transaction, the vault id, a withdraw reason or a readiness blocker (§32, #36, #37)');
-  neg(!has(av, S_NOTE) && !has(av, 'dec-1') && av.currentRevision.documents.length === 0 && av.clientId === 'p1' && has(av, 'own act'), 'A89 the agent view: terms and state, no documents, no note, and the words that it is the client\'s own act (§12)');
+  neg(!has(rv, S_NOTE) && !has(rv, 'dec-1') && !has(rv, 'atx-1') && !has(rv, S_WITHDRAW) && !has(rv, 'readiness') && !has(rv, 'blockers') && has(rv, S_MSG) && rv.currentRevision.documents[0].id === 'd1' && !has(rv, 'vevd-1'), 'A88 the recipient view: the message and the document by its Offer id — never the note, the decision, the transaction, the vault id, a withdraw reason or a readiness blocker (#36, #37)');
+  neg(!has(av, S_NOTE) && !has(av, 'dec-1') && av.currentRevision.documents.length === 0 && av.clientId === 'p1' && has(av, 'own act'), 'A89 the agent view: terms and state, no documents, no note, and the words that it is the client\'s own act');
   neg(!has(cv, 'sign') || /signing pending|not a signing/i.test(JSON.stringify(cv)), 'A90 wherever the club view mentions signing it says it is pending or not one');
   // #51 — a minor with an impossible DOB is not an adult
   for (const dob of [null, undefined, false, 0, '', '0000-00-00', '2030-01-01', 'yesterday', '2026-02-30', NaN]) neg(isAdult({ dob, country: 'GB' }, new Date(T)) === false, `A91 dob ${JSON.stringify(dob)} does not make an adult (#51)`);
@@ -309,7 +307,7 @@ async function reviewed(token, playerId) {
   if (await stage(RID, token) === 'watching') { const mv = await lifecycle(RID, 'startReview', {}, token); if (mv.status !== 200) throw new Error(`startReview ${JSON.stringify(mv.body)}`); }
   return RID;
 }
-/** The P5 path with no trial: shortlist → draft progress → finalize → offer_consideration. */
+/** The decision path with no trial: shortlist → draft progress → finalize → offer_consideration. */
 async function toConsideration(token, playerId, note = S_DEC) {
   const RID = await reviewed(token, playerId);
   if (await stage(RID, token) === 'offer_consideration') return { RID, DEC: (await journey(RID, token)).decisions.formal?.id ?? null };
@@ -355,10 +353,10 @@ const K = {};
   K.RID = c.RID; K.DEC = c.DEC;
   ok(K.RID === before && await stage(K.RID) === 'offer_consideration', 'B2 the case reached offer_consideration through P5');
   const s1 = await surface(K.RID);
-  neg(s1.body.offers.length === 0 && s1.body.liveOfferId === null && (await journey(K.RID)).offer.records.length === 0 && (await journey(K.RID)).offer.available === true, '#4 a positive P5 decision created NO Offer: the list is empty, the journey lists none (§9, §10)');
+  neg(s1.body.offers.length === 0 && s1.body.liveOfferId === null && (await journey(K.RID)).offer.records.length === 0 && (await journey(K.RID)).offer.available === true, '#4 a positive decision created NO Offer: the list is empty, the journey lists none');
   ok(s1.body.requirements.draftBlockers.length === 0 && s1.body.vocabulary.statuses.length === 7 && s1.body.limits.revisions === 20 && s1.body.policyVersion === OFFER_POLICY_VERSION && /never walks through it/.test(s1.body.note), 'B3 no blockers now; vocabulary, limits and the honest note are on the surface');
-  neg(expect(collect('#2', await create(K.RID, { terms: TERMS }, tom.token)), 403, 'OFFER_NOT_PERMITTED'), '#2 a scout cannot draft an Offer (§16)');
-  neg(expect(collect('#1', await create(K.RID, { terms: TERMS }, rita.token)), 404, 'ROOM_NOT_FOUND'), '#1 a foreign club drafting on this case gets the case\'s own 404 (§51)');
+  neg(expect(collect('#2', await create(K.RID, { terms: TERMS }, tom.token)), 403, 'OFFER_NOT_PERMITTED'), '#2 a scout cannot draft an Offer');
+  neg(expect(collect('#1', await create(K.RID, { terms: TERMS }, rita.token)), 404, 'ROOM_NOT_FOUND'), '#1 a foreign club drafting on this case gets the case\'s own 404');
   neg(expect(collect('B4', await surface(K.RID, rita.token)), 404, 'ROOM_NOT_FOUND'), 'B4 and cannot read the surface');
   for (const [body, code, field] of [[{ terms: { offerType: 'loan' } }, 'OFFER_TERMS_INVALID', 'offerType'], [{ terms: { startDate: '2027-02-29' } }, 'OFFER_TERMS_INVALID', 'startDate'], [{ terms: 'x' }, 'OFFER_TERMS_INVALID', 'terms'], [{ internalNote: 'x'.repeat(2001) }, 'OFFER_INPUT_INVALID', 'internalNote'], [{ expiresAt: 'next week' }, 'OFFER_EXPIRY_INVALID', 'expiresAt'], [{ expiresAt: T0 - 1 }, 'OFFER_EXPIRY_INVALID', 'expiresAt'], [{ documents: 'x' }, 'OFFER_DOCUMENT_INVALID', 'documents'], [{ clientKey: 'x'.repeat(65) }, 'OFFER_CLIENT_KEY_INVALID', undefined], [{ transactionId: 1 }, 'OFFER_INPUT_INVALID', 'transactionId'], [{ transactionId: 'atx-nope' }, 'OFFER_INPUT_INVALID', 'transactionId']]) {
     const r = await create(K.RID, body);
@@ -401,7 +399,7 @@ section('C — edit draft: expectedRev required, own rev, one field at a time');
   ok(e1.status === 200 && e1.body.offer.rev === 2 && revOf(e1).rev === 2 && revOf(e1).terms.startDate === '2027-07-01' && revOf(e1).expiresAt === T0 + 7 * DAY && revOf(e1).internalNote === S_NOTE && revOf(e1).recipientMessage === S_MSG, 'C8 the lead completes the terms and sets the expiry: rev 2, the note and message kept');
   const h = await history(K.OID);
   ok(h.status === 200 && h.body.items.map((x) => x.action).join() === 'offer_draft_created,offer_draft_updated' && h.body.items.every((x) => x.by.kind === 'org'), 'C9 the history is append-only: created, updated');
-  neg(expect(collect('C10', await getOffer(K.OID, tom.token)), 200, null) && (await getOffer(K.OID, tom.token)).body.offer.currentRevision.internalNote === S_NOTE, 'C10 a scout reads the Offer, note included — club memory (§16)');
+  neg(expect(collect('C10', await getOffer(K.OID, tom.token)), 200, null) && (await getOffer(K.OID, tom.token)).body.offer.currentRevision.internalNote === S_NOTE, 'C10 a scout reads the Offer, note included — club memory');
   neg(expect(collect('C11', await getOffer('rof-999999')), 404, 'OFFER_NOT_FOUND') && expect(collect('C11b', await getOffer(encodeURIComponent('../../etc/passwd'))), 404, 'OFFER_NOT_FOUND'), 'C11 an invented id and a traversal string are both NOT FOUND');
 }
 
@@ -410,7 +408,7 @@ section('D — issue: the exact revision is frozen, the case moves to offer_made
 {
   neg(expect(collect('D1', await issue(K.OID, { clientKey: 'D-issue' })), 400, 'OFFER_REV_REQUIRED'), 'D1 issuing without expectedRev is refused');
   neg(expect(collect('#7', await issue(K.OID, { expectedRev: 1, clientKey: 'D-issue' })), 409, 'OFFER_REV_CONFLICT'), '#7 issuing from a stale rev is a conflict');
-  neg(expect(collect('#8', await issue(K.OID, { expectedRev: 2, clientKey: 'D-issue' }, tom.token)), 403, 'OFFER_NOT_PERMITTED'), '#8 a user without the issuing role cannot issue (re-derived at issue, §17)');
+  neg(expect(collect('#8', await issue(K.OID, { expectedRev: 2, clientKey: 'D-issue' }, tom.token)), 403, 'OFFER_NOT_PERMITTED'), '#8 a user without the issuing role cannot issue (re-derived at issue)');
   neg(expect(collect('D2', await issue(K.OID, { expectedRev: 2 }, rita.token)), 404, 'OFFER_NOT_FOUND'), 'D2 a foreign club: NOT FOUND');
   // #10, #11: an expiry that became invalid between draft and issue is caught at issue.
   const late = await issue(K.OID, { expectedRev: 2, clientKey: 'D-late' }, maria.token, at(T0 + 7 * DAY));
@@ -427,12 +425,12 @@ section('D — issue: the exact revision is frozen, the case moves to offer_made
   ok(iss.body.offer.rev === 3 && revOf(iss).rev === 3, 'D4 the Offer and the revision each moved one rev');
   const orgFrames = await sseOrg.stop(); const pFrames = await sseP.stop();
   ok(/offer_issued/.test(orgFrames) && has(orgFrames, K.OID), `D5 the club stream carried offer_issued with the Offer id${/offer_issued/.test(orgFrames) ? '' : ` (frames: ${orgFrames.slice(0, 400)})`}`);
-  neg(!has(orgFrames, S_NOTE) && !has(orgFrames, S_MSG) && !has(orgFrames, TERMS.role) && !has(orgFrames, 'expiresAt'), 'D5b the event carries ids only — no term, message, note or expiry (§35)');
+  neg(!has(orgFrames, S_NOTE) && !has(orgFrames, S_MSG) && !has(orgFrames, TERMS.role) && !has(orgFrames, 'expiresAt'), 'D5b the event carries ids only — no term, message, note or expiry');
   neg(!/offer_/.test(pFrames), 'D6 the player\'s stream carried no Offer event (org-private); the player hears through a notification');
   const pn = (await notifs('/player/notifications', kola.token));
   const mine = pn.filter((n) => n.type === 'recruitment_offer');
   ok(pn.length === playerNotifs + 1 && mine.length === 1 && /issued you an Offer/.test(mine[0].text) && mine[0].refId === K.OID && /not a signing/i.test(mine[0].text), 'D7 the player is notified: a factual line with the Offer id as deep link, saying acceptance is not a signing');
-  neg(!has(mine, S_NOTE) && !has(mine, TERMS.role) && !has(mine, S_MSG), 'D7b the notification carries no term, message or note (§37)');
+  neg(!has(mine, S_NOTE) && !has(mine, TERMS.role) && !has(mine, S_MSG), 'D7b the notification carries no term, message or note');
   ok((await notifs('/org/notifications', maria.token)).length === orgNotifs, 'D8 the issuer is not notified about their own issue');
   const jr = await journey(K.RID);
   ok(jr.conditions.offerAwaitingResponse === true && jr.offer.records[0].status === 'ISSUED' && jr.lifecycle.currentStage === 'offer_made' && jr.outcome.signing === null, 'D9 the journey: awaiting a response, ISSUED, at offer_made, no signing');
@@ -440,7 +438,7 @@ section('D — issue: the exact revision is frozen, the case moves to offer_made
   const again = await issue(K.OID, { expectedRev: 3, clientKey: 'D-issue' });
   ok(again.status === 200 && again.body.idempotent === true, '#46 the same issue key replays without a second issue');
   neg(expect(collect('D10', await issue(K.OID, { expectedRev: 3, clientKey: 'D-other' })), 409, 'OFFER_STATE_INVALID'), 'D10 issuing an already-issued revision with a new key is a state refusal');
-  neg(expect(collect('#39', await editDraft(K.OID, { terms: { ...TERMS, role: 'Striker' }, expectedRev: 3 })), 409, 'OFFER_STATE_INVALID') && (await getOffer(K.OID)).body.offer.currentRevision.terms.role === TERMS.role, '#39 issued terms cannot be changed in place — immutable (§6)');
+  neg(expect(collect('#39', await editDraft(K.OID, { terms: { ...TERMS, role: 'Striker' }, expectedRev: 3 })), 409, 'OFFER_STATE_INVALID') && (await getOffer(K.OID)).body.offer.currentRevision.terms.role === TERMS.role, '#39 issued terms cannot be changed in place — immutable');
   const h = (await history(K.OID)).body.items.map((x) => x.action);
   ok(h.join() === 'offer_draft_created,offer_draft_updated,offer_issued', 'D11 history: created, updated, issued');
 }
@@ -505,11 +503,11 @@ section('H — Agent: read-only, only what the client explicitly shared, only wh
   const l = await aList(REP, ana.token);
   ok(l.status === 200 && l.body.items.length === 1 && l.body.items[0].id === K.OID && l.body.items[0].clientId === 'pl-adeyemi' && l.body.items[0].currentRevision.terms.role === TERMS.role && l.body.items[0].awaitingClientResponse === true && /own act/.test(l.body.note) && /not a signed contract/.test(l.body.honest), 'H5 Ana reads the shared Offer: terms and state, and the words that the answer is the client\'s own act');
   neg(!has(l.body, S_NOTE) && !has(l.body, K.DEC) && l.body.items[0].currentRevision.documents.length === 0 && !has(l.body, 'internalNote'), 'H6 no internal note, no decision reference, no documents in the agent projection');
-  neg(expect(collect('#18', await aList(REP, bea.token)), 404, 'REPRESENTATION_NOT_FOUND'), '#18 a same-agency colleague: the relationship itself is NOT FOUND — nothing says an Offer exists (§33)');
+  neg(expect(collect('#18', await aList(REP, bea.token)), 404, 'REPRESENTATION_NOT_FOUND'), '#18 a same-agency colleague: the relationship itself is NOT FOUND — nothing says an Offer exists');
   const admin = await aList(REP, alexAgent.token);
   neg((admin.status === 403 || admin.status === 404) && !has(admin.body, K.OID) && !has(admin.body, TERMS.role), '#19 the agency administrator without entitlement reads nothing of it');
   neg(expect(collect('#20', await j('POST', `/player/offers/${K.OID}/accept`, { revisionId: K.R1 }, ana.token)), 401, null) || (await j('POST', `/player/offers/${K.OID}/accept`, { revisionId: K.R1 }, ana.token)).status === 403, '#20 an agent token on the player accept route is not a player');
-  neg(expect(collect('#20b', await j('POST', `/org/agent/clients/${REP}/offers/${K.OID}/accept`, { revisionId: K.R1 }, ana.token)), 404, null), '#20b there is no route through which an agent accepts for a client — a second response path was not built (§12)');
+  neg(expect(collect('#20b', await j('POST', `/org/agent/clients/${REP}/offers/${K.OID}/accept`, { revisionId: K.R1 }, ana.token)), 404, null), '#20b there is no route through which an agent accepts for a client — a second response path was not built');
   for (const p of [`/org/offers/${K.OID}`, `/org/rooms/${K.RID}/offers`, `/org/offers/${K.OID}/history`]) neg(expect(collect('H7', await j('GET', p, undefined, ana.token)), 404, null) || (await j('GET', p, undefined, ana.token)).status === 403, `H7 the agent cannot use the club\'s own Offer routes (${p})`);
   const unshare = await pShare(K.OID, { share: false }, kola.token);
   ok(unshare.status === 200 && unshare.body.offer.agentShared === false && (await aList(REP, ana.token)).body.items.length === 0, 'H8 Kola un-shares; Ana sees nothing again — the share is the client\'s, live');
@@ -544,7 +542,7 @@ section('J — expiry: lazy, at the server\'s clock, through the ONE temporal he
   const kim = await playerLogin('pl-kim');
   ok((await pGet(OID, kim.token, at(T0 + H))).body.offer.status === 'ISSUED', 'J2 an hour later it is still ISSUED');
   const later = await pGet(OID, kim.token, at(T0 + 3 * H));
-  ok(later.body.offer.status === 'EXPIRED' && later.body.offer.awaitingYourResponse === false && later.body.offer.currentRevision.storedStatus === 'ISSUED', 'J3 three hours later it reads EXPIRED — derived, nothing written (§21)');
+  ok(later.body.offer.status === 'EXPIRED' && later.body.offer.awaitingYourResponse === false && later.body.offer.currentRevision.storedStatus === 'ISSUED', 'J3 three hours later it reads EXPIRED — derived, nothing written');
   neg(expect(collect('#26', await pAccept(OID, { revisionId: R, clientKey: key() }, kim.token, at(T0 + 3 * H))), 409, 'OFFER_EXPIRED'), '#26 accepting an expired Offer is refused');
   neg(expect(collect('J4', await pDecline(OID, { revisionId: R, clientKey: key() }, kim.token, at(T0 + 3 * H))), 409, 'OFFER_EXPIRED'), 'J4 so is declining it');
   ok((await getOffer(OID, maria.token, at(T0 + 3 * H))).body.offer.status === 'EXPIRED' && (await journey(RID)).conditions.offerAwaitingResponse === false || true, 'J5 the club sees EXPIRED');
@@ -569,7 +567,7 @@ section('K — revisioning and M — supersede: a change is a new revision; the 
   ok((await pGet(K.OID, kola.token)).body.offer.currentRevisionId === K.R1 && (await pGet(K.OID, kola.token)).body.offer.status === 'ISSUED' && (await pGet(K.OID, kola.token)).body.offer.revisions.length === 1, 'K1 Kola still sees revision 1 as the live one; the draft is invisible');
   ok((await aList(REP, ana.token)).body.items[0].revisions.length === 1, 'K1b so does Ana');
   neg(expect(collect('K2', await revise(K.OID, { expectedRev: 4, clientKey: key() })), 409, 'OFFER_STATE_INVALID'), 'K2 no second draft over a live draft');
-  neg(expect(collect('K3', await editDraft(K.OID, { terms: { role: 'Striker' }, expectedRev: 1 })), 409, 'OFFER_REV_CONFLICT') && (await editDraft(K.OID, { terms: { role: 'Striker' }, expectedRev: 1 })).body.currentRev === 4, 'K3 editing revision 2 with a stale rev is a conflict — ONE rev, the Offer\'s (§28)');
+  neg(expect(collect('K3', await editDraft(K.OID, { terms: { role: 'Striker' }, expectedRev: 1 })), 409, 'OFFER_REV_CONFLICT') && (await editDraft(K.OID, { terms: { role: 'Striker' }, expectedRev: 1 })).body.currentRev === 4, 'K3 editing revision 2 with a stale rev is a conflict — ONE rev, the Offer\'s');
   const e = await editDraft(K.OID, { terms: { ...TERMS, squad: 'First team', role: 'Attacking midfielder' }, expiresAt: T0 + 14 * DAY, expectedRev: 4 });
   ok(e.status === 200 && e.body.offer.rev === 5 && revOf(e).rev === 2 && revOf(e).terms.role === 'Attacking midfielder', 'K4 revision 2 edited in draft: Offer rev 5, the revision\'s own counter 2');
   neg(expect(collect('#47', await issue(K.OID, { expectedRev: 5, clientKey: 'D-issue' })), 409, 'OFFER_IDEMPOTENCY_CONFLICT'), '#47 the key that issued revision 1 cannot issue revision 2');
@@ -610,7 +608,7 @@ section('L — withdraw: a draft goes quietly; an issued Offer steps the case ba
   const playerNotifs = (await notifs('/player/notifications', mateus.token)).length;
   neg(expect(collect('L9', await withdraw(K.OID_H, { expectedRev: 2, reason: S_WITHDRAW, clientKey: 'L-w2' }, (await login('org-harbour', 'Sam Scout', 'Scout')).token)), 403, 'OFFER_NOT_PERMITTED'), 'L9 a Harbour scout cannot withdraw');
   const w2 = await withdraw(K.OID_H, { expectedRev: 2, reason: S_WITHDRAW, clientKey: 'L-w2' }, rita.token);
-  ok(w2.status === 200 && w2.body.offer.status === 'WITHDRAWN' && w2.body.lifecycle.applied === true && w2.body.lifecycle.action === 'considerOffer' && w2.body.lifecycle.to === 'offer_consideration' && await stage(K.RID_H, rita.token) === 'offer_consideration', 'L10 an issued Offer withdrawn: the case steps back to offer_consideration through considerOffer (§18, §24)');
+  ok(w2.status === 200 && w2.body.offer.status === 'WITHDRAWN' && w2.body.lifecycle.applied === true && w2.body.lifecycle.action === 'considerOffer' && w2.body.lifecycle.to === 'offer_consideration' && await stage(K.RID_H, rita.token) === 'offer_consideration', 'L10 an issued Offer withdrawn: the case steps back to offer_consideration through considerOffer');
   ok(w2.body.offer.currentRevision.withdrawReason === S_WITHDRAW, 'L11 the club keeps its own reason');
   const pv = await pGet(K.OID_H, mateus.token);
   ok(pv.status === 200 && pv.body.offer.status === 'WITHDRAWN' && pv.body.offer.awaitingYourResponse === false, 'L12 Mateus still reads the Offer, now WITHDRAWN');
@@ -670,7 +668,7 @@ section('O — decline: closure with an optional reason; the club steps back thr
   ok(d.status === 200 && d.body.offer.status === 'DECLINED' && d.body.lifecycle.applied === true && d.body.lifecycle.to === 'offer_declined' && await stage(K.KIM.RID) === 'offer_declined', '#35 Kim declines revision 2: DECLINED, the case at offer_declined through the ONE validator');
   ok((await getOffer(OID)).body.offer.responses[0].reason === 'Staying at my club this season.', 'O2 the club reads the reason the recipient chose to give');
   neg(expect(collect('#29', await pAccept(OID, { revisionId: K.KIM.R2, clientKey: key() }, kim.token, at(T0 + 4 * H))), 409, 'OFFER_ALREADY_RESPONDED'), '#29 accepting a declined revision is refused');
-  neg(expect(collect('O3', await revise(OID, { terms: { ...TERMS, squad: 'First team' }, expiresAt: T0 + 10 * DAY, expectedRev: 5, clientKey: 'O-r' }, maria.token, at(T0 + 4 * H))), 409, 'OFFER_LIFECYCLE_CONFLICT'), 'O3 no new revision while the case sits at offer_declined — the case has to be brought back first (§18)');
+  neg(expect(collect('O3', await revise(OID, { terms: { ...TERMS, squad: 'First team' }, expiresAt: T0 + 10 * DAY, expectedRev: 5, clientKey: 'O-r' }, maria.token, at(T0 + 4 * H))), 409, 'OFFER_LIFECYCLE_CONFLICT'), 'O3 no new revision while the case sits at offer_declined — the case has to be brought back first');
   ok((await lifecycle(K.KIM.RID, 'shortlist')).status === 200 && (await lifecycle(K.KIM.RID, 'considerOffer')).status === 200 && await stage(K.KIM.RID) === 'offer_consideration', 'O4 the lead steps the case back: shortlist → considerOffer (the finalized decision still stands as evidence)');
   const rv = await revise(OID, { terms: { ...TERMS, squad: 'First team' }, expiresAt: T0 + 10 * DAY, expectedRev: 5, clientKey: 'O-r' }, maria.token, at(T0 + 4 * H));
   ok(rv.status === 201 && revOf(rv).revisionNumber === 3 && revOf(rv).supersedesRevisionId === null, `O5 the club drafts revision 3 after the decline (superseding nothing: the declined one is answered history)${rv.status === 201 ? '' : ` (${rv.status} ${JSON.stringify(rv.body).slice(0, 240)})`}`);
@@ -732,7 +730,7 @@ section('R — blocks: no issue while blocked; a blocked recipient may still dec
   neg(expect(collect('#9', await issue(c.body.offer.id, { expectedRev: 1, clientKey: 'R-i' })), 403, 'OFFER_BLOCKED'), '#9 issuing to a player who blocked the club is refused');
   neg(expect(collect('R4', await editDraft(c.body.offer.id, { internalNote: 'still ours', expectedRev: 1 })), 200, null), 'R4 the club may still edit its own draft (a club-private note is not an approach)');
   const w = await withdraw(c.body.offer.id, { expectedRev: 2, clientKey: 'R-w' });
-  ok(w.status === 200 && w.body.offer.status === 'WITHDRAWN', 'R5 and withdraw it (a closure, not an approach) (§29)');
+  ok(w.status === 200 && w.body.offer.status === 'WITHDRAWN', 'R5 and withdraw it (a closure, not an approach)');
   neg(expect(collect('R6', await create(RID, { terms: TERMS })), 403, 'OFFER_BLOCKED'), 'R6 a new draft while blocked is refused');
   neg((await pList(tanaka.token)).body.items.length === 0, 'R7 Tanaka never saw anything');
   // Issue first, then block: decline stays open, accept does not.
@@ -758,7 +756,7 @@ section('S — minors: guardian-controlled, and closed in this build — an Offe
   ok(c.status === 201, 'S2 drafted');
   ok((await surface(RID)).body.requirements.issueBlockers.includes('MINOR_PATHWAY_CLOSED'), 'S3 the surface says the minor pathway is closed before anyone tries');
   const i = await issue(c.body.offer.id, { expectedRev: 1, clientKey: 'S-i' });
-  neg(expect(collect('#23', i), 422, 'OFFER_RECIPIENT_INVALID') && i.body.reasons?.includes('MINOR_PATHWAY_CLOSED'), '#23/#24 issuing to a minor is refused: no jurisdiction policy is encoded, so it fails closed (§13)');
+  neg(expect(collect('#23', i), 422, 'OFFER_RECIPIENT_INVALID') && i.body.reasons?.includes('MINOR_PATHWAY_CLOSED'), '#23/#24 issuing to a minor is refused: no jurisdiction policy is encoded, so it fails closed');
   ok((await getOffer(c.body.offer.id)).body.offer.status === 'DRAFT' && await stage(RID) === 'offer_consideration', 'S4 nothing was issued and the case did not move');
   neg((await gList(amara.token)).body.items.length === 0 && (await pList(guni.token)).body.items.length === 0, 'S5 the guardian and the child see nothing');
   neg(expect(collect('S6', await gAccept(c.body.offer.id, { revisionId: c.body.offer.currentRevisionId }, amara.token)), 404, 'OFFER_NOT_FOUND'), 'S6 the guardian cannot answer a draft (NOT FOUND — it was never addressed)');
@@ -781,7 +779,7 @@ section('T — transaction integration: readiness re-evaluated at issue; a trans
   ok(tx.status === 201 && tx.body.transaction.links.recruitmentCaseId === c.RID, 'T3 Ana opens the workspace citing the case');
   const TX = tx.body.transaction.id;
   await j('POST', `/org/agent/transactions/${TX}/notes`, { text: S_TXNOTE, visibility: 'AGENT_PRIVATE' }, ana.token);
-  neg((await surface(c.RID)).body.offers.length === 0, 'T4 no Offer appeared from the transaction (§11)');
+  neg((await surface(c.RID)).body.offers.length === 0, 'T4 no Offer appeared from the transaction');
   const o = await create(c.RID, { terms: TERMS, expiresAt: EXP, transactionId: TX, clientKey: 'T-c' });
   ok(o.status === 201 && o.body.offer.transactionId === TX, 'T5 the club drafts an Offer referencing the transaction');
   const s = await surface(c.RID);
@@ -802,11 +800,11 @@ section('T — transaction integration: readiness re-evaluated at issue; a trans
   K.MAT = { RID: c.RID, OID: o2.body.offer.id, R: revOf(i2).id, REP2 };
 }
 
-// ============================================================ U — P5 privacy
-section('U — P5 privacy: the decision\'s rationale never leaves the club');
+// ======================================================= U — decision privacy
+section('U — privacy: the decision\'s rationale never leaves the club');
 {
   const payloads = [(await pGet(K.OID, kola.token)).body, (await pList(kola.token)).body, (await aList(REP, ana.token)).body, (await pGet(K.MAT.OID, mateus.token)).body];
-  neg(!payloads.some((p) => has(p, S_DEC) || has(p, K.DEC) || has(p, 'decision')), 'U1 no recipient or agent payload carries the decision\'s note, id or the word decision (§10, #36)');
+  neg(!payloads.some((p) => has(p, S_DEC) || has(p, K.DEC) || has(p, 'decision')), 'U1 no recipient or agent payload carries the decision\'s note, id or the word decision (#36)');
   ok((await getOffer(K.OID)).body.offer.decisionId === K.DEC, 'U2 the club\'s view references the decision by id only');
   neg(!has((await getOffer(K.OID)).body, S_DEC), 'U3 and not its rationale — an Offer is not a decision record');
 }
@@ -842,7 +840,7 @@ section('W — deep links: a reference is re-authorised on open');
 section('X — legacy lifecycle states: unchanged vocabulary, every offer state still evidence-gated');
 {
   ok(ROOM_TRANSITIONS.offer_consideration.includes('offer_made') && ROOM_TRANSITIONS.offer_made.includes('offer_accepted') && ROOM_TRANSITIONS.offer_made.includes('offer_declined') && ROOM_TRANSITIONS.offer_made.includes('offer_consideration'), 'X1 the edges P6 uses exist and existed');
-  neg(!ROOM_STATUSES.includes('offer_issued') && !ROOM_STATUSES.includes('offer_withdrawn') && !ROOM_STATUSES.includes('offer_expired'), 'X2 no new lifecycle state was added for an Offer status (§61)');
+  neg(!ROOM_STATUSES.includes('offer_issued') && !ROOM_STATUSES.includes('offer_withdrawn') && !ROOM_STATUSES.includes('offer_expired'), 'X2 no new lifecycle state was added for an Offer status');
   const { RID } = await toConsideration(rita.token, 'pl-kim');
   neg(expect(collect('X3', await legacyStatus(RID, 'offer_made', rita.token)), 422, 'ROOM_EVIDENCE_REQUIRED') && (await legacyStatus(RID, 'offer_accepted', rita.token)).status >= 400, 'X3 the legacy route: offer_made needs evidence; offer_accepted is not even an edge from consideration');
   ok(await stage(RID, rita.token) === 'offer_consideration', 'X4 nothing moved');
@@ -874,7 +872,7 @@ section('Z — temporal regressions: every Offer instant through P5.7, none thro
 {
   const { RID } = await toConsideration(maria.token, 'pl-tomasz-adult').catch(() => ({ RID: null }));
   void RID;
-  neg(expect(collect('Z1', await editDraft(K.MAT.OID, { expiresAt: '2026-11-01T01:30:00', expectedRev: 2 })), 409, 'OFFER_STATE_INVALID'), 'Z1 (an issued revision: the state gate answers before the expiry parser — order §50)');
+  neg(expect(collect('Z1', await editDraft(K.MAT.OID, { expiresAt: '2026-11-01T01:30:00', expectedRev: 2 })), 409, 'OFFER_STATE_INVALID'), 'Z1 (an issued revision: the state gate answers before the expiry parser)');
   const c = await create(K.RID_H, { terms: TERMS, clientKey: 'Z-c' }, rita.token, at(T0 + 20 * DAY)).catch(() => null);
   if (c && c.status === 201) {
     for (const bad of ['2026-11-01T01:30:00', '2026-03-29T02:30:00', 'soon', '2026-02-30T00:00:00Z', 1e18, -5, '  ']) {
@@ -883,12 +881,12 @@ section('Z — temporal regressions: every Offer instant through P5.7, none thro
     }
     const dst = await editDraft(c.body.offer.id, { expiresAt: '2026-11-01T01:30:00-04:00', expectedRev: (await getOffer(c.body.offer.id, rita.token)).body.offer.rev }, rita.token, at(T0 + 20 * DAY));
     ok(dst.status === 200 && dst.body.offer.currentRevision.expiresAt === parseInstant('2026-11-01T05:30:00Z').ms || dst.status === 400, 'Z3 an ambiguous DST wall time WITH its offset is one exact instant; the server stores the instant');
-    neg(expect(collect('Z4', await editDraft(c.body.offer.id, { terms: { startDate: '2027-07-01', endDate: '2027-07-01' }, expectedRev: (await getOffer(c.body.offer.id, rita.token)).body.offer.rev }, rita.token, at(T0 + 20 * DAY))), 400, 'OFFER_TERMS_INVALID'), 'Z4 a zero-length term is refused (ordering, P5.7 §25)');
+    neg(expect(collect('Z4', await editDraft(c.body.offer.id, { terms: { startDate: '2027-07-01', endDate: '2027-07-01' }, expectedRev: (await getOffer(c.body.offer.id, rita.token)).body.offer.rev }, rita.token, at(T0 + 20 * DAY))), 400, 'OFFER_TERMS_INVALID'), 'Z4 a zero-length term is refused (ordering)');
   } else ok(true, `Z2 (Harbour\'s case has a live Offer; the parser cases are covered in group A: ${c?.status})`);
   const spoof = await pGet(K.MAT.OID, mateus.token, {});
   ok(spoof.status === 200 && spoof.body.offer.status === 'ISSUED', 'Z5 with no test-clock header the server\'s own clock judges the expiry (and it is in the future)');
   const futureSpoof = await pAccept(K.MAT.OID, { revisionId: K.MAT.R, clientKey: key(), occurredAt: T0 - 30 * DAY, at: 1 }, mateus.token, at(T0 + 2 * DAY));
-  ok(futureSpoof.status === 200 && futureSpoof.body.offer.responses[0].occurredAt === T0 + 2 * DAY, 'Z6 the response time is the server\'s clock; a body claim of when is ignored (§53)');
+  ok(futureSpoof.status === 200 && futureSpoof.body.offer.responses[0].occurredAt === T0 + 2 * DAY, 'Z6 the response time is the server\'s clock; a body claim of when is ignored');
 }
 
 // ---------------------------------------------------------------- report

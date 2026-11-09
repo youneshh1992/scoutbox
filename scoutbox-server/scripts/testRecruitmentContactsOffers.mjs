@@ -1,12 +1,7 @@
-// S8c — recruitment contacts and offers as typed tables with EXPLICIT writes (repositories/recruitmentContactsOffers.mjs,
-// migration 0017; docs/architecture/migration.md §4.3). What this suite proves: the migration creates the ten typed
-// tables (no lossless side column, the deferred case and request keys); a fixture written through the repository types
-// every field into its column and reads back the typed record, stops on a record it cannot type and names every missing
-// reference with ids; the player references are counted, never refused (Q8c-a); the repository's operations write rows at once and return fresh read-only records; there is no db.* view
-// (§4.3 step 2: a reader naming one throws) and every query matches a scan of the tables; a unit of work rolls the rows
-// back and a read inside it sees its own writes; a contact may name a request the staged S8a repository writes at the
-// same unit's COMMIT; the deletion unit's redactions.
-// Temporary databases only; nothing touches DATA_DIR. Run with: npm test
+// Recruitment contacts and offers (repositories/recruitmentContactsOffers.mjs, migration 0017): the typed tables,
+// typed writes and refusals, SQL reads that match a table scan, units of work and the deletion unit's redactions. The
+// request key is deferred so a contact may name a request written later in the same unit. Player references are
+// counted, never refused (Q8c-a, docs/decisions.md). Temporary databases only; nothing touches DATA_DIR. Run with: npm test
 import assert from 'node:assert/strict';
 import { checkHistoryFeed } from './historyFeedCheck.mjs';
 import fs from 'node:fs';
@@ -43,7 +38,7 @@ const S8A_FIX = () => ({ requests: [acceptedRequest(p4bInvitation(), 'trial-1'),
 /** The typed expectation of a fixture: what every read returns. */
 const typed = (name, raw) => { const t = (name === 'recruitmentContacts' ? mod.typeContact : mod.typeOffer)(persisted(raw)); assert.ok(t.ok, t.reason); return plain(t.record); };
 
-/** The S8a–S8c fixtures as one fixture; `two` overrides a contact/offer collection (undefined omits it). */
+/** The recruitment fixtures as one fixture; `two` overrides a contact/offer collection (undefined omits it). */
 function fixtureCollections({ more = {}, ...two } = {}) {
   const fix = S8C_FIX(); const db = { ...S8B_FIX(), ...S8A_FIX(), ...more };
   for (const name of COLLECTIONS) { const v = Object.hasOwn(two, name) ? two[name] : fix[name]; if (v !== undefined) db[name] = v; }
@@ -75,7 +70,7 @@ test('[schema] migration 0017 is registered before 0018 and creates the ten type
   assert.match(ddlOf(e, 'recruitment_contacts'), /status TEXT NOT NULL CHECK \(status IS NULL OR status IN \('draft','delivered','failed','responded','recorded','cancelled'\)\)/);
   assert.match(ddlOf(e, 'offer_revisions'), /internal_note TEXT CHECK \(internal_note IS NULL OR length\(internal_note\) <= 2000\)/);
   assert.doesNotMatch(ddlOf(e, 'idempotency_keys'), /'recruitment_contacts'|'recruitment_offers'/, 'the keys are the owners\' own columns');
-  assert.equal(hasBlobTable(e), false, 'no blob table'); // rewritten in S14a: it described the blob
+  assert.equal(hasBlobTable(e), false, 'no blob table');
   E.close(); rm(empty);
   const d = file('schema'); const back = readRecords(d); const s = new DatabaseSync(dbFile(d)); s.exec('PRAGMA foreign_keys = ON');
   const after = fullDump(s); assert.deepEqual(runDataMigrations(s, DATA_MIGRATIONS, { now: NOW, context: { sessionTtlMs: TTL } }).ran, []); assert.equal(fullDump(s), after, 'never runs twice');
@@ -131,12 +126,12 @@ test('[repository] explicit writes: there is no db.* view (reading or assigning 
   const o = offers.update('rof-1', (draft) => { draft.revisions.push(revision({ id: 'rofr-n', revisionNumber: 2 })); draft.currentRevisionId = 'rofr-n'; draft.keys.revise.push({ key: 'k-n', revisionId: 'rofr-n' }); draft.rev = 2; });
   assert.equal(o.revisions.length, 2); withRo(d, (s) => { assert.equal(col(s, "SELECT count(*) FROM offer_revisions WHERE offer_id = 'rof-1'"), 2); assert.equal(col(s, "SELECT key FROM offer_keys WHERE offer_id = 'rof-1'"), 'k-n'); });
   refused(() => offers.update('rof-1', (draft) => { draft.currentRevisionId = 'rofr-2'; }), /rof-1\.currentRevisionId names rofr-2, not a revision of this offer/);
-  const dump = withRo(d, s8cDump); assert.equal(withRo(d, s8cDump), dump, 'a save writes no S8c row');
+  const dump = withRo(d, s8cDump); assert.equal(withRo(d, s8cDump), dump, 'a save writes no contact or offer row');
   const served = plain(L.repo.exportAll()); L.close();
   const R = serverOpen(d); assert.deepEqual(plain(R.repo.exportAll()), served); R.close(); rm(d);
 });
 
-test('[repository] SQL reads (§4.3 step 2): byId and every list query return exactly the records a scan of the tables would, in insertion order; an unknown or non-text id reads null; forPlayers takes several players and ignores junk; the read-only `reads` object carries the queries and no write', () => {
+test('[repository] SQL reads: byId and every list query return exactly the records a scan of the tables would, in insertion order; an unknown or non-text id reads null; forPlayers takes several players and ignores junk; the read-only `reads` object carries the queries and no write', () => {
   const d = file('reads'); const L = serverOpen(d); const { contacts, offers, reads } = L.repo;
   const all = { contacts: mod.readContacts(L.store.sqlite), offers: mod.readOffers(L.store.sqlite) };
   assert.ok(all.contacts.length >= 5 && all.offers.length >= 4, 'the fixture has records to query');
@@ -171,7 +166,7 @@ test('[repository] SQL reads (§4.3 step 2): byId and every list query return ex
   L.close(); rm(d);
 });
 
-test('[repository] a unit of work: a contact written in a unit together with the request it names — a NEW request the staged S8a repository writes at the same COMMIT (the deferred key) — commits; a read inside the unit sees the unit\'s own writes; a unit that throws after its writes rolls the rows back (the records held before read the pre-unit values, and a fresh read the stored ones); a contact naming a request that never arrives fails at COMMIT and nothing lands', () => {
+test('[repository] a unit of work: a contact written in a unit together with the request it names — a NEW request the request repository writes at the same COMMIT (the deferred key) — commits; a read inside the unit sees the unit\'s own writes; a unit that throws after its writes rolls the rows back (the records held before read the pre-unit values, and a fresh read the stored ones); a contact naming a request that never arrives fails at COMMIT and nothing lands', () => {
   const d = file('unit'); const L = serverOpen(d); const { contacts } = L.repo;
   const sent = (id, requestId) => draftContact({ id, status: 'delivered', recipient: { type: 'player', playerId: 'pl-adult', guardianId: null, minor: false }, requestId, sentAt: NOW, deliveredAt: NOW, attempts: [{ at: NOW, ok: true, code: null }], keys: { create: null, send: { key: null, fp: `{"contactId":"${id}"}` }, record: null }, history: [] });
   L.unit(() => { L.recruitment.requests.create(contactRequest('req-new', 'rct-new')); contacts.create(sent('rct-new', 'req-new')); });

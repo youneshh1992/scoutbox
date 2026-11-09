@@ -1,4 +1,4 @@
-// M22 — golden observation fixtures (§57, §58, §59).
+// Golden observation fixtures.
 //
 // HONESTY NOTE, first, because everything below depends on it:
 //
@@ -8,22 +8,22 @@
 //   structure they claim to fire on, and above all that it REFUSES the cases
 //   it promises to refuse. They cannot demonstrate that it counts touches
 //   correctly on real video of a real player, and nothing in this repository
-//   can, because there is no real football video here and §57 forbids adding
-//   private user media.
+//   can, because there is no real football video here and private user
+//   media must not be added.
 //
 //   That gap is not a caveat to be buried. It is the reason the production
 //   enablement gate in gate.mjs requires real-world validation evidence that
 //   this environment cannot supply.
 //
-// Every fixture declares its EXPECTED outcome (§59) as data, before any
+// Every fixture declares its EXPECTED outcome as data, before any
 // measurement is taken, so that tuning against a result is visible as a diff
 // to a ground-truth constant rather than invisible as a threshold nudge.
 
 import { FRAME_LIMITS } from './policy.mjs';
 import { sequence, touchPath } from './scenes.mjs';
 
-// Deterministic PRNG — fixtures must be byte-identical on every run (§76 of
-// the negative list: "count differs nondeterministically for same fixture").
+// Deterministic PRNG — fixtures must be byte-identical on every run (a count
+// that differs nondeterministically for the same fixture is a defect).
 function mulberry32(seed) {
   let a = seed >>> 0;
   return () => {
@@ -113,11 +113,10 @@ function juggleFrames({ bounces = 8, fps = 12, seed = 11, apexFrac = 0.30 }) {
 /**
  * Ground touches — delegated to the shared physics model in scenes.mjs.
  *
- * This file previously carried its OWN touch generator, a triangle wave at a
- * fixed size. Two descriptions of what a touch is, in one repository, is one
- * too many: when the shared model was corrected the local copy silently kept
- * asserting the old physics, and the fixture failed for a reason that had
- * nothing to do with the engine.
+ * There is ONE description of what a touch is, in scenes.mjs. A local copy
+ * would silently keep asserting old physics when the shared model is
+ * corrected, and the fixture would fail for a reason that has nothing to do
+ * with the engine.
  */
 function touchFrames({ touches = 10, fps = 12, seed = 23 }) {
   return sequence({
@@ -205,13 +204,12 @@ export function goldenFixtures() {
       id: 'G6_long_occlusion',
       kind: 'juggle',
       description: 'Valid juggling, but the ball leaves the visible area for a long run of frames.',
-      // GROUND-TRUTH REVISION (fix pack). Originally declared
-      // `ball_not_detected`. The fix pack introduced `observation_discontinuity`
-      // as a distinct canonical state, and that is what this fixture actually
-      // contains: the ball IS detected for most of the attempt and then lost
-      // for nine consecutive frames. Revised on semantic grounds, before
-      // seeing whether the engine agreed — and recorded here so the change is
-      // a visible edit to a declared truth rather than an invisible nudge.
+      // GROUND TRUTH: the ball IS detected for most of the attempt and then
+      // lost for nine consecutive frames, so this is an
+      // `observation_discontinuity`, not `ball_not_detected`. The declared
+      // truth was revised on semantic grounds before seeing whether the
+      // engine agreed (git has the change), so it is a visible edit to a
+      // declared truth rather than an invisible nudge.
       frames: (() => {
         const rng = mulberry32(11);
         const out = [];
@@ -253,7 +251,7 @@ export function goldenFixtures() {
         }), i, i * 83));
       })(),
       // Two dark masses merge into one wide person region. The engine must
-      // not attempt to decide which is the account holder (§33); whatever it
+      // not attempt to decide which is the account holder; whatever it
       // reports, it must not be a confident count attributed to one of them.
       expected: { state: 'any_refusal_or_uncounted', count: null },
     },
@@ -310,7 +308,7 @@ export function goldenFixtures() {
         });
       })(),
       // The ball is not being played. Anything counted here is a FALSE
-      // POSITIVE, which §61 makes a P0.
+      // POSITIVE, which is a P0.
       expected: { state: 'accepted_with_zero_or_refusal', count: 0 },
     },
     {
@@ -318,11 +316,10 @@ export function goldenFixtures() {
       kind: 'juggle',
       description: 'Valid juggling with occasional retransmitted frames (about one in four).',
       frames: (() => {
-        // A realistic retransmission rate. The original fixture doubled EVERY
-        // frame, which conflated two different properties: "duplicates do not
-        // inflate the count" and "a capture that is half duplicates is still
-        // acceptable". The second is not something M22 wants to be true, so
-        // the two are now separate fixtures rather than one compromise.
+        // A realistic retransmission rate. "Duplicates do not inflate the
+        // count" and "a capture that is half duplicates is still acceptable"
+        // are different properties, and the second must not be true, so
+        // G14 tests it separately.
         const base = juggleFrames({ bounces: 8 });
         const out = [];
         let seq = 0;
@@ -332,7 +329,7 @@ export function goldenFixtures() {
         });
         return out;
       })(),
-      // Duplicates must not inflate the count (§89, T7).
+      // Duplicates must not inflate the count.
       expected: { state: 'accepted', count: 8, tolerance: 1 },
     },
     {
@@ -350,7 +347,7 @@ export function goldenFixtures() {
         return out;
       })(),
       // A capture that is half retransmission is a degraded capture, whatever
-      // the derived count happens to be (§29 duplicate/frozen-frame rate).
+      // the derived count happens to be (the duplicate/frozen-frame rate).
       expected: { state: 'protocol_violation', count: null },
     },
   ];

@@ -1,5 +1,5 @@
 /**
- * M23 P5.6C — the fail-honest regulatory verification provider abstraction.
+ * The fail-honest regulatory verification provider abstraction.
  *
  * ScoutBox has NO live FIFA, FA or U.S. Soccer register integration and none
  * is pretended. The interface exists so that a real adapter can be attached
@@ -9,11 +9,8 @@
  * environment flag, that verifies nothing but its own tagged references and
  * names itself in every provenance record.
  *
- * Provider states (mandate §29):
- *   VERIFIED, NOT_VERIFIED, INACTIVE, STALE, UNAVAILABLE, MANUAL_REVIEW_REQUIRED
- *
  * UNAVAILABLE never silently permits anything: the route answers 503 and
- * writes nothing (mandate §30).
+ * writes nothing.
  */
 
 import { RECHECK_MS } from '../core/shared.mjs';

@@ -1,11 +1,6 @@
-// S8d — signing packages, completed signings, follow-ups and outcome reports as typed tables with EXPLICIT writes
-// (repositories/signingsFollowUps.mjs, migration 0018): docs/architecture/s8d-design-note.md. What this suite proves:
-// the migration creates the typed tables; a fixture written through the repository types every field into its column,
-// normalises what the note lists, stops on a row it cannot type and names every missing reference and every
-// uniqueness rule; the repository's operations write rows at once and return fresh records; there is no db.*
-// view (§4.3 step 2: a reader naming one throws) and every query, page and sweep query matches a scan of the tables; a
-// unit of work rolls the rows back (a statement failure, a real COMMIT failure, the deferred completion key) and a read
-// inside it sees its own writes; the completion cycle commits in one unit; the live counters.
+// Signing packages, completed signings, follow-ups and outcome reports (repositories/signingsFollowUps.mjs, migration
+// 0018): the typed tables, typed writes, normalisations and refusals, SQL reads that match a table scan, units of work
+// (including the deferred completion key) and the completion cycle in one unit.
 // Temporary databases only; nothing touches DATA_DIR. Run with: npm test
 
 import assert from 'node:assert/strict';
@@ -35,7 +30,7 @@ const TABLES = ['signing_packages', 'signing_revisions', 'signing_documents', 's
 const EARLIER = ['recruitment_requests', 'trials', 'recruitment_cases', 'room_decisions', 'recruitment_contacts', 'recruitment_offers', 'offer_revisions'];
 let mod = null;
 try { mod = await import('../repositories/signingsFollowUps.mjs'); } catch { mod = null; }
-const need = () => { assert.ok(mod?.createSigningsFollowUpsRepository, 'repositories/signingsFollowUps.mjs exports createSigningsFollowUpsRepository (the S8d repository module)'); return mod; };
+const need = () => { assert.ok(mod?.createSigningsFollowUpsRepository, 'repositories/signingsFollowUps.mjs exports createSigningsFollowUpsRepository'); return mod; };
 const second = (dir) => new DatabaseSync(dbFile(dir), { readOnly: true });
 const withRo = (dir, fn) => { const s = second(dir); try { return fn(s); } finally { s.close(); } };
 const tableExistsIn = (s, t) => !!s.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(t);
@@ -47,7 +42,7 @@ const ddlOf = (s, t) => s.prepare("SELECT sql FROM sqlite_master WHERE type = 't
 const openRaw = (dir) => { const s = new DatabaseSync(dbFile(dir)); s.exec('PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;'); return s; };
 const S8A_FIX = () => ({ requests: [acceptedRequest(p4bInvitation(), 'trial-1'), minorInvitation(), legacyTrialRequest()], trials: [scheduledTrial()] });
 
-/** A database holding the S8a–S8d fixtures, written through the repositories. `four` overrides an S8d collection (undefined omits it). */
+/** A database holding the recruitment fixtures, written through the repositories. `four` overrides one of the four signing collections (undefined omits it). */
 const fixtureCollections = ({ more = {}, ...four } = {}) => {
   const fix = S8D_FIX(); const db = { ...S8B_FIX(), ...S8C_FIX(), ...S8A_FIX(), ...more };
   for (const name of COLLECTIONS) { const v = Object.hasOwn(four, name) ? four[name] : fix[name]; if (v !== undefined) db[name] = v; }
@@ -67,14 +62,14 @@ function serverOpen(dir, { warnings = [] } = {}) {
   return { store, layer, warnings, unit: (w) => store.unitOfWork(w), repo: layer.signingsFollowUps, close: () => store.sqlite.close() };
 }
 const refused = (fn, pattern, label = '') => { let err = null; try { fn(); } catch (e) { err = e; } assert.ok(err, `${label}: expected a refusal`); assert.match(String(err.message), pattern, `${label}: ${err.message}`); assert.doesNotMatch(String(err.message), /agreed verbally|Regular starter|All good|open day|Adult Signup|Kid One/, `${label}: ids only, never a note, a name or a text`); return err; };
-/** The typed expectation of a fixture: what the cutover and every read return (the normalisations applied). */
+/** The typed expectation of a fixture: what the fixture write and every read return (the normalisations applied). */
 const typed = (name, raw) => { const t = mod[{ signingPackages: 'typeSigningPackage', signings: 'typeSigning', followUps: 'typeFollowUp', outcomeReports: 'typeOutcomeReport' }[name]](raw); assert.ok(t.ok, t.reason); return plain(t.record); };
 
-// ------------------------------------------------------------- the cutover
+// ------------------------------------------------------------- the schema and the fixtures
 
 test('[schema] migration 0018 is registered last and creates the ten typed STRICT tables (no lossless side column), the deferred completion key and the signing method CHECK, and broadens idempotency_keys to signing_packages; a fresh database holds no row; the step never runs twice; the fixtures written through the repository read back as the typed expectation (the legacy signing\'s method and the copied ledger row normalised), with their key rows; the live player counters', () => {
   need();
-  assert.equal(DATA_MIGRATIONS.filter((m) => m.id < '0019').at(-1)?.id, MIGRATION, 'the last registered migration of the recruitment steps (S9 onwards follow)'); for (const n of COLLECTIONS) assert.ok(TABLE_BACKED.includes(n), `${n} is table-backed`);
+  assert.equal(DATA_MIGRATIONS.filter((m) => m.id < '0019').at(-1)?.id, MIGRATION, 'the last registered migration of the recruitment group'); for (const n of COLLECTIONS) assert.ok(TABLE_BACKED.includes(n), `${n} is table-backed`);
   // a fresh database: the tables exist and are empty
   const empty = tempDir('s8d-empty'); const E = openLayer(empty); const e = E.sqlite;
   assert.equal(e.prepare("SELECT id FROM data_migrations WHERE id < '0019' ORDER BY id").all().at(-1).id, MIGRATION);
@@ -83,12 +78,12 @@ test('[schema] migration 0018 is registered last and creates the ten typed STRIC
   assert.match(ddlOf(e, 'signing_packages'), /completion_signing_id\s+TEXT REFERENCES signings\(id\) DEFERRABLE INITIALLY DEFERRED/);
   assert.match(ddlOf(e, 'signings'), /CHECK \(method IN \('CANONICAL_COMPLETION','LEGACY_RECORDED'\)\)/);
   assert.match(ddlOf(e, 'idempotency_keys'), /owner_table IN \('signing_packages'\)/, 'the signing packages are the only owner: the other steps keep their keys as columns');
-  assert.equal(hasBlobTable(e), false, 'no blob table'); // rewritten in S14a: it described the blob
+  assert.equal(hasBlobTable(e), false, 'no blob table');
   E.close(); rm(empty);
   // the fixtures
   const d = file('mig'); const back = readRecords(d); const s = openRaw(d);
   const after = fullDump(s); assert.deepEqual(migrateAll(s).ran, []); assert.equal(fullDump(s), after, 'never runs twice');
-  assert.equal(hasBlobTable(s), false, 'no blob table'); // rewritten in S14a: it described the blob
+  assert.equal(hasBlobTable(s), false, 'no blob table');
   assert.deepEqual(plain(back.signingPackages), [typed('signingPackages', draftPackage()), typed('signingPackages', completedPackage())]);
   assert.deepEqual(plain(back.signings), [typed('signings', canonicalSigning()), typed('signings', legacySigning())]);
   assert.deepEqual(plain(back.followUps), S8D_FIX().followUps.map((f) => typed('followUps', f)));
@@ -178,7 +173,7 @@ test('[repository] there is no db.* view (reading or assigning one of the four t
   const r9b = L.repo.outcomeReports.addConfirmation('out-9', { by: { kind: 'guardian', id: 'gd-primary', name: 'Primary Parent' }, agree: false, note: 'Not quite', experienceRating: 2, at: NOW + 3 }, { status: 'disputed' }); assert.equal(r9b.status, 'disputed'); assert.equal(r9b.confirmations.length, 1);
   assert.throws(() => L.repo.outcomeReports.addConfirmation('out-9', { by: { kind: 'guardian', id: 'gd-primary', name: 'Primary Parent' }, agree: true, note: null, experienceRating: null, at: NOW + 4 }), /confirmations\[1\]\.by\.id duplicates gd-primary/);
   assert.throws(() => L.repo.outcomeReports.addConfirmation('out-9', { by: { kind: 'player', id: 'pl-child2', name: 'Kid Two' }, agree: true, note: 'x'.repeat(301), experienceRating: null, at: NOW + 5 }), /note must be text of at most 300/);
-  // a save writes nothing more; the counts (S14a: the save-sequence check described the blob)
+  // the rows stay as written; the counts
   const dump = Object.fromEntries(JSON.parse(withRo(d, fullDump))); withRo(d, (s) => { for (const t of TABLES) assert.equal(JSON.stringify(rowsOf(s, t)), JSON.stringify(dump[t]), `the save rewrites no ${t} row`); });
   assert.deepEqual(L.repo.counts(), { signingPackages: 3, signings: 3, followUps: 4, outcomeReports: 2 });
   assert.deepEqual(L.layer.report().domains.signingsFollowUps.rows, { signingPackages: 3, signings: 3, followUps: 4, outcomeReports: 2 }); assert.equal(L.layer.report().domains.signingsFollowUps.pendingWrites, 0);
@@ -187,7 +182,7 @@ test('[repository] there is no db.* view (reading or assigning one of the four t
   const L2 = serverOpen(d); assert.deepEqual(plain(L2.repo.signingPackages.byId('spk-1')), plain(p7)); assert.equal(L2.repo.outcomeReports.byId('out-9').status, 'disputed'); L2.close(); rm(d);
 });
 
-test('[repository] SQL reads (§4.3 step 2): byId and every list query return exactly what a scan of the tables would, in insertion order; the one-row lookups (forPackage, forOffer, forFollowUp) and the counts agree; the two pages walk the whole list in their order at every page size and end with a null cursor; the sweep queries pick exactly the scheduled-and-past and the due-and-unnotified follow-ups and the signings missing a milestone; the admin totals equal a count over the rows; `reads` carries no write', () => {
+test('[repository] SQL reads: byId and every list query return exactly what a scan of the tables would, in insertion order; the one-row lookups (forPackage, forOffer, forFollowUp) and the counts agree; the two pages walk the whole list in their order at every page size and end with a null cursor; the sweep queries pick exactly the scheduled-and-past and the due-and-unnotified follow-ups and the signings missing a milestone; the admin totals equal a count over the rows; `reads` carries no write', () => {
   need();
   const d = file('reads'); const L = serverOpen(d); const { signingPackages: sp, signings: sg, followUps: fu, outcomeReports: out } = L.repo;
   // more rows than the fixture: a second legacy signing and its follow-ups, so the pages and the sweep have work
@@ -240,7 +235,7 @@ test('[repository] SQL reads (§4.3 step 2): byId and every list query return ex
   L.close(); rm(d);
 });
 
-test('[repository] batched lists (§4.3 step 4): a list of packages decodes their revisions, documents, parties, history and keys in one batch, a list of signings their parties; each record is exactly the one byId decodes on its own; a list of five packages runs as many SQL statements as a list of two', () => {
+test('[repository] batched lists: a list of packages decodes their revisions, documents, parties, history and keys in one batch, a list of signings their parties; each record is exactly the one byId decodes on its own; a list of five packages runs as many SQL statements as a list of two', () => {
   need();
   const d = file('batch'); const L = serverOpen(d); const { signingPackages: sp, signings: sg } = L.repo;
   const whole = (label, list, repo) => { assert.ok(list.length >= 2, `${label} is a list of several`); assert.deepEqual(plain(list), plain(list.map((r) => repo.byId(r.id))), `${label}: a batch-decoded list is the per-record decode`); };
@@ -265,7 +260,7 @@ test('[repository] batched lists (§4.3 step 4): a list of packages decodes thei
   L.close(); rm(d);
 });
 
-test('[repository] a player\'s journey reads (§4.3 step 4): the bulk lists forCases / forRooms return the per-case lists merged in insertion order, each record the one byId decodes (contacts, offers and decisions batch-decoded too); playerJourneyReads answers every question the journey asks exactly as the repositories do, for this player, another player, a case outside the list and an unknown id', () => {
+test('[repository] a player\'s journey reads: the bulk lists forCases / forRooms return the per-case lists merged in insertion order, each record the one byId decodes (contacts, offers and decisions batch-decoded too); playerJourneyReads answers every question the journey asks exactly as the repositories do, for this player, another player, a case outside the list and an unknown id', () => {
   need();
   const d = file('journey-reads'); const L = serverOpen(d); const lay = L.layer;
   const reads = Object.freeze({ ...lay.recruitmentContactsOffers.reads, ...lay.signingsFollowUps.reads, ...lay.recruitment.reads, ...lay.recruitmentCases.reads });

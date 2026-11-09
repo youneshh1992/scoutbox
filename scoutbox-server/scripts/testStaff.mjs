@@ -1,9 +1,7 @@
-// Organisation staff as typed tables with explicit writes (repositories/users.mjs, migration 0001; explicit since S14f,
-// docs/architecture/migration.md §4.6): the table and its rules (a name unique in its organisation, case-insensitive,
-// removed accounts included; an e-mail unique among current staff; an SSO subject unique in the organisation); the
-// repository's writes (typed whole, junk refused by field, each joining the caller's transaction) and SQL reads (fresh
-// frozen records without the MFA secret); MFA (a recovery code works once); the snapshot path; the cost of a write does
-// not grow with the staff. In-memory databases only. Run with: npm test
+// Organisation staff (repositories/users.mjs, migration 0001): the table and its rules (a name unique in its
+// organisation, case-insensitive, removed accounts included; an e-mail unique among current staff; an SSO subject
+// unique in the organisation); typed writes that join the caller's transaction; SQL reads without the MFA secret; MFA
+// recovery codes; a write's cost does not grow with the staff. In-memory databases only. Run with: npm test
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
 import { runDataMigrations, transaction } from '../repositories/database.mjs';

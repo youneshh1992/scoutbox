@@ -1,8 +1,7 @@
 /**
- * Box Cam, the At-Home Combine and the production CV results get their own typed tables (S12b): preferences,
- * challenges and entries, assignments, sessions (observations, reasons and integrity history as rows), disputes,
- * Combine requests and attempts, and CV results. REGISTERED in DATA_MIGRATIONS. `up()` is the DDL plus the two
- * ScoutBox challenges (a seeded catalogue): nothing is carried over (no production data; rollback means re-seed).
+ * Box Cam, the At-Home Combine and the production CV results: preferences, challenges and entries, assignments,
+ * sessions (observations, reasons and integrity history as rows), disputes, Combine requests and attempts, and CV
+ * results. Also inserts the two ScoutBox challenges (a seeded catalogue).
  */
 import { migrationApplied } from '../database.mjs';
 import { DEVELOPMENT_MIGRATION } from '../development.mjs';

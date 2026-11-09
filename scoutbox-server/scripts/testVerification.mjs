@@ -1,13 +1,7 @@
-// S10a — verification claims as typed tables with explicit writes (repositories/verification.mjs, migration 0023). What
-// this suite proves: the migration creates the eighteen STRICT tables (no JSON column) and a fresh database holds no
-// row; the organisation facet is retired (the revocation is the verificationRevokedAt column); the typers refuse junk
-// with the record and field named (an unknown metadata key, an unknown code, a duplicate code); create/update write
-// rows at once and return fresh, deep-frozen records, refuse an identity change, a duplicate id and an update from inside
-// its own update; evidence created for a claim links to it at once; the database keeps the code's uniqueness rules (one
-// open identity claim per user, one open dispute per claim); a rolled-back unit leaves nothing; there is no db.* view;
-// the boot bootstrap turns verified organisations into claims exactly once; the event detail is one line; and the
-// snapshot write types, names missing references with ids and reads back what it wrote.
-// Temporary databases only; nothing touches DATA_DIR. Run with: npm test
+// Verification claims (repositories/verification.mjs, migration 0023): the STRICT tables, the typers' refusals, typed
+// writes returning frozen records, evidence linking to its claim, the database's uniqueness rules (one open identity
+// claim per user, one open dispute per claim), units of work, the boot bootstrap that turns verified organisations into
+// claims exactly once, and fixtures. Temporary databases only; nothing touches DATA_DIR. Run with: npm test
 
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -54,7 +48,7 @@ const dispute = (over = {}) => ({ id: 'vdsp-1', claimId: 'vclm-1', byKind: 'org_
 
 function serverOpen(dir) {
   const store = openStore(dir);
-  const db = {}; // S14a: a fixture-saved file is not a first installation, so there is nothing to hand in
+  const db = {}; // a fixture-saved file is not a first installation, so there is nothing to hand in
   const layer = attachDataLayer({ db, store, nextId, persist: () => {}, sessionTtlMs: TTL, now: () => NOW, warn: () => {} });
   const snapshot = () => ({ savedAt: NOW, idCounter: 1000, db });
   return { store, db, repo: layer.verification, layer, unit: (w) => store.unitOfWork(w, { snapshot }), close: () => store.sqlite.close() };

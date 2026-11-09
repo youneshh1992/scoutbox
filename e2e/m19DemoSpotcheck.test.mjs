@@ -1,9 +1,9 @@
-// M19 demo spotcheck — Explainable Matching and Dynamic Watchlists, as they
+// Demo spotcheck — Explainable Matching and Dynamic Watchlists, as they
 // appear in the SHIPPED single-file bundles.
 //
 // The demo bundles are the artifact HTML: no server, no network. What this
-// asserts is that the M19 surface is really in them and really behaves:
-//   • both org bundles boot clean and reach both M19 destinations
+// asserts is that matching and watchlists are really in them and really behave:
+//   • both org bundles boot clean and reach both destinations
 //   • the demo story — "2027 Defensive Midfielders" — is there, with
 //     membership, a change summary, an explanation per player and a history
 //   • the criteria editor offers the typed vocabulary and no protected trait
@@ -14,15 +14,11 @@
 //   • the player bundle knows nothing about any of it
 //   • 390px
 //
-// Requires `node serve.mjs` on :8099 with freshly built demo bundles.
+// Needs freshly built demo bundles (buildDemos.mjs).
 import { chromium } from 'playwright-core';
 import { ensureDemoHost } from './demoHost.mjs';
 
-// D7 (M22 §74-§76): this test OWNS its demo host rather than assuming one
-// is already listening. The old comment above said "Requires node
-// serve.mjs on :8099" — an instruction nobody followed, because
-// crosstab and demoOffline happened to leave a host behind. They no
-// longer do.
+// This test owns its demo host: it starts one if none is running (see demoHost.mjs).
 const demo = await ensureDemoHost();
 const BASE = demo.host.replace('localhost', '127.0.0.1');
 const EXE = process.env.CHROMIUM || '/opt/pw-browsers/chromium';
@@ -74,7 +70,7 @@ for (const [name, path] of [['club', 'club/'], ['grassroots', 'grassroots/']]) {
 
   // ---- the Dynamic Watchlists destination and the demo story
   await goHash(p, '#/recruitment/watchlists');
-  await p.locator('[data-testid="watchlists-about"] summary').click().catch(() => {}); // M24F.5 — the definition sits behind About
+  await p.locator('[data-testid="watchlists-about"] summary').click().catch(() => {}); // the definition sits behind About
   let body = (await p.locator('body').innerText()) ?? '';
   ok(/Dynamic Watchlists/.test(body), `${name} the Dynamic Watchlists destination exists in the bundle`);
   ok(/2027 Defensive Midfielders/.test(body), `${name} the demo story watchlist is pre-seeded`);
@@ -166,7 +162,7 @@ for (const [name, path] of [['club', 'club/'], ['grassroots', 'grassroots/']]) {
   await p.close();
 }
 
-// ---- the player bundle knows nothing about M19
+// ---- the player bundle knows nothing about matching or watchlists
 {
   const { p, errors } = await open(`${BASE}/player/`, { width: 420, height: 900 });
   await p.waitForTimeout(1800);

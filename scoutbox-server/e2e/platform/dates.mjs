@@ -1,12 +1,11 @@
-// M23 P5.7 — PLATFORM TEMPORAL INTEGRITY & DATE VALIDATION suite.
+// PLATFORM TEMPORAL INTEGRITY & DATE VALIDATION suite.
 //
-// The question this suite asks is not "do dates work?" — every earlier suite
-// assumed they did. It is: for every date or time a security, lifecycle or
+// The question this suite asks is not "do dates work?" — every other suite
+// assumes they do. It is: for every date or time a security, lifecycle or
 // compliance decision depends on, what happens when the value is malformed,
 // rolled over by the engine, ambiguous, zone-dependent, out of order, or
-// simply unreadable? P5.6F found the same answer five times (F-2, F-3, F-8,
-// F-12, F-12b): the decision failed OPEN. This suite exists so that class of
-// defect has one regression for the whole platform.
+// simply unreadable? The decision must fail CLOSED, never open; this suite is
+// the one regression for that class of defect across the whole platform.
 //
 // Groups (pure first, then live on a fresh server):
 //   A the temporal contract   B DATE_ONLY parser        C date of birth
@@ -115,17 +114,17 @@ section('C/pure — date of birth: one rule, GB 18 / KR 19, unknown is never adu
 {
   const invalid = ['2010-02-30', '2011-04-31', '2019-02-29', '2023-13-01', '2023-00-10', '2023-01-00', '2023-01-32', '02/03/2010'];
   for (const v of invalid) neg(parseDob(v) === null && Number.isNaN(ageOn(v, new Date(T0))) && isAdult({ dob: v, country: 'GB' }, new Date(T0)) === false, `C1 dob ${v}: unreadable → age NaN → not adult`);
-  for (const v of SHAPES.absent.concat([0, false, NaN, 20100101])) neg(Number.isNaN(ageOn(v, new Date(T0))) && isAdult({ dob: v }, new Date(T0)) === false, `C1b dob ${JSON.stringify(v)} is not the epoch (F-8) — not adult`);
+  for (const v of SHAPES.absent.concat([0, false, NaN, 20100101])) neg(Number.isNaN(ageOn(v, new Date(T0))) && isAdult({ dob: v }, new Date(T0)) === false, `C1b dob ${JSON.stringify(v)} is not the epoch — not adult`);
   ok(parseDob('2000-02-29') === '2000-02-29' && parseDob('2020-02-29') === '2020-02-29', 'C2 real leap days are dates of birth');
   ok(ageOn('2008-09-23', new Date(T0)) === 18 && ageOn('2008-09-24', new Date(T0)) === 17, 'C3 18 on the birthday (UTC), 17 the day before');
   ok(isAdult({ dob: '2008-09-23', country: 'GB' }, new Date(T0)) === true && isAdult({ dob: '2008-09-24', country: 'GB' }, new Date(T0)) === false, 'C4 GB: adult at 18, not at 17y364d');
   ok(adultAgeFor('KR') === 19 && isAdult({ dob: '2007-09-23', country: 'KR' }, new Date(T0)) === true && isAdult({ dob: '2007-09-24', country: 'KR' }, new Date(T0)) === false && isAdult({ dob: '2008-09-23', country: 'KR' }, new Date(T0)) === false, 'C5 KR: adult at 19 — an 18-year-old is a minor there');
   ok(ageOn('2008-02-29', new Date(Date.UTC(2026, 1, 28))) === 17 && ageOn('2008-02-29', new Date(Date.UTC(2026, 2, 1))) === 18, 'C6 a 29 February birthday counts on 1 March in a non-leap year');
-  neg(T.parseDobStrict('2030-01-01', T0).error === 'DOB_INVALID' && T.parseDobStrict('2030-01-01', T0).why === 'in the future', 'C7 a date of birth in the future is refused (§24)');
-  neg(T.parseDobStrict('1900-01-01', T0).error === 'DOB_INVALID' && T.parseDobStrict('1900-01-01', T0).why === 'implausibly old', 'C7b a 126-year-old is refused (§24)');
+  neg(T.parseDobStrict('2030-01-01', T0).error === 'DOB_INVALID' && T.parseDobStrict('2030-01-01', T0).why === 'in the future', 'C7 a date of birth in the future is refused');
+  neg(T.parseDobStrict('1900-01-01', T0).error === 'DOB_INVALID' && T.parseDobStrict('1900-01-01', T0).why === 'implausibly old', 'C7b a 126-year-old is refused');
   ok(T.parseDobStrict('1906-09-24', T0).ok === true, 'C7c a 119-year-old is accepted — the bound is a bound, not a guess');
   ok(T.parseDobStrict('2026-09-23', T0).ok === true, 'C7d born today is accepted');
-  neg(isRegulatoryMinor({ dob: '2010-02-30' }, T0) === null && isRegulatoryMinor({ dob: null }, T0) === null, 'C8 the regulatory minor test answers "unknown" for an unreadable dob (F-8/F-12b)');
+  neg(isRegulatoryMinor({ dob: '2010-02-30' }, T0) === null && isRegulatoryMinor({ dob: null }, T0) === null, 'C8 the regulatory minor test answers "unknown" for an unreadable dob');
   const gate = (dob) => evaluateMinorGate({ subject: { id: 'p', dob }, agent: { facets: {} }, jurisdictions: ['ENG'], guardianConsents: [], now: T0 });
   neg(gate('2010-02-30').blocked === true && (gate('2010-02-30').reasons ?? []).some((r) => /SUBJECT_DOB_UNKNOWN/.test(JSON.stringify(r))), 'C9 the minors gate BLOCKS on an unreadable dob');
   const rule = { rule: { params: { formula: 'academic_year_16', academicYearStart: '09-01' } } };
@@ -181,7 +180,7 @@ section('G/pure — daylight saving in America/New_York: gaps refused, overlaps 
   ok(T.parseLocalDateTimeWithZone('2026-03-08T01:59', NY).ms === Date.UTC(2026, 2, 8, 6, 59) && T.parseLocalDateTimeWithZone('2026-03-08T03:00', NY).ms === Date.UTC(2026, 2, 8, 7, 0), 'G1b 01:59 is 06:59Z and 03:00 is 07:00Z — one minute apart on the clock, one minute apart in truth');
   // 1 November 2026: clocks go 01:59:59 → 01:00:00. 01:30 happens twice.
   const twice = T.parseLocalDateTimeWithZone('2026-11-01T01:30', NY);
-  neg(twice.ok === false && twice.error === 'LOCAL_TIME_AMBIGUOUS' && twice.candidates.length === 2 && twice.candidates[1] - twice.candidates[0] === HOUR, 'G2 01:30 on 1 November 2026 happens twice — refused without an explicit resolution (§36 #16)');
+  neg(twice.ok === false && twice.error === 'LOCAL_TIME_AMBIGUOUS' && twice.candidates.length === 2 && twice.candidates[1] - twice.candidates[0] === HOUR, 'G2 01:30 on 1 November 2026 happens twice — refused without an explicit resolution');
   ok(T.parseLocalDateTimeWithZone('2026-11-01T01:30', NY, { resolve: 'earlier' }).ms === Date.UTC(2026, 10, 1, 5, 30) && T.parseLocalDateTimeWithZone('2026-11-01T01:30', NY, { resolve: 'earlier' }).offsetMinutes === -240, 'G2b resolved "earlier": the EDT instant (05:30Z)');
   ok(T.parseLocalDateTimeWithZone('2026-11-01T01:30', NY, { resolve: 'later' }).ms === Date.UTC(2026, 10, 1, 6, 30) && T.parseLocalDateTimeWithZone('2026-11-01T01:30', NY, { resolve: 'later' }).ambiguous === true, 'G2c resolved "later": the EST instant (06:30Z), flagged ambiguous');
   ok(T.parseLocalDateTimeWithZone('2026-06-01T09:00', NY).ms === Date.UTC(2026, 5, 1, 13) && T.parseLocalDateTimeWithZone('2026-06-01T09:00', NY).ambiguous === false, 'G3 an ordinary summer morning: 09:00 EDT is 13:00Z');
@@ -219,7 +218,7 @@ section('H/pure — the predicates: absent is open, unreadable is closed');
   neg(T.isDayWithin('2026-09-23', 'garbage', null) === false && T.isDayWithin('2026-09-23', null, '2026-02-30') === false && T.isDayWithin('garbage', null, null) === false, 'H13 an unreadable bound or day closes the window');
 }
 
-section('I/pure — licence and affiliation expiry (M14 effective status)');
+section('I/pure — licence and affiliation expiry (effective status)');
 {
   const base = { status: 'verified', current: true, validFrom: 1, validUntil: null, organisationId: 'o1', verificationMethod: 'organisation_admin_confirmation' };
   const org = { id: 'o1', suspended: false, verification: {}, closedAt: null };
@@ -227,18 +226,18 @@ section('I/pure — licence and affiliation expiry (M14 effective status)');
   ok(licenceEffectiveStatus({ ...base, validUntil: T0 + 1 }, { org, now: T0 }).status === 'verified', 'I2 expires in 1ms: still verified');
   neg(licenceEffectiveStatus({ ...base, validUntil: T0 }, { org, now: T0 }).status === 'expired', 'I3 expires now: expired (exclusive end)');
   neg(licenceEffectiveStatus({ ...base, validUntil: T0 - DAY }, { org, now: T0 }).status === 'expired', 'I3b expired yesterday');
-  for (const v of SHAPES.unreadable) neg(licenceEffectiveStatus({ ...base, validUntil: v }, { org, now: T0 }).status === 'expired', `I4 T-3: an unreadable validUntil ${JSON.stringify(v)} reads EXPIRED, never "no expiry"`);
-  ok(licenceEffectiveStatus({ ...base, current: false, validUntil: 99 }, { org, now: T0 }).historical === true, 'I5 a closed period stays history (frozen M14 rule untouched)');
+  for (const v of SHAPES.unreadable) neg(licenceEffectiveStatus({ ...base, validUntil: v }, { org, now: T0 }).status === 'expired', `I4 an unreadable validUntil ${JSON.stringify(v)} reads EXPIRED, never "no expiry"`);
+  ok(licenceEffectiveStatus({ ...base, current: false, validUntil: 99 }, { org, now: T0 }).historical === true, 'I5 a closed period stays history (frozen rule untouched)');
 }
 
-section('J/pure — policy windows (M25): boundaries that exist, closed when they do not');
+section('J/pure — policy windows: boundaries that exist, closed when they do not');
 {
   const row = (p) => ({ jurisdiction: 'ENG', status: 'published', policyVersion: 1, effectiveFrom: '2026-01-01', effectiveTo: null, ...p });
   ok(selectPolicyVersion([row({})], 'ENG', T0)?.policyVersion === 1, 'J1 control: an in-effect version is selected');
   ok(selectPolicyVersion([row({ effectiveFrom: '2026-09-23' })], 'ENG', Date.UTC(2026, 8, 23)) !== null, 'J2 effectiveFrom is inclusive at UTC midnight');
   neg(selectPolicyVersion([row({ effectiveFrom: '2026-09-24' })], 'ENG', T0) === null, 'J3 a version effective tomorrow is not in effect today');
   neg(selectPolicyVersion([row({ effectiveTo: '2026-09-23' })], 'ENG', T0) === null, 'J4 effectiveTo is exclusive: a version ending today ended at midnight');
-  neg(selectPolicyVersion([row({ effectiveFrom: '2026-02-30' })], 'ENG', T0) === null, 'J5 T-4: a version starting on 30 February is NEVER in effect (it used to start on 2 March)');
+  neg(selectPolicyVersion([row({ effectiveFrom: '2026-02-30' })], 'ENG', T0) === null, 'J5 a version starting on 30 February is NEVER in effect (it used to start on 2 March)');
   neg(selectPolicyVersion([row({ effectiveFrom: '2025-13-01' })], 'ENG', T0) === null && selectPolicyVersion([row({ effectiveFrom: 'garbage' })], 'ENG', T0) === null && selectPolicyVersion([row({ effectiveFrom: null })], 'ENG', T0) === null, 'J5b month 13, text and null starts select nothing');
   neg(selectPolicyVersion([row({ effectiveTo: 'garbage' })], 'ENG', T0) === null && selectPolicyVersion([row({ effectiveTo: '2099-02-30' })], 'ENG', T0) === null, 'J6 an unreadable END is a closed window, not an open one');
   ok(selectPolicyVersion([row({ effectiveFrom: T0 - DAY })], 'ENG', T0) !== null, 'J7 an integer boundary is accepted');
@@ -252,8 +251,8 @@ section('K/pure — agent facets, affiliations, agreements, consent, handoff');
 {
   ok(effectiveFacetState({ state: 'VERIFIED', recheckAt: T0 + DAY }, T0) === 'VERIFIED', 'K1 control: VERIFIED before recheck');
   neg(effectiveFacetState({ state: 'VERIFIED', recheckAt: T0 }, T0) === 'STALE', 'K2 STALE at the recheck instant');
-  ok(effectiveFacetState({ state: 'VERIFIED' }, T0) === 'VERIFIED' && effectiveFacetState({ state: 'VERIFIED', recheckAt: null }, T0) === 'VERIFIED', 'K3 an ABSENT recheck clock keeps the frozen P5.6B reading (legacy row, no decay)');
-  for (const v of SHAPES.unreadable) neg(effectiveFacetState({ state: 'VERIFIED', recheckAt: v }, T0) === 'STALE', `K4 T-1: a PRESENT but unreadable recheckAt ${JSON.stringify(v)} reads STALE, never VERIFIED for ever`);
+  ok(effectiveFacetState({ state: 'VERIFIED' }, T0) === 'VERIFIED' && effectiveFacetState({ state: 'VERIFIED', recheckAt: null }, T0) === 'VERIFIED', 'K3 an ABSENT recheck clock keeps the frozen reading (legacy row, no decay)');
+  for (const v of SHAPES.unreadable) neg(effectiveFacetState({ state: 'VERIFIED', recheckAt: v }, T0) === 'STALE', `K4 a PRESENT but unreadable recheckAt ${JSON.stringify(v)} reads STALE, never VERIFIED for ever`);
   const p = { facets: { fifa_licence: { state: 'VERIFIED', recheckAt: NaN }, national_registration: {}, domestic_authorisation: {}, minors_authorisation: {} } };
   neg(verificationGap(p, 'INT', T0)?.error === 'AGENT_VERIFICATION_REQUIRED' && verificationGap(p, 'INT', T0)?.state === 'STALE', 'K4b …so the regulated-action gate refuses it');
   ok(affiliationActive({ startedAt: T0 - 1, endedAt: null }, T0) === true, 'K5 control: affiliation');
@@ -261,7 +260,7 @@ section('K/pure — agent facets, affiliations, agreements, consent, handoff');
   for (const v of SHAPES.unreadable) neg(affiliationActive({ startedAt: v, endedAt: null }, T0) === false && affiliationActive({ startedAt: T0 - 1, endedAt: v }, T0) === false, `K6 affiliation with unreadable ${JSON.stringify(v)} at either end is inactive`);
   const live = { status: 'active', confirmedAt: T0 - DAY, agentUserId: 'u', clientId: 'p', startAt: T0 - DAY, endAt: T0 + DAY };
   ok(agreementGrantsAccess(live, 'u', T0) === true, 'K7 control: mandate');
-  for (const v of SHAPES.unreadable) neg(agreementGrantsAccess({ ...live, endAt: v }, 'u', T0) === false && agreementGrantsAccess({ ...live, startAt: v }, 'u', T0) === false, `K8 F-2/F-3 regression: unreadable ${JSON.stringify(v)} at either term end grants nothing`);
+  for (const v of SHAPES.unreadable) neg(agreementGrantsAccess({ ...live, endAt: v }, 'u', T0) === false && agreementGrantsAccess({ ...live, startAt: v }, 'u', T0) === false, `K8 regression: unreadable ${JSON.stringify(v)} at either term end grants nothing`);
   ok(effectiveAgreementStatus({ ...live, endAt: NaN }, T0) === 'expired', 'K8b and reads expired');
   const consent = (patch) => consentSufficiency({ kind: 'dual_representation', status: 'granted', grantedAt: T0 - DAY, contextId: 'c', agentUserId: 'a', partyRole: 'individual', policyVersions: ['v1'], grantedBy: { kind: 'player', id: 'p' }, ...patch }, { partyRole: 'individual', agentUserId: 'a', contextId: 'c', firstActAt: T0, activePolicyIds: ['v1'] });
   ok(consent({}).ok === true, 'K9 control: consent granted a day before the first act');
@@ -278,7 +277,7 @@ section('L/pure — Contact: the attested-contact instant and the 72-hour cooldo
   ok(rec(T0 - HOUR).ok === true && rec(T0 - HOUR).occurredAt === T0 - HOUR, 'L1 control: an integer instant an hour ago');
   ok(rec('2026-09-23T10:00:00Z').ok === true && rec('2026-09-23T10:00:00Z').occurredAt === Date.UTC(2026, 8, 23, 10), 'L1b an ISO instant with Z');
   ok(rec('2026-09-23T06:00:00-04:00').occurredAt === Date.UTC(2026, 8, 23, 10), 'L1c an ISO instant with an offset: 06:00 in New York is 10:00Z');
-  neg(rec('2026-09-23T10:00').error === 'CONTACT_OCCURRED_AT_INVALID', 'L2 T-6: a bare local time is refused — it used to mean whatever zone the server ran in');
+  neg(rec('2026-09-23T10:00').error === 'CONTACT_OCCURRED_AT_INVALID', 'L2 a bare local time is refused — it used to mean whatever zone the server ran in');
   neg(rec('09/22/2026').error === 'CONTACT_OCCURRED_AT_INVALID' && rec('22/09/2026').error === 'CONTACT_OCCURRED_AT_INVALID', 'L2b an ambiguous slash date is refused either way round');
   neg(rec('2026-02-30T10:00:00Z').error === 'CONTACT_OCCURRED_AT_INVALID', 'L2c a rolled-over day is refused');
   neg(rec(String(T0 - HOUR)).error === 'CONTACT_OCCURRED_AT_INVALID' && rec(1.5).error === 'CONTACT_OCCURRED_AT_INVALID', 'L2d a numeric string and a fraction are refused');
@@ -288,7 +287,7 @@ section('L/pure — Contact: the attested-contact instant and the 72-hour cooldo
   ok(cooldownFor([c(T0 - CONTACT_LIMITS.cooldownMs)], { orgId: 'o', playerId: 'p', now: T0 }) === null, 'L4b exactly 72 hours after: clear (exclusive boundary)');
   ok(cooldownFor([c(T0 - 1, { status: 'answered' })], { orgId: 'o', playerId: 'p', now: T0 }) === null, 'L4c an answered contact does not cool');
   for (const v of SHAPES.absent.concat(SHAPES.unreadable)) ok(cooldownFor([c(v)], { orgId: 'o', playerId: 'p', now: T0 }) === null, `L5 an undated delivery ${String(v)} cannot start a cooldown (a rate limit fails OPEN by design: it protects the player, not the club)`);
-  ok(cooldownFor([c(Infinity)], { orgId: 'o', playerId: 'p', now: T0 }) === null, 'L5b T-13: a delivery at +Infinity used to cool the pair down FOR EVER (`typeof Infinity === "number"`); it now starts nothing');
+  ok(cooldownFor([c(Infinity)], { orgId: 'o', playerId: 'p', now: T0 }) === null, 'L5b a delivery at +Infinity used to cool the pair down FOR EVER (`typeof Infinity === "number"`); it now starts nothing');
 }
 
 section('M/pure — Trial scheduling: 15 minutes to 12 hours, ordered, ≤20 sessions, a real zone');
@@ -313,7 +312,7 @@ section('M/pure — Trial scheduling: 15 minutes to 12 hours, ordered, ≤20 ses
   ok(trialReportDueAt('2026-06-01', 5) === Date.UTC(2026, 5, 8) && trialReportDueAt('2026-02-30', 5) === 5 + 7 * DAY && trialReportDueAt(null, NaN) === null, 'M12 the report deadline derives from the day, else from acceptance, else null (never NaN)');
 }
 
-section('N/pure — analytics windows, recruitment briefs, and football history (§50: partial dates stay partial)');
+section('N/pure — analytics windows, recruitment briefs, and football history (partial dates stay partial)');
 {
   ok(resolveWindow({ from: '2026-03-01', to: '2026-03-31' }, T0).days === 31, 'N1 a custom window');
   neg(resolveWindow({ from: '2026-02-30', to: '2026-03-31' }, T0).error === 'WINDOW_INVALID' && resolveWindow({ from: '2026-03-01', to: '2026-13-01' }, T0).error === 'WINDOW_INVALID', 'N2 a window bounded by a day that does not exist is refused (it used to become 2 March)');
@@ -324,13 +323,13 @@ section('N/pure — analytics windows, recruitment briefs, and football history 
   neg(brief({ activeUntil: 'garbage' }).ok === false && brief({ activeUntil: 'garbage' }).details.some((d) => d.field === 'activeUntil' && d.error === 'DATE_INVALID'), 'N6 a brief whose end cannot be read is refused (it used to be live for ever)');
   neg(brief({ activeFrom: '2026-02-30' }).ok === false && brief({ activeFrom: '2026-09-30', activeUntil: '2026-09-01' }).details.some((d) => d.error === 'BRIEF_WINDOW_INVALID'), 'N6b a rolled-over start, and a backwards window');
   ok(briefIsLiveOn({ status: 'active', activeFrom: '2026-09-01', activeUntil: '2026-09-30' }, '2026-09-30') === true && briefIsLiveOn({ status: 'active', activeUntil: '2026-09-30' }, '2026-10-01') === false, 'N7 live through the whole last day');
-  neg(briefIsLiveOn({ status: 'active', activeUntil: 'garbage' }, '2026-09-23') === false && briefIsLiveOn({ status: 'active', activeFrom: '2026-02-30' }, '2026-09-23') === false, 'N8 a pre-P5.7 brief with garbage in a bound is not live');
-  ok(normWhen('2024').precision === 'year' && normWhen('2024-03').precision === 'month' && normWhen('2024-03-05').precision === 'day', 'N9 §50: year-only and month-only history dates are kept at their own precision');
+  neg(briefIsLiveOn({ status: 'active', activeUntil: 'garbage' }, '2026-09-23') === false && briefIsLiveOn({ status: 'active', activeFrom: '2026-02-30' }, '2026-09-23') === false, 'N8 a brief with garbage in a bound is not live');
+  ok(normWhen('2024').precision === 'year' && normWhen('2024-03').precision === 'month' && normWhen('2024-03-05').precision === 'day', 'N9 year-only and month-only history dates are kept at their own precision');
   neg(normWhen('2024-02-30') === null && normWhen({ year: 2024, month: 13 }) === null && normWhen({ year: 1850 }) === null, 'N10 …but a day that does not exist, a 13th month (which used to be clamped to December) and an implausible year become null, never a guessed date');
   ok(normWhen('2024-03-05T10:00:00Z').precision === 'day' && normWhen('2024-03-05T10:00:00Z').d === 5, 'N11 an ISO date-time in history keeps its day');
 }
 
-section('O/pure — the 22 adversarial cases (mandate §36) — every one EXPECT NO');
+section('O/pure — the 22 adversarial cases — every one EXPECT NO');
 {
   const now = T0;
   const cases = [
@@ -362,7 +361,7 @@ section('O/pure — the 22 adversarial cases (mandate §36) — every one EXPECT
   ok(T.parseLocalDateTimeWithZone('2026-11-01T01:30', NY, { resolve: 'earlier' }).ok === true, 'O #16b …and WITH the frozen explicit resolution it does (the only permitted YES)');
 }
 
-section('P/pure — zone independence: identical answers under TZ=UTC and TZ=America/New_York (§28)');
+section('P/pure — zone independence: identical answers under TZ=UTC and TZ=America/New_York');
 {
   const probe = `
     const T = await import(${JSON.stringify(path.join(HERE, '..', '..', 'temporal.mjs'))});
@@ -397,7 +396,7 @@ section('P/pure — zone independence: identical answers under TZ=UTC and TZ=Ame
   ok(strip(utc) === strip(ny), 'P2 every age, dob, instant, DST, quarter, window and bound answer is byte-identical under TZ=America/New_York');
   ok(strip(utc) === strip(tokyo), 'P2b …and under TZ=Asia/Tokyo (east of Greenwich, the other failure direction)');
   ok(utc.agesMidnight[0] === 18 && utc.agesLateEvening[0] === 18 && utc.agesMidnight[1] === 17 && utc.agesLateEvening[1] === 17, 'P3 the birthday turns at 00:00 UTC and holds until 23:59:59 UTC, whatever the server zone');
-  ok(utc.quarterMonth === 3, 'P4 a 1 April birth is in April in every zone (T-9: getMonth() used to say March in New York)');
+  ok(utc.quarterMonth === 3, 'P4 a 1 April birth is in April in every zone (getMonth() used to say March in New York)');
 }
 
 // =================================================================== LIVE
@@ -421,17 +420,16 @@ async function j(method, url, body, token, extra = {}) {
 const expect = (r, status, code) => { const good = r.status === status && (code == null || r.body?.error === code); if (!good) console.error(`   got ${r.status} ${JSON.stringify(r.body).slice(0, 240)}`); return good; };
 const login = async (orgId, scoutName, role, platform) => (await j('POST', '/auth/org/login', { orgId, scoutName, role, ...(platform ? { platform } : {}) })).body;
 
-// A trial with named staff exists before boot, carrying the three shapes a
-// pre-P5.7 database can hold for a background-check expiry: a day that has
-// passed, a day to come, and text nobody can read.
+// A trial with named staff exists before boot, carrying three shapes for a
+// background-check expiry: a day that has passed, a day to come, and text
+// nobody can read.
 let server = await boot();
 await stop(server);
 {
   // Written through the repositories onto the stopped server's database (an additive fixture).
-  // S8a-core: a trial names its request by a real key and a request names its staff member by a real key, so the
+  // A trial names its request by a real key and a request names its staff member by a real key, so the
   // fixture carries the staff row and the accepted invitation trial-p57 came from (the legacy direct-request literal);
-  // a trial naming an absent request is refused at the write with its id (PAIR_MISMATCH), never repaired. The trial
-  // row and the staff checks it carries are unchanged.
+  // a trial naming an absent request is refused at the write with its id (PAIR_MISMATCH), never repaired.
   const existing = (() => { const s = new DatabaseSync(path.join(DATA_DIR, 'scoutbox.db'), { readOnly: true }); try { return s.prepare("SELECT id FROM org_users WHERE org_id = 'org-eastport' AND name = 'Maria Keane'").get()?.id ?? null; } finally { s.close(); } })();
   const users = existing ? [] : [{ id: 'usr-p57-maria', orgId: 'org-eastport', name: 'Maria Keane', role: 'Head of Recruitment', createdAt: 1 }];
   const requests = [{ id: 'req-p57', playerId: 'pl-adeyemi', playerName: 'Kola Adeyemi', orgId: 'org-eastport', orgName: 'Eastport FC', orgType: 'club', orgVerified: true, orgSafeguardingCertified: false, userId: existing ?? 'usr-p57-maria', scoutName: 'Maria Keane', scoutRole: 'Head of Recruitment', type: 'trial', message: 'Come and train.', trialDetails: { proposedDate: T.utcDayOf(Date.now() + 10 * DAY), altSlots: [], venue: 'Training ground', notes: '' }, status: 'accepted', createdAt: Date.now() - 4 * DAY, respondedAt: Date.now() - 3 * DAY, respondedBy: 'player', routedTo: 'player', guardianId: null, contactChannel: null }];
@@ -456,13 +454,13 @@ server = await boot();
 
 section('Q/live — sign-up: every bad date of birth refused at the door, both doors');
 {
-  // (S4a: `foot` is a column with CHECK (left|right|null); a sign-up with any other value is refused 400 PLAYER_INVALID, so the probe sends the valid form.)
+  // (`foot` is a column with CHECK (left|right|null); a sign-up with any other value is refused 400 PLAYER_INVALID, so the probe sends the valid form.)
   const signup = (dob) => j('POST', '/auth/player/signup', { name: `Probe ${Math.random().toString(36).slice(2, 6)}`, dob, country: 'GB', position: 'ST', foot: 'right', password: 'a-long-enough-password' });
   for (const dob of ['2000-02-30', '1999-04-31', '1997-02-29', '1998-13-01', '1998-00-10', '1998-01-00', '1998-01-32', '02/03/1998']) neg(expect(await signup(dob), 400, 'DOB_INVALID'), `Q1 self sign-up with dob ${dob} → 400 DOB_INVALID`);
-  neg(expect(await signup('2030-01-01'), 400, 'DOB_INVALID'), 'Q1b a date of birth in the future → 400 DOB_INVALID (§24)');
-  neg(expect(await signup('1890-01-01'), 400, 'DOB_INVALID'), 'Q1c a 136-year-old → 400 DOB_INVALID (§24)');
+  neg(expect(await signup('2030-01-01'), 400, 'DOB_INVALID'), 'Q1b a date of birth in the future → 400 DOB_INVALID');
+  neg(expect(await signup('1890-01-01'), 400, 'DOB_INVALID'), 'Q1c a 136-year-old → 400 DOB_INVALID');
   const leap = await signup('2000-02-29');
-  ok(leap.status === 201 && leap.body?.player?.dob === '2000-02-29', 'Q2 a REAL leap day (2000-02-29) creates the account and stores the day exactly (§36 #7)');
+  ok(leap.status === 201 && leap.body?.player?.dob === '2000-02-29', 'Q2 a REAL leap day (2000-02-29) creates the account and stores the day exactly');
   const gAuth = await j('POST', '/auth/guardian/login', { guardianId: 'gd-amara' });
   ok(gAuth.status === 200 && !!gAuth.body?.token, 'Q3 the guardian signs in');
   const child = (dob) => j('POST', '/guardian/children', { name: `Child ${Math.random().toString(36).slice(2, 6)}`, dob, country: 'GB' }, gAuth.body.token);
@@ -480,7 +478,7 @@ section('R/live — every hardened route answers with the taxonomy');
   const priya = (await j('POST', '/auth/reviewer/login', { reviewerId: 'tsr-dev-admin', secret: 'dev-reviewer-admin' })).body;
   ok(!!maria?.token && !!moss?.token && !!kola?.token && !!priya?.token, 'R0 the four identities signed in');
 
-  // Licence expiry (T-3)
+  // Licence expiry
   const lic = (body) => j('POST', '/org/verification/licence', { licenceType: 'UEFA B Licence', issuer: 'UEFA', identifier: 'UEFA-B-77777', holderName: 'Maria Keane', ...body }, maria.token);
   neg(expect(await lic({ expiry: '2027-02-30' }), 400, 'DATE_INVALID'), 'R1 a licence expiring on 30 February → 400 DATE_INVALID');
   neg(expect(await lic({ expiry: 'sometime' }), 400, 'DATE_INVALID'), 'R1b …"sometime" → 400 (it used to be stored as NO expiry)');
@@ -492,12 +490,12 @@ section('R/live — every hardened route answers with the taxonomy');
   const claim = (me.body?.claims ?? []).find((c) => c.id === good.body.claim.id);
   ok(claim?.validUntil === Date.UTC(2028, 5, 31) && claim?.validFrom === Date.UTC(2024, 5, 30), 'R2b stored as instants: valid THROUGH 30 June 2028 (expiry = start of 1 July, UTC), from 30 June 2024');
 
-  // Safeguarding staff check expiry (T-2)
+  // Safeguarding staff check expiry
   const day = await j('GET', '/org/trials/trial-p57/day', undefined, maria.token);
   const st = Object.fromEntries((day.body?.trial?.staff ?? []).map((s) => [s.id, s.check.status]));
   ok(day.status === 200 && st['stf-future'] === 'reviewed' && st['stf-none'] === 'reviewed' && st['stf-pending'] === 'pending', 'R3 controls: a future expiry and no expiry read reviewed; pending reads pending');
   neg(st['stf-past'] === 'expired', 'R3b a check that expired in 2020 reads expired');
-  neg(st['stf-text'] === 'expired', 'R3c T-2: a check whose expiry is the word "never" reads EXPIRED — it used to read reviewed for ever');
+  neg(st['stf-text'] === 'expired', 'R3c a check whose expiry is the word "never" reads EXPIRED — it used to read reviewed for ever');
   neg(expect(await j('POST', '/admin/staff-checks/trial-p57/stf-pending', { status: 'reviewed', expiresAt: '2027-02-30' }, null, ADMIN), 400, 'DATE_INVALID'), 'R4 T&S cannot review a check with an expiry on 30 February');
   neg(expect(await j('POST', '/admin/staff-checks/trial-p57/stf-pending', { status: 'reviewed', expiresAt: 'never' }, null, ADMIN), 400, 'DATE_INVALID'), 'R4b …or "never"');
   const reviewed = await j('POST', '/admin/staff-checks/trial-p57/stf-pending', { status: 'reviewed', expiresAt: '2027-06-30' }, null, ADMIN);
@@ -506,7 +504,7 @@ section('R/live — every hardened route answers with the taxonomy');
   const staffIso = await j('POST', '/org/trials/trial-p57/staff', { name: 'G Iso', role: 'Coach', check: { kind: 'DBS', expiresAt: '2027-06-30T00:00:00.000Z' } }, maria.token);
   ok(staffIso.status === 201 && staffIso.body?.staff?.check?.expiresAt === '2027-06-30T00:00:00.000Z', 'R5b an ISO instant with Z (the shape the club app sends) is accepted and normalised');
 
-  // Development Hub (T-7)
+  // Development Hub
   neg(expect(await j('POST', '/player/development/plans', { title: 'X', visibility: 'private', startDate: '2026-06-01T09:00' }, kola.token), 400, 'DATE_INVALID'), 'R6 a plan starting at a bare local time → 400 DATE_INVALID');
   neg(expect(await j('POST', '/player/development/plans', { title: 'X', visibility: 'private', startDate: '2026-02-30' }, kola.token), 400, 'DATE_INVALID'), 'R6b …on 30 February → 400');
   neg(expect(await j('POST', '/player/development/plans', { title: 'X', visibility: 'private', startDate: '06/01/2026' }, kola.token), 400, 'DATE_INVALID'), 'R6c …on 06/01/2026 → 400 (it used to be 1 June)');
@@ -519,7 +517,7 @@ section('R/live — every hardened route answers with the taxonomy');
   const brief = await j('POST', '/org/recruitment-briefs', { title: 'P57', positions: ['CM'], activeUntil: 'whenever' }, maria.token);
   neg(brief.status === 400 && brief.body?.error === 'BRIEF_INVALID' && (brief.body?.details ?? []).some((d) => d.field === 'activeUntil' && d.error === 'DATE_INVALID'), 'R8 a brief ending "whenever" → 400 BRIEF_INVALID naming activeUntil DATE_INVALID');
 
-  // Grassroots dates (T-10)
+  // Grassroots dates
   neg(expect(await j('POST', '/org/open-trials', { title: 'Open day', date: 'next week', venue: 'Rec' }, moss.token), 400, 'DATE_INVALID'), 'R9 an open day dated "next week" → 400 DATE_INVALID (it used to list as upcoming for ever)');
   neg(expect(await j('POST', '/org/open-trials', { title: 'Open day', date: '2099-02-30', venue: 'Rec' }, moss.token), 400, 'DATE_INVALID'), 'R9b …on 30 February → 400');
   ok((await j('POST', '/org/open-trials', { title: 'Open day', date: '2099-05-01', venue: 'Rec' }, moss.token)).status === 201, 'R9c a real day → 201');
@@ -529,26 +527,26 @@ section('R/live — every hardened route answers with the taxonomy');
   neg(expect(await j('POST', '/player/medical/records', { title: 'Knock', date: '2026-13-01' }, kola.token), 400, 'DATE_INVALID'), 'R12 a medical record in month 13 → 400');
   ok((await j('POST', '/player/medical/records', { title: 'Knock' }, kola.token)).status === 201, 'R12b …and one with no date is dated today');
 
-  // Evidence (§16)
+  // Evidence
   neg(expect(await j('POST', '/player/evidence', { claimType: 'statistic', label: 'Goals', value: 3, observedAt: '2026-02-30' }, kola.token), 400, 'DATE_INVALID'), 'R13 evidence observed on 30 February → 400');
   neg(expect(await j('POST', '/player/evidence', { claimType: 'statistic', label: 'Goals', value: 3, observedAt: T.utcDayOf(Date.now() + 30 * DAY) }, kola.token), 400, 'DATE_INVALID'), 'R13b evidence observed next month → 400 (not yet evidence)');
   const ev = await j('POST', '/player/evidence', { claimType: 'statistic', label: 'Goals', value: 3, observedAt: '2026-03-01' }, kola.token);
   ok(ev.status === 201 && ev.body?.evidence?.observedAt === Date.UTC(2026, 2, 1), 'R13c a calendar day is stored as an instant');
 
-  // Notification preferences (T-12)
+  // Notification preferences
   neg(expect(await j('POST', '/player/prefs', { quietStart: '25:00', quietEnd: '07:00' }, kola.token), 400, 'TIME_INVALID'), 'R14 quiet hours from 25:00 → 400 TIME_INVALID');
   neg(expect(await j('POST', '/player/prefs', { timezone: 'Mars/Olympus' }, kola.token), 400, 'TIMEZONE_INVALID'), 'R14b a zone that is not a zone → 400 TIMEZONE_INVALID');
   const prefs = await j('POST', '/player/prefs', { quietStart: '22:00', quietEnd: '07:00', timezone: NY }, kola.token);
   ok(prefs.status === 200 && prefs.body?.prefs?.timezone === NY && prefs.body?.prefs?.quietStart === '22:00', 'R14c quiet hours in a named zone are stored');
 
-  // Policy publishing (T-4)
+  // Policy publishing
   const pol = (from, to = null) => j('POST', '/ts/compliance/policies', { id: `jp-eng-p57-${Math.random().toString(36).slice(2, 6)}`, regulator: 'FA', jurisdiction: 'ENG', policyVersion: 77, effectiveFrom: from, effectiveTo: to, rules: { 'X-1': { ruleStatus: 'ACTIVE', sourceRef: [{ source: 'p57', retrievedDate: '2026-01-01' }] } } }, priya.token);
   neg(expect(await pol('2027-02-30'), 400, 'POLICY_INPUT_INVALID'), 'R15 a policy effective from 30 February → 400 POLICY_INPUT_INVALID');
   neg(expect(await pol('2027-01-01', '2026-12-31'), 400, 'POLICY_INPUT_INVALID'), 'R15b a policy ending before it starts → 400');
   ok((await pol('2027-01-01', '2027-12-31')).status === 201, 'R15c a well-ordered window is proposed');
 }
 
-section('S/live — authorization is decided before a date is read (§29 error privacy)');
+section('S/live — authorization is decided before a date is read (error privacy)');
 {
   neg(expect(await j('POST', '/org/open-trials', { title: 'x', date: '2026-02-30', venue: 'y' }), 401), 'S1 no token + bad date → 401, not 400');
   const kola = (await j('POST', '/auth/player/login', { playerId: 'pl-adeyemi' })).body;
@@ -567,7 +565,7 @@ section('S/live — authorization is decided before a date is read (§29 error p
 
 section('T/live — persistence and restart: normalised values survive as what they are');
 {
-  ok((await j('GET', '/healthz')).headers.get('x-scoutbox-schema') === String(SCHEMA_VERSION), 'T1 schema 39, the latest table migration (rewritten in S14a: it named the retired snapshot registry\'s 2308)');
+  ok((await j('GET', '/healthz')).headers.get('x-scoutbox-schema') === String(SCHEMA_VERSION), 'T1 the schema is the latest table migration');
   await stop(server);
   server = await boot();
   const maria = await login('org-eastport', 'Maria Keane', 'Head of Recruitment');

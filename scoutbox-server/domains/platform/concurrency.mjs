@@ -1,11 +1,7 @@
 /**
- * M18.1 — optimistic concurrency for collaborative organisation records.
- *
- * Recruitment Rooms and Recruitment Briefs are worked on by several people at
- * once. Before M18.1 the last write won: two scouts editing the same brief, or
- * moving the same room, silently overwrote each other and nothing recorded that
- * it had happened. That is a lost update, and on a room it can also lose the
- * reason a decision was recorded against.
+ * Optimistic concurrency for collaborative organisation records. Recruitment
+ * Rooms and Recruitment Briefs are worked on by several people at once, and a
+ * lost update on a room can lose the reason a decision was recorded against.
  *
  * The mechanism is deliberately boring and identical for both records:
  *
@@ -36,15 +32,14 @@ export function expectedRevOf(body) {
   if (raw === undefined || raw === null || raw === '') return null;
   // Only a number or a string can be a revision. `Number(value)` invokes the
   // value's own `toString`/`valueOf`, so `{ toString: 1 }` in a request body
-  // threw "Cannot convert object to primitive value" out of the guard and
-  // became a 500 on every rev-guarded route (M23 P3 defect D1, found by the
-  // Contact suite; the guard predates it). An object is malformed, not a crash.
+  // would throw out of the guard and become a 500 on every rev-guarded route.
+  // An object is malformed, not a crash.
   if (typeof raw !== 'number' && typeof raw !== 'string') return Number.NaN;
   const n = Number(raw);
   return Number.isInteger(n) && n >= 0 ? n : Number.NaN; // NaN = malformed
 }
 
-/** Current revision of a record that may predate M18.1 (treated as rev 1). */
+/** Current revision of a record; a record with no `rev` is treated as rev 1. */
 export const revOf = (record) => Number(record?.rev ?? 1);
 
 /**
@@ -62,14 +57,14 @@ export function guardRev(req, res, record, { errorCode, current }) {
     res.status(400).json({ error: 'EXPECTED_REV_INVALID', message: 'expectedRev must be a whole number.' });
     return false;
   }
-  if (expected === null) return true; // not supplied: unchanged pre-M18.1 behaviour
+  if (expected === null) return true; // not supplied: the write is unguarded
   const now = revOf(record);
   if (expected === now) return true;
   res.status(409).json({
     error: errorCode,
     expectedRev: expected,
     currentRev: now,
-    // M18.2: who moved it and when — a display name, never a user id — so the
+    // Who moved it and when — a display name, never a user id — so the
     // shared conflict notice can say "Tom Field changed this" instead of
     // "someone".
     updatedBy: record?.revBy?.name ?? null,

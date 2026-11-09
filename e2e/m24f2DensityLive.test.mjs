@@ -1,13 +1,13 @@
-// M24F.2 — live density / categorisation / brand journeys in a real browser
+// Live density / categorisation / brand journeys in a real browser
 // against the real bundles and a live scoutbox-server:
 //   P  the Player's You › Clubs (four categories) and You › Account (four
 //      categories): the tabs work, every category reaches its content, deep
-//      links / back / forward / refresh behave, the roots are shorter than
-//      the M24F.1 roots, no horizontal overflow;
-//   G  the Grassroots entry (photograph on the introduction, no diagonal,
-//      the centre-circle motif, no bullet points), the LIGHT workspace
+//      links / back / forward / refresh behave, the roots are short, no
+//      horizontal overflow;
+//   G  the Grassroots entry (the green introduction: no photograph, no
+//      centre-circle motif, no bullet points), the LIGHT workspace
 //      (navy sidebar, cool canvas, the Home's hierarchy), the DARK workspace
-//      unchanged against the frozen M24E fixture;
+//      unchanged against the frozen dark-token fixture;
 //   A  the Agent's active navigation in gold at both themes, not colour-only;
 //   W  the ScoutBox™ lock-up: the TM raised over the square, tight, labelled
 //      "trademark", on the Player, Grassroots and Agent at 390 / 640×360 /
@@ -187,7 +187,7 @@ for (const [w, h] of VIEWS) {
   await page.goto(`${origin(PORTS.grassroots)}/`); await page.waitForSelector('.org-card', { timeout: 25000 }); await sleep(400);
   const r = await page.evaluate(() => { const cs = (el) => getComputedStyle(el); const promo = document.querySelector('.auth-promo'); const bg = cs(promo).backgroundImage; return { photo: /url\(/.test(bg), circle: /radial-gradient/.test(bg), diagonal: /repeating-linear-gradient/.test(bg) || /linear-gradient\((?!180deg)\s*\d+deg/.test(bg), points: document.querySelectorAll('.auth-points li').length, notes: document.querySelectorAll('.auth-promo .auth-note').length, h2: document.querySelector('.auth-promo h2')?.textContent.trim(), summary: !!document.querySelector('.auth-summary'), img: document.querySelectorAll('.auth-promo img').length, labelled: !!promo.getAttribute('aria-labelledby'), formImage: cs(document.querySelector('.auth-form')).backgroundImage }; });
   const tag = `Grassroots entry ${w}×${h}`;
-  // The Founder's direction after M24F.2: the M24E green introduction — no photograph, no centre circle.
+  // The Founder's direction: the green introduction — no photograph, no centre circle.
   ok(!r.photo && !r.circle, `${tag}: no photograph and no centre-circle motif on the introduction (the green panel, restored)`);
   ok(r.points === 0 && r.notes === 0 && r.h2 === 'Your club. Your community. Your next player.' && r.summary, `${tag}: the headline and one sentence — no bullet points, no demo notice`);
   ok(r.img === 0 && r.labelled && r.formImage === 'none', `${tag}: no img, the panel is named by its headline, the form carries no image`);

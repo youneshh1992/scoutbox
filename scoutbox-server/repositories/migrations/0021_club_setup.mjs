@@ -1,7 +1,6 @@
 /**
- * A club's own setup (S9c) gets its own typed tables: the tactical setup (roles, criteria, windows), the squad, the
- * shadow list, looking-for, the federation-route request and vacancies. REGISTERED in DATA_MIGRATIONS. `up()` is the
- * DDL. (These were organisation facets before; since S14g the organisations have no facet storage to clean up.)
+ * A club's own setup: the tactical setup (roles, criteria, windows), the squad, the shadow list, looking-for, the
+ * federation-route request and vacancies.
  */
 import { migrationApplied } from '../database.mjs';
 import { SCOUTING_ASSESSMENTS_MIGRATION } from '../scoutingAssessments.mjs';

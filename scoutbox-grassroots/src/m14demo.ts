@@ -1,4 +1,4 @@
-// M14 in-browser demo mirror (VITE_DEMO=1). Same honesty rules as the live
+// In-browser demo mirror (VITE_DEMO=1). Same honesty rules as the live
 // server: nothing here shows "verified" for anything that was only uploaded,
 // and the demo personas cover the full range of states — verified club, root
 // admin, verified scout, pending coach, former (historical) coach, and a

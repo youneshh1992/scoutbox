@@ -1,5 +1,5 @@
-// S6b, explicit since S14b — the eight audit collections as typed tables (repositories/safetyAudit.mjs, migration
-// 0013_safety_audit amended in place). Q4: the five player references (blocks, reports, org notes, ledger, source
+// The eight audit collections as typed tables (repositories/safetyAudit.mjs, migration 0013_safety_audit). Q4 (see
+// docs/decisions.md): the five player references (blocks, reports, org notes, ledger, source
 // changes) carry no key and an unresolved id is counted, never refused. Q4b: the ID-check queue names an existing
 // guardian, checked on every write. Q5: lifting a block deletes its row.
 //

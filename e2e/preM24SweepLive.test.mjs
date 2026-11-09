@@ -1,27 +1,26 @@
-// PRE-M24 final defect sweep — LIVE regressions for the browser-side defects
-// the sweep fixed (PRE_M24_DEFECT_REGISTER.md). Real server, real Club,
-// Grassroots, Agent and Player bundles.
+// LIVE regressions for browser-side session, dialog, route and date defects.
+// Real server, real Club, Grassroots, Agent and Player bundles.
 //
-//   S1  sign-out revokes the session on the server (PM-4)
-//   S2  a sign-out in another tab of the same browser ends this tab too (PM-3)
+//   S1  sign-out revokes the session on the server
+//   S2  a sign-out in another tab of the same browser ends this tab too
 //   S3  a colleague removed mid-session is signed out on the next refresh
-//       signal, and the event stream stops asking for tickets (PM-3)
-//   S4  Grassroots and Agent: a server-side logout signs the open tab out (PM-3)
+//       signal, and the event stream stops asking for tickets
+//   S4  Grassroots and Agent: a server-side logout signs the open tab out
 //   S5  Player: an ended session returns the app to onboarding instead of
-//       staying "signed in" with every request refused (PM-5)
+//       staying "signed in" with every request refused
 //   S6  Escape closes the notification panel and the phone drawer; focus
-//       returns; the menu button says whether the drawer is open (PM-7)
+//       returns; the menu button says whether the drawer is open
 //   S7  the Report & block and player drawers are labelled modal dialogs:
-//       focus moves in, Escape closes, focus returns (PM-8); player cards are
-//       keyboard controls (PM-14)
+//       focus moves in, Escape closes, focus returns; player cards are
+//       keyboard controls
 //   S8  an outdated Player link shows a translated ScoutBox not-found screen,
-//       never the developer page and its sitemap (PM-6); /_sitemap itself no
-//       longer lists the route files and SDK version (PM-13)
+//       never the developer page and its sitemap; /_sitemap itself does
+//       not list the route files and SDK version
 //   S9  a server with development logins disabled gets no demo identities on
-//       the Player landing (PM-11)
-//   S10 a date-only contract day reads the same in Los Angeles (§27)
+//       the Player landing
+//   S10 a date-only contract day reads the same in Los Angeles
 //   S11 a history row with an unreadable timestamp (legacy or damaged data)
-//       shows a dash, never "Invalid Date" (PM-12)
+//       shows a dash, never "Invalid Date"
 //   and zero page errors in every context.
 
 import { spawn, execSync } from 'node:child_process';
@@ -213,7 +212,7 @@ console.log('\n— S5: Player session —');
   const q = await enterPlayer(ctx, 'Kola Adeyemi', 'kola2');
   const tok2 = await q.evaluate(() => { try { return JSON.parse(localStorage.getItem('scoutbox-player-tokens-v1') ?? '{}')['pl-adeyemi'] ?? null; } catch { return null; } });
   await q.goto(`http://localhost:${PORTS.player}/you?tab=account`);
-  const signOut = q.locator('text=/^Sign out$/').last(); // M24E: the Player's exit is "Sign out"
+  const signOut = q.locator('text=/^Sign out$/').last(); // the Player's exit is "Sign out"
   await signOut.waitFor({ timeout: 20000 });
   await signOut.click();
   const gone = await waitFor(() => q.evaluate(() => { try { return !('pl-adeyemi' in JSON.parse(localStorage.getItem('scoutbox-player-tokens-v1') ?? '{}')); } catch { return false; } }), 8000);

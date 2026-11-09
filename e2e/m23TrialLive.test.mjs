@@ -1,4 +1,4 @@
-// M23 P4B LIVE — the Trial workflow, driven through the real Pro workspace
+// Live: the Trial workflow, driven through the real Pro workspace
 // and the real player app against a real server (test clock enabled so the
 // "last session ended" gate can be proved without waiting for it).
 //
@@ -168,7 +168,7 @@ async function openRoomFor(page, playerName) {
   return id;
 }
 const tab = async (page, name) => {
-  await roomTab(page, name); // M24B — category → subcategory
+  await roomTab(page, name); // category → subcategory
   if (name === 'Trial') await page.locator('[role="tabpanel"][aria-label="Trial"] [aria-label="Trials"]').waitFor({ timeout: 15000 });
 };
 const trialPanel = (page) => page.locator('[role="tabpanel"][aria-label="Trial"]');
@@ -243,7 +243,7 @@ say('A1: a recruitment lead signs in through the real client');
 const ROOM_A = await openRoomFor(lead.page, 'Kola Adeyemi');
 say(`A2: the lead opens a Recruitment Room for an adult player (${ROOM_A})`);
 {
-  // M24B — the pages of every category, read off the category buttons (only the open category's pages are in the tablist).
+  // The pages of every category, read off the category buttons (only the open category's pages are in the tablist).
   const tabs = await lead.page.locator('[data-casenav="room"] .casenav-cat').evaluateAll((els) => els.flatMap((e) => (e.dataset.subs ?? '').split(' ')));
   ok(tabs.includes('trial'), 'A2b: the room offers a page-local Trial tab');
   ok(tabs.indexOf('trial') > tabs.indexOf('contact') && tabs.indexOf('trial') - tabs.indexOf('contact') === 1, 'A2c: it sits right after Contact in Engagement — first the conversation, then the trial (M24B)');
@@ -291,7 +291,7 @@ neg(!JSON.stringify(INV).includes('Gate B') && !JSON.stringify(INV).includes('As
 const ctxKola = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
 const kola = await enterPlayer(ctxKola, 'Kola Adeyemi', 'kola', 'text=Your visibility right now');
 await goTab(kola, '/inbox');
-// M24F.3 — open the trial row, then the words behind "View full message"
+// Open the trial row, then the words behind "View full message"
 await kola.locator('[data-testid^="inbox-request-"]').first().click();
 await kola.locator('[data-testid^="req-details-"]').first().click();
 await kola.waitForSelector('text=one session to start', { timeout: 20000 });
@@ -318,7 +318,7 @@ const TRIAL_A = (await j('GET', `/org/rooms/${ROOM_A}/trials`, undefined, LEAD))
 const SID_A = TRIAL_A.schedule.sessions[0].id;
 
 // The player's Opportunities: the address and instructions arrive with acceptance.
-await playerCategory(kola, 'trial', 'Schedule'); // M24B — Trial › Schedule
+await playerCategory(kola, 'trial', 'Schedule'); // Trial › Schedule
 await kola.waitForSelector('[data-testid="trial-workflow"]', { timeout: 20000 });
 {
   const txt = await kola.locator('[data-testid="trial-workflow"]').innerText();
@@ -396,7 +396,7 @@ expect(await j('POST', `/org/rooms/${ROOM_A}/trials/${TRIAL_A.id}/sessions/${SID
   await j('POST', `/player/box-cam/sessions/${bx.body.session.id}/start`, { nonce: bx.body.nonce, liveness: bx.body.livenessChallenge }, KOLA);
   await j('POST', `/player/box-cam/sessions/${bx.body.session.id}/complete`, { nonce: bx.body.nonce }, KOLA);
   expect(await j('POST', `/org/rooms/${ROOM_A}/trials/${TRIAL_A.id}/sessions/${SID_A}/evidence`, { boxSessionId: bx.body.session.id, expectedRev: TRIAL_A.rev + 1 }, LEAD), 403, 'EVIDENCE_CONSENT_REQUIRED', 'N11c: linking his finalised session is refused 403 EVIDENCE_CONSENT_REQUIRED — a trial is not consent');
-  // M23 P8.1 (D-P81-9): consent is decided BEFORE the session is looked up, so without consent a fabricated id gets the SAME refusal as a real session — the existence of footage is not enumerable through guesses (the club's own consent state is already on its candidates list, N11).
+  // Consent is decided BEFORE the session is looked up, so without consent a fabricated id gets the SAME refusal as a real session — the existence of footage is not enumerable through guesses (the club's own consent state is already on its candidates list, N11).
   expect(await j('POST', `/org/rooms/${ROOM_A}/trials/${TRIAL_A.id}/sessions/${SID_A}/evidence`, { boxSessionId: 'bx-any', expectedRev: TRIAL_A.rev + 1 }, LEAD), 403, 'EVIDENCE_CONSENT_REQUIRED', 'N11d: an unknown session id is refused exactly like a real one without consent (403 EVIDENCE_CONSENT_REQUIRED) — whether footage exists is not enumerable through guesses (D-P81-9)');
 }
 
@@ -435,7 +435,7 @@ ok(await waitLive(lead.page, /Invitation sent\. Case moved to Trial requested\./
 
 const ctxAmara = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
 const amara = await enterPlayer(ctxAmara, 'Amara Adebayo', 'amara', 'text=Guardian');
-await amara.waitForSelector('[data-testid^="req-details-"]', { timeout: 25000 }); await amara.locator('[data-testid^="req-details-"]').first().click(); // M24F.3 — the message sits behind View full message
+await amara.waitForSelector('[data-testid^="req-details-"]', { timeout: 25000 }); await amara.locator('[data-testid^="req-details-"]').first().click(); // the message sits behind View full message
 await amara.waitForSelector('text=U14 training session', { timeout: 25000 });
 {
   const txt = await bodyText(amara);
@@ -474,7 +474,7 @@ await guni.waitForSelector('[data-testid="trial-workflow"]', { timeout: 20000 })
   expect(await j('POST', `/player/trials/${TRIAL_M.id}/confirm-schedule`, {}, GUNI), 403, 'GUARDIAN_MANAGED', 'N12e: the child\'s device cannot confirm through the API either (403 GUARDIAN_MANAGED)');
 }
 
-// M7 — a material reschedule asks the guardian again; she confirms in the UI.
+// A material reschedule asks the guardian again; she confirms in the UI.
 {
   const re = await j('POST', `/org/rooms/${ROOM_M}/trials/${TRIAL_M.id}/reschedule`, { timezone: 'Europe/London', expectedRev: TRIAL_M.rev, reason: 'Pitch booked elsewhere that morning.', sessions: [{ id: TRIAL_M.schedule.sessions[0].id, startsAt: M_START + 3 * H, endsAt: M_END + 3 * H, venue: { name: 'Eastport Dome', town: 'Eastport', address: 'Gate B, Dome Road' } }] }, LEAD);
   ok(re.status === 200 && re.body.requiresConfirmation === true && re.body.trial.workflowState === 'accepted', 'M7: the club moves the session — material, so the confirmation is cleared and the trial is accepted-not-scheduled');
@@ -596,7 +596,7 @@ await guni.waitForSelector('[data-testid="trial-workflow"]', { timeout: 20000 })
   await ctxPhone.close();
 }
 
-// A13 — accessibility (§206): tab semantics, keyboard, focus, live mutation feedback.
+// A13 — accessibility: tab semantics, keyboard, focus, live mutation feedback.
 {
   await trialTab(lead.page, ROOM_A);
   const sel = await lead.page.locator('[role="tablist"] button[role="tab"]:has-text("Trial")').getAttribute('aria-selected');
@@ -626,12 +626,12 @@ await guni.waitForSelector('[data-testid="trial-workflow"]', { timeout: 20000 })
   ok((await trialPanel(lead.page).locator('[role="status"][aria-live="polite"]').count()) >= 1, 'A13e: live mutation feedback — the panel carries a polite live region (the one every A-step read its outcome from)');
 }
 
-// A14 — FR (§207): the same tab in French, the same invitation in French on the family side.
+// A14 — FR: the same tab in French, the same invitation in French on the family side.
 {
   await lead.page.evaluate(() => localStorage.setItem('sb-lang', 'fr'));
   await lead.page.reload();
   await lead.page.waitForSelector('[aria-label="En-tête de la salle"]', { timeout: 25000 });
-  await roomTab(lead.page, 'trial'); // M24B — by page id; the French label is asserted on the panel below
+  await roomTab(lead.page, 'trial'); // by page id; the French label is asserted on the panel below
   const frPanel = lead.page.locator('[role="tabpanel"][aria-label="Essai"]');
   await frPanel.waitFor({ timeout: 10000 });
   let frTxt = '';
@@ -641,7 +641,7 @@ await guni.waitForSelector('[data-testid="trial-workflow"]', { timeout: 20000 })
   await lead.page.reload();
   await kola.evaluate(() => localStorage.setItem('sb-player-lang', 'fr'));
   await reenter(kola, 'Kola Adeyemi', 'a[href="/inbox"]');
-  await playerCategory(kola, 'trial', 'Planning'); // M24B — the app is in French here: Trial › Planning
+  await playerCategory(kola, 'trial', 'Planning'); // the app is in French here: Trial › Planning
   await kola.waitForSelector('[data-testid="trial-workflow"]', { timeout: 20000 });
   let frFam = '';
   for (let i = 0; i < 40 && !/vos essais/i.test(frFam); i++) { frFam = await bodyText(kola); if (!/vos essais/i.test(frFam)) await sleep(250); }

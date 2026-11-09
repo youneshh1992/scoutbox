@@ -1,6 +1,6 @@
 import { RecordIdentity, DetailFact } from './RecordDetails';
 import { GuidanceNote } from './InformationRows';
-// M14 player/guardian sections: structured coach references (with honest
+// Player/guardian sections: structured coach references (with honest
 // verification provenance) and squad-invitation acceptance. Verification is
 // display-only here — it changes nothing about who may see or contact whom.
 import { useEffect, useState } from 'react';

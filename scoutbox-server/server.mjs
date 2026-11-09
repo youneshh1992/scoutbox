@@ -1,24 +1,20 @@
-// ScoutBox sync backend (Milestone 2).
+// ScoutBox sync backend.
 // Every deck rule is enforced HERE, not in the frontends — the product's
 // claims depend on the API refusing, not the UI hiding.
-//
-// Storage is in-memory, seeded from seed.mjs (restart = reset). The API
-// surface is designed so storage can swap to Postgres without changes.
 
 import express from 'express';
 import { installAsyncErrorForwarding } from './domains/platform/asyncErrors.mjs';
-// PRE-M24 (PM-9): a rejected async handler answers 500 instead of ending the process.
+// A rejected async handler answers 500 instead of ending the process.
 installAsyncErrorForwarding();
 
-// PRE-M24 (PM-10): free text in a request body is a string or absent. A value
-// of any other type used to throw on `.trim()` (a 500 — and, inside an async
-// handler, the end of the process: PM-9) or was stored as an object that
-// every screen rendering it then crashed on. `optText` accepts absent or a
+// Free text in a request body is a string or absent. A value of any other
+// type would throw on `.trim()` (a 500) or be stored as an object that every
+// screen rendering it then crashes on. `optText` accepts absent or a
 // string within the length limit; everything else is a 400 at the route.
 const optText = (v, max = 500) => v === undefined || v === null || (typeof v === 'string' && v.length <= max);
 const reqText = (v, max = 500) => typeof v === 'string' && v.trim().length > 0 && v.length <= max;
 const badField = (res, field) => res.status(400).json({ error: 'FIELD_INVALID', field, message: `${field} must be text.` });
-/** S14h: a switch must be sent as true or false (400 FIELD_INVALID naming it), never coerced. Returns true when refused. */
+/** A switch must be sent as true or false (400 FIELD_INVALID naming it), never coerced. Returns true when refused. */
 const switchRefused = (res, v, field) => { if (typeof v === 'boolean') return false; res.status(400).json({ error: 'FIELD_INVALID', field, message: `${field} must be true or false.` }); return true; };
 import cors from 'cors';
 import crypto from 'node:crypto';
@@ -120,7 +116,7 @@ import { createLookups } from './domains/platform/lookups.mjs';
 import { createMatchFactsKeeper } from './domains/discovery/matchFacts.mjs';
 
 /**
- * M23 P5.7: a DATE_ONLY a client typed (open day, match day, friendly,
+ * A DATE_ONLY a client typed (open day, match day, friendly,
  * attendance, medical record) is a calendar day that exists, or a 400.
  * Returns true when it is; false after sending the refusal.
  */
@@ -156,35 +152,24 @@ const dataLayer = attachDataLayer({
   log: (m) => { if (process.env.M13_QUIET_LOGS !== '1') console.log(m); },
 });
 const { users, sessions, orgs, players, guardians, identity, mediaDeletions, codes, notifications, dispatches, outbox, pushLog, pushTokens, channels, safetyAudit, recruitment, recruitmentCases, recruitmentContactsOffers, signingsFollowUps, scoutingEvidence, scoutingAssessments, clubSetup, opportunitiesCampaigns, verification, passport, transitionsVouches, agentCore, compliancePolicies, complianceRecords, agentTransactions, development, boxCam, discovery, insightCoverage, integrations, enterprise, groups, grassroots, operations, matchFacts } = dataLayer;
-// The recruitment domains read through SQL rather than db.* (§4.3 step 2): read-only query objects, handed to every
-// module context as `recruitmentReads` (contacts, offers, signingPackages, signings, followUps, outcomeReports, requests, trials,
-// cases, comments, snapshots, decisions, evidenceStates).
 // A record the caller may use, or null: `onlyIf(repo.byId(id), (r) => r.orgId === orgId)`.
 const onlyIf = (record, ok) => (record && ok(record) ? record : null);
-const safetyReads = safetyAudit.reads; // S14b: blocks, reports, the ledger… as queries (repositories/safetyAudit.mjs)
+// Each domain's read-only query objects (`<domain>Reads`), handed to every module context.
+const safetyReads = safetyAudit.reads;
 const recruitmentReads = Object.freeze({ ...recruitmentContactsOffers.reads, ...signingsFollowUps.reads, ...recruitment.reads, ...recruitmentCases.reads });
-// The scouting domain reads through SQL too (S9): `scoutingReads` (evidence, coachAffiliations, squadInvites; since S9b
-// templates, assessments, segments, playlists; since S9c tacticalSetups, squad, shadow, lookingFor, federationChecks,
-// vacancies; since S9d opportunities, applications, campaigns, campaignSubmissions, playerPrefs).
 const scoutingReads = Object.freeze({ ...scoutingEvidence.reads, ...scoutingAssessments.reads, ...clubSetup.reads, ...opportunitiesCampaigns.reads });
-// The verification domain reads through SQL too (S10a): `verificationReads` (claims, events, evidence, tokens, admins,
-// rootTransfers, rootRequests, disputes, references, playerInvites, conflicts, domainRequests, domains; since S10b the
-// Passport's passportPrefs, careerEntries, achievements, shares, corrections; since S10c transitionCases and vouches).
 const verificationReads = Object.freeze({ ...verification.reads, ...passport.reads, ...transitionsVouches.reads });
-// S11a: the agent core (profiles, memberships, agreements, agency settings) is read through SQL by every module.
 const agentReads = agentCore.reads;
-// The development domain (S12a): objectives, drill-guidance reviews and the Development Hub, read through SQL.
 const developmentReads = development.reads;
-// Box Cam, the At-Home Combine and the CV results (S12b), read through SQL.
 const boxCamReads = boxCam.reads;
-const discoveryReads = discovery.reads; // S12c: briefs, Nobody Missed reviews, Second Look items, watchlists and their transitions (queries only)
-const insightReads = insightCoverage.reads; // S12d: exposure, review-later, evidence suggestions, calibration and coverage (queries only)
-const enterpriseReads = enterprise.reads; // S13b: staff invites, SSO, support tickets and access grants (queries only)
-const groupReads = groups.reads; // S13c: group workspaces and group grants (queries only)
-const grassrootsReads = grassroots.reads; // S13d: open days, match days and friendlies (queries only)
-const integrationReads = integrations.reads; // S13a: import batches, prospects, identity reviews, API keys, webhook endpoints and deliveries (queries only)
-const complianceReads = complianceRecords.reads; // S11b-2: contexts, evaluations, reviews and consents (queries only)
-// Lookups by id through the repositories' indexes, never a scan of the collection (migration.md §4.3.1): handed to
+const discoveryReads = discovery.reads;
+const insightReads = insightCoverage.reads;
+const enterpriseReads = enterprise.reads;
+const groupReads = groups.reads;
+const grassrootsReads = grassroots.reads;
+const integrationReads = integrations.reads;
+const complianceReads = complianceRecords.reads;
+// Lookups by id through the repositories' indexes, never a scan: handed to
 // every module context as `byId` (`byId.player(id)`, `byId.org(id)`, …; null when there is none).
 const byId = createLookups({ players, guardians, users, orgs });
 if (dataLayer.boot.identity.imported) console.log(`data layer: ${dataLayer.boot.identity.players} player(s) and ${dataLayer.boot.identity.guardians} guardian(s) initialised from the first installation's records`);
@@ -195,7 +180,7 @@ if (dataLayer.boot.identity.imported) console.log(`data layer: ${dataLayer.boot.
  * runs only after COMMIT. `work` must be synchronous — prepare asynchronous things
  * before, publish after.
  */
-// Development-only failure seams inside units of work (the m182 fault layer's
+// Development-only failure seams inside units of work (the fault layer's
 // `internal:<step>` rules; the layer is created further down and cannot exist in
 // production, so until then — and in production — no seam ever fires).
 const seams = { shouldFail: () => false };
@@ -211,7 +196,7 @@ function unit(work) {
 function seam(step) {
   if (seams.shouldFail(step)) throw new Error(`simulated failure at ${step} (development fault layer)`);
 }
-// M18.2 — integrity is reported at boot, never repaired. A violation is
+// Integrity is reported at boot, never repaired. A violation is
 // logged as codes and ids (no names) and counted on /capabilities; the
 // process still starts, because a running server that says "two open Rooms
 // for one player" is more useful than a dead one that says nothing.
@@ -267,18 +252,17 @@ const app = express();
 const TRUST_PROXY = parseTrustProxy(process.env.SCOUTBOX_TRUST_PROXY);
 app.set('trust proxy', TRUST_PROXY.setting);
 
-// M18.1 — CORS is an allowlist, not a wildcard.
+// CORS is an allowlist, not a wildcard.
 //
-// `cors()` with no options answered every origin. ScoutBox authenticates with
-// bearer tokens rather than cookies, so this was not an open door on its own,
-// but "no origin policy at all" is not something a deployment should have to
-// discover by reading the source. SCOUTBOX_ALLOWED_ORIGINS is a comma-separated
-// list; with nothing set, development keeps its old permissive behaviour and
-// says so in the capability report rather than silently locking a developer out
+// ScoutBox authenticates with bearer tokens rather than cookies, so a wildcard
+// would not be an open door on its own, but "no origin policy at all" is not
+// something a deployment should have to discover by reading the source.
+// SCOUTBOX_ALLOWED_ORIGINS is a comma-separated list; with nothing set,
+// development stays permissive and says so in the capability report rather than silently locking a developer out
 // of their own machine.
 const ALLOWED_ORIGINS = String(process.env.SCOUTBOX_ALLOWED_ORIGINS ?? '')
   .split(',').map((o) => o.trim()).filter(Boolean);
-// M18.2: headers a browser client is allowed to READ. Retry-After lets the
+// Headers a browser client is allowed to READ. Retry-After lets the
 // client honour a 429 instead of guessing; the request id lets a person quote
 // one when something goes wrong; the ordering header states how a list was
 // sorted. None of them is readable cross-origin unless exposed here.
@@ -308,18 +292,18 @@ app.use((_req, res, next) => {
 // 20 MB because media still travels as data URLs on the upload path. The limit
 // is stated here rather than left to the default so it is a decision, not an
 // accident.
-// M18.2 — the HTTP contract wraps res.json BEFORE the body parser, so a
+// The HTTP contract wraps res.json BEFORE the body parser, so a
 // malformed-body 400 carries the same retry/schema headers as every other error.
 app.use(httpContractMiddleware({ ratePolicy: RATE_LIMIT_POLICY, schemaVersion: () => dataLayer.schemaVersion() }));
 app.use(express.json({ limit: '20mb' }));
-// M18.2 — the HTTP contract headers (Retry-After on 429, retryability on every
+// The HTTP contract headers (Retry-After on 429, retryability on every
 // error, the schema version on every response) and the development-only
 // fault layer. The fault layer refuses to exist in production; installing it
 // there is a no-op middleware and no /__faults route.
 const faultLayer = createFaultLayer();
 faultLayer.install(app);
 seams.shouldFail = (step) => faultLayer.shouldFail(step); // always false in production (the layer is disabled there)
-// M13: correlation ids, structured request logs (redacted), request metrics,
+// Correlation ids, structured request logs (redacted), request metrics,
 // and the exposure-capture hook. Installed before every route on purpose.
 app.use(requestInstrumentation());
 
@@ -355,7 +339,7 @@ function signMediaPath(pathStr, sid) {
   return `/media/${m[1]}?e=${exp}&s=${mediaSig(m[1], exp, sid)}&v=${sid}`;
 }
 
-// Copy-on-write deep walk: never mutates the db objects behind a response.
+// Copy-on-write deep walk: never mutates the objects behind a response.
 function signMediaDeep(value, sid) {
   if (typeof value === 'string') return value.startsWith('/media/') ? signMediaPath(value, sid) : value;
   if (Array.isArray(value)) {
@@ -465,11 +449,10 @@ function shouldDeliver(identity, event, payload) {
     if (identity.kind === 'guardian') return p.guardianId === identity.guardianId;
     return visibleToOrg(p, org) && !isBlocked(p.id, org.id);
   }
-  // M18.1 — nothing falls through to "deliver to everyone" any more. An event
-  // that carried neither an orgId nor a playerId used to return true here,
-  // which meant the NEXT event with a new payload shape would inherit
-  // broadcast-to-all as its default. The audience is now declared per event
-  // name, and an unclassified name fails closed to org_private.
+  // Nothing falls through to "deliver to everyone": a default of true here
+  // would let the NEXT event with a new payload shape inherit broadcast-to-all.
+  // The audience is declared per event name, and an unclassified name fails
+  // closed to org_private.
   switch (audienceFor(event)) {
     // Catalogue pings: no personal data in the payload, and the refetch on the
     // other side re-applies every gate.
@@ -490,11 +473,11 @@ function sseFrame(row) {
   return `id: ${row.id}\ndata: ${JSON.stringify({ event: row.event, ...row.payload, ts: row.ts })}\n\n`;
 }
 
-// M18.2 — payloads that the registry did not allow, counted for /capabilities.
+// Payloads that the registry did not allow, counted for /capabilities.
 const eventPayloadDrops = { count: 0, lastEvent: null };
 
 function broadcast(event, rawPayload = {}) {
-  // M18.2: the registry is the only authority on what an event may carry. A
+  // The registry is the only authority on what an event may carry. A
   // key it does not list is stripped before anything is written to a stream
   // or the replay log — and in development it throws, because a new key on a
   // live event is a privacy decision somebody has to make on purpose, not one
@@ -520,9 +503,9 @@ function broadcast(event, rawPayload = {}) {
  * Write one already-minimised event to the replay log and the live streams —
  * the transport half of broadcast(), with no registry check and no save of
  * its own. notify() registers it as a store.afterCommit effect of the row it
- * wrote (S14e): inside a unit it runs after the COMMIT and never for a
- * rollback, so a `notify` frame is never on a stream or in the replay log for
- * a row the file does not hold. The
+ * wrote: inside a unit it runs after the COMMIT and never for a rollback, so a
+ * `notify` frame is never on a stream or in the replay log for a row the
+ * database does not hold. The
  * payload must already have passed minimizePayload (broadcast does that at the
  * call site, before the effect is registered).
  */
@@ -590,9 +573,9 @@ const nextId = (prefix) => {
   return `${prefix}-${idCounter.next()}`;
 };
 
-/** The organisation as the apps see it: an allowlist of the record (the password hash is never on it, S14g). */
+/** The organisation as the apps see it: an allowlist of the record (the password hash is never on it). */
 function orgSafe(o) {
-  // S9c: what the club is looking for and its federation-route request are club setup tables, not facets of the
+  // What the club is looking for and its federation-route request are club setup tables, not facets of the
   // record; the apps read both from the session's organisation, so they are added here explicitly.
   const fed = clubSetup.federation.forOrg(o.id);
   return {
@@ -636,7 +619,7 @@ function isBlocked(playerId, orgId) {
 }
 
 /**
- * M23 P8 (§26/§27) — the player's CANONICAL live contract, if any: a
+ * The player's CANONICAL live contract, if any: a
  * completed-signing row written by the ONE writer over a COMPLETED signing
  * package, not cancelled, whose contract end (if any) has not passed at
  * `now`. This is the record that owns `under_contract`; a self-declaration
@@ -661,14 +644,10 @@ function canonicalContractFor(playerId, now = Date.now(), { exceptOrgId = null }
 // -------------------------------------------------------------- sessions
 // Real sessions: logins mint a bearer token; every authenticated route
 // resolves the caller from the token. Nothing trusts a client-sent id.
-// PRE-M24 (PM-4): a session has an absolute lifetime. Before this, a bearer
-// token lived forever — stored with a creation time nothing checked, persisted
-// across restarts, and never revoked by any app's sign-out. Expiry is decided
-// in ONE place (`sessionLive`) and applied wherever a session is resolved:
-// the bearer lookup, the event-stream connect and a signed media link. A
-// session with no valid creation time is treated as expired (fail closed).
-// S2: sessions live in the `sessions` table (repositories/sessions.mjs). The
-// lifetime rule is unchanged and lives in the repository; the bearer token is
+// A session has an absolute lifetime. Expiry is decided in ONE place (the
+// sessions repository) and applied wherever a session is resolved: the bearer
+// lookup, the event-stream connect and a signed media link. A session with no
+// valid creation time is treated as expired (fail closed). The bearer token is
 // never stored — the table holds its hash and `sessionFor` hashes what the
 // client presents. `createSession` is the only place a token exists server
 // side, and only as the value it returns to the login handler.
@@ -709,7 +688,7 @@ function devLoginRefused(res) {
   return true;
 }
 
-// ----------------------------------------------- M23 P5.6F: failed-login budget
+// ----------------------------------------------------- failed-login budget
 //
 // Complements `authLimiter` above rather than replacing it. That one is per IP
 // and counts every /auth request including successes; this one is per IDENTIFIER
@@ -725,8 +704,8 @@ function devLoginRefused(res) {
 //      guess arriving after the budget is gone is refused rather than rewarded.
 //   3. An identifier that does not exist is charged and refused IDENTICALLY to
 //      one that does, so the 429 is not a new account-existence oracle. (The
-//      pre-existing 404 on an unknown id is frozen behaviour from M7 and is not
-//      changed here — but this limiter must not add a second signal on top.)
+//      404 on an unknown id is frozen behaviour — but this limiter must not
+//      add a second signal on top.)
 
 /** Normalise an identifier to one bucket: trimmed, lower-cased, never empty. */
 const loginKey = (identifier) => String(identifier ?? '').trim().toLowerCase() || 'unknown';
@@ -746,7 +725,7 @@ const noteLoginFailure = (identifier) => { rateLimit.limited('login_failure', lo
 // Quiet hours + the minors' school-hours mute apply to PUSH delivery: the
 // in-app feed always receives the record, but `deferredPush` marks anything
 // that production push infra must hold back.
-// M23 P5.7 (T-12): quiet hours and the school-hours mute are WALL-CLOCK rules
+// Quiet hours and the school-hours mute are WALL-CLOCK rules
 // for the person, so they are evaluated in a named zone — the person's own
 // when their preferences carry one, otherwise the platform's home zone —
 // never in whatever zone the server process happens to run in.
@@ -778,24 +757,24 @@ function pushDeferred(audience, now = new Date()) {
   return false;
 }
 
-// M18.1 — how long an identical UNREAD notification stays coalescible: six
-// hours, now the repository's `coalesceMs` (repositories/notifications.mjs,
-// S7a), which also owns the scan that decides what coalesces.
+// How long an identical UNREAD notification stays coalescible: six hours, the
+// repository's `coalesceMs` (repositories/notifications.mjs), which also owns
+// the scan that decides what coalesces.
 
-// M18.2 — the preference gate. Assigned once the preference module has
+// The preference gate. Assigned once the preference module has
 // registered (below); until then everything is allowed, which is the safe
 // direction for the few notifications seeding may create at boot.
 let notificationAllows = () => true;
-let m182Ctx = null; // assigned when the M18.2 modules register, below
-let m24Ctx = null; // M23 P5.6B — assigned when the Agent module registers, below
+let m182Ctx = null; // assigned when the preference and audit modules register, below
+let m24Ctx = null; // assigned when the Agent module registers, below
 const notificationsSuppressed = { count: 0 };
 
 /**
  * Create (or coalesce) one notification: a row of the `notifications` table
  * (repositories/notifications.mjs), written at once — inside the unit of work
  * of the action it announces when one is open, so it commits or rolls back
- * with it, in a transaction of its own otherwise (S14e). `actionRequired:
- * { deadline }` attaches an acknowledgment contract in the same write (M13
+ * with it, in a transaction of its own otherwise. `actionRequired:
+ * { deadline }` attaches an acknowledgment contract in the same write (m13
  * notifyAction). Text longer than the table keeps is shortened (it can carry
  * names people typed). Returns the stored record or null when the person's
  * preferences mute it.
@@ -807,7 +786,7 @@ const notificationsSuppressed = { count: 0 };
  * a delivery failure, counted by the store, never a rollback.
  */
 function notify(audience, type, text, refId = null, { actionRequired = null } = {}) {
-  // M18.2: a category the person has turned off is never CREATED — not
+  // A category the person has turned off is never CREATED — not
   // created and hidden, not created and un-pushed. The mandatory
   // security_account category cannot be turned off, so it never lands here.
   if (!notificationAllows(audience, type, text)) {
@@ -818,8 +797,8 @@ function notify(audience, type, text, refId = null, { actionRequired = null } = 
   const cut = (t, n) => { let s = t.slice(0, n); if (/[\uD800-\uDBFF]$/.test(s)) s = s.slice(0, -1); return s; };
   const body = typeof text === 'string' && text.length > NOTIFICATION_LIMITS.text ? `${cut(text, NOTIFICATION_LIMITS.text - 1)}…` : text;
   // Coalesce identical unread notifications. The same sentence about the same
-  // record arriving twice is not two pieces of news: it pushed the recipient's
-  // phone twice and buried the twenty other rows in their bell. So an existing
+  // record arriving twice is not two pieces of news: it would push the recipient's
+  // phone twice and bury the twenty other rows in their bell. So an existing
   // unread row whose last occurrence was within six hours is refreshed and
   // counted rather than duplicated — and no second push is sent. Once the
   // recipient has READ it, a new occurrence is genuinely new and gets its own
@@ -840,7 +819,7 @@ function notify(audience, type, text, refId = null, { actionRequired = null } = 
     return c;
   }
 
-  // M18.2: `groupKey` (worked out from type and refId) lets any reader fold
+  // `groupKey` (worked out from type and refId) lets any reader fold
   // several DIFFERENT updates about the same record into "3 changes in …"
   // rather than three rows, without the server deciding presentation.
   // `category` is what the preference gate matched.
@@ -859,7 +838,7 @@ function notify(audience, type, text, refId = null, { actionRequired = null } = 
 }
 
 function notificationsFor(kind, id) {
-  // M23 P8 §30 — each row is decorated at READ time with the current,
+  // Each row is decorated at READ time with the current,
   // authorized resource its refId points to (or null). Nothing is stored.
   // The feed is the repository's (newest insertion first), each row an allowlist.
   const resolve = journeyCtx?.notificationTargetFor;
@@ -925,7 +904,7 @@ function buildAttachment(channel, body, senderSide) {
 
 /**
  * A message route's text and retry id, checked before moderation: `{ text, clientMsgId }`, or null once a 400 has
- * been sent. Junk is refused, never cut down (S14c).
+ * been sent. Junk is refused, never cut down.
  */
 function messageInput(req, res) {
   const { text, clientMsgId = null } = req.body || {};
@@ -1010,7 +989,6 @@ function channelViewFor(c, viewer) {
 }
 
 // Football activity feeds the streak/weekly-goal habit loop.
-// (S5: the activity log and the badges are rows of their tables, appended through the repository — inside the caller's unit of work when there is one.)
 function recordActivity(player) {
   players.addItem(player.id, 'activityLog', Date.now());
   refreshJourneyBadges(players.byId(player.id));
@@ -1031,8 +1009,8 @@ function refreshJourneyBadges(given) {
 }
 
 /**
- * A coach reference as every profile shows it: an allowlist, never the coach's email or the code. Honesty audit (M12
- * F1/F10): an email-code reference proves mailbox control, NOT coach identity — say so wherever the reference travels.
+ * A coach reference as every profile shows it: an allowlist, never the coach's email or the code. Honesty rule: an
+ * email-code reference proves mailbox control, NOT coach identity — say so wherever the reference travels.
  */
 function vouchView(v) {
   return {
@@ -1124,7 +1102,7 @@ function moderateOrRefuse(res, text, context) {
   return true;
 }
 
-// Public view of a player for a given org (readiness review §6.1): a positive
+// Public view of a player for a given org: a positive
 // allowlist (views/playerViews.mjs), never a spread of the record. Applies the
 // minor-visibility rules, guardian-managed contact, player/guardian-controlled
 // medical sharing, the grassroots platform rules; serves attendance without
@@ -1157,14 +1135,14 @@ app.get('/meta', (_req, res) => {
 
 // ------------------------------------------------------------- player auth
 // Real sessions: signup/login/pair mint a bearer token. New accounts require
-// a password (scrypt-hashed); pre-M7 seed identities carry no password and
-// stay open as demo logins — production seeds always set one.
+// a password (scrypt-hashed); seed identities carry no password and stay
+// open as demo logins — production seeds always set one.
 
 // Self sign-up is adults only. Under-18 accounts are OWNED by a verified
 // guardian and can only be created through the guardian flow below — the API
 // itself refuses a minor self-signup.
 /**
- * S14h: the profile fields a sign-up or a guardian's child creation may carry, refused by name (400 FIELD_INVALID)
+ * The profile fields a sign-up or a guardian's child creation may carry, refused by name (400 FIELD_INVALID)
  * instead of stored or coerced: the name 1–120 characters, the country and city text, the position and foot from
  * their vocabularies, height and weight whole numbers in range, the coordinates numbers in range.
  */
@@ -1189,11 +1167,9 @@ app.post('/auth/player/signup', (req, res) => {
   const { name, dob, country = 'GB', position, foot, password } = req.body || {};
   if (!name || !dob) return res.status(400).json({ error: 'NAME_AND_DOB_REQUIRED' });
   if (profileFieldRefused(res, req.body)) return;
-  // P5.6F review: a date of birth that cannot be READ must be refused here, not
-  // stored. Before F-8 an unreadable dob computed as the epoch and passed every
-  // adult gate; after F-8 it fails closed as "age unknown" — but a sign-up that
-  // stores it would still create an account whose age can never be established.
-  // M23 P5.7 (§24): a real day, not in the future, not implausibly old.
+  // A date of birth that cannot be READ is refused here, not stored: it would
+  // fail closed as "age unknown", but the account's age could then never be
+  // established. A real day, not in the future, not implausibly old.
   if (!parseDobStrict(dob, Date.now()).ok) return res.status(400).json({ error: 'DOB_INVALID', message: 'Enter a date of birth as YYYY-MM-DD.' });
   if (!password || String(password).length < 8) {
     return res.status(400).json({ error: 'PASSWORD_REQUIRED', message: 'Pick a password of at least 8 characters — your profile is yours alone.' });
@@ -1241,7 +1217,7 @@ app.post('/auth/player/signup', (req, res) => {
 });
 
 app.post('/auth/player/login', (req, res) => {
-  // P5.6F: lockout first — before the lookup, so an unknown id and a real one
+  // Lockout first — before the lookup, so an unknown id and a real one
   // are refused identically once the budget is gone.
   if (loginLockedOut(res, `player:${req.body?.playerId}`)) return;
   const p = findPlayer(req.body?.playerId);
@@ -1250,7 +1226,7 @@ app.post('/auth/player/login', (req, res) => {
   if (hash) {
     const check = verifyPassword(req.body?.password ?? '', hash);
     if (!check) { noteLoginFailure(`player:${p.id}`); return res.status(401).json({ error: 'BAD_PASSWORD', message: 'This profile is password-protected.' }); }
-    if (check === 'upgrade') players.setPasswordHash(p.id, hashPassword(req.body.password)); // migrate legacy plain-text
+    if (check === 'upgrade') players.setPasswordHash(p.id, hashPassword(req.body.password)); // upgrade a plain-text record to scrypt
   } else if (!DEV_LOGINS) {
     return devLoginRefused(res);
   }
@@ -1286,7 +1262,7 @@ function guardianManagedOnly(req, res) {
 
 app.post('/auth/guardian/signup', async (req, res) => {
   const { name, email, password } = req.body || {};
-  if (!reqText(name, 120) || !reqText(email, 254) || !email.includes('@')) return res.status(400).json({ error: 'NAME_AND_EMAIL_REQUIRED' }); // PRE-M24 (PM-10)
+  if (!reqText(name, 120) || !reqText(email, 254) || !email.includes('@')) return res.status(400).json({ error: 'NAME_AND_EMAIL_REQUIRED' });
   if (!password || String(password).length < 8) {
     return res.status(400).json({ error: 'PASSWORD_REQUIRED', message: 'Pick a password of at least 8 characters.' });
   }
@@ -1395,15 +1371,15 @@ guardianRouter.post('/verify-id', async (req, res, next) => {
     return res.status(422).json({ error: 'IDV_REJECTED', message: 'Identity verification did not pass — check the document details.' });
   }
   // ONE unit of work, entered only after the provider answered (a transaction
-  // never spans the await): the column and the audit-queue entry (a blob)
-  // commit together before the response (review of 9656a4b).
+  // never spans the await): the column and the audit-queue entry commit
+  // together before the response.
   try {
     unit(() => {
       guardians.update(req.guardian.id, (d) => { d.idVerified = true; d.idvReference = result.reference; });
       seam('guardian.verify_id.after_row');
       // Every check lands in the admin IDV queue for audit — and can be revoked there.
-      // S6b: a row of idv_queue in the same unit as the guardian's column (Domain G:
-      // the repository refuses an entry naming a guardian that does not exist).
+      // A row of idv_queue in the same unit as the guardian's column (the
+      // repository refuses an entry naming a guardian that does not exist).
       safetyAudit.idvQueue.add({
         id: nextId('idv'), guardianId: req.guardian.id, guardianName: req.guardian.name,
         documentType, documentRef: result.document.refLast4, provider: result.provider,
@@ -1424,7 +1400,7 @@ guardianRouter.post('/disclaimer', (req, res) => {
   res.json({ disclaimerAccepted: true });
 });
 
-// §6.3 — the guardian's own record: minus the password hash and the e-mail code.
+// The guardian's own record: minus the password hash and the e-mail code.
 const guardianView = (g) => guardianSelfView(g);
 
 guardianRouter.get('/me', (req, res) => res.json(guardianView(req.guardian)));
@@ -1452,11 +1428,9 @@ guardianRouter.post('/children', (req, res) => {
   const { name, dob, country = 'GB', position, foot, heightCm, weightKg } = req.body || {};
   if (!name || !dob) return res.status(400).json({ error: 'NAME_AND_DOB_REQUIRED' });
   if (profileFieldRefused(res, req.body)) return;
-  // P5.6F review: a date of birth that cannot be READ must be refused here, not
-  // stored. Before F-8 an unreadable dob computed as the epoch and passed every
-  // adult gate; after F-8 it fails closed as "age unknown" — but a sign-up that
-  // stores it would still create an account whose age can never be established.
-  // M23 P5.7 (§24): a real day, not in the future, not implausibly old.
+  // A date of birth that cannot be READ is refused here, not stored: it would
+  // fail closed as "age unknown", but the account's age could then never be
+  // established. A real day, not in the future, not implausibly old.
   if (!parseDobStrict(dob, Date.now()).ok) return res.status(400).json({ error: 'DOB_INVALID', message: 'Enter a date of birth as YYYY-MM-DD.' });
   if (ageOn(dob) >= adultAgeFor(country)) {
     return res.status(400).json({ error: 'NOT_A_MINOR', message: 'Adults create their own account with player sign-up.' });
@@ -1514,32 +1488,32 @@ guardianRouter.post('/requests/:id/respond', (req, res) => {
   if (!replyCheck.ok) return;
   // A block the guardian placed AFTER the request arrived: they may still
   // decline it, but accepting would open a thread with an organisation they
-  // blocked, so that is refused (M23 P3 §68/§69).
+  // blocked, so that is refused.
   if (accept && isBlocked(found.playerId, found.orgId)) {
     return res.status(403).json({ error: 'BLOCKED', message: 'You have blocked this organisation. Lift the block before accepting.' });
   }
   if (found.contactId && rateLimit.limited('contact_response', `guardian:${req.guardian.id}`)) return res.status(429).json(rateLimitedBody('contact_response'));
-  // P4A-D12: the slot is checked BEFORE the answer is recorded, so a refused
+  // The slot is checked BEFORE the answer is recorded, so a refused
   // slot leaves the request pending rather than accepted-with-the-wrong-day.
   const slot = accept && found.type === 'trial' ? chooseTrialSlot(found.trialDetails, chosenSlot) : { ok: true, date: null };
   if (!slot.ok) return res.status(400).json(slot);
-  // M23 P4B (D-7): a Trial invitation tied to a recruitment case re-derives
-  // its recipient NOW — the guardian must still be this child's verified
-  // route, the club must still be allowed to reach the child. Legacy M12
-  // requests (no caseId) keep their existing rule.
+  // A Trial invitation tied to a recruitment case re-derives its recipient
+  // NOW — the guardian must still be this child's verified route, the club
+  // must still be allowed to reach the child. Requests with no caseId keep
+  // the request's own rule.
   if (accept && found.type === 'trial' && found.caseId && m23Ctx?.trialAcceptGate) {
     const gate = m23Ctx.trialAcceptGate({ request: found, by: 'guardian', actorId: req.guardian.id });
     if (!gate.ok) return res.status(gate.status).json({ error: gate.error, message: gate.message });
   }
   const respondedAt = Date.now();
-  // One unit of work: the answer, the Contact (S8c, an explicit write), the
-  // channel and the trial commit together or not at all (P4A-D15).
+  // One unit of work: the answer, the Contact, the channel and the trial
+  // commit together or not at all.
   const answered = unit(() => {
-  // S8a: the answer is an explicit write; the record the hooks see is the stored one.
+  // The record the hooks see is the stored one.
   let request = recruitment.requests.update(found.id, (d) => { d.status = accept ? 'accepted' : 'declined'; d.respondedAt = respondedAt; d.respondedBy = 'guardian'; });
-  // M23 P3: the Contact that created this request learns of the answer.
+  // The Contact that created this request learns of the answer.
   m23Ctx?.onRequestResponded?.({ request, accept: !!accept, message: replyCheck.reply, by: 'guardian', at: respondedAt });
-  // P4A-D15: the answer, the channel and the trial row are ONE unit,
+  // The answer, the channel and the trial row are ONE unit,
   // so a crash between them cannot leave an accepted request with no trial.
 
   if (accept) {
@@ -1549,13 +1523,13 @@ guardianRouter.post('/requests/:id/respond', (req, res) => {
     ledgerAppend({ type: `${request.type}_accepted_by_guardian`, playerId: child.id, orgId: request.orgId, orgName: request.orgName, userId: request.userId, scoutName: request.scoutName });
     if (request.type === 'trial') {
       const trial = issueAcceptedTrial({ request, player: child, trialDate: slot.date, by: 'guardian', at: respondedAt, actor: { id: req.guardian.id, name: req.guardian.name } });
-      // M23 P4B: the case learns of the acceptance through the Trial hook —
-      // a concrete slot confirms the schedule and moves the case through the
-      // single lifecycle writer. Same save as the answer (P4A-D15).
+      // The case learns of the acceptance through the Trial hook — a concrete
+      // slot confirms the schedule and moves the case through the single
+      // lifecycle writer, in the same unit as the answer.
       m23Ctx?.onTrialAccepted?.({ request, trial, at: respondedAt, actor: { kind: 'guardian', id: req.guardian.id, name: req.guardian.name } });
     }
     notify({ kind: 'org_user', id: request.userId }, 'accepted', `The guardian of ${child.name} accepted your ${request.type} request — thread open.`, request.contactChannel);
-    // P4A-D10: the child hears the outcome as a request outcome ("Messages and
+    // The child hears the outcome as a request outcome ("Messages and
     // requests"), the same category the club's own accepted/declined rows
     // use — not as a discovery nudge, which is off by default.
     notify({ kind: 'player', id: child.id }, 'guardian_decision', `Your parent/guardian accepted the ${request.type} with ${request.orgName}.`, request.id);
@@ -1656,7 +1630,7 @@ guardianRouter.post('/coguardian', (req, res) => {
     createdAt: Date.now(),
   };
   // One unit: the co-guardian's row and its co links (one per child). The primary's coGuardians list is worked out
-  // from the co-guardians' coGuardianOf (S14h).
+  // from the co-guardians' coGuardianOf.
   try {
     guardians.create(co);
   } catch (e) {
@@ -1705,7 +1679,7 @@ guardianRouter.post('/children/:id/medical/share', (req, res) => {
 guardianRouter.post('/report', (req, res) => handleReport(req, res, { by: 'guardian', byId: req.guardian.id }));
 guardianRouter.post('/block', (req, res) => {
   const { orgId, playerId, reason } = req.body || {};
-  // M23 P8.1 (D-P81-7): a block lands on the child it names. A playerId that is
+  // A block lands on the child it names. A playerId that is
   // not this guardian's child is refused, never silently swapped for the first
   // child; with no playerId, a guardian of exactly one child means that child.
   if (playerId && !req.guardian.childIds.includes(playerId)) return res.status(404).json({ error: 'CHILD_NOT_FOUND' });
@@ -1763,7 +1737,7 @@ function handleReport(req, res, actor) {
     for (const pid of playerIds) {
       safetyAudit.blocks.add({ id: nextId('blk'), playerId: pid, orgId: targetOrgId, by: actor.by, reason: 'suspended_pending_review', ts: Date.now() });
       for (const r of recruitment.requests.forOrgPlayer(targetOrgId, pid).filter((x) => x.status === 'pending')) {
-        recruitment.requests.update(r.id, (d) => { d.status = 'suspended'; }); // S8a: the frozen request, with its block
+        recruitment.requests.update(r.id, (d) => { d.status = 'suspended'; }); // the frozen request, with its block
       }
     }
   });
@@ -1774,7 +1748,7 @@ function handleReport(req, res, actor) {
 // ---------------------------------------------------------------- org auth
 app.get('/orgs', (req, res) => {
   // Platform separation starts at the login screen: the Grassroots app lists
-  // only grassroots clubs, the main app never lists them. M23 P5.6B: the Agent
+  // only grassroots clubs, the main app never lists them. The Agent
   // app lists agency organisations only. Unpaged: the sign-in pickers have no
   // search yet (docs/known-issues.md).
   const filter = { grassroots: { level: 'grassroots' }, main: { notLevel: 'grassroots' }, agent: { type: 'agency' } }[req.query.platform] ?? {};
@@ -1795,7 +1769,7 @@ app.post('/auth/org/register-grassroots', (req, res) => {
   if (password !== undefined && String(password).length < 8) {
     return res.status(400).json({ error: 'PASSWORD_TOO_SHORT', message: 'Club passwords need at least 8 characters.' });
   }
-  if (!reqText(name, 120)) return res.status(400).json({ error: 'NAME_REQUIRED' }); // PRE-M24 (PM-10)
+  if (!reqText(name, 120)) return res.status(400).json({ error: 'NAME_REQUIRED' });
   for (const [f, v, max] of [['country', country, 2], ['city', city, 80], ['federation', federation, 120], ['registrationId', registrationId, 60], ['role', role, 60]]) if (!optText(v, max)) return badField(res, f);
   if (!Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) {
     if (typeof lat === 'number' || typeof lng === 'number') return badField(res, 'location');
@@ -1807,8 +1781,8 @@ app.post('/auth/org/register-grassroots', (req, res) => {
   if (typeof lat !== 'number' || typeof lng !== 'number') {
     return res.status(400).json({ error: 'LOCATION_REQUIRED', message: 'The 50km scouting radius is measured from your ground — a location is required.' });
   }
-  if (!reqText(scoutName, 120)) return res.status(400).json({ error: 'SCOUT_NAME_REQUIRED' }); // PRE-M24 (PM-10)
-  // The organisation, its administrator's account and the session are one unit (S14g).
+  if (!reqText(scoutName, 120)) return res.status(400).json({ error: 'SCOUT_NAME_REQUIRED' });
+  // The organisation, its administrator's account and the session are one unit.
   const { org, user, token } = unit(() => {
     const created = orgs.create({
       name: name.trim(),
@@ -1845,13 +1819,12 @@ app.post('/auth/org/login', (req, res) => {
   if (org.level !== 'grassroots' && wantsGrassroots) {
     return res.status(403).json({ error: 'PLATFORM_MISMATCH', message: 'ScoutBox Grassroots is for federation-registered grassroots clubs only.' });
   }
-  // M23 P5.6B: ScoutBox Agent is for agency organisations only. (An agency
-  // logging into the club app is unchanged in this phase — the legacy M13
-  // representation lane and its suites still live there until P5.6E.)
+  // ScoutBox Agent is for agency organisations only. (An agency can still log
+  // into the club app: the m13 representation lane and its suites live there.)
   if (platform === 'agent' && org.type !== 'agency') {
     return res.status(403).json({ error: 'PLATFORM_MISMATCH', message: 'ScoutBox Agent is for agency organisations only.' });
   }
-  if (!optText(role, 60)) return badField(res, 'role'); // PRE-M24 (PM-10)
+  if (!optText(role, 60)) return badField(res, 'role');
   if (typeof scoutName !== 'string' || !scoutName.trim()) {
     // Accountability by user: no anonymous / shared workspace access.
     return res.status(400).json({ error: 'SCOUT_NAME_REQUIRED', message: 'Every session is attributed to a named individual.' });
@@ -1872,7 +1845,7 @@ app.post('/auth/org/login', (req, res) => {
     // Departed staff don't come back by typing their old name.
     return res.status(403).json({ error: 'USER_REMOVED', message: 'This staff member\'s access was removed by the organisation.' });
   }
-  // M13: second factor. A user who enabled MFA never gets a session from the
+  // Second factor. A user who enabled MFA never gets a session from the
   // password alone; recovery codes are one-time; wrong codes rate-limit.
   if (user?.mfa?.enabledAt) {
     if (m13Ctx?.mfaGuards?.mfaLocked(user.id)) {
@@ -1902,9 +1875,8 @@ app.post('/auth/org/login', (req, res) => {
   // invitation, or — exactly once — the first login with the organisation
   // password, which bootstraps the administrator account for organisations
   // provisioned without one. The role sent with a login is ignored on such an
-  // organisation; the stored role answers. Anyone else typing a new name with
-  // the shared password used to become staff with whatever role they chose,
-  // and anyone typing an existing name used to overwrite that person's role.
+  // organisation; the stored role answers, so nobody with the shared password
+  // can make themselves staff or rewrite another person's role.
   //
   // Unprovisioned (seeded demo) organisations keep the development shortcut:
   // a login names its own role. That path is refused outside development
@@ -1977,17 +1949,17 @@ app.use('/org', orgAuth, orgRouter);
 // ----------------------------------------------------------------- search
 orgRouter.get('/players', (req, res) => {
   const { q, position, academyPlus, availability, country, ageGroup, newDays } = req.query;
-  // A filter sent twice arrives as a list: refused by name (S14h), never bound into the query.
+  // A filter sent twice arrives as a list: refused by name, never bound into the query.
   for (const f of ['q', 'position', 'academyPlus', 'availability', 'country', 'ageGroup', 'newDays']) {
     if (req.query[f] !== undefined && typeof req.query[f] !== 'string') return res.status(400).json({ error: 'FIELD_INVALID', field: f, message: `${f} is given once, as text.` });
   }
   const AGE_GROUPS = { u16: { ageBelow: 16 }, u18: { ageBelow: 18 }, '18-21': { ageAtLeast: 18, ageBelow: 22 }, senior: { ageAtLeast: 22 } };
-  // S14i: an unknown age group or a day count that is not a whole number of days is refused, not read as "any".
+  // An unknown age group or a day count that is not a whole number of days is refused, not read as "any".
   if (ageGroup && !Object.hasOwn(AGE_GROUPS, ageGroup)) return res.status(400).json({ error: 'FIELD_INVALID', field: 'ageGroup', message: `ageGroup is one of ${Object.keys(AGE_GROUPS).join(', ')}.` });
   if (newDays && !(/^\d{1,5}$/.test(newDays) && Number(newDays) > 0)) return res.status(400).json({ error: 'FIELD_INVALID', field: 'newDays', message: 'newDays is a whole number of days, from 1.' });
   let page;
   try { page = readPage(req.query, players.directoryCursorShape(req.org)); } catch (e) { return sendPageError(res, e); }
-  // S14i: the whole visibility rule (the wall, the Grassroots radius, the blocks), the filters, the search and the
+  // The whole visibility rule (the wall, the Grassroots radius, the blocks), the filters, the search and the
   // declared order are the query's, so the page is exact; the view still applies the rule at the source.
   //   Pro / agency: Academy+ first (a boosted, opted-in cohort), then PROFILE COMPLETENESS (never ability), then the id.
   //   Grassroots: First Team Seekers first (need-based, never purchasable), then the nearest ground (to 0.1 km, as
@@ -2007,7 +1979,7 @@ orgRouter.get('/players', (req, res) => {
 
 /**
  * The `k` players the organisation may see that are most like `base` (domain.mjs similarityScore), best first; a tie
- * keeps the creation order, as the stable sort over the whole list did. Ranked over light rows (S14i): only the
+ * keeps the creation order. Ranked over light rows: only the
  * winners are decoded by the caller.
  */
 function mostSimilar(base, org, k) {
@@ -2037,7 +2009,7 @@ orgRouter.get('/players/:id', (req, res) => {
   if (isBlocked(p.id, req.org.id)) return res.status(404).json({ error: 'PLAYER_NOT_FOUND' });
   ledgerAppend({ type: 'view', playerId: p.id, orgId: req.org.id, orgName: req.org.name, userId: req.orgUser.id, scoutName: req.orgUser.name });
   const view = playerViewForOrg(p, req.org);
-  // S14i: ranked over light rows (the visibility rule is the query's); the winners keep the creation order on a tie.
+  // Ranked over light rows (the visibility rule is the query's); the winners keep the creation order on a tie.
   const similar = mostSimilar(p, req.org, 3).map(({ c, score }) => ({ playerId: c.id, name: c.name, position: c.position, score }));
   const archetypes = ARCHETYPES
     .map((a) => ({ archetypeId: a.id, label: a.label, score: similarityScore(p, a) }))
@@ -2051,7 +2023,7 @@ orgRouter.get('/players/:id', (req, res) => {
 // player or any other organisation.
 orgRouter.post('/players/:id/notes', (req, res) => {
   const p = findPlayer(req.params.id);
-  // M23 P8.1 (D-P81-8): a player who blocked this organisation reads as absent
+  // A player who blocked this organisation reads as absent
   // on every discovery route, exactly as the profile read already answers.
   if (!p || !visibleToOrg(p, req.org) || isBlocked(p.id, req.org.id)) return res.status(404).json({ error: 'PLAYER_NOT_FOUND' });
   const { text } = req.body || {};
@@ -2113,8 +2085,8 @@ orgRouter.post('/players/:id/request', (req, res) => {
   if (type === 'trial') {
     // Trial reports are mandatory: an org with an unfiled report for a past
     // trial cannot request new trials until it files.
-    // A report can never be filed for a subject who removed their account
-    // (P4A-D14), so a tombstoned trial does not hold the organisation hostage.
+    // A report can never be filed for a subject who removed their account,
+    // so a tombstoned trial does not hold the organisation hostage.
     const overdue = recruitment.trials.forOrgStatus(req.org.id, 'awaiting_report').filter((t) => !t.subjectRemovedAt);
     if (overdue.length > 0) {
       return res.status(409).json({
@@ -2127,9 +2099,9 @@ orgRouter.post('/players/:id/request', (req, res) => {
 
   // Trial logistics: what the player/guardian is actually agreeing to.
   // altSlots lets the other side pick a date that works (counter-proposal).
-  // M23 P4A-D1: every date is validated by the one Trial date validator and
-  // the text fields are bounded BEFORE anything is written — a malformed
-  // date used to travel into the trial row as a NaN deadline.
+  // Every date is validated by the one Trial date validator and the text
+  // fields are bounded BEFORE anything is written, so a malformed date never
+  // reaches the trial row as a NaN deadline.
   let trialDetails = null;
   if (type === 'trial') {
     const check = validateTrialDetails(req.body);
@@ -2137,11 +2109,10 @@ orgRouter.post('/players/:id/request', (req, res) => {
     trialDetails = check.details;
     if (trialDetails.notes && !moderateOrRefuse(res, trialDetails.notes, { kind: 'trial_notes', orgId: req.org.id })) return;
   }
-  // M23 P8.1 (D-P81-4): this legacy route is a second path to the same inbox
-  // row as a canonical Contact send or Trial invitation. After the body has
-  // been validated exactly as before, it draws on the SAME budgets and keeps
-  // the same one-pending rule, so it is not an unmetered alias: a club cannot
-  // flood a player through the old door.
+  // This route is a second path to the same inbox row as a canonical Contact
+  // send or Trial invitation. After the body has been validated, it draws on
+  // the SAME budgets and keeps the same one-pending rule, so it is not an
+  // unmetered alias: a club cannot flood a player through this door.
   const pendingSame = recruitment.requests.forOrgPlayer(req.org.id, p.id).find((r) => r.type === type && r.status === 'pending' && !r.subjectRemovedAt);
   if (pendingSame) return res.status(409).json({ error: 'REQUEST_PENDING', message: `A ${type} request to this player is already awaiting an answer.`, requestId: pendingSame.id });
   if (rateLimit.limited(type === 'trial' ? 'trial_invite' : 'contact_send', req.org.id)) return res.status(429).json(rateLimitedBody(type === 'trial' ? 'trial_invite' : 'contact_send'));
@@ -2152,22 +2123,22 @@ orgRouter.post('/players/:id/request', (req, res) => {
 /**
  * THE one writer of an org → player/guardian request row.
  *
- * Extracted in M23 P3 so the Contact workflow's send creates its recipient-
- * visible object through exactly the same path as the legacy request route:
+ * The Contact workflow's send creates its recipient-visible object through
+ * exactly the same path as the direct request route:
  * the same routing rule (scout → parent, never scout → child), the same
  * ledger entry, the same notifications, the same `inbox` ping. A second
  * writer would be a second Inbox by another name.
  *
  * `guardianId` lets a caller that has already resolved the guardian route
- * (M23 P3 validates the record, the child link and the verification gates)
- * name it; the legacy route keeps the player's own link.
+ * (the Contact workflow validates the record, the child link and the
+ * verification gates) name it; the direct route keeps the player's own link.
  * `notice` lets a caller with its own occasion word the notifications
  * (`{ kind, toGuardian, toPlayer }`, the open-day invitation); the row, the
  * routing, the ledger entry and the inbox ping are the same either way.
  * `workflow` lets the Trial invitation write its case link, recipient snapshot
  * and client key in the same create (`{ caseId, recipient, keys }`).
- * S8a: the row is written at once (`requests.create`); the returned record is
- * the stored, read-only one.
+ * The row is written at once (`requests.create`); the returned record is the
+ * stored, read-only one.
  */
 function issueRecruitmentRequest({
   org, orgUser, player, type, message = '', trialDetails = null,
@@ -2189,7 +2160,7 @@ function issueRecruitmentRequest({
     scoutRole: orgUser.role || 'Scout',
     type,
     message: message || '',
-    // M23 P3: a Contact carries an optional subject, and the row remembers
+    // A Contact carries an optional subject, and the row remembers
     // which Contact created it. `contactId` is an internal link and is
     // stripped from every recipient-facing view (`requestForRecipient`).
     ...(subject ? { subject } : {}),
@@ -2203,7 +2174,7 @@ function issueRecruitmentRequest({
     contactChannel: null, // stays null until the player/guardian accepts
     ...(workflow ? { caseId: workflow.caseId, trialId: null, recipient: workflow.recipient, keys: workflow.keys } : {}),
   };
-  const stored = recruitment.requests.create(request); // S8a: a row of recruitment_requests, written now (inside the caller's unit when there is one)
+  const stored = recruitment.requests.create(request); // written now (inside the caller's unit when there is one)
   ledgerAppend({ type: `${type}_request${minor ? '_to_guardian' : ''}`, playerId: player.id, orgId: org.id, orgName: org.name, userId: orgUser.id, scoutName: orgUser.name });
   const kind = notice?.kind ?? 'request';
   if (minor) {
@@ -2217,27 +2188,25 @@ function issueRecruitmentRequest({
 }
 
 /**
- * The ONE writer of an accepted trial (M23 P4A-D1/D4/D13). Both respond
- * routes — the adult's own and the guardian's on a minor's behalf — call this
- * with the slot they already validated (`chooseTrialSlot`), so the two rows
- * cannot drift apart again: same fields, same clock (`at` is the response
+ * The ONE writer of an accepted trial. Both respond routes — the adult's own
+ * and the guardian's on a minor's behalf — call this with the slot they
+ * already validated (`chooseTrialSlot`), so the two rows cannot drift apart: same fields, same clock (`at` is the response
  * instant the caller stamped on the request), same deadline derivation.
  * `trialDate` is a validated `YYYY-MM-DD` or null (date to be confirmed);
  * the deadline is never NaN because `trialReportDueAt` never returns one.
  */
 function issueAcceptedTrial({ request, player, trialDate, by, at, actor = null }) {
   const details = request.trialDetails ?? {};
-  // M23 P4B: a P4B invitation carries concrete slots (UTC instants + the
+  // A slot-based invitation carries concrete slots (UTC instants + the
   // organiser's timezone + a venue). Accepting one of them IS the schedule
-  // confirmation (D-4): the trial is born `scheduled` with revision 1
-  // confirmed by the recipient. A legacy date-only invitation, or an
-  // undated one, is born `accepted` with no schedule — a date the club typed
+  // confirmation: the trial is born `scheduled` with revision 1 confirmed by
+  // the recipient. A date-only invitation, or an undated one, is born `accepted` with no schedule — a date the club typed
   // is not a confirmed schedule, and nothing is fabricated from it.
   const slot = Array.isArray(details.slots) ? details.slots.find((s) => s && s.day === trialDate) ?? null : null;
   const recipient = { type: by, playerId: player.id, guardianId: by === 'guardian' ? (actor?.id ?? null) : null, minor: by === 'guardian', at };
   const who = { kind: by, id: actor?.id ?? null, name: actor?.name ?? null };
   // The address line and the instructions were held back from the
-  // invitation (D-23); they join the session now that the family accepted.
+  // invitation; they join the session now that the family accepted.
   const priv = details.private && typeof details.private === 'object' ? details.private : {};
   const session = slot ? {
     id: nextId('tses'), kind: slot.kind ?? 'training', startsAt: slot.startsAt, endsAt: slot.endsAt,
@@ -2270,7 +2239,7 @@ function issueAcceptedTrial({ request, player, trialDate, by, at, actor = null }
     // The mandatory report is due 7 days after the trial day (or acceptance).
     reportDueAt: trialReportDueAt(trialDate, at),
     status: 'awaiting_report', // mandatory report gate
-    // ---- P4B operational containers (D-1/D-20). One clock: `at`.
+    // ---- Operational containers. One clock: `at`.
     workflowState: schedule ? 'scheduled' : 'accepted',
     schedule,
     attendance: [],
@@ -2283,20 +2252,20 @@ function issueAcceptedTrial({ request, player, trialDate, by, at, actor = null }
     reminders: {},
     rev: 1, revAt: at, revBy: null,
   };
-  return recruitment.trials.create(trial); // S8a: a row of trials with its children, written now (inside the respond route's unit)
+  return recruitment.trials.create(trial); // with its children, written now (inside the respond route's unit)
 }
 
 /** A request row as its RECIPIENT may see it: no org id, no user id, no internal Contact link. */
-// M23 P4B: `caseId` and `trialId` are the club's workflow ids and never travel
-// to a recipient; the family reaches the trial through its own family view,
-// where `requestId` matches the invitation (privacy matrix, concealment §4).
+// `caseId` and `trialId` are the club's workflow ids and never travel to a
+// recipient; the family reaches the trial through its own family view, where
+// `requestId` matches the invitation.
 const requestForRecipient = ({ orgId, userId, contactId, caseId, recipient, keys, trialId, ...visible }) => {
   // The trial the recipient's own acceptance created is THEIR record (it is
   // what /player/trials and /guardian/trials list); its id travels so the
   // Inbox can deep-link to it. The case id and the org's internals never do.
   const out = { ...visible, trialId: trialId ?? null };
-  // The address line and the instructions of a P4B invitation are shared
-  // after acceptance only (D-23): they never appear in the Inbox view.
+  // The address line and the instructions of an invitation are shared
+  // after acceptance only: they never appear in the Inbox view.
   if (out.trialDetails && typeof out.trialDetails === 'object' && 'private' in out.trialDetails) {
     const { private: _p, ...td } = out.trialDetails;
     return { ...out, trialDetails: td };
@@ -2305,7 +2274,7 @@ const requestForRecipient = ({ orgId, userId, contactId, caseId, recipient, keys
 };
 
 /**
- * M23 P3: an optional short reply on a CONTACT-type request. Validated before
+ * An optional short reply on a CONTACT-type request. Validated before
  * anything is mutated; refused if it is not text or if moderation refuses it.
  * Returns `{ ok, reply }` or answers the request and returns `{ ok: false }`.
  */
@@ -2324,7 +2293,7 @@ orgRouter.get('/reports', (req, res) => {
 });
 
 // Message threads for this org — only exist where a request was accepted. Pages by cursor, most recently active
-// first (S14c); `playerId` limits the page to one player's threads (a Room's inbox panel).
+// first; `playerId` limits the page to one player's threads (a Room's inbox panel).
 orgRouter.get('/channels', (req, res) => {
   let page;
   try { page = readPage(req.query, ['number', 'number']); } catch (e) { return sendPageError(res, e); }
@@ -2380,7 +2349,7 @@ orgRouter.post('/notifications/read', (req, res) => {
 // The Film Room: full-screen swipe deck of playable clips from players this
 // org is allowed to see. Verified Clips surface first.
 orgRouter.get('/filmroom', (req, res) => {
-  // S14i: paged by cursor in SQL ({ items, nextCursor }): verified clips first, then the most viewed.
+  // Paged by cursor in SQL ({ items, nextCursor }): verified clips first, then the most viewed.
   let page;
   try { page = readPage(req.query, ['number', 'number', 'string', 'number']); } catch (e) { return sendPageError(res, e); }
   const { items, nextCursor } = players.clipPage(req.org, page);
@@ -2407,7 +2376,7 @@ orgRouter.post('/players/:pid/media/:mid/view', (req, res) => {
   const m = p.media.find((x) => x.id === req.params.mid);
   if (!m) return res.status(404).json({ error: 'MEDIA_NOT_FOUND' });
   const views = (m.views ?? 0) + 1;
-  players.patchItem(p.id, 'media', { id: m.id }, { views }); // S5: one row UPDATE, committed before the response
+  players.patchItem(p.id, 'media', { id: m.id }, { views }); // committed before the response
   broadcast('players', { playerId: p.id });
   res.json({ views });
 });
@@ -2424,7 +2393,7 @@ orgRouter.post('/players/:pid/media/:mid/tags', (req, res) => {
   if (invalid.length) return res.status(400).json({ error: 'UNKNOWN_TAGS', invalid, allowed: SCOUT_TAGS });
   const next = { ...(m.tags ?? {}) };
   for (const t of tags) next[t] = (next[t] ?? 0) + 1;
-  // ONE unit of work (S5): the clip's tag rows and the ledger row commit together.
+  // ONE unit of work: the clip's tag rows and the ledger row commit together.
   let stored;
   unit(() => {
     stored = players.patchItem(p.id, 'media', { id: m.id }, { tags: next });
@@ -2441,7 +2410,7 @@ orgRouter.get('/feed', (req, res) => {
   const FOURTEEN_DAYS = Date.now() - 14 * 24 * 3600 * 1000;
   const items = [];
   const shortlisted = new Set(safetyAudit.ledger.playersListedBy(req.org.id, ['shortlist', 'save']));
-  // S14i: the newest 40 of each kind from SQL (the visibility rule is the query's); the page is the newest 40 of all.
+  // The newest 40 of each kind from SQL (the visibility rule is the query's); the page is the newest 40 of all.
   const recent = players.recentFor(req.org, FOURTEEN_DAYS, 40);
   for (const p of recent.players) {
     items.push({ type: 'new_player', ts: p.createdAt, playerId: p.id, playerName: p.name, position: p.position, age: ageOn(p.dob), guardianManaged: !isAdult(p) });
@@ -2453,16 +2422,16 @@ orgRouter.get('/feed', (req, res) => {
       mediaId: m.id, title: m.title, hasVideo: !!m.url, verifiedClip: !!m.verifiedClip,
     });
   }
-  // A trial whose subject removed their account (P4A-D14 tombstone) has no
+  // A trial whose subject removed their account (a tombstone) has no
   // report to file, so it is neither listed as due nor reminded about.
   for (const t of recruitment.trials.forOrgStatus(req.org.id, 'awaiting_report').filter((x) => !x.subjectRemovedAt)) {
     const dueAt = Number.isFinite(t.reportDueAt) ? t.reportDueAt : null;
     items.push({ type: 'report_due', ts: dueAt ?? Date.now(), playerId: t.playerId, playerName: t.playerName, trialId: t.id, dueAt });
     // one-shot reminder when the mandatory report is due within 48h
     if (!t.reminderSent && dueAt !== null && dueAt - Date.now() < 48 * 3600 * 1000) {
-      recruitment.trials.update(t.id, (d) => { d.reminderSent = true; }); // S8a: the one-shot marker, written now
+      recruitment.trials.update(t.id, (d) => { d.reminderSent = true; }); // the one-shot marker, written now
       const request = recruitment.requests.byId(t.requestId);
-      if (request?.userId) notify({ kind: 'org_user', id: request.userId }, 'report_due', `Mandatory trial report for ${t.playerName} is due ${utcDayOf(dueAt)}.`, t.id); // M23 P5.7: the UTC day, not the server locale
+      if (request?.userId) notify({ kind: 'org_user', id: request.userId }, 'report_due', `Mandatory trial report for ${t.playerName} is due ${utcDayOf(dueAt)}.`, t.id); // the UTC day, not the server locale
     }
   }
   items.sort((a, b) => b.ts - a.ts);
@@ -2477,7 +2446,7 @@ orgRouter.get('/trials/:id/ics', (req, res) => {
   const t = onlyIf(recruitment.trials.byId(req.params.id), (x) => x.orgId === req.org.id);
   if (!t) return res.status(404).json({ error: 'TRIAL_NOT_FOUND' });
   const deadline = Number.isFinite(t.reportDueAt) ? ` Mandatory performance report due ${new Date(t.reportDueAt).toISOString().slice(0, 10)}.` : '';
-  // M23 P4B: a trial with a confirmed schedule exports every session as its
+  // A trial with a confirmed schedule exports every session as its
   // own timed event in the organiser's zone (`DTSTART;TZID=`), from the
   // current revision only. A cancelled trial exports its sessions as
   // CANCELLED rather than silently vanishing from a calendar that already
@@ -2488,8 +2457,8 @@ orgRouter.get('/trials/:id/ics', (req, res) => {
     // An unconfirmed revision is TENTATIVE: the club can hold the slots, the
     // calendar says the family has not yet agreed to them.
     const status = cancelled ? 'CANCELLED' : t.schedule.confirmedAt ? 'CONFIRMED' : 'TENTATIVE';
-    // M23 P5.7 (T-11): DTSTAMP from the first READABLE clock; a row with none
-    // used to throw inside toISOString and answer 500.
+    // DTSTAMP from the first READABLE clock, so a row with none never throws
+    // inside toISOString.
     const stampMs = readInstant(t.schedule.confirmedAt) ?? readInstant(t.schedule.proposedAt) ?? readInstant(t.acceptedAt) ?? Date.now();
     const stamp = new Date(stampMs).toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
     const events = t.schedule.sessions.slice().sort((a, b) => (a.startsAt - b.startsAt) || String(a.id).localeCompare(String(b.id))).flatMap((s) => {
@@ -2508,12 +2477,11 @@ orgRouter.get('/trials/:id/ics', (req, res) => {
     const ics = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//ScoutBox//Trials//EN', ...events, 'END:VCALENDAR'].join('\r\n');
     return res.set('Content-Type', 'text/calendar').send(ics);
   }
-  // Without any schedule (a legacy row, or a P4B acceptance of an undated
-  // invitation) the export is honest: the accepted day as an all-day event,
-  // and nothing invented about a time or a venue.
-  // M23 P4A-D1, read side: a stored date that is not a calendar day (a row
-  // written before the validator existed) is refused as what it is — never
-  // a 500, never a fabricated day. A missing deadline is simply not stated.
+  // Without any schedule (a date-only invitation, or an acceptance of an
+  // undated one) the export is honest: the accepted day as an all-day event,
+  // and nothing invented about a time or a venue. A stored date that is not
+  // a calendar day is refused as what it is — never a 500, never a
+  // fabricated day. A missing deadline is simply not stated.
   const day = parseTrialDate(t.proposedDate);
   if (!day.ok) return res.status(422).json({ error: 'TRIAL_DATE_INVALID', message: 'This trial was recorded with a date that is not a calendar day; postpone it to a valid day to export it.', expected: day.expected });
   const startAt = day.t ?? (Number.isFinite(t.acceptedAt) ? t.acceptedAt : null);
@@ -2535,7 +2503,7 @@ orgRouter.get('/trials/:id/ics', (req, res) => {
 
 // Fixture-graph scouting: verified attendances form a map of real fixtures.
 orgRouter.get('/fixtures', (req, res) => {
-  // S14i: paged by cursor in SQL ({ items, nextCursor }): the (fixture, date) groups, newest date first.
+  // Paged by cursor in SQL ({ items, nextCursor }): the (fixture, date) groups, newest date first.
   let page;
   try { page = readPage(req.query, ['string', 'string']); } catch (e) { return sendPageError(res, e); }
   const { items, nextCursor } = players.fixturePage(req.org, page);
@@ -2573,7 +2541,7 @@ orgRouter.post('/trials/:trialId/report', (req, res) => {
   const trial = onlyIf(recruitment.trials.byId(req.params.trialId), (x) => x.orgId === req.org.id);
   if (!trial) return res.status(404).json({ error: 'TRIAL_NOT_FOUND' });
   if (trial.status === 'reported') return res.status(409).json({ error: 'ALREADY_REPORTED' });
-  // P4A-D14: the subject removed their account. There is no profile for the
+  // The subject removed their account. There is no profile for the
   // report to land on and nobody to deliver feedback to; the tombstone keeps
   // what happened, and nothing new is written about a person who left.
   if (trial.subjectRemovedAt || !findPlayer(trial.playerId)) {
@@ -2612,17 +2580,16 @@ orgRouter.post('/trials/:trialId/report', (req, res) => {
     strengthNote: strengthNote || null,
     focusNote: focusNote || null,
   };
-  // Filed reports raise Trust Score (institutional corroboration). Since S5 the
+  // Filed reports raise Trust Score (institutional corroboration). The
   // player's `trialReports` is DERIVED from the trials: the report written on
   // the trial is what the profile serves, in filing order — no copy is pushed
-  // onto the player (docs/architecture/s5-player-subrecords.md §2.5). S8a: the
-  // report and its ledger row commit together.
+  // onto the player. The report and its ledger row commit together.
   const p = findPlayer(trial.playerId);
   unit(() => {
     recruitment.trials.update(trial.id, (d) => { d.status = 'reported'; d.report = report; });
     ledgerAppend({ type: 'trial_report', playerId: p.id, orgId: req.org.id, orgName: req.org.name, userId: req.orgUser.id, scoutName: req.orgUser.name });
   });
-  // P4B (D-16): the mandatory report closes the club's obligation even while
+  // The mandatory report closes the club's obligation even while
   // the family has blocked the club, but the block stands — no notification
   // reaches the player or guardian from a blocked club. The report is still
   // on the profile when they look.
@@ -2638,14 +2605,13 @@ orgRouter.post('/trials/:trialId/report', (req, res) => {
 // timeline + contract, freezes the attribution evidence from the Proof Pack,
 // and notifies the player (and guardian for minors).
 orgRouter.post('/players/:id/signing', (req, res) => {
-  // M23 P7 (§88): the LEGACY recording route. It no longer writes anything
-  // itself: the completed-signing record and every side effect come from the
-  // ONE writer in m29, and a recruitment that went through the canonical
-  // Offer cannot be short-circuited here — an accepted Offer or a signing
-  // package between this club and player means the signing workflow on the
-  // case owns the outcome. Kept for clients that never used P6; retirement
-  // is flagged for P7.1.
-  // M23 P8 (§26/§27): recording a joining is a CLUB's act and a lead's act.
+  // The LEGACY recording route, kept for clients that do not use the signing
+  // workflow. It writes nothing itself: the completed-signing record and
+  // every side effect come from the ONE writer (m29Ctx), and a recruitment
+  // that went through the canonical Offer cannot be short-circuited here — an
+  // accepted Offer or a signing package between this club and player means
+  // the signing workflow on the case owns the outcome.
+  // Recording a joining is a CLUB's act and a lead's act.
   // An agency has no squad to sign a player into, and a scout could not
   // complete the canonical workflow either; the same authority applies here.
   if (req.org.type === 'agency' || req.org.level === 'agent') return res.status(403).json({ error: 'SIGNING_NOT_PERMITTED', message: 'Only a club records a signing.' });
@@ -2656,7 +2622,7 @@ orgRouter.post('/players/:id/signing', (req, res) => {
   if (isBlocked(p.id, req.org.id)) return res.status(403).json({ error: 'BLOCKED' });
   const blocker = m29Ctx?.legacyRecordingBlocker?.(p.id, req.org.id, Date.now());
   if (blocker) return res.status(409).json({ ok: false, error: blocker.error, message: blocker.message });
-  // M23 P8.1 (D-P81-3): ONE standing legacy row per club and player. A second
+  // ONE standing legacy row per club and player. A second
   // recording while one stands (not cancelled, voided or revoked) would be a
   // second signing row, a second invoice and a second set of notifications for
   // one joining — the same invariant the canonical workflow keeps per package
@@ -2666,8 +2632,8 @@ orgRouter.post('/players/:id/signing', (req, res) => {
   if (standing) return res.status(409).json({ ok: false, error: 'SIGNING_ALREADY_RECORDED', message: 'A signing of this player by your club is already on record.', signingId: standing.id });
   if (rateLimit.limited('signing_closure', req.org.id)) return res.status(429).json(rateLimitedBody('signing_closure'));
   if (!m29Ctx?.recordCompletedSigning) return res.status(500).json({ error: 'SIGNING_STORE_MISSING' });
-  // S4a: the ledger row, the signings row and the player's level / contract columns commit as one unit of work.
-  // S8d: typed input only — a note is text of at most 400 characters, or absent; never sliced.
+  // The ledger row, the signings row and the player's level / contract columns commit as one unit of work.
+  // Typed input only — a note is text of at most 400 characters, or absent; never sliced.
   const legacyNote = req.body?.note;
   if (legacyNote !== undefined && legacyNote !== null && legacyNote !== '' && (typeof legacyNote !== 'string' || legacyNote.length > 400)) return res.status(400).json({ error: 'FIELD_INVALID', field: 'note', message: 'The note is text of at most 400 characters.' });
   let written;
@@ -2683,14 +2649,14 @@ orgRouter.post('/players/:id/signing', (req, res) => {
 });
 
 // Newest first, paged by cursor (domains/platform/paging.mjs): { items, nextCursor }. No app reads this list yet; one
-// that does will need a "load more" (the decision of 4 November 2026: no load-more UI yet).
+// that does will need a "load more" (product decision: no load-more UI yet).
 orgRouter.get('/signings', (req, res) => {
   let page;
   try { page = readPage(req.query, ['number']); } catch (e) { return sendPageError(res, e); }
   res.json(signingsFollowUps.signings.pageForOrg(req.org.id, page));
 });
 
-// S13e: the organisation's invoices, newest first, by cursor (`?limit=&cursor=`); the apps read the first page.
+// The organisation's invoices, newest first, by cursor (`?limit=&cursor=`); the apps read the first page.
 orgRouter.get('/invoices', (req, res) => {
   let page;
   try { page = readPage(req.query, ['number']); } catch (e) { return sendPageError(res, e); }
@@ -2707,8 +2673,8 @@ function grassrootsOrgOnly(req, res) {
   return false;
 }
 
-// S13d: open days, match days and friendlies are rows of repositories/grassroots.mjs, written by explicit operations;
-// responses are built from these allowlists. A club's name is read live (not a copy taken when it posted).
+// Open days, match days and friendlies are rows of repositories/grassroots.mjs; responses are built from these
+// allowlists. A club's name is read live (not a copy taken when it posted).
 const GL = GRASSROOTS_LIMITS;
 const orgNameOf = (orgId) => byId.org(orgId)?.name ?? null;
 const registrationView = (r) => ({
@@ -2742,14 +2708,14 @@ orgRouter.post('/open-trials', (req, res) => {
   }
   const { title, date, venue, ageGroup, positions, notes } = req.body || {};
   if (!reqText(title, GL.title) || !date || !reqText(venue, GL.venue)) return res.status(400).json({ error: 'TITLE_DATE_VENUE_REQUIRED' });
-  if (!optText(ageGroup, GL.ageGroup)) return badField(res, 'ageGroup'); // PRE-M24 (PM-10)
+  if (!optText(ageGroup, GL.ageGroup)) return badField(res, 'ageGroup');
   if (!optText(notes, GL.notes)) return badField(res, 'notes');
-  // M23 P5.7 (T-10): the open-day date gates the no-ghosting rule above
-  // (`date < today`) and the upcoming lists (`date >= today`) by string
-  // comparison. Text that is not a day compared as "upcoming for ever" and
-  // never became a past day whose registrants are owed an answer.
+  // The open-day date gates the no-ghosting rule above (`date < today`) and
+  // the upcoming lists (`date >= today`) by string comparison, so it must be
+  // a real day: other text would compare as "upcoming for ever" and never
+  // become a past day whose registrants are owed an answer.
   if (!dateOnlyOrRefuse(res, date, 'date')) return;
-  const wanted = openDayPositions(positions); // S13d: refused, no longer filtered or cut off
+  const wanted = openDayPositions(positions); // junk is refused, never filtered or cut off
   if (!wanted) return fieldInvalid(res, 'positions', `positions is a list of at most ${GL.positions} positions, each text of at most ${GL.position} characters.`);
   if (notes && !moderateOrRefuse(res, notes, { kind: 'open_trial_notes', orgId: req.org.id })) return;
   const trial = unit(() => {
@@ -2786,7 +2752,7 @@ orgRouter.get('/open-trials', (req, res) => {
   });
 });
 
-// S13d: deleting stamps the open day; it leaves every list (a coverage assignment naming it keeps its key).
+// Deleting stamps the open day; it leaves every list (a coverage assignment naming it keeps its key).
 orgRouter.delete('/open-trials/:id', (req, res) => {
   if (grassrootsOrgOnly(req, res)) return;
   if (!grassroots.openTrials.remove(req.org.id, req.params.id, Date.now())) return res.status(404).json({ error: 'OPEN_TRIAL_NOT_FOUND' });
@@ -2795,7 +2761,7 @@ orgRouter.delete('/open-trials/:id', (req, res) => {
 });
 
 // What the club is looking for — powers the players' opportunity radar.
-// S9c: position codes only (the radar matches them against the player's position), at most five; an explicit write.
+// Position codes only (the radar matches them against the player's position), at most five; an explicit write.
 orgRouter.post('/looking-for', (req, res) => {
   if (grassrootsOrgOnly(req, res)) return;
   const positions = req.body?.positions;
@@ -2817,11 +2783,11 @@ orgRouter.post('/open-trials/:id/registrations/:regId/outcome', (req, res) => {
   if (reg.outcome) return res.status(409).json({ error: 'ALREADY_RESOLVED' });
   const { outcome, note } = req.body || {};
   if (!['invite_trial', 'declined'].includes(outcome)) return res.status(400).json({ error: 'OUTCOME_INVALID' });
-  if (!optText(note, 10_000)) return badField(res, 'note'); // S13d: refused when not text (was stringified)
+  if (!optText(note, 10_000)) return badField(res, 'note');
   if (note && !moderateOrRefuse(res, note, { kind: 'open_day_outcome', orgId: req.org.id })) return;
   const outcomeNote = note?.trim() ? note.trim().slice(0, GL.outcomeNote) : null;
   const p = findPlayer(reg.playerId);
-  // ONE unit of work (S13d): the answer, the trial request it may raise and the notifications commit together.
+  // ONE unit of work: the answer, the trial request it may raise and the notifications commit together.
   const answered = unit(() => {
     const r = grassroots.openTrials.resolve(trial.id, reg.id, { outcome, note: outcomeNote, at: Date.now() });
     if (p && visibleToOrg(p, req.org)) {
@@ -2829,7 +2795,7 @@ orgRouter.post('/open-trials/:id/registrations/:regId/outcome', (req, res) => {
         // Through THE request writer: the same row, routing (guardian-first for a
         // minor), ledger entry and inbox ping as every other trial invitation;
         // only the notifications are worded for the open day. Several pending
-        // invitations per player stay allowed (D2).
+        // invitations per player stay allowed (product decision).
         issueRecruitmentRequest({
           org: req.org, orgUser: req.orgUser, player: p, type: 'trial',
           message: outcomeNote || `We liked what we saw at "${trial.title}" — come for a proper trial.`,
@@ -2861,7 +2827,7 @@ orgRouter.post('/open-trials/:id/registrations/:regId/outcome', (req, res) => {
 // the whole squad verified, coach-signed attendance.
 const POSITION_GROUPS = { GK: ['GK'], DEF: ['CB', 'RB', 'LB', 'RWB', 'LWB'], MID: ['CDM', 'CM', 'CAM'], ATT: ['ST', 'CF', 'RW', 'LW'] };
 
-// S9c: the squad is rows of org_squad_members; a club's shadow list (the Pro squad planner) is never part of it.
+// The squad is rows of org_squad_members; a club's shadow list (the Pro squad planner) is never part of it.
 function squadView(org) {
   const entries = clubSetup.squad.forOrg(org.id).map((e) => {
     const p = e.playerId ? findPlayer(e.playerId) : null;
@@ -2883,7 +2849,7 @@ orgRouter.get('/squad', (req, res) => {
 orgRouter.post('/squad', (req, res) => {
   if (grassrootsOrgOnly(req, res)) return;
   const { name, position, playerId } = req.body || {};
-  if (!reqText(name, 120)) return res.status(400).json({ error: 'NAME_REQUIRED' }); // PRE-M24 (PM-10)
+  if (!reqText(name, 120)) return res.status(400).json({ error: 'NAME_REQUIRED' });
   if (!optText(position, 40)) return badField(res, 'position');
   if (!optText(playerId, 80)) return badField(res, 'playerId');
   if (playerId) {
@@ -2906,22 +2872,21 @@ orgRouter.post('/squad/:entryId/release', (req, res) => {
   if (raw !== undefined && raw !== null && typeof raw !== 'string') return res.status(400).json({ error: 'FIELD_INVALID', field: 'referenceText', message: 'The reference is text.' });
   const referenceText = raw ? raw.trim().slice(0, TRANSITION_LIMITS.text) : '';
   if (referenceText && !moderateOrRefuse(res, referenceText, { kind: 'release_reference', orgId: req.org.id })) return;
-  // ONE unit of work (review of 9656a4b): the squad row (S9c: a row of org_squad_members),
-  // the player's availability and contract columns, the published reference,
-  // the ledger row and the notifications commit together; the pushes and the
-  // broadcast go out after COMMIT.
+  // ONE unit of work: the squad row, the player's availability and contract
+  // columns, the published reference, the ledger row and the notifications
+  // commit together; the pushes and the broadcast go out after COMMIT.
   unit(() => {
     clubSetup.squad.remove(entry.id);
     const p = entry.playerId ? findPlayer(entry.playerId) : null;
     if (p) {
-      // M23 P8 (§27): releasing a player from THIS club's squad does not speak
+      // Releasing a player from THIS club's squad does not speak
       // for a contract another club completed in ScoutBox. The squad row goes;
       // the canonical contract truth stays with its writer.
       const other = canonicalContractFor(p.id, Date.now(), { exceptOrgId: req.org.id });
       if (!other) players.update(p.id, (d) => { d.availability = 'available_now'; d.contractStatus = 'free_agent'; });
       seam('squad.release.after_row');
       if (referenceText) {
-        // S10c: a row of vouches, published at once (the club's identity is the session; no email, no code).
+        // A row of vouches, published at once (the club's identity is the session; no email, no code).
         transitionsVouches.vouches.create({
           id: nextId('vch'), playerId: p.id, playerName: p.name?.slice(0, TRANSITION_LIMITS.name) ?? null,
           coachName: req.orgUser.name.slice(0, TRANSITION_LIMITS.coachName), coachEmail: null, role: `${req.orgUser.role || 'Manager'}, ${req.org.name}`.slice(0, TRANSITION_LIMITS.role),
@@ -2943,20 +2908,19 @@ orgRouter.post('/matchday', (req, res) => {
   if (grassrootsOrgOnly(req, res)) return;
   const { fixture, venue, date, result, playerIds } = req.body || {};
   if (!fixture || !date) return res.status(400).json({ error: 'FIXTURE_AND_DATE_REQUIRED' });
-  // S13d: refused, no longer stringified or cut off.
   if (!reqText(fixture, GL.fixture)) return fieldInvalid(res, 'fixture', `fixture is text of at most ${GL.fixture} characters.`);
   if (!optText(venue, GL.venue)) return fieldInvalid(res, 'venue', `venue is text of at most ${GL.venue} characters.`);
   if (!optText(result, GL.result)) return fieldInvalid(res, 'result', `result is text of at most ${GL.result} characters (e.g. 3-1).`);
-  if (!dateOnlyOrRefuse(res, date, 'date')) return; // M23 P5.7: a match day is a day that exists
+  if (!dateOnlyOrRefuse(res, date, 'date')) return; // a match day is a day that exists
   const ids = playerIds === undefined || playerIds === null ? [] : playerIds;
   if (!Array.isArray(ids) || ids.length > GL.matchdayPlayers || !ids.every((x) => typeof x === 'string' && x.length > 0 && x.length <= GL.id)) {
     return fieldInvalid(res, 'playerIds', `playerIds is a list of at most ${GL.matchdayPlayers} player ids.`);
   }
-  const onSquad = new Set(clubSetup.squad.playerIds(req.org.id)); // S9c: the squad only, never the shadow list
+  const onSquad = new Set(clubSetup.squad.playerIds(req.org.id)); // the squad only, never the shadow list
   const credited = [];
   const fixtureText = fixture.trim();
-  // ONE unit of work (S5): every credited player's attendance row and activity,
-  // the match-day row (S13d) and the ledger row commit together.
+  // ONE unit of work: every credited player's attendance row and activity,
+  // the match-day row and the ledger row commit together.
   unit(() => {
     for (const pid of new Set(ids)) { // a player listed twice is credited once
       if (!onSquad.has(pid)) continue; // only your own rostered players
@@ -3031,7 +2995,7 @@ orgRouter.post('/verification/federation', (req, res) => {
   if (grassrootsOrgOnly(req, res)) return;
   const { federation, registrationId, contactEmail } = req.body || {};
   if (!federation || !registrationId) return res.status(400).json({ error: 'FEDERATION_REQUIRED' });
-  // S9c: typed and refused at the route (FIELD_INVALID naming the field); one row per club, replaced on resubmission.
+  // Typed and refused at the route (FIELD_INVALID naming the field); one row per club, replaced on resubmission.
   if (!reqText(federation, CLUB_SETUP_LIMITS.federation)) return res.status(400).json({ error: 'FIELD_INVALID', field: 'federation', message: `federation is text of at most ${CLUB_SETUP_LIMITS.federation} characters.` });
   if (!reqText(registrationId, CLUB_SETUP_LIMITS.registrationId)) return res.status(400).json({ error: 'FIELD_INVALID', field: 'registrationId', message: `registrationId is text of at most ${CLUB_SETUP_LIMITS.registrationId} characters.` });
   const email = typeof contactEmail === 'string' ? contactEmail.trim() : contactEmail;
@@ -3063,8 +3027,8 @@ orgRouter.post('/friendlies', (req, res) => {
   if (grassrootsOrgOnly(req, res)) return;
   const { ageGroup, date, venue, notes } = req.body || {};
   if (!date) return res.status(400).json({ error: 'DATE_REQUIRED' });
-  for (const [f, v, max] of [['ageGroup', ageGroup, GL.ageGroup], ['venue', venue, GL.venue], ['notes', notes, GL.notes]]) if (!optText(v, max)) return badField(res, f); // PRE-M24 (PM-10)
-  if (!dateOnlyOrRefuse(res, date, 'date')) return; // M23 P5.7
+  for (const [f, v, max] of [['ageGroup', ageGroup, GL.ageGroup], ['venue', venue, GL.venue], ['notes', notes, GL.notes]]) if (!optText(v, max)) return badField(res, f);
+  if (!dateOnlyOrRefuse(res, date, 'date')) return;
   if (notes && !moderateOrRefuse(res, notes, { kind: 'friendly_notes', orgId: req.org.id })) return;
   const friendly = grassroots.friendlies.create({
     id: nextId('fr'), orgId: req.org.id, postedByUserId: req.orgUser.id,
@@ -3093,10 +3057,10 @@ orgRouter.post('/friendlies/:id/respond', (req, res) => {
   if (!friendly) return res.status(404).json({ error: 'FRIENDLY_NOT_FOUND' });
   if (friendly.orgId === req.org.id) return res.status(400).json({ error: 'OWN_POST' });
   const { message } = req.body || {};
-  if (!optText(message, 10_000)) return badField(res, 'message'); // S13d: refused when not text (was stringified)
+  if (!optText(message, 10_000)) return badField(res, 'message');
   if (message && !moderateOrRefuse(res, message, { kind: 'friendly_response', orgId: req.org.id })) return;
   if (friendly.responses.some((r) => r.orgId === req.org.id)) return res.status(409).json({ error: 'ALREADY_RESPONDED' });
-  // ONE unit of work (S13d): the response and the poster's notification commit together.
+  // ONE unit of work: the response and the poster's notification commit together.
   unit(() => {
     grassroots.friendlies.respond(friendly.id, { orgId: req.org.id, message: message ? message.trim().slice(0, GL.message) : '', respondedByUserId: req.orgUser.id, ts: Date.now() });
     notify({ kind: 'org_user', id: friendly.postedByUserId }, 'friendly', `${req.org.name} is up for your friendly on ${friendly.date}.`, friendly.id);
@@ -3133,22 +3097,21 @@ const FREE_MAIL = /@(gmail|googlemail|hotmail|outlook|yahoo|icloud|aol|proton|pr
 
 orgRouter.post('/verification/email', async (req, res) => {
   const { email } = req.body || {};
-  if (!reqText(email, 254) || !email.includes('@')) return res.status(400).json({ error: 'EMAIL_REQUIRED' }); // PRE-M24 (PM-10)
+  if (!reqText(email, 254) || !email.includes('@')) return res.status(400).json({ error: 'EMAIL_REQUIRED' });
   if (FREE_MAIL.test(email)) {
     return res.status(422).json({
       error: 'COMPANY_EMAIL_REQUIRED',
       message: 'Free email providers don\'t prove domain control. No club domain? Use federation verification instead — your federation registration is checked by Trust & Safety.',
     });
   }
-  // S6a: every request sends a mail, so requests are bounded per organisation.
+  // Every request sends a mail, so requests are bounded per organisation.
   if (rateLimit.limited('email_challenge_request', req.org.id)) return res.status(429).json(rateLimitedBody('email_challenge_request'));
-  // S6a: the challenge is a row of email_challenges (stored as a hash; 30-minute
+  // The challenge is a row of email_challenges (stored as a hash; 30-minute
   // lifetime; one live challenge per organisation, the previous one replaced),
   // durable BEFORE the mail is sent. The plain code exists in the issue result
   // and in the mail only: `secrets` makes the persisted outbox record withhold
-  // it (review of e020aba, finding 1) while the recipient's mail carries it. A
-  // mail that fails to send leaves the row (it expires; a re-request replaces
-  // it) — the same outcome as before S6a.
+  // it while the recipient's mail carries it. A mail that fails to send leaves
+  // the row (it expires; a re-request replaces it).
   const { code } = codes.issueEmailChallenge(req.org.id, email);
   await mailer.send({
     to: email,
@@ -3161,11 +3124,11 @@ orgRouter.post('/verification/email', async (req, res) => {
 
 orgRouter.post('/verification/email/confirm', (req, res) => {
   const { code } = req.body || {};
-  // S6a: a wrong code is charged against the organisation's confirm budget (a
+  // A wrong code is charged against the organisation's confirm budget (a
   // correct one costs nothing) and counted on the challenge itself, which is
   // cancelled after EMAIL_CHALLENGE_MAX_ATTEMPTS wrong codes; the budget is
   // tested before the code is judged, so a correct guess after it is gone is
-  // refused rather than rewarded (the login-failure wiring, M23 P5.6F).
+  // refused rather than rewarded (as with the failed-login budget).
   if (rateLimit.peek('email_challenge_confirm', req.org.id).remaining === 0) return res.status(429).json(rateLimitedBody('email_challenge_confirm')); // exactly `max` wrong codes are judged; the next attempt is refused
   const check = codes.checkEmailChallenge(req.org.id, code);
   if (check.status === 'none') {
@@ -3392,28 +3355,27 @@ playerRouter.post('/requests/:id/respond', (req, res) => {
   const replyCheck = contactReplyFrom(req, res, found);
   if (!replyCheck.ok) return;
   // Same rule as the guardian route: a blocked organisation can be declined,
-  // never accepted (M23 P3 §68/§69).
+  // never accepted.
   if (accept && isBlocked(req.player.id, found.orgId)) {
     return res.status(403).json({ error: 'BLOCKED', message: 'You have blocked this organisation. Lift the block before accepting.' });
   }
   if (found.contactId && rateLimit.limited('contact_response', `player:${req.player.id}`)) return res.status(429).json(rateLimitedBody('contact_response'));
-  // P4A-D12: slot checked before the answer is recorded (see the guardian route).
+  // Slot checked before the answer is recorded (see the guardian route).
   const slot = accept && found.type === 'trial' ? chooseTrialSlot(found.trialDetails, chosenSlot) : { ok: true, date: null };
   if (!slot.ok) return res.status(400).json(slot);
-  // M23 P4B (D-7): the recipient of a case-tied Trial invitation is re-derived now.
+  // The recipient of a case-tied Trial invitation is re-derived now.
   if (accept && found.type === 'trial' && found.caseId && m23Ctx?.trialAcceptGate) {
     const gate = m23Ctx.trialAcceptGate({ request: found, by: 'player', actorId: req.player.id });
     if (!gate.ok) return res.status(gate.status).json({ error: gate.error, message: gate.message });
   }
   const respondedAt = Date.now();
-  // One unit of work: the answer, the Contact (S8c, an explicit write), the
-  // channel and the trial commit together or not at all (P4A-D15).
+  // One unit of work: the answer, the Contact, the channel and the trial
+  // commit together or not at all.
   const answered = unit(() => {
-  // S8a: the answer is an explicit write (P4A-D13: both respond paths stamp who answered).
+  // Both respond paths stamp who answered.
   let request = recruitment.requests.update(found.id, (d) => { d.status = accept ? 'accepted' : 'declined'; d.respondedAt = respondedAt; d.respondedBy = 'player'; });
-  // M23 P3: the Contact that created this request learns of the answer.
+  // The Contact that created this request learns of the answer.
   m23Ctx?.onRequestResponded?.({ request, accept: !!accept, message: replyCheck.reply, by: 'player', at: respondedAt });
-  // P4A-D15: one unit for the answer, the channel and the trial (below).
 
   if (accept) {
     // Only now does a contact channel exist.
@@ -3489,7 +3451,7 @@ playerRouter.get('/reports', (req, res) => {
 playerRouter.post('/academyplus', (req, res) => {
   if (guardianManagedOnly(req, res)) return;
   if (switchRefused(res, req.body?.enabled, 'enabled')) return;
-  // ONE unit of work: the column and the badge (a row of player_badges since S5) commit together (review of 9656a4b).
+  // ONE unit of work: the column and the badge commit together.
   let stored;
   unit(() => {
     stored = players.update(req.player.id, (d) => { d.academyPlus = req.body.enabled; });
@@ -3505,16 +3467,16 @@ playerRouter.post('/academyplus', (req, res) => {
 playerRouter.post('/badges', (req, res) => {
   const { badges } = req.body || {};
   if (!Array.isArray(badges)) return res.status(400).json({ error: 'BADGES_MUST_BE_ARRAY' });
-  const stored = players.setItems(req.player.id, 'badges', badges.slice(0, 6).map(String)); // S5: the whole list rewritten as rows, duplicates kept as given
+  const stored = players.setItems(req.player.id, 'badges', badges.slice(0, 6).map(String)); // the whole list rewritten as rows, duplicates kept as given
   broadcast('players', { playerId: req.player.id });
   res.json({ badges: stored });
 });
 
-// Media upload. `dataUrl` carries the actual video (prototype in-memory
-// store, ~12MB cap; production = object storage behind the same endpoint).
+// Media upload. `dataUrl` carries the actual video (~12MB cap; the storage
+// adapter writes it to disk, object storage slots in behind the same endpoint).
 playerRouter.post('/media', (req, res) => {
   const { title, kind = 'video', dataUrl, attendanceId } = req.body || {};
-  if (!reqText(title, 160)) return res.status(400).json({ error: 'TITLE_REQUIRED' }); // PRE-M24 (PM-10): an object title was stored and crashed every screen showing it
+  if (!reqText(title, 160)) return res.status(400).json({ error: 'TITLE_REQUIRED' }); // an object title would crash every screen showing it
   if (!optText(kind, 20)) return badField(res, 'kind');
   if (!moderateOrRefuse(res, title, { kind: 'media_title', playerId: req.player.id })) return;
   const item = { id: nextId('media'), title, kind, uploadedAt: new Date().toISOString(), url: null, views: 0, tags: {}, verifiedClip: null };
@@ -3535,7 +3497,7 @@ playerRouter.post('/media', (req, res) => {
     if (!item.url) return res.status(400).json({ error: 'FILE_REQUIRED_FOR_VERIFIED_CLIP', message: 'Attach the actual footage to claim the Verified Clip seal.' });
     item.verifiedClip = att.id;
   }
-  // ONE unit of work (S5): the clip row and the activity it records (the log
+  // ONE unit of work: the clip row and the activity it records (the log
   // entry, any badge, its notification) commit together before the 201.
   try {
     unit(() => {
@@ -3563,12 +3525,12 @@ playerRouter.post('/medical/share', (req, res) => {
 
 playerRouter.post('/medical/records', (req, res) => {
   const { type, title, date, layoffWeeks, cleared, conditionStatus } = req.body || {};
-  if (date && !dateOnlyOrRefuse(res, date, 'date')) return; // M23 P5.7: a medical record is dated on a day that exists
-  // PRE-M24 (PM-10): each field has its type; nothing else is stored.
+  if (date && !dateOnlyOrRefuse(res, date, 'date')) return; // a medical record is dated on a day that exists
+  // Each field has its type; nothing else is stored.
   for (const [f, v, max] of [['type', type, 40], ['title', title, 160], ['conditionStatus', conditionStatus, 40]]) if (!optText(v, max)) return badField(res, f);
   if (layoffWeeks != null && !(typeof layoffWeeks === 'number' && Number.isFinite(layoffWeeks) && layoffWeeks >= 0 && layoffWeeks <= 520)) return badField(res, 'layoffWeeks');
   if (cleared != null && typeof cleared !== 'boolean') return badField(res, 'cleared');
-  // ONE unit of work (review of 9656a4b): the condition column and the record
+  // ONE unit of work: the condition column and the record
   // (a facet of the same player) commit together before the response, so a
   // crash after the answer can never leave the column without its record.
   try {
@@ -3599,9 +3561,9 @@ playerRouter.post('/location', (req, res) => {
   res.json({ ok: true });
 });
 
-// M23 P8 (§26): the player's self-service declaration. `under_contract` is
-// CANONICAL contract truth and is written by exactly one thing — the
-// completed-signing writer in m29 — so it cannot be self-declared here, and
+// The player's self-service declaration. `under_contract` is CANONICAL
+// contract truth and is written by exactly one thing — the completed-signing
+// writer (m29Ctx) — so it cannot be self-declared here, and
 // while a canonical live contract stands no self-declared word replaces it.
 // The other five words remain the player's own to declare (their intent and
 // their reading of a contract ScoutBox did not write); availability is always
@@ -3640,11 +3602,11 @@ playerRouter.post('/attendance', (req, res) => {
   if (missing.length) {
     return res.status(400).json({ error: 'ATTENDANCE_UNVERIFIABLE', message: 'Verified attendance needs fixture, venue, date, GPS and device data.', missing });
   }
-  if (!dateOnlyOrRefuse(res, date, 'date')) return; // M23 P5.7: verified attendance on a day that exists
+  if (!dateOnlyOrRefuse(res, date, 'date')) return; // verified attendance on a day that exists
   // The attendance row stores gps as two columns: a gps carrying anything else is refused, not silently trimmed.
   if (Object.keys(gps).some((k) => k !== 'lat' && k !== 'lng')) return res.status(400).json({ error: 'GPS_INVALID', message: 'gps is { lat, lng } and nothing else.' });
   const item = { id: nextId('att'), fixture, venue, date, gps: { lat: gps.lat, lng: gps.lng }, deviceConfirmed: true, verified: true };
-  // ONE unit of work (S5): the attendance row, the activity it records and the
+  // ONE unit of work: the attendance row, the activity it records and the
   // ledger row commit together before the 201. A fixture or venue the table
   // cannot hold (not text) is refused by the repository and answered 400.
   try {
@@ -3666,7 +3628,7 @@ playerRouter.post('/timeline', (req, res) => {
   const { year, event } = req.body || {};
   if (!year || !event) return res.status(400).json({ error: 'YEAR_AND_EVENT_REQUIRED' });
   if (!moderateOrRefuse(res, event, { kind: 'timeline_event', playerId: req.player.id })) return;
-  players.addItem(req.player.id, 'timeline', { year: String(year), event: String(event) }); // S5: one row, committed before the response
+  players.addItem(req.player.id, 'timeline', { year: String(year), event: String(event) }); // one row, committed before the response
   broadcast('players', { playerId: req.player.id });
   res.status(201).json({ timeline: players.byId(req.player.id).timeline });
 });
@@ -3679,7 +3641,7 @@ playerRouter.post('/stats', (req, res) => {
   const updates = {};
   for (const f of FIELDS) {
     if (req.body?.[f] !== undefined) {
-      // S14h: a number, never text turned into one; the counts whole, the percentages at most 100.
+      // A number, never text turned into one; the counts whole, the percentages at most 100.
       const v = req.body[f];
       const count = ['appearances', 'goals', 'assists', 'cleanSheets'].includes(f);
       if (typeof v !== 'number' || !Number.isFinite(v) || v < 0 || (count && !Number.isSafeInteger(v)) || (f.endsWith('Pct') && v > 100)) return res.status(400).json({ error: 'BAD_STAT', field: f });
@@ -3689,11 +3651,11 @@ playerRouter.post('/stats', (req, res) => {
   const season = typeof req.body?.season === 'string' && req.body.season.trim() ? req.body.season.trim() : null;
   // ONE unit of work: the stat columns (or the season facet) and the activity
   // bookkeeping — the activity log, any badge it earns and its notification —
-  // commit together (review of 9656a4b).
+  // commit together.
   unit(() => {
     if (season) {
-      // S5: the season history is rows of player_season_history; the whole
-      // (sorted) list is rewritten, as the in-place sort used to do.
+      // The season history is rows of player_season_history; the whole
+      // (sorted) list is rewritten.
       const history = (req.player.seasonHistory ?? []).map((s) => ({ ...s }));
       const existing = history.find((s) => s.season === season);
       if (existing) Object.assign(existing, updates);
@@ -3728,7 +3690,7 @@ playerRouter.get('/drills', (req, res) => {
       completed: (req.player.drills ?? []).includes(d.id),
       // A player who has never completed a drill has no `drillResults` yet (a
       // sign-up creates none; the first completion appends the array). Read as
-      // empty — before S5 this answered 500 for every new player.
+      // empty.
       best: (req.player.drillResults ?? [])
         .filter((r) => r.drillId === d.id)
         .sort((a, b) => (d.lowerIsBetter ? a.value - b.value : b.value - a.value))[0] ?? null,
@@ -3742,7 +3704,7 @@ playerRouter.post('/drills/:id/complete', (req, res) => {
   const { value, videoDataUrl } = req.body || {};
   const numeric = value !== undefined && value !== null && value !== '' ? Number(value) : null;
   if (numeric !== null && (Number.isNaN(numeric) || numeric < 0)) return res.status(400).json({ error: 'BAD_VALUE' });
-  // ONE unit of work (S5): the drill row, the result row and the activity commit together.
+  // ONE unit of work: the drill row, the result row and the activity commit together.
   unit(() => {
     if (!(req.player.drills ?? []).includes(drill.id)) players.addItem(req.player.id, 'drills', drill.id);
     if (numeric !== null) {
@@ -3790,8 +3752,8 @@ playerRouter.post('/programme', (req, res) => {
   const track = PROGRAMME_TRACKS[req.body?.track];
   if (!track) return res.status(400).json({ error: 'TRACK_NOT_FOUND' });
   // track and startedAt are columns; `completed` is rows of
-  // player_programme_completions (S5). ONE unit of work: the new track and the
-  // reset of the completed sessions commit together (review of 9656a4b).
+  // player_programme_completions. ONE unit of work: the new track and the
+  // reset of the completed sessions commit together.
   unit(() => {
     players.update(req.player.id, (d) => { d.programme = { track: track.key, startedAt: Date.now(), completed: d.programme?.completed ?? [] }; });
     seam('programme.select.after_row');
@@ -3807,7 +3769,7 @@ playerRouter.post('/programme/sessions/:id/complete', (req, res) => {
   const track = PROGRAMME_TRACKS[req.player.programme.track];
   const session = track?.sessions.find((x) => x.id === req.params.id);
   if (!session) return res.status(404).json({ error: 'SESSION_NOT_FOUND' });
-  // ONE unit of work (S5): the completion row and the activity commit together.
+  // ONE unit of work: the completion row and the activity commit together.
   unit(() => {
     players.addItem(req.player.id, 'programme.completed', { sessionId: session.id, ts: Date.now() });
     recordActivity(req.player); // programme work feeds streaks + the weekly goal
@@ -3820,7 +3782,7 @@ playerRouter.post('/programme/sessions/:id/complete', (req, res) => {
 // cohort in the same position group. Small cohorts return null.
 playerRouter.get('/benchmarks', (req, res) => {
   if (grassrootsOnly(req, res)) return;
-  // S14i: the cohort (grassrootsJourney.mjs inCohort: not pro, the same position track) is a SQL filter, read as light
+  // The cohort (grassrootsJourney.mjs inCohort: not pro, the same position track) is a SQL filter, read as light
   // rows for the statistics and as one GROUP BY for the drill bests; nobody is decoded.
   const track = trackForPosition(req.player.position);
   const cohortFilter = { notLevel: 'pro', exceptId: req.player.id, positions: PLAYER_POSITIONS.filter((pos) => trackForPosition(pos) === track), orNoPosition: trackForPosition(null) === track };
@@ -3838,7 +3800,7 @@ playerRouter.get('/benchmarks', (req, res) => {
     if (mine === null) return null;
     const cohortValues = (bests.get(d.id) ?? []).map((b) => (d.lowerIsBetter ? b.min : b.max));
     const percentile = percentileAmong(mine, cohortValues, d.lowerIsBetter);
-    // M12 F12F: sample size and method travel with every comparison; a
+    // Sample size and method travel with every comparison; a
     // too-small cohort says "not enough evidence" instead of a number.
     return { drillId: d.id, name: d.name, metric: d.metric, unit: d.unit, value: mine, percentile, sampleSize: cohortValues.length, insufficient: percentile === null };
   }).filter(Boolean);
@@ -3866,7 +3828,7 @@ playerRouter.get('/opportunities', (req, res) => {
     .map((o) => ({ org: o, distanceKm: Math.round(haversineKm(o.location, req.player.location) * 10) / 10 }))
     .filter((x) => x.distanceKm <= GRASSROOTS_RADIUS_KM)
     .sort((a, b) => a.distanceKm - b.distanceKm);
-  // S13d: the clubs' upcoming open days in one query.
+  // The clubs' upcoming open days in one query.
   const upcoming = Map.groupBy(grassroots.openTrials.upcomingForOrgs(near.map((x) => x.org.id), new Date().toISOString().slice(0, 10)), (t) => t.orgId);
   const clubs = near
     .map(({ org, distanceKm }) => ({
@@ -3891,7 +3853,7 @@ playerRouter.post('/open-trials/:id/register', (req, res) => {
     return res.status(403).json({ error: 'OUT_OF_RADIUS', message: 'Open days are local — this one is beyond 50km of you.' });
   }
   if (trial.registrations.some((r) => r.playerId === req.player.id)) return res.status(409).json({ error: 'ALREADY_REGISTERED' });
-  // ONE unit of work (S13d): the registration, the ledger row and the notification commit together.
+  // ONE unit of work: the registration, the ledger row and the notification commit together.
   unit(() => {
     grassroots.openTrials.register(trial.id, { id: nextId('otr'), playerId: req.player.id, playerName: req.player.name?.slice(0, GL.playerName) ?? null, byGuardian: false, guardianId: null, ts: Date.now() });
     ledgerAppend({ type: 'open_trial_registration', playerId: req.player.id, orgId: org.id, orgName: org.name, userId: trial.createdByUserId, scoutName: 'open day' });
@@ -3914,7 +3876,7 @@ playerRouter.post('/first-team-seeker', (req, res) => {
 // Coach vouches: a named, verified local coach is the most valuable
 // credential an amateur can hold. The coach proves mailbox control with a
 // one-time code; the text is moderated like every other message.
-// S10c: the code is stored only as its SHA-256 hash (the coach's email carries it); junk is refused, not coerced.
+// The code is stored only as its SHA-256 hash (the coach's email carries it); junk is refused, not coerced.
 function createVouchRequest(player, { coachName, coachEmail, role }, res) {
   const VL = TRANSITION_LIMITS;
   for (const [field, v] of [['coachName', coachName], ['coachEmail', coachEmail], ['role', role]]) {
@@ -3944,7 +3906,7 @@ ${player.name} has asked you for a coach reference on ScoutBox Grassroots.
 Your one-time reference code is ${code}. Submitting with it confirms this mailbox is yours; your name and role will appear with the reference on ${player.name}'s profile.
 
 References are screened by moderation and reviewed by Trust & Safety.`,
-  }).catch((err) => console.error(`reference request ${vouch.id}: the mail was not recorded or sent (${err?.code ?? err?.message ?? err})`)); // observed, never an unhandled rejection (review of 40aa05c, F2)
+  }).catch((err) => console.error(`reference request ${vouch.id}: the mail was not recorded or sent (${err?.code ?? err?.message ?? err})`)); // observed, never an unhandled rejection
   res.status(201).json({ requested: true, vouchId: vouch.id });
 }
 
@@ -4007,17 +3969,17 @@ guardianRouter.post('/children/:id/pairing-code', (req, res) => {
   const child = findPlayer(req.params.id);
   if (!child || !req.guardian.childIds.includes(child.id)) return res.status(404).json({ error: 'CHILD_NOT_FOUND' });
   if (rateLimit.limited('pairing_code_mint', req.guardian.id)) return res.status(429).json(rateLimitedBody('pairing_code_mint'));
-  // S6a: a row of pairing_codes — random (CSPRNG, never id-derived), stored as a
+  // A row of pairing_codes — random (CSPRNG, never id-derived), stored as a
   // hash, 15-minute lifetime, one live code per child (the previous one
   // replaced) — durable BEFORE the response is sent. The plain code exists in
-  // this response only; the response shape is unchanged.
+  // this response only.
   const { code, expiresAt } = codes.issuePairingCode(child.id);
   res.status(201).json({ code, expiresAt });
 });
 
 app.post('/auth/player/pair', (req, res) => {
   const { code } = req.body || {};
-  // S6a: a wrong code is charged per client address (a correct one costs
+  // A wrong code is charged per client address (a correct one costs
   // nothing), on top of the per-IP /auth limiter; the budget is tested first.
   const source = req.ip ?? req.socket?.remoteAddress ?? '?';
   if (rateLimit.peek('pairing_attempt', source).remaining === 0) return res.status(429).json(rateLimitedBody('pairing_attempt')); // exactly `max` wrong codes are judged; the next attempt is refused
@@ -4030,8 +3992,8 @@ app.post('/auth/player/pair', (req, res) => {
   }
   // ONE unit of work: the code is consumed (its row deleted) and the child's
   // session created together — a failure anywhere, the real COMMIT included,
-  // keeps the code live and creates no session; a crash between the two can
-  // no longer leave a committed session beside a still-live code.
+  // keeps the code live and creates no session; a crash between the two
+  // cannot leave a committed session beside a still-live code.
   let token = null;
   unit(() => {
     const consumed = codes.consumePairingCode(code);
@@ -4043,7 +4005,7 @@ app.post('/auth/player/pair', (req, res) => {
 });
 
 // Device push-token registration (used when EXPO_ACCESS_TOKEN switches the push adapter live; stored in dev too).
-// S14d: players and guardians only (the Player app's accounts; staff are notified in their portal and by e-mail).
+// Players and guardians only (the Player app's accounts; staff are notified in their portal and by e-mail).
 // One row per device token: a token another account registered moves to this one, so a shared phone receives only
 // the notices of the account that last signed in on it.
 app.post('/push/register', (req, res) => {
@@ -4065,8 +4027,8 @@ guardianRouter.get('/children/:id/open-trials', (req, res) => {
   const child = findPlayer(req.params.id);
   if (!child || !req.guardian.childIds.includes(child.id)) return res.status(404).json({ error: 'CHILD_NOT_FOUND' });
   if (!child.location) return res.json({ openTrials: [], note: 'Set a location on the profile to see local open days.' });
-  // S13d: the open days hosted inside the radius's box (one query; past ones too, as before, so a parent still sees the
-  // day their child registered for); the exact distance and visibility here.
+  // The open days hosted inside the radius's box (one query; past ones too, so a parent still sees the day their
+  // child registered for); the exact distance and visibility here.
   const list = grassroots.openTrials.inBox(boxAround(child.location, GRASSROOTS_RADIUS_KM))
     .map((t) => ({ t, org: byId.org(t.orgId) }))
     .filter(({ org }) => org?.level === 'grassroots' && org.location && haversineKm(org.location, child.location) <= GRASSROOTS_RADIUS_KM)
@@ -4091,7 +4053,7 @@ guardianRouter.post('/open-trials/:id/register', (req, res) => {
     return res.status(403).json({ error: 'VERIFIED_CLUBS_ONLY', message: 'Only verified, local clubs can receive an under-18 registration.' });
   }
   if (trial.registrations.some((r) => r.playerId === child.id)) return res.status(409).json({ error: 'ALREADY_REGISTERED' });
-  // ONE unit of work (S13d): the registration, the ledger row and the notifications commit together.
+  // ONE unit of work: the registration, the ledger row and the notifications commit together.
   unit(() => {
     grassroots.openTrials.register(trial.id, { id: nextId('otr'), playerId: child.id, playerName: child.name?.slice(0, GL.playerName) ?? null, byGuardian: true, guardianId: req.guardian.id, ts: Date.now() });
     ledgerAppend({ type: 'open_trial_registration_by_guardian', playerId: child.id, orgId: org.id, orgName: org.name, userId: trial.createdByUserId, scoutName: 'open day' });
@@ -4124,7 +4086,7 @@ function prefsHandler(getTarget) {
     let target = getTarget(req);
     if (req.method === 'POST') {
       const { quietStart, quietEnd, schoolHoursMute, timezone } = req.body || {};
-      // M23 P5.7: quiet hours are HH:MM wall-clock values in a named zone.
+      // Quiet hours are HH:MM wall-clock values in a named zone.
       const hhmm = (v) => v == null || v === '' ? null : (typeof v === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(v) ? v : undefined);
       const qs = hhmm(quietStart); const qe = hhmm(quietEnd);
       if (qs === undefined || qe === undefined) return res.status(400).json({ error: 'TIME_INVALID', message: 'Quiet hours are written HH:MM (24-hour).', expected: 'HH:MM' });
@@ -4165,13 +4127,13 @@ function exportPlayer(p) {
 }
 
 /**
- * M23 P4A-D14 — what an accepted trial leaves behind when its subject removes
+ * What an accepted trial leaves behind when its subject removes
  * their account. The rule is the ledger's: history stays, and it carries only
  * ids, states, times and the club's own filed numbers. Everything that
  * describes the person — name, the club's notes about them, the family's
  * emergency contact, arrival instructions written for them, the feedback
  * written to them — goes. The row keeps its id so a recruitment case that
- * references it (history, links, P4B evidence) still resolves, and
+ * references it (history, links, evidence) still resolves, and
  * `subjectRemovedAt` tells every reader why the person-shaped fields are gone.
  */
 function tombstoneTrial(t, at) {
@@ -4188,7 +4150,7 @@ function tombstoneTrial(t, at) {
     checkins: (t.day.checkins ?? []).map((c) => ({ playerId: c.playerId, at: c.at, byUserId: c.byUserId, byName: c.byName })),
     statusEvents: t.day.statusEvents ?? [],
   } : undefined;
-  // M23 P4B (D-26): the operational containers keep ids, states and times —
+  // The operational containers keep ids, states and times —
   // the case's evidence stays honest — and lose everything written for or
   // about the person: instructions, venue address lines, attendance notes,
   // Box Cam evidence links (the player's sessions are no longer the club's to
@@ -4237,7 +4199,7 @@ function tombstoneRequest(r, at) {
     ...(r.contactId ? { contactId: r.contactId } : {}),
     trialDetails: td ? {
       proposedDate: td.proposedDate ?? null, altSlots: Array.isArray(td.altSlots) ? td.altSlots : [], venue: td.venue ?? null, notes: '',
-      // P4B slots: times and venue name/town only; no instructions, no address line.
+      // Slots: times and venue name/town only; no instructions, no address line.
       ...(Array.isArray(td.slots) ? { slots: td.slots.map((s) => ({ id: s.id, day: s.day, startsAt: s.startsAt, endsAt: s.endsAt, timezone: s.timezone, kind: s.kind ?? null, venue: s.venue ? { name: s.venue.name, town: s.venue.town ?? null, address: null } : null })) } : {}),
     } : null,
     ...(r.caseId ? { caseId: r.caseId } : {}),
@@ -4255,54 +4217,51 @@ function deletePlayerData(playerId) {
   const at = Date.now();
   const mediaIds = p.media.map((m) => m.id);
   let uploadIds = [];
-  // ONE unit of work (readiness review §7.4): the player row becomes the retained
-  // record and its links go (S4b-R), the removal of the media FILES is
-  // queued in the same transaction, every session of the person is revoked
-  // and every blob collection that names the person is tombstoned — all of it
-  // commits or none of it. The files themselves are removed only after COMMIT
+  // ONE unit of work: the player row becomes the retained record and its
+  // links go, the removal of the media FILES is queued in the same
+  // transaction, every session of the person is revoked and every table that
+  // names the person is tombstoned or redacted — all of it commits or none of it. The files themselves are removed only after COMMIT
   // (and again at every boot and sweep until they are gone); while an entry is
   // queued, /media/:id never serves the file.
   unit(() => {
   mediaDeletions.enqueue(mediaIds, { playerId, at });
   sessions.revokeFor('player', playerId);
-  codes.revokePairingCodesFor(playerId); // S6a: the child's pairing code row goes in this unit (an explicit act, before the player row)
-  // S4b-R (migration 0014; the Founder's decisions: the full birth date, the country
-  // code kept): the row is not deleted — it is reduced to the retained record (id,
-  // deleted_at, birth_date, country; placeholders and NULL elsewhere), the child rows
-  // and links go explicitly, the guardians stop listing the id, and nothing serves
-  // it as an account from here on. Everything else in this unit is today's behaviour.
+  codes.revokePairingCodesFor(playerId); // before the player row
+  // The row is not deleted — it is reduced to the retained record (id,
+  // deleted_at, birth_date, country; placeholders and NULL elsewhere: the full
+  // birth date and the country code are kept by product decision), the child
+  // rows and links go, the guardians stop listing the id, and nothing serves
+  // it as an account from here on.
   players.erase(playerId, { at });
   seam('player.delete.after_erase');
-  // M23 P4A-D14: requests and trials become id-only tombstones rather than
+  // Requests and trials become id-only tombstones rather than
   // vanishing. A recruitment case that reached a trial keeps the record that
   // the trial happened (and the numbers the club itself filed); the person
   // is gone from it. The case's status is NOT touched here — deletion is not
   // a lifecycle event, and no path other than the lifecycle writer moves a
-  // case (M23 P2). The case's copy of the name goes with the person.
-  // S8a: each tombstone is an explicit write of the reduced record, in this unit.
+  // case. The case's copy of the name goes with the person.
   recruitment.tombstoneForPlayer(playerId, { request: (r) => tombstoneRequest(r, at), trial: (t) => tombstoneTrial(t, at) });
-  recruitmentCases.redactPlayer(playerId, at); // S8b: the case's copy of the name goes, in this unit
-  scoutingAssessments.assessments.redactPlayer(playerId); // S9b: the club keeps its assessments; the player's name goes, in this unit
-  recruitmentContactsOffers.contacts.redactPlayer(playerId); // S8c: the reply's words go; the contact stays
-  grassroots.openTrials.redactPlayer(playerId); // S13d: the registration keeps the id; the name goes, in this unit
-  uploadIds = operations.uploads.removeForPlayer(playerId); // S13e: the player's upload sessions go, in this unit (their chunk files after COMMIT)
-  // M23 P5.6B: agent relationships become id-only tombstones (no name is
+  recruitmentCases.redactPlayer(playerId, at); // the case's copy of the name goes, in this unit
+  scoutingAssessments.assessments.redactPlayer(playerId); // the club keeps its assessments; the player's name goes, in this unit
+  recruitmentContactsOffers.contacts.redactPlayer(playerId); // the reply's words go; the contact stays
+  grassroots.openTrials.redactPlayer(playerId); // the registration keeps the id; the name goes, in this unit
+  uploadIds = operations.uploads.removeForPlayer(playerId); // the player's upload sessions go, in this unit (their chunk files after COMMIT)
+  // Agent relationships become id-only tombstones (no name is
   // stored on them; the dispute text and any player-authored history names go).
   m24Ctx?.onPlayerDeleted?.(playerId, at);
-  // M23 P5.6C: compliance contexts and consents keep only the id.
+  // Compliance contexts and consents keep only the id.
   m25Ctx?.onPlayerDeleted?.(playerId, at);
-  // M23 P5.6D: a transaction keeps its ids, roles, states and times and loses
+  // A transaction keeps its ids, roles, states and times and loses
   // the person; every representation naming the subject is withdrawn.
   m26Ctx?.onPlayerDeleted?.(playerId, at);
-  // M23 P6.1: Offers keep ids, states and times and lose the person's name and words.
+  // Offers keep ids, states and times and lose the person's name and words.
   m28Ctx?.onPlayerDeleted?.(playerId, at);
   m29Ctx?.onPlayerDeleted?.(playerId, at);
-  // D-B: every thread of the player goes, guardian–club threads included, with
-  // its messages, attachments and receipts, inside this unit. The retention
-  // question stays open (S4b).
+  // Every thread of the player goes, guardian–club threads included, with its
+  // messages, attachments and receipts, inside this unit (D-B, docs/decisions.md;
+  // that settled scope, not retention).
   channels.deleteForPlayer(playerId);
-  notifications.deleteForAudience('player', playerId); // S7a: the person's rows go in this unit; their preferences are retained (no cascade, by decision)
-  // (The pairing code row was revoked above, inside this unit, before the player row went.)
+  notifications.deleteForAudience('player', playerId); // the person's rows go in this unit; their preferences are retained (no cascade, by decision)
   // (Every guardian's childIds was spliced by players.erase, with the link rows.)
   // Ledger rows stay (append-only audit + attribution) but carry only ids.
   broadcast('players'); // deferred until COMMIT inside the unit
@@ -4374,12 +4333,12 @@ app.post('/vouch/submit', (req, res) => {
   if (!moderateOrRefuse(res, text, { kind: 'coach_vouch', playerId: vouch.playerId })) return;
   const VL = TRANSITION_LIMITS;
   const player = findPlayer(vouch.playerId);
-  // S10c: the published reference (the code cleared: single use) and both notifications commit together.
+  // The published reference (the code cleared: single use) and both notifications commit together.
   unit(() => {
     transitionsVouches.vouches.update(vouch.id, (d) => {
       d.text = text.trim().slice(0, VL.text);
       d.seasons = seasons?.trim() ? seasons.trim().slice(0, VL.seasons) : null;
-      // M12 F10: a reference carries its declared relationship to the player —
+      // A reference carries its declared relationship to the player —
       // "my son", "I run their agency" etc. must be visible, not discoverable.
       d.conflictOfInterest = conflictOfInterest?.trim() ? conflictOfInterest.trim().slice(0, VL.conflictOfInterest) : null;
       d.status = 'published';
@@ -4399,10 +4358,10 @@ const ADMIN_KEY = process.env.ADMIN_KEY || 'scoutbox-admin';
 const adminRouter = express.Router();
 app.use('/admin', (req, res, next) => {
   if (req.headers['x-admin-key'] !== ADMIN_KEY) return res.status(401).json({ error: 'ADMIN_KEY_REQUIRED' });
-  // M23 P5.6C (G-C0): when an AUTHENTICATED reviewer session is presented
-  // beside the shared key, legacy admin actions are attributed to that person
-  // (derived from the session, never from a header). The shared key alone
-  // remains what it was: read-only and non-authoritative for compliance.
+  // When an AUTHENTICATED reviewer session is presented beside the shared
+  // key, the key-gated admin actions are attributed to that person
+  // (derived from the session, never from a header). The shared key alone is
+  // read-only and non-authoritative for compliance.
   const session = sessionFor(req);
   if (session?.kind === 'ts_reviewer') {
     const reviewer = compliancePolicies.reviewers.activeById(session.refId);
@@ -4411,17 +4370,17 @@ app.use('/admin', (req, res, next) => {
   next();
 }, adminRouter);
 
-// M23 P5.6C — the attributed Trust & Safety lane. Every route here resolves
+// The attributed Trust & Safety lane. Every route here resolves
 // a specific authenticated reviewer (never the shared key) before it runs;
 // the middleware is installed by registerCompliance() below.
 let m25Ctx = null;
-// M23 P5.6D — the Agent Transaction Workspace, declared here because the
+// The Agent Transaction Workspace, declared here because the
 // account-deletion sweep above runs before its registration below.
 let m26Ctx = null;
-// M23 P5.6E — the cross-app integration layer, registered after all four.
+// The cross-app integration layer, registered after all four.
 let m27Ctx = null;
-let m28Ctx = null; // M23 P6 — assigned when the Offer module registers, below
-let m29Ctx = null; // M23 P7 — assigned when the Signing module registers, below
+let m28Ctx = null; // assigned when the Offer module registers, below
+let m29Ctx = null; // assigned when the Signing module registers, below
 const tsRouter = express.Router();
 app.use('/ts', (req, res, next) => (m25Ctx ? m25Ctx.reviewerAuth(req, res, next) : res.status(503).json({ error: 'REVIEWER_LANE_NOT_READY' })), tsRouter);
 
@@ -4448,7 +4407,7 @@ adminRouter.get('/overview', (_req, res) => {
     sessions: sessions.count(),
     storageEngine: store.engine,
     groomingEscalations: safetyAudit.moderationLog.count('grooming'),
-    persisted: true, // every write is in the database (there is no unsaved snapshot since S14a)
+    persisted: true, // every write is committed to the database before the handler answers
   });
 });
 
@@ -4461,9 +4420,9 @@ adminRouter.get('/reports', (req, res) => {
   res.json({ items: out.items.map(reportView), nextCursor: out.nextCursor });
 });
 
-// S6a: on the dev transport the outbox is the delivery, so a mail whose one-time code the persisted record withholds is shown
+// On the dev transport the outbox is the delivery, so a mail whose one-time code the persisted record withholds is shown
 // with its full text while this process holds it (mailer.devDeliveredText; never saved, never backed up).
-// S14d: both lists page by cursor, newest first (the admin app reads the first page).
+// Both lists page by cursor, newest first (the admin app reads the first page).
 adminRouter.get('/outbox', (req, res) => {
   let page;
   try { page = readPage(req.query, ['number']); } catch (e) { return sendPageError(res, e); }
@@ -4475,7 +4434,7 @@ adminRouter.get('/push-log', (req, res) => {
   try { page = readPage(req.query, ['number']); } catch (e) { return sendPageError(res, e); }
   res.json(pushLog.page(page));
 });
-// S13e: every invoice, newest first, by cursor (`?limit=&cursor=`); the admin app reads the first page.
+// Every invoice, newest first, by cursor (`?limit=&cursor=`); the admin app reads the first page.
 adminRouter.get('/invoices', (req, res) => {
   let page;
   try { page = readPage(req.query, ['number']); } catch (e) { return sendPageError(res, e); }
@@ -4539,11 +4498,11 @@ adminRouter.post('/clubs/:id/verification', (req, res) => {
   const org = byId.org(req.params.id);
   if (!org) return res.status(404).json({ error: 'ORG_NOT_FOUND' });
   const { verified, safeguardingContractSigned, verifiedDomain, suspended } = req.body || {};
-  // S14g: the switches are booleans and the domain is text or null; anything else is refused, never coerced.
+  // The switches are booleans and the domain is text or null; anything else is refused, never coerced.
   for (const [f, v] of [['verified', verified], ['safeguardingContractSigned', safeguardingContractSigned], ['suspended', suspended]]) if (v !== undefined && typeof v !== 'boolean') return res.status(400).json({ error: 'FIELD_INVALID', field: f, message: `${f} must be true or false.` });
   if (verifiedDomain !== undefined && verifiedDomain !== null && !(typeof verifiedDomain === 'string' && verifiedDomain.trim().length <= ORG_LIMITS.domain)) return badField(res, 'verifiedDomain');
-  // M14: the legacy toggle stays functional, but its changes now carry
-  // claim-level provenance so the boolean and the claim engine never drift (one unit).
+  // The legacy toggle's changes carry claim-level provenance so the boolean
+  // and the claim engine never drift (one unit).
   const updated = unit(() => {
     orgs.update(org.id, (d) => {
       if (verified !== undefined) d.verified = verified;
@@ -4558,8 +4517,8 @@ adminRouter.post('/clubs/:id/verification', (req, res) => {
   res.json({ ...orgSafe(updated), safeguardingCertified: safeguardingCertified(updated) });
 });
 
-// §6.5 — Trust & Safety sees an allowlist of each guardian: never the password hash, never the e-mail code.
-// S14h: the guardians page by cursor (oldest first; `?limit=&cursor=`, `nextCursor`), the ID-check queue beside them.
+// Trust & Safety sees an allowlist of each guardian: never the password hash, never the e-mail code.
+// The guardians page by cursor (oldest first; `?limit=&cursor=`, `nextCursor`), the ID-check queue beside them.
 adminRouter.get('/guardians', (req, res) => {
   let page;
   try { page = readPage(req.query, ['number']); } catch (e) { return sendPageError(res, e); }
@@ -4573,7 +4532,7 @@ adminRouter.post('/guardians/:id/idv', (req, res) => {
   if (switchRefused(res, req.body?.approved, 'approved')) return;
   const approved = req.body.approved;
   // One unit of work: the column and the review-queue row commit together
-  // (S6b: the FIRST entry of the guardian in insertion order, as before).
+  // (the FIRST entry of the guardian in insertion order).
   let stored;
   unit(() => {
     stored = guardians.update(g.id, (d) => { d.idVerified = approved; });
@@ -4592,7 +4551,7 @@ adminRouter.get('/blocks', (req, res) => {
 });
 
 adminRouter.post('/blocks/:id/lift', (req, res) => {
-  // Q5 (19 October 2026): lifting a block deletes its row, as it always did.
+  // Lifting a block deletes its row (Q5, docs/decisions.md).
   const lifted = safetyAudit.blocks.lift(req.params.id);
   if (!lifted) return res.status(404).json({ error: 'BLOCK_NOT_FOUND' });
   broadcast('players');
@@ -4608,7 +4567,7 @@ adminRouter.get('/moderation', (req, res) => {
 });
 
 // Thread audit — the "all communications logged" promise, made inspectable.
-// Pages by cursor, most recently active first (S14c).
+// Pages by cursor, most recently active first.
 adminRouter.get('/channels', (req, res) => {
   let page;
   try { page = readPage(req.query, ['number', 'number']); } catch (e) { return sendPageError(res, e); }
@@ -4659,10 +4618,9 @@ app.get('/media/:id', (req, res) => {
   res.set('Content-Type', blob.contentType).send(blob.buffer);
 });
 
-// ------------------------------------------------------------ Milestone 12
-// The M12 feature areas live in focused modules under m12/ — they receive the
-// shared context (routers, helpers) and register their own routes and
-// migrations. Nothing here weakens an existing rule; every module re-uses
+// ------------------------------------------------------------- m12 modules
+// The feature areas under m12/ receive the shared context (routers, helpers)
+// and register their own routes. Nothing here weakens an existing rule; every module re-uses
 // visibleToOrg / blocks / guardian routing at the API layer.
 function revokeOrgUserAccess(userId) {
   // Immediate, structural: sessions die (API + media on the next byte) and
@@ -4683,33 +4641,33 @@ function revokeOrgUserAccess(userId) {
 
 registerM12({
   byId, safetyReads, scoutingReads, verificationReads, agentReads, complianceReads, developmentReads, development, boxCamReads, discoveryReads, insightReads, grassrootsReads, recruitmentReads, users, orgs, players, guardians, unit, app, orgRouter, playerRouter, guardianRouter, adminRouter,
-  nextId, notify, ledgerAppend, broadcast, safetyAudit, recruitment, recruitmentCases, // S8a: requests and trials are explicit repository writes
-  signingsFollowUps, // S8d: follow-ups and outcome reports are explicit repository writes
-  scoutingEvidence, // S9a: evidence, coach affiliations and squad invitations are explicit repository writes
-  scoutingAssessments, // S9b: templates, assessments, video segments and playlists are explicit repository writes
-  clubSetup, // S9c: tactical setups, squads, shadow lists and vacancies are explicit repository writes
-  opportunitiesCampaigns, // S9d: opportunities, applications, campaigns and their submissions are explicit repository writes
-  transitionsVouches, // S10c: the T&S withdrawal of a coach reference is an explicit repository write
+  nextId, notify, ledgerAppend, broadcast, safetyAudit, recruitment, recruitmentCases,
+  signingsFollowUps,
+  scoutingEvidence,
+  scoutingAssessments,
+  clubSetup,
+  opportunitiesCampaigns,
+  transitionsVouches,
   findPlayer, isBlocked, moderateOrRefuse, playerViewForOrg, sessionFor,
   storage, mailer, orgSafe, recordActivity, revokeOrgUserAccess,
   grassrootsOrgOnly, guardianManagedOnly, safeguardingCertified,
   publishedVouchesFor, pathwayRecord, DRILLS, DATA_DIR,
-  operations, // S13e: upload sessions are explicit repository writes
+  operations,
 });
 
-// ------------------------------------------------------------ Milestone 13
+// ------------------------------------------------------------- m13 modules
 // Same module pattern under m13/. registerM13 returns the enriched context so
 // the login path above can reach the MFA rate-limit guards.
 const m13Ctx = registerM13({
   byId, safetyReads, scoutingReads, verificationReads, agentReads, complianceReads, developmentReads, development, boxCamReads, discoveryReads, insightReads, grassrootsReads, recruitmentReads, users, sessions, orgs, players, guardians, mediaDeletions, codes, notifications, dispatches, outbox, pushLog, pushTokens, channels, unit, app, orgRouter, playerRouter, guardianRouter, adminRouter,
   nextId, notify, ledgerAppend, broadcast, safetyAudit, recruitment, recruitmentCases,
-  opportunitiesCampaigns, // S9d: player suitability preferences and approved summaries are explicit repository writes
-  transitionsVouches, // S10c: transition cases, their grants and history are explicit repository writes
-  insightCoverage, // S12d: exposure, deferrals, evidence suggestions, calibration and coverage are explicit repository writes
-  enterprise, enterpriseReads, // S13b: staff invites, SSO, support tickets and support access are explicit repository writes
-  groups, groupReads, // S13c: group workspaces and group grants are explicit repository writes
-  integrations, integrationReads, // S13a: imports, prospects, identity reviews, API keys and webhooks are explicit repository writes
-  operations, // S13e: the delivery centre's callback ids, start and injected failures are explicit repository writes
+  opportunitiesCampaigns,
+  transitionsVouches,
+  insightCoverage,
+  enterprise, enterpriseReads,
+  groups, groupReads,
+  integrations, integrationReads,
+  operations,
   schemaVersion: () => dataLayer.schemaVersion(),
   findPlayer, isBlocked, moderateOrRefuse, playerViewForOrg, sessionFor,
   storage, mailer, orgSafe, recordActivity, revokeOrgUserAccess,
@@ -4717,13 +4675,12 @@ const m13Ctx = registerM13({
   createSession, DATA_DIR, backupDatabase: (file) => store.copyTo(file),
 });
 
-// ------------------------------------------------------------ Milestone 14
+// ---------------------------------------------------- verification claims
 // Verification & Trust: independent claims, org-administered attestation,
-// Trust & Safety review, licences, disputes, references. Same module pattern
-// under domains/verification/claims/. Returns its context so the legacy admin verification route can
-// keep claim provenance in sync.
+// Trust & Safety review, licences, disputes, references (domains/verification/claims/).
+// Returns its context so the legacy admin verification route can keep claim provenance in sync.
 const m14Ctx = registerM14({
-  verification, unit, // S10a: every verification record is an explicit repository write
+  verification, unit,
   byId, players, guardians, safetyReads, scoutingReads, verificationReads, agentReads, complianceReads, developmentReads, development, boxCamReads, discoveryReads, insightReads, grassrootsReads, users, orgs, app, orgRouter, playerRouter, guardianRouter, adminRouter,
   nextId, notify, ledgerAppend, broadcast, safetyAudit,
   findPlayer, isBlocked, moderateOrRefuse, playerViewForOrg, sessionFor,
@@ -4732,19 +4689,19 @@ const m14Ctx = registerM14({
   createSession, DATA_DIR,
 });
 
-// M18.1 — canonical source-change events. Registered before the systems that
-// write to it (M15 preferences) and the system that reads it (M18 Second Look),
+// Canonical source-change events. Registered before the systems that write to
+// it (the Passport preferences) and the system that reads it (Second Look),
 // so a change carries the clock of the moment it happened rather than one
 // borrowed from a record describing a different event.
 const srcCtx = { nextId, safetyAudit }; // source changes are rows of source_changes, written through the repository
 registerSourceChanges(srcCtx);
 
-// M18.2 — preferences, audit and fault injection. Registered here, after the
-// routers exist and before the milestone modules that emit notifications, so
+// Preferences, audit and fault injection. Registered here, after the routers
+// exist and before the modules that emit notifications, so
 // the preference gate is in place for every notify() call that follows.
 m182Ctx = {
   byId, players, guardians, safetyReads, scoutingReads, verificationReads, agentReads, complianceReads, developmentReads, development, boxCamReads, discoveryReads, insightReads, grassrootsReads, recruitmentReads, notifications, orgRouter, playerRouter, guardianRouter, findPlayer,
-  // The same standing-gate composition M12's shared helpers use.
+  // The same standing-gate composition m12/shared.mjs uses.
   orgCanSee: (org, p) => !!p && visibleToOrg(p, org) && !isBlocked(p.id, org.id),
   requireLead: (req, res) => {
     if (isLeadRole(req.orgUser?.role)) return true;
@@ -4756,13 +4713,13 @@ const prefsModule = registerNotificationPrefs(m182Ctx);
 notificationAllows = prefsModule.allows;
 registerAudit(m182Ctx);
 
-// M18.1 — one rate limiter for the whole server. Every limited action is named
+// One rate limiter for the whole server. Every limited action is named
 // in RATE_LIMIT_POLICY with its window and scope, and the capability report
 // says plainly that the memory provider counts per process.
 const rateLimit = createRateLimiter();
 
-// M15 — Football Passport: a provenance-aware projection over existing
-// records. Registered after M14 so it can read verification stores; it
+// Football Passport: a provenance-aware projection over existing records.
+// Registered after the verification claims so it can read them; it
 // receives the same context and adds no new authorization surface.
 const m15Ctx = registerM15({
   byId, players, guardians, safetyReads, scoutingReads, verificationReads, agentReads, complianceReads, developmentReads, development, boxCamReads, discoveryReads, insightReads, grassrootsReads, recruitmentReads, app, orgRouter, playerRouter, guardianRouter, adminRouter,
@@ -4770,19 +4727,19 @@ const m15Ctx = registerM15({
   findPlayer, isBlocked, moderateOrRefuse, playerViewForOrg,
   storage, m14: m14Ctx,
   recordSourceChange: srcCtx.recordSourceChange,
-  passport, unit, // S10b: every Passport record is an explicit repository write
+  passport, unit,
 });
 const m16Ctx = registerM16({
   rateLimit,
   byId, players, guardians, safetyReads, scoutingReads, verificationReads, agentReads, complianceReads, developmentReads, development, boxCamReads, discoveryReads, insightReads, grassrootsReads, app, orgRouter, playerRouter, guardianRouter, adminRouter,
   nextId, notify, ledgerAppend, broadcast, safetyAudit,
   findPlayer, isBlocked, moderateOrRefuse,
-  players, unit, // S5: a Box Clip marks a media row through the repository, inside a unit with the session and the ledger
-  boxCam, // S12b: every Box Cam, Combine and CV record is an explicit repository write
+  players, unit, // a Box Clip marks a media row through the repository, inside a unit with the session and the ledger
+  boxCam,
 });
 
-// M16.2 — ScoutBox Trust Score: a DERIVED evidence-confidence summary over
-// M14 claims, the M15 Passport assembly, M16 Box Cam and M16.1 Combine.
+// ScoutBox Trust Score: a DERIVED evidence-confidence summary over the
+// verification claims, the Passport assembly, Box Cam and the Combine.
 // Registered last because it consumes all of them; it adds no storage and no
 // authorization surface (a Trust Score grants nothing).
 const m162Ctx = registerM162({
@@ -4790,18 +4747,18 @@ const m162Ctx = registerM162({
   nextId, notify, ledgerAppend, broadcast, safetyAudit,
   findPlayer, isBlocked, moderateOrRefuse,
   assemblePassport: m15Ctx.assemblePassport,
-  passportHistoryFor: m15Ctx.passportHistoryFor, // S14j: the trust band's history source reads the history alone
+  passportHistoryFor: m15Ctx.passportHistoryFor, // the trust band's history source reads the history alone
   testProviderEnabled: process.env.BOX_CAM_TEST_PROVIDER === '1',
 });
 
-// M17 — Recruitment Rooms: the CLUB's private decision layer over one player.
+// Recruitment Rooms: the CLUB's private decision layer over one player.
 // Registered last of all because it composes every layer beneath it. It owns
 // no player truth: the Passport, Trust Score, Combine, Box Cam and evidence it
 // shows are the canonical projections, fetched through their own gates on
 // every read. A Room grants no access to anything.
 const m17Ctx = registerM17({
   rateLimit,
-  faults: faultLayer, // M23 P8.1 — the development fault seam inside the ONE lifecycle writer
+  faults: faultLayer, // the development fault seam inside the ONE lifecycle writer
   byId, players, guardians, users, safetyReads, scoutingReads, verificationReads, agentReads, complianceReads, developmentReads, development, boxCamReads, discoveryReads, insightReads, grassrootsReads, recruitmentReads, app, orgRouter, playerRouter, guardianRouter, adminRouter,
   nextId, notify, ledgerAppend, broadcast, safetyAudit, recruitmentCases, unit,
   findPlayer, isBlocked, moderateOrRefuse, playerViewForOrg,
@@ -4811,7 +4768,7 @@ const m17Ctx = registerM17({
   // Canonical source projections, each keeping its own gate.
   assemblePassport: m15Ctx.assemblePassport,
   buildFootballPassport: m15Ctx.buildFootballPassport,
-  // M18.1 — the Passport CONTENT revision, recorded in decision snapshots.
+  // The Passport CONTENT revision, recorded in decision snapshots.
   passportRevisionOf: m15Ctx.passportRevisionOf,
   buildTrustProfile: m162Ctx.buildTrustProfile,
   safeTrustProjection: m162Ctx.safeTrustProjection,
@@ -4827,25 +4784,25 @@ const m17Ctx = registerM17({
   computeEvidenceGaps: m13Ctx.computeEvidenceGaps,
 });
 
-// M18 — Second Look + Nobody Missed: two deterministic workflow systems over
+// Second Look + Nobody Missed: two deterministic workflow systems over
 // everything beneath them. Second Look asks whether something materially
 // changed since THIS club last decided; Nobody Missed asks whether eligible
 // players match the club's own stated criteria without ever entering its
 // workflow. Neither judges talent, neither ranks, and neither is player-facing:
-// M18 registers no player, guardian or public route at all.
+// the module registers no player, guardian or public route at all.
 const m18Ctx = registerM18({
   rateLimit,
   byId, players, guardians, users, safetyReads, scoutingReads, verificationReads, agentReads, complianceReads, developmentReads, development, boxCamReads, discoveryReads, insightReads, grassrootsReads, recruitmentReads, app, orgRouter, playerRouter, guardianRouter, adminRouter,
-  discovery, unit, // S12c: every brief, review, Second Look item and watchlist is an explicit repository write
-  matchFacts, // S14j: matching and Nobody Missed are queries over the stored facts
-  combineProtocolIds: () => COMBINE_PROTOCOLS.map((p) => p.id), // a brief's Combine protocols are refused unless known (S12c)
+  discovery, unit,
+  matchFacts, // matching and Nobody Missed are queries over the stored facts
+  combineProtocolIds: () => COMBINE_PROTOCOLS.map((p) => p.id), // a brief's Combine protocols are refused unless known
   nextId, notify, ledgerAppend, broadcast, safetyAudit,
   findPlayer, isBlocked, moderateOrRefuse, playerViewForOrg,
   storage, sessionFor, mailer, orgSafe, recordActivity, revokeOrgUserAccess,
   grassrootsOrgOnly, guardianManagedOnly, safeguardingCertified,
   publishedVouchesFor, pathwayRecord, DRILLS, DATA_DIR,
-  // Canonical projections and the M17 bridges — M18 never mutates the
-  // pipeline itself.
+  // Canonical projections and the Room bridges — this module never mutates
+  // the pipeline itself.
   assemblePassport: m15Ctx.assemblePassport,
   buildFootballPassport: m15Ctx.buildFootballPassport,
   buildTrustProfile: m162Ctx.buildTrustProfile,
@@ -4854,26 +4811,26 @@ const m18Ctx = registerM18({
   combineProjection: m16Ctx.combineProjection,
   reopenRoom: m17Ctx.reopenRoom,
   createRoomForPlayer: m17Ctx.createRoomForPlayer,
-  // M18.1 — canonical source-change clocks (position, current club).
+  // Canonical source-change clocks (position, current club).
   sourceChangesFor: srcCtx.sourceChangesFor,
 });
 
-// ------------------------------------------- M19 Explainable Matching
-// Registered AFTER M18 so it reuses the very same match reads (S14j: the
-// stored facts, domains/discovery/matching/query.mjs) and the canonical M17
-// Room bridge. There is deliberately no second matching engine and no second
+// ------------------------------------------------- Explainable Matching
+// Registered AFTER Second Look so it reuses the very same match reads (the
+// stored facts, domains/discovery/matching/query.mjs) and the canonical Room
+// bridge. There is deliberately no second matching engine and no second
 // Room-creation path.
 const m19Ctx = {
   ...m18Ctx,
-  recruitmentReads, // §4.3 step 2: contacts and offers are read through SQL
-  scoutingReads, verificationReads, agentReads, developmentReads, development, boxCamReads, discoveryReads, insightReads, grassrootsReads, // S12a: the development domain; S10a: verification reads; S9: the evidence and the assessments are read through SQL
+  recruitmentReads,
+  scoutingReads, verificationReads, agentReads, developmentReads, development, boxCamReads, discoveryReads, insightReads, grassrootsReads,
   users,
-  notifications, // S7a: the Agent module's inbox and unread count read the repository
+  notifications, // the Agent module's inbox and unread count read the repository
   combineProtocolIds: () => COMBINE_PROTOCOLS.map((p) => p.id),
 };
 registerMatching(m19Ctx);
 
-// S14j: the match facts. Triggers on their inputs mark a player; the keeper re-derives the marked players before every
+// The match facts. Triggers on their inputs mark a player; the keeper re-derives the marked players before every
 // COMMIT, so matching and Nobody Missed read current facts in SQL. Time-only changes (an expiry, an agreement's term,
 // adulthood) are the minute sweep's.
 const matchFactsKeeper = createMatchFactsKeeper({
@@ -4885,50 +4842,50 @@ matchFactsKeeper.start();
 m19Ctx.matchFactsKeeper = matchFactsKeeper;
 setInterval(() => { try { matchFactsKeeper.sweep(); } catch (err) { console.error(`match facts sweep failed: ${err?.message ?? err}`); } }, 60_000).unref();
 
-// ------------------------------------------ M20 Recruitment Analytics
+// ------------------------------------------------ Recruitment Analytics
 // Registered LAST, because it reads everything and owns nothing. There is no
 // analytics store: every figure is a projection over the Rooms, decisions,
-// briefs, reviews, watchlists and trials that M12-M19 already hold, so a
+// briefs, reviews, watchlists and trials the modules above already hold, so a
 // number on the Director Dashboard cannot disagree with the record it came
 // from. It measures the recruitment PROCESS -- never a player, never a
 // colleague.
 const m20Ctx = registerAnalytics(m19Ctx);
 void m20Ctx;
 
-// ------------------------------------------------ M21 Development Hub 2.0
+// ------------------------------------------------------- Development Hub
 // Workflow, not truth. Plans, goals, actions, reviews and REFERENCES to
-// evidence M12-M16.1 already own — resolved live, never copied, so an
+// evidence the modules above already own — resolved live, never copied, so an
 // invalidated Combine result or a withdrawn assessment reads as unavailable
-// here the moment it changes there. Nothing in M21 writes into the Passport,
+// here the moment it changes there. Nothing in the Hub writes into the Passport,
 // Trust, Matching or the Director Dashboard, and no figure anywhere in it
 // combines counts into a score.
 const m21Ctx = registerDevelopment({
   ...m19Ctx,
   isAdult,
-  unit, // S12a: every Hub write is one unit of work
+  unit, // every Hub write is one unit of work
 });
 void m21Ctx;
 
-// ------------------------------------------------ M23 recruitment lifecycle
-// M23 adds no recruitment pipeline: `db.recruitmentCases` stays canonical and
-// the Room stays a facet of it. What M23 adds is the OPERATING layer — named
-// semantic actions with server-validated transitions, and one viewer-aware
-// projection over the records that already exist. It writes status only
-// through M17's single writer (ctx.applyLifecycleTransition), so `case.stage`
-// and `room.status` still cannot disagree, and it stores nothing of its own.
+// ------------------------------------------------- recruitment lifecycle
+// The recruitment case is canonical and the Room is a facet of it. This is the
+// OPERATING layer over them — named semantic actions with server-validated
+// transitions, and one viewer-aware projection over the records that already
+// exist. It writes status only through the Rooms' single writer
+// (ctx.applyLifecycleTransition), so `case.stage` and `room.status` cannot
+// disagree.
 
-// The evidence provider is attached to the M17 context as well as handed to
-// M23, because M17's own status route can name an evidence-bearing status. One
+// The evidence provider is attached to the Rooms context as well as handed to
+// the lifecycle, because the Rooms' own status route can name an evidence-bearing status. One
 // provider, reachable from every status path; a path with no provider fails
 // closed rather than assuming the requirement is met.
 const recruitmentEvidence = createEvidenceProvider(recruitmentReads);
 m17Ctx.recruitmentEvidence = recruitmentEvidence;
 
-// ------------------------------------------ M23 P5.6E the integration seam holder
-// M23 is registered BEFORE the Agent, Compliance and Integration layers, so the
-// seam cannot be handed over as a value. This holder is: one object, filled in
-// below once `registerIntegration` exists, read at REQUEST time. A build that
-// never fills it (a suite that boots M23 alone) routes every contact to the
+// ------------------------------------------------ the integration seam holder
+// The lifecycle is registered BEFORE the Agent, Compliance and Integration
+// layers, so the seam cannot be handed over as a value. This holder is: one
+// object, filled in below once `registerIntegration` exists, read at REQUEST
+// time. A build that never fills it (a suite that boots the lifecycle alone) routes every contact to the
 // player and to nobody else, which is the honest answer when nothing in the
 // process can resolve an agent's authority.
 const agentIntegration = {};
@@ -4936,31 +4893,30 @@ const agentIntegration = {};
 const m23Ctx = registerM23({
   agentIntegration,
   recruitmentEvidenceProvider: recruitmentEvidence,
-  recruitmentCases, // S8b: the formal decision row enters through the repository (and leaves it on a transport failure)
-  recruitmentContactsOffers, // S8c: contacts are explicit repository writes (contacts.create / update), inside a unit of work
-  recruitment, // S8a: requests and trials are explicit repository writes (requests/trials.create / update), inside a unit of work
+  recruitmentCases, // the formal decision row enters through the repository (and leaves it on a transport failure)
+  recruitmentContactsOffers,
+  recruitment,
   unit, afterCommit: (fn) => store.afterCommit(fn),
   ...m19Ctx,
-  operations, // S13e: an injected transport failure is used up through the delivery bookkeeping
+  operations, // an injected transport failure is used up through the delivery bookkeeping
   isAdult,
-  // M17's room seams live on the object registerM17 returned; registerM18
+  // The Rooms' seams live on the object registerM17 returned; registerM18
   // returns a fresh object, so they do not arrive via m19Ctx. Passed
   // explicitly rather than re-derived: findRoom is the 404-concealing lookup
-  // and applyLifecycleTransition is the single status writer, and M23 must use
+  // and applyLifecycleTransition is the single status writer, and the lifecycle must use
   // exactly those two rather than its own copies.
   findRoomForRequest: m17Ctx.findRoomForRequest,
   applyLifecycleTransition: m17Ctx.applyLifecycleTransition,
   roomIsRoom: m17Ctx.roomIsRoom,
-  // M23 P5 (D-P5-1) — the decision-time evidence-confidence snapshot, captured
-  // through exactly the code M17's advisory recommendation uses. Without this
-  // seam the formal decision route captured nothing and said nothing.
+  // The decision-time evidence-confidence snapshot, captured through exactly
+  // the code the Rooms' advisory recommendation uses.
   captureRoomSnapshot: m17Ctx.captureRoomSnapshot,
-  // M23 P3 — the ONE writer of a recipient-visible request row, so a Contact
-  // send reaches the Inbox through exactly the path the legacy route uses.
+  // The ONE writer of a recipient-visible request row, so a Contact send
+  // reaches the Inbox through exactly the path the direct request route uses.
   issueRecruitmentRequest,
-  // M23 P4B — Trial. The Combine consent rule is reused unchanged for Box
+  // Trial. The Combine consent rule is reused unchanged for Box
   // Cam evidence links (a trial is not consent to a player's home footage);
-  // the test-provider gate is the same flag M16 reads; minors never act on
+  // the test-provider gate is the same flag Box Cam reads; minors never act on
   // their own trials.
   combineOrgMaySeeResults: m16Ctx.combineOrgMaySeeResults,
   boxPrefsFor: m16Ctx.boxPrefsFor,
@@ -4968,12 +4924,12 @@ const m23Ctx = registerM23({
   guardianManagedOnly,
 });
 
-// ------------------------------------------------ M23 P5.6B ScoutBox Agent core
-// The fifth application's server domain: agent profiles, agency affiliations
+// ------------------------------------------------------ ScoutBox Agent core
+// The Agent app's server domain: agent profiles, agency affiliations
 // and client-confirmed representation relationships. It reads the canonical
 // player, org, block and opportunity records through their own gates and
 // writes nothing into them. No conflict adjudication, no transactions, no
-// fee enforcement and no Trust & Safety mutation live here (P5.6C/D, G-C0).
+// fee enforcement and no Trust & Safety mutation live here.
 // The verification provider is created ONCE, here, and handed to both the
 // Agent core (facet submissions) and the Compliance Engine (rechecks): one
 // provider, one honest status, no second path to a VERIFIED facet.
@@ -4982,11 +4938,11 @@ m24Ctx = registerAgent({
   ...m19Ctx,
   isAdult,
   verificationProvider,
-  agentCore, unit, // S11a: profiles, memberships, agreements and agency settings are explicit repository writes
+  agentCore, unit,
 });
 
-// ------------------------------------------ M23 P5.6C Conflict & Compliance Engine
-// The regulated compliance layer: per-reviewer Trust & Safety identity (G-C0),
+// --------------------------------------------- Conflict & Compliance Engine
+// The regulated compliance layer: per-reviewer Trust & Safety identity,
 // the versioned jurisdiction policy engine, the pure Conflict Engine, the
 // consent ledger, attributed manual review and the minors gate. It reads the
 // Agent core's records and re-authorises every regulated mutation at mutation
@@ -4996,77 +4952,78 @@ m25Ctx = registerCompliance({
   isAdult, tsRouter, verificationProvider,
   hashPassword, verifyPassword, createSession, sessionFor, sessions, devLogins: DEV_LOGINS,
   agent: m24Ctx,
-  agentCore, unit, // S11a: a review decision's effect on a facet or an agreement is an explicit repository write
-  compliancePolicies, // S11b-1: reviewers and policy versions are tables (repositories/compliancePolicies.mjs)
-  complianceRecords, // S11b-2: contexts, evaluations, reviews and consents are tables (repositories/complianceRecords.mjs)
+  agentCore, unit,
+  compliancePolicies,
+  complianceRecords,
 });
 // The Agent core's hooks into the compliance lane (review items for
 // manual-review facets and disputes; the policy layer's verdict on an Approach).
 Object.assign(m24Ctx.hooks, m25Ctx.hooks);
 
-// ------------------------------------------- M23 P5.6D Agent Transaction Workspace
+// ------------------------------------------------ Agent Transaction Workspace
 // The canonical multi-party workspace: Player ↔ Agent ↔ Engaging Club ↔
 // Releasing Club. Operational infrastructure, not a legal actor. It owns the
 // transaction, its party model, its state machine, its document classification
 // and its audience-filtered timeline; it owns NO rule, NO policy and NO consent
-// row — the compliance verdict comes from P5.6C through one narrow seam and is
+// row — the compliance verdict comes from the compliance engine through one narrow seam and is
 // re-derived at every material mutation. No Offer, no signing, no negotiation.
 m26Ctx = registerTransactions({
   ...m19Ctx,
   isAdult, tsRouter,
   agent: m24Ctx,
   compliance: m25Ctx.transactionSeam,
-  // The same P5.6E holder the recruitment side reads. M26 is registered before
-  // M27 too, so the handoff binding and the duplicate rule arrive by reference.
+  // The same integration holder the recruitment side reads. Transactions are
+  // registered before the integration layer too, so the handoff binding and
+  // the duplicate rule arrive by reference.
   integration: agentIntegration,
-  agentTransactions, unit, // S11c: transactions, bindings and documents are tables (repositories/agentTransactions.mjs)
+  agentTransactions, unit,
   channels, // a linked thread's own authorisation
 });
 // An attributed review of a declared-only binding lands on the transaction's own
 // representation row, which is its truth — not only on the compliance context's
 // evaluation projection.
 m25Ctx.transactionSeam.hooks.representationReviewed = m26Ctx.representationReviewed;
-// ------------------------------------------- M23 P5.6E Agent cross-app integration
+// ------------------------------------------------ Agent cross-app integration
 // The ONE layer that answers "may this agent see or do this, on this surface,
 // for this client, right now?" — for Contact routing, Trial projection, the club
 // Agent-presence badge, an opportunity share and a transaction handoff. It owns
-// no store, declares no migration and duplicates no rule: the basis is P5.6B's
-// access predicate, the licence is P5.6B's facets, the policy verdict is P5.6C's
-// through one narrow seam, and the client's disclosure choices are a field of the
+// no store, declares no migration and duplicates no rule: the basis is the Agent
+// core's access predicate, the licence is its facets, the policy verdict is the
+// compliance engine's through one narrow seam, and the client's disclosure choices are a field of the
 // agreement they are choices about. It is registered LAST because it reads all
 // four layers and is read by the first of them through the holder above.
 m27Ctx = registerIntegration({
   ...m19Ctx,
   isAdult,
-  // M17's own concealing case lookup and its own role ranking, passed rather
+  // The Rooms' own concealing case lookup and their own role ranking, passed rather
   // than re-derived — the handoff must be as invisible to a foreign club as the
   // case itself is.
   findRoomForRequest: m17Ctx.findRoomForRequest,
   agent: m24Ctx,
   compliance: m25Ctx.integrationSeam,
-  recruitmentCases, // S8b: the transaction handoff is an explicit write of its case
-  agentCore, unit, // S11a: an opportunity share is an explicit write of its agreement
-  transactionReads: agentTransactions.reads, // S11c: the live transaction covering a case is read through SQL
+  recruitmentCases, // the transaction handoff is an explicit write of its case
+  agentCore, unit, // an opportunity share is an explicit write of its agreement
+  transactionReads: agentTransactions.reads, // the live transaction covering a case
 });
 Object.assign(agentIntegration, m27Ctx.seam);
 
-// ------------------------------------------------- M23 P6 Canonical Offer workflow
-// The first authoritative Offer domain. A P5 decision to progress AUTHORISES
+// ------------------------------------------------- canonical Offer workflow
+// The authoritative Offer domain. A formal decision to progress AUTHORISES
 // considering an Offer and creates none; an explicit club act drafts one;
 // issuing freezes an exact immutable revision and moves the case to
 // `offer_made`; the recipient's own acceptance or decline — and nothing else
 // — moves it to `offer_accepted` / `offer_declined`. It moves the case only
-// through the ONE validator (with the real evidence provider, which now reads
-// its store) and the ONE status writer; it never writes `signed`, never
-// touches `db.signings`, never negotiates and never lets an agent act for a
-// player. Registered after the Agent layers because it reads the P5.6E seam
-// (an agent's basis and scope) and P5.6D's readiness seam, by reference.
+// through the ONE validator (with the real evidence provider) and the ONE
+// status writer; it never writes `signed`, never touches the signings, never
+// negotiates and never lets an agent act for a player. Registered after the
+// Agent layers because it reads the integration seam (an agent's basis and
+// scope) and the transactions' readiness seam, by reference.
 m28Ctx = registerOffers({
   ...m19Ctx,
-  recruitmentCases, // S8b: the case's history entries are explicit writes in the offer's unit
-  recruitmentContactsOffers, // S8c: offers are explicit repository writes (offers.create / update), inside a unit of work
+  recruitmentCases, // the case's history entries are written in the offer's unit
+  recruitmentContactsOffers,
   unit, afterCommit: (fn) => store.afterCommit(fn),
-  faults: faultLayer, // M23 P8.1 — the development fault seam after an answer moved the case
+  faults: faultLayer, // the development fault seam after an answer moved the case
   isAdult,
   storage,
   findRoomForRequest: m17Ctx.findRoomForRequest,
@@ -5077,8 +5034,8 @@ m28Ctx = registerOffers({
   transactions: m26Ctx,
 });
 
-// ------------------------------------------------ M23 P7 Signing & Contract
-// Completion. The ONE writer of `db.signings`, of the lifecycle move to
+// ----------------------------------------------- Signing & Contract Completion
+// The ONE writer of the signings, of the lifecycle move to
 // `signed` and of a player's `contractStatus` for a recruitment signing.
 // Registered after the Offer module because a package is opened over an
 // ACCEPTED Offer revision and read by reference; the Offer views get a
@@ -5088,15 +5045,15 @@ m29Ctx = registerSigning({
   isAdult,
   storage,
   ledgerAppend,
-  // S4a: the player's level, contract status and availability are columns written through the identity repository; a completion is one unit of work.
+  // The player's level, contract status and availability are columns written through the identity repository; a completion is one unit of work.
   players, unit, afterCommit: (fn) => store.afterCommit(fn),
-  signingsFollowUps, // S8d: packages and signings are explicit repository writes
-  clubSetup, // S9c: a grassroots signing adds the squad row through the club setup repository
+  signingsFollowUps,
+  clubSetup, // a grassroots signing adds the squad row through the club setup repository
   billing,
   refreshJourneyBadges,
   findRoomForRequest: m17Ctx.findRoomForRequest,
   applyLifecycleTransition: m17Ctx.applyLifecycleTransition,
-  recruitmentCases, // S8b: the case's signing link and history are explicit writes in the completion unit
+  recruitmentCases, // the case's signing link and history are written in the completion unit
   recruitmentEvidenceProvider: recruitmentEvidence,
   agent: m24Ctx,
   integration: agentIntegration,
@@ -5105,9 +5062,9 @@ m29Ctx = registerSigning({
 });
 m28Ctx.setSigningSummary?.(m29Ctx.summaryForOffer);
 
-// ------------------------------------------------ M23 P8 journey audiences
+// ------------------------------------------------------ journey audiences
 // The player's, the guardian's and an authorized agent's journeys, and the
-// notification target resolver. Registered after M24–M29 because the agent
+// notification target resolver. Registered after the Agent, Offer and signing modules because the agent
 // route proves its basis through the same seams the Offer and signing agent
 // routes use. Reads only.
 const journeyCtx = registerJourneyRoutes({
@@ -5117,12 +5074,12 @@ const journeyCtx = registerJourneyRoutes({
   integration: agentIntegration,
 });
 
-// The transaction domain's rows join the agency audit feed beside the P5.6B and
-// P5.6C rows, so an agency has ONE audit rather than three.
+// The transaction domain's rows join the agency audit feed beside the Agent
+// core's and the compliance engine's rows, so an agency has ONE audit rather than three.
 const m25AuditRows = m24Ctx.hooks.auditRows;
 m24Ctx.hooks.auditRows = (org) => [...(m25AuditRows?.(org) ?? []), ...m26Ctx.hooks.auditRows(org)].sort((a, b) => (b.at - a.at) || String(b.id).localeCompare(String(a.id)));
 
-// ------------------------------------------------- M18.1 operator surface
+// -------------------------------------------------------- operator surface
 // What this deployment can and cannot actually do. ScoutBox is careful to be
 // honest about missing capability inside the product; this is the same honesty
 // pointed at whoever runs it. States only — no keys, hosts or connection
@@ -5132,7 +5089,7 @@ app.get('/capabilities', (_req, res) => {
     rateLimit,
     providers: m16Ctx.providerStatus?.() ?? [],
     trustProxy: TRUST_PROXY,
-    // M18.2 — states only, as before. Counts are counts, never subjects.
+    // States only. Counts are counts, never subjects.
     extra: {
       schema: dataLayer.schemaReport(),
       dataLayer: { ...dataLayer.report(), note: 'Collections that have moved from the snapshot blob into tables of their own. Counts are counts, never subjects.' },
@@ -5168,12 +5125,12 @@ app.get('/capabilities', (_req, res) => {
   }
 }
 
-// M18.2 — the event registry must be internally consistent, and every event
+// The event registry must be internally consistent, and every event
 // this process emits must be in it. Development and test throw here; in
 // production the problems are logged and the fail-closed audience default
 // keeps an unregistered event from reaching anyone. EMITTED_EVENTS is the
-// list of names broadcast() is called with anywhere in the server; the M18.2
-// suite greps the source and fails if this list and the call sites disagree.
+// list of names broadcast() is called with anywhere in the server;
+// e2e/platform/contracts.mjs greps the source and fails if this list and the call sites disagree.
 export const EMITTED_EVENTS = Object.freeze([
   'players', 'orgs', 'opportunities', 'openTrials', 'campaigns', 'friendlies', 'ledger',
   'messages', 'typing', 'inbox', 'notify',
@@ -5185,48 +5142,48 @@ export const EMITTED_EVENTS = Object.freeze([
   'development_plan_created', 'development_plan_updated', 'development_plan_completed',
   'development_goal_created', 'development_goal_updated', 'development_action_completed',
   'development_evidence_linked', 'development_review_submitted',
-  // M22 production CV. All player_private, none analytics-eligible, and
-  // deliberately no per-frame event (§41) — adding one would have to pass
+  // Box Cam CV. All player_private, none analytics-eligible, and
+  // deliberately no per-frame event — adding one would have to pass
   // through here and through the registry, which is the point.
   'box_cam_cv_session_started', 'box_cam_cv_refused', 'box_cam_observed',
-  // M23 P3 Contact. All org_private, ids only. The recipient side reuses
+  // Contact. All org_private, ids only. The recipient side reuses
   // `inbox` and `notify`; a draft reaches no player-facing stream at all.
   'contact_created', 'contact_sent', 'contact_failed', 'contact_external_recorded', 'contact_responded',
-  // M23 P4B Trial. All org_private, ids only; the recipient side reuses
+  // Trial. All org_private, ids only; the recipient side reuses
   // `inbox` and `notify`. No schedule, venue, attendance note, assessment or
   // guardian id ever rides on one of these.
   'trial_invited', 'trial_accepted', 'trial_declined', 'trial_scheduled', 'trial_rescheduled',
   'trial_cancelled', 'trial_attendance_recorded', 'trial_completed', 'trial_evidence_linked',
-  // M23 P5.6B ScoutBox Agent core. All org_private to the agency, ids only;
+  // ScoutBox Agent core. All org_private to the agency, ids only;
   // the client side reuses `notify`.
   'agent_profile_created', 'agent_verification_state_changed', 'agency_affiliation_created', 'agency_affiliation_ended',
   'representation_requested', 'representation_confirmed', 'representation_rejected', 'representation_terminated', 'representation_disputed',
-  // M23 P5.6C Conflict & Compliance Engine. org_private to the agency, ids
+  // Conflict & Compliance Engine. org_private to the agency, ids
   // and state words only; the policy publication is a content-free ping.
   'regulatory_review_requested', 'regulatory_review_started', 'regulatory_review_resolved', 'conflict_evaluated',
   'regulatory_consent_requested', 'regulatory_consent_granted', 'regulatory_consent_declined', 'regulatory_consent_revoked',
   'agent_authorisation_state_changed', 'policy_version_published',
-  // M23 P5.6D Agent Transaction Workspace. org_private to the agency that holds
+  // Agent Transaction Workspace. org_private to the agency that holds
   // the workspace, ids and state words only; the club and the individual hear
   // through `notify`, where their own preferences apply.
   'agent_transaction_created', 'agent_transaction_party_changed', 'agent_transaction_compliance_updated',
   'agent_transaction_status_changed', 'agent_transaction_document_added', 'agent_transaction_message_linked',
   'agent_transaction_held', 'agent_transaction_cancelled', 'agent_transaction_closed',
-  // M23 P5.6E cross-app integration. Two names, both org_private to the agency
+  // Cross-app integration. Two names, both org_private to the agency
   // and both ids only: the client changed a disclosure choice (not WHICH one),
   // and a club routed a contact to the agent as well as to the client.
   'representation_disclosure_changed', 'contact_agent_routed', 'agent_opportunity_shared',
-  // and the P5 → transaction handoff, which is recruitment-domain because the
+  // and the decision → transaction handoff, which is recruitment-domain because the
   // club's case is where it lives.
   'transaction_handoff_invited', 'transaction_handoff_withdrawn',
-  // M23 P6 canonical Offer. All org_private to the club that owns the case,
+  // Canonical Offer. All org_private to the club that owns the case,
   // ids only (plus the status WORD on a response). The recipient and a shared
   // agent hear through `notify`; a term, a note or a reason is never on the wire.
   'offer_draft_created', 'offer_draft_updated', 'offer_issued', 'offer_superseded', 'offer_withdrawn', 'offer_responded',
-  // M23 P7 signing workflow. Org_private, ids plus a party type word; never a
+  // Signing workflow. Org_private, ids plus a party type word; never a
   // document, a digest, a term or a signatory's name.
   'signing_created', 'signing_ready', 'signing_party_completed', 'signing_completed', 'signing_cancelled', 'signing_voided', 'signing_superseded',
-  // M23 P5 decisions (declared in PRE-M24, PM-15; broadcast since P5).
+  // Formal Room decisions.
   'room_decision_finalized', 'room_decision_superseded',
 ]);
 {
@@ -5251,12 +5208,10 @@ for (const [route, dir] of [['/app', 'club'], ['/console', 'admin'], ['/grassroo
 }
 
 // ------------------------------------------------------------------- start
-// M18.1 — the error contract.
+// The error contract.
 //
-// Everything used to arrive as 500 INTERNAL with the raw message attached, so a
-// 25 MB body and a genuine crash were indistinguishable to a client, and the
-// message could carry internal detail. Known request faults now answer with
-// their own machine-readable code, and anything genuinely unexpected stays a
+// Known request faults (a 25 MB body, malformed JSON) answer with their own
+// machine-readable code, so a client can tell them from a crash, and anything genuinely unexpected stays a
 // 500 whose message is fixed text — the detail goes to the log, not the caller.
 app.use((err, req, res, _next) => {
   const known = (() => {

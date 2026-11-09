@@ -1,8 +1,6 @@
 /**
- * The Football Passport's own records (S10b) get typed tables: preferences (secondary positions, position history and
- * public selections as child rows), career entries, achievements, share links and correction requests.
- * REGISTERED in DATA_MIGRATIONS. `up()` is the DDL only; nothing is carried over (no production data; rollback means
- * re-seed).
+ * The Football Passport's own records: preferences (secondary positions, position history and public selections as
+ * child rows), career entries, achievements, share links and correction requests.
  */
 import { migrationApplied } from '../database.mjs';
 import { VERIFICATION_MIGRATION } from '../verification.mjs';

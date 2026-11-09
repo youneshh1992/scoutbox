@@ -1,4 +1,4 @@
-// M16 — Box Cam sessions: server-owned identity, liveness, structured
+// Box Cam sessions: server-owned identity, liveness, structured
 // observation ingestion and server-derived results.
 //
 // Integrity model: the SERVER mints every Box Session (id + fresh nonce +
@@ -11,8 +11,8 @@
 // appear. Box Cam Verified can only originate here: an uploaded video can
 // never become `box_cam_observed`.
 //
-// S12b: a session is a row of repositories/boxCam.mjs. The nonce is stored only as its hash; the accepted
-// observations are appended as rows per batch (`sessions.recordBatch`) and read once, by finalize.
+// A session is a row of repositories/boxCam.mjs. The nonce is stored only as its hash; the accepted observations are
+// appended as rows per batch (`sessions.recordBatch`) and read once, by finalize.
 import crypto from 'node:crypto';
 import { isAdult } from '../../../domain.mjs';
 import {
@@ -61,7 +61,7 @@ export function registerBoxCamSessions(ctx) {
   const guardianOwnsChild = (g, id) => g.childIds.includes(id);
 
   // ----------------------------------------------------------- rate limits
-  // M18.1: the shared limiter and its named policy (see domains/platform/rateLimit.mjs).
+  // The shared limiter and its named policy (see domains/platform/rateLimit.mjs).
   const limited = (action, keyPart) => !!ctx.rateLimit?.limited(action, keyPart);
 
   const caps = (session) => {
@@ -93,7 +93,7 @@ export function registerBoxCamSessions(ctx) {
     provenanceLabel: s.verificationState === 'verified' ? 'Box Cam Verified' : s.verificationState === 'partially_verified' ? 'Captured by Box Cam' : null,
     provenanceDetail: s.verificationState && ['verified', 'partially_verified'].includes(s.verificationState) ? boxCamDetail(s) : null,
     createdAt: s.createdAt,
-    // The integrity facts are constants of every server-minted session (S12b: worked out, not stored).
+    // The integrity facts are constants of every server-minted session (worked out, not stored).
     ...(includeIntegrity ? { resultHash: s.resultHash ?? null, integrity: s.id ? { minted: 'server', drift: DRIFT_MS } : null, lastSeq: s.lastSeq, batches: s.batches } : {}),
   });
   ctx.boxSessionView = sessionView;
@@ -130,7 +130,7 @@ export function registerBoxCamSessions(ctx) {
   }
 
   // Server-owned session minting, shared with the At-Home Combine layer
-  // (M16.1) so a Combine Attempt binds to a REAL Box Cam session and inherits
+  // so a Combine Attempt binds to a REAL Box Cam session and inherits
   // every integrity property here — the client never mints a session. Returns
   // `{ session, nonce }`; the caller hands the nonce back once. It joins the
   // caller's unit of work (the attempt is written with it).
@@ -167,7 +167,7 @@ export function registerBoxCamSessions(ctx) {
     if (!drill.targetTypes.includes(t.type)) return res.status(400).json({ error: 'TARGET_TYPE_UNSUPPORTED', allowed: drill.targetTypes });
     const bounds = { duration: [60_000, 2 * 3_600_000], repetitions: [1, 2_000], sets: [1, 20] };
     const [min, max] = bounds[t.type];
-    // S12b: the value is a number as sent (a numeric string was accepted before).
+    // The value is a number as sent: a numeric string is refused.
     if (typeof t.value !== 'number' || !Number.isFinite(t.value) || t.value < min || t.value > max) return res.status(400).json({ error: 'TARGET_VALUE_INVALID', min, max });
 
     let assignment = null;
@@ -252,8 +252,7 @@ export function registerBoxCamSessions(ctx) {
           return res.status(422).json({ error: 'TIMESTAMP_OUT_OF_RANGE', field: k, maxMs });
         }
       }
-      // S12b: an event the engine cannot read is refused naming the field (it was dropped at finalize, or its
-      // quality read as 'good', before).
+      // An event the engine cannot read is refused naming the field, never dropped or read as good quality.
       const o = observationOf(e);
       if (o.kind === 'resume') {
         if (typeof o.atMs !== 'number') return res.status(400).json({ error: 'EVENT_INVALID', seq: n, field: 'atMs', message: 'A resume needs atMs.' });
@@ -341,9 +340,9 @@ export function registerBoxCamSessions(ctx) {
   }
 
   // Shared completion: finalize + notifications + the onSessionFinalized hook
-  // (which drives assignment/challenge AND — from M16.1 — Combine
-  // measurement). Both the Box Cam complete route and the At-Home Combine
-  // complete route call this, so there is one code path. One unit of work:
+  // (which drives assignment/challenge AND Combine measurement). Both the
+  // Box Cam complete route and the At-Home Combine complete route call this,
+  // so there is one code path. One unit of work:
   // the session, its assignment, entries, attempt, requests, ledger rows and
   // notifications commit together or not at all.
   function completeSession(sessionId, p) {

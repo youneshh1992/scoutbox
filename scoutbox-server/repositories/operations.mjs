@@ -1,6 +1,6 @@
 /**
- * S13e — the remaining operations collections as typed tables (migration `0038_operations`;
- * docs/architecture/migration.md §4.5 S13; sql/08_operations_integrations.sql).
+ * Operations: upload sessions, saved searches, invoices, the demo reputation seed and the delivery centre's
+ * bookkeeping.
  *
  * Records:
  *   - An upload session (`uploads`): a player's resumable upload (domains/media/uploads.mjs), the chunk numbers received
@@ -17,8 +17,8 @@
  *
  * Plans and archetypes are not tables: they are constants (catalogue.mjs).
  *
- * WRITES are explicit operations; every write joins the open unit of work, the caller's transaction or its own.
- * READS are SQL: no mirror. Fresh, deep-frozen records. Modules receive the queries as `operationsReads`.
+ * Every write joins the open unit of work, the caller's transaction or its own. Records are deep-frozen. Modules
+ * receive the queries as `operationsReads`.
  *
  * References. Organisations, staff and signings are RESTRICT keys. Player ids carry no key (an upload session goes
  * with the player explicitly; an invoice keeps its copy of the player's name: a billing record).
@@ -31,7 +31,7 @@ import { PLAYER_POSITIONS, PLAYER_FEET, PLAYER_AVAILABILITY } from './identity.m
 import { pageOf } from '../domains/platform/paging.mjs';
 
 export const OPERATIONS_MIGRATION = '0038_operations';
-/** The blob collections this repository replaced (lists; the whole-domain read returns them). */
+/** The collections the whole-domain read returns. */
 export const OPERATIONS_COLLECTIONS = Object.freeze(['uploadSessions', 'savedSearches', 'invoices', 'reputationSeed', 'deliveryCallbacksSeen']);
 
 // ------------------------------------------------------------------ vocabularies and limits (one definition)
@@ -184,7 +184,7 @@ const decodeSearch = (row) => {
 };
 const decodeReputation = (row) => ({ ...decode(REPUTATION_SPEC, row), seeded: true });
 
-// ------------------------------------------------------------------ snapshot (fixtures and the persistence batteries)
+// ------------------------------------------------------------------ whole-domain read (the test suites)
 export const operationsLive = (sqlite) => migrationApplied(sqlite, OPERATIONS_MIGRATION);
 function readAll(sqlite) {
   const all = (sql) => sqlite.prepare(sql).all();
@@ -219,7 +219,7 @@ const TYPED = {
   reputationSeed: (list, label) => typeList('reputationSeed', list, typeReputation, label, (r) => `${r.scoutName}|${r.orgName}`),
   deliveryCallbacksSeen: (list, label) => typeList('deliveryCallbacksSeen', list, (v, at) => (typeof v === 'string' && v.length > 0 && v.length <= L.callbackId ? { ok: true, record: v } : { ok: false, reason: `${at} is not a callback id (${describe(v)})` }), label, (v) => v),
 };
-/** The whole domain read back as plain records (`readAllRecords` in index.mjs: the test suites' read-back); null before its migration. */
+/** The whole domain read back as plain records (`readAllRecords` in index.mjs: the test suites' read-back). */
 export const OPERATIONS_RECORDS = {
   names: OPERATIONS_COLLECTIONS,
   read(sqlite) { return operationsLive(sqlite) ? readAll(sqlite) : null; },

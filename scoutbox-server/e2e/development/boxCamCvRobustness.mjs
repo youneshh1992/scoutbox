@@ -1,4 +1,4 @@
-// M22 — robustness regressions (fix pack §2–§32).
+// CV engine robustness regressions (§2–§32).
 //
 // These are permanent, named tests. The names are the contract: each one says
 // in a sentence what must stay true, so a future change that breaks it fails
@@ -73,7 +73,7 @@ section('session reset (§2)');
 section('pooled tracker reuse (§3, §4, §5)');
 // =========================================================================
 {
-  // The hazard the mandate singles out: the runtime RECYCLES the object
+  // The hazard that matters: the runtime RECYCLES the object
   // rather than allocating a new one. Object replacement must not be the
   // thing correctness depends on.
   const pooled = new ObservationRun({ eventKind: 'touch' });
@@ -117,7 +117,7 @@ section('concurrent session isolation (§6, §7, §8)');
   reg.create({ sessionId: 'sessB', eventKind: 'touch' });
   reg.create({ sessionId: 'sessC', eventKind: 'touch' });
 
-  // Round-robin, exactly as §6 prescribes: A1 B1 C1 A2 B2 C2 ...
+  // Round-robin: A1 B1 C1 A2 B2 C2 ...
   const streams = { sessA: VALID_TOUCHES, sessB: SHAKE, sessC: NO_BALL };
   const maxLen = Math.max(...Object.values(streams).map((s) => s.length));
   for (let i = 0; i < maxLen; i += 1) {
@@ -365,10 +365,10 @@ section('refractory boundaries (§25–§28)');
   // boundary is exercised exactly rather than approximately.
   const motionAt = (secondContactMs) => {
     const out = [];
-    // 1 ms granularity: the boundary must be representable. An earlier cut
-    // stepped 20 ms, so a contact scheduled at refractory±1 never landed on a
-    // sample — and the minus-1 case "passed" because there was no second
-    // impulse to suppress, which is not the same thing at all.
+    // 1 ms granularity: the boundary must be representable. At a coarser step
+    // a contact scheduled at refractory±1 never lands on a sample, and the
+    // minus-1 case "passes" only because there is no second impulse to
+    // suppress, which is not the same thing at all.
     for (let t = 0; t <= secondContactMs + 600; t += 1) {
       const isContact = t === 300 || t === 300 + secondContactMs;
       // After the first contact the ball is displaced, then returns — so the
@@ -420,7 +420,7 @@ section('refractory boundaries (§25–§28)');
     'time_alone_cannot_produce_a_second_touch',
     `count=${interpretTouches(noSeparation).events.length}`);
 
-  // §8 of the original pack, restated here: sustained contact counts once.
+  // Sustained contact counts once.
   const prolonged = (() => {
     const out = [];
     for (let t = 0; t <= 4000; t += 20) {

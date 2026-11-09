@@ -1,4 +1,4 @@
-// M18.2 pattern — destructive actions say what they actually do. Same
+// Destructive actions say what they actually do. Same
 // classes and the same browser-native confirm as Pro/Grassroots; the
 // catalogue is the Agent workspace's own three actions.
 import { t } from './i18n';

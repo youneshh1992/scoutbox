@@ -1,4 +1,4 @@
-// M15 LIVE browser journeys (P1–P8) — real backend, separate contexts, no
+// LIVE browser journeys (P1–P8) — real backend, separate contexts, no
 // demo bus. Assertions read page content, never just toasts.
 //   P1. Player: opens their Football Passport, adds a career entry with a
 //       year-only date, adds an achievement — everything renders with honest
@@ -137,26 +137,26 @@ await player.waitForSelector('text=Your visibility right now', { timeout: 20000 
 await player.click('a[href="/football"]');
 await player.waitForSelector('text=Football Passport', { timeout: 20000 });
 {
-  await player.locator('[data-testid="passport-about"]').first().click().catch(() => {}); // M24F.3 — the self-description sits behind About Passport
+  await player.locator('[data-testid="passport-about"]').first().click().catch(() => {}); // the self-description sits behind About Passport
   const body = await player.locator('body').innerText();
   if (!body.includes('Identity confirmed by ScoutBox review')) fail('P1: honest identity assurance missing');
   if (body.includes('Government identity verified')) fail('P1: over-claimed identity');
   if (!body.includes('not a rating of football ability')) fail('P1: passport self-description missing');
   say('P1: self passport renders with honest identity assurance and the no-rating note');
-  await player.locator('[data-testid="passport-achievements"] > [role="button"]').first().click(); // M24F.4 — Achievements is a row that opens
-  await player.locator('[data-testid="passport-add-achievement"]').first().click(); // M24F.3 — the form sits behind a Disclosure
+  await player.locator('[data-testid="passport-achievements"] > [role="button"]').first().click(); // Achievements is a row that opens
+  await player.locator('[data-testid="passport-add-achievement"]').first().click(); // the form sits behind a Disclosure
   await player.fill('input[placeholder="Achievement (e.g. League top scorer 2025)"]', 'County Cup Winner 2024');
-  await player.locator('[data-testid="passport-add-achievement"]').getByText('Add', { exact: true }).click(); // M24F.4 — the Add inside its own row
-  await player.waitForSelector('text=County Cup Winner 2024', { timeout: 15000 }); // M24F: the achievement carries a trophy icon, not a pictograph
+  await player.locator('[data-testid="passport-add-achievement"]').getByText('Add', { exact: true }).click(); // the Add inside its own row
+  await player.waitForSelector('text=County Cup Winner 2024', { timeout: 15000 }); // the achievement carries a trophy icon, not a pictograph
   say('P1: achievement added (player-submitted until a club confirms it)');
-  await player.locator('[data-testid="passport-history"] > [role="button"]').first().click(); // M24F.4 — Club history is a row that opens
-  await player.locator('[data-testid="passport-add-career"]').first().click(); // M24F.3 — the form sits behind a Disclosure
+  await player.locator('[data-testid="passport-history"] > [role="button"]').first().click(); // Club history is a row that opens
+  await player.locator('[data-testid="passport-add-career"]').first().click(); // the form sits behind a Disclosure
   await player.fill('input[placeholder="Club name"]', 'Sunday Kings FC');
   await player.fill('input[placeholder="From (e.g. 2019)"]', '2018');
-  await player.locator('[data-testid="passport-add-career"]').getByText('Add', { exact: true }).click(); // M24F.4 — the Add inside its own row
+  await player.locator('[data-testid="passport-add-career"]').getByText('Add', { exact: true }).click(); // the Add inside its own row
   await player.waitForSelector('text=Sunday Kings FC', { timeout: 15000 });
   const after = await player.locator('body').innerText();
-  if (!/Provided by player|Player supplied/.test(after)) fail('P1: player-provided provenance chip missing'); // M24F.3 — provenance words without glyphs
+  if (!/Provided by player|Player supplied/.test(after)) fail('P1: player-provided provenance chip missing'); // provenance words without glyphs
   say('P1: year-only career entry lands in club history with "Provided by player" provenance');
 }
 
@@ -169,7 +169,7 @@ await player.waitForSelector('text=Football Passport', { timeout: 20000 });
   await player.waitForSelector('text=Our promises to every player', { timeout: 30000 }).catch(() => {});
   await player.click('a[href="/football"]').catch(() => {});
   await player.waitForSelector('text=Football Passport', { timeout: 25000 });
-  await player.waitForSelector('[data-testid="passport-conflict"]', { timeout: 15000 }); await player.locator('[data-testid="passport-conflict"]').first().click(); // M24F.3 — the conflict is one line; the full text opens behind Review
+  await player.waitForSelector('[data-testid="passport-conflict"]', { timeout: 15000 }); await player.locator('[data-testid="passport-conflict"]').first().click(); // the conflict is one line; the full text opens behind Review
   await player.waitForSelector('text=confirmed as your current club', { timeout: 15000 });
   const body = await player.locator('body').innerText();
   if (!body.includes('Eastport FC')) fail('P5: authoritative current club not displayed');
@@ -180,10 +180,10 @@ await player.waitForSelector('text=Football Passport', { timeout: 20000 });
 {
   await j(`/org/verification/staff/${sam.userId}/departed`, { method: 'POST', body: JSON.stringify({}) }, bearer(maria.token));
   await player.reload();
-  // P2.5: coach references (M14) live on You › Clubs.
+  // Coach references live on You › Clubs.
   await player.click('a[href^="/you"]').catch(() => {});
   await player.getByRole('tab', { name: 'Clubs' }).click();
-  await player.getByRole('tab', { name: 'History' }).click(); // M24F.2: references sit in Clubs › History
+  await player.getByRole('tab', { name: 'History' }).click(); // references sit in Clubs › History
   await player.waitForSelector('text=Coach references', { timeout: 25000 });
   await player.waitForSelector('text=Coach affiliation was verified when this reference was submitted.', { timeout: 15000 });
   say('P4: after the coach departs, the reference shows its SNAPSHOT provenance — historical truth never rewritten');
@@ -192,10 +192,10 @@ await player.waitForSelector('text=Football Passport', { timeout: 20000 });
 // ================================================================ P6
 let kolaShareUrl = null;
 {
-  // P2.5: sharing lives on the Football Passport; P4 left the page on You › Clubs.
+  // Sharing lives on the Football Passport; P4 left the page on You › Clubs.
   await player.click('a[href="/football"]');
   await player.waitForSelector('text=Football Passport', { timeout: 25000 });
-  await player.locator('[data-testid="passport-share"]').first().click().catch(() => {}); // M24F.3 — sharing sits behind a Disclosure
+  await player.locator('[data-testid="passport-share"]').first().click().catch(() => {}); // sharing sits behind a Disclosure
   await player.getByText('Create public link', { exact: true }).click();
   await player.waitForSelector('text=/\\/passport\\/shared\\//', { timeout: 15000 });
   kolaShareUrl = (await player.locator('text=/\\/passport\\/shared\\//').first().innerText()).trim();
@@ -223,7 +223,7 @@ await club.waitForSelector('nav.sidebar', { timeout: 20000 });
 await club.evaluate(() => { location.hash = '#/search'; });
 await club.waitForSelector('.player-card:has-text("Kola Adeyemi")', { timeout: 20000 });
 {
-  // M24F.5 — the batch summary reads in the card's one quiet line, not as pills.
+  // The batch summary reads in the card's one quiet line, not as pills.
   await club.waitForSelector('.player-card:has-text("Kola Adeyemi") .player-quiet:has-text("Evidence:")', { timeout: 15000 });
   say('P2: search cards carry batch passport summary chips (one batch call, no N+1)');
   await club.click('.player-card:has-text("Kola Adeyemi")');
@@ -247,13 +247,13 @@ await guardian.goto('http://localhost:8491/');
 await guardian.waitForSelector('text=Our promises to every player', { timeout: 30000 });
 await guardian.locator('text=Enter').last().click(); // Amara (guardian, dev login)
 await guardian.waitForSelector('text=Guardian', { timeout: 20000 });
-// M24F.5 — the child's sections are rows on the guardian dashboard; open them before reading or acting inside.
+// The child's sections are rows on the guardian dashboard; open them before reading or acting inside.
 await guardian.waitForSelector('[data-testid^="guardian-child-"] > [role="button"]', { timeout: 25000 });
 { const closed = guardian.locator('[data-testid^="guardian-child-"] > [role="button"][aria-expanded="false"]'); for (let i = 0; i < 40 && (await closed.count()) > 0; i++) { await closed.first().click().catch(() => {}); await guardian.waitForTimeout(150); } }
 let guniRecSecret = null;
 {
   await guardian.waitForSelector('text=Football Passport — Guni Adebayo', { timeout: 25000 });
-  for (const t of ['passport-share', 'passport-about']) await guardian.locator(`[data-testid="${t}"]`).first().click().catch(() => {}); // M24F.3 — sharing and its wording sit behind Disclosures
+  for (const t of ['passport-share', 'passport-about']) await guardian.locator(`[data-testid="${t}"]`).first().click().catch(() => {}); // sharing and its wording sit behind Disclosures
   const gbody = await guardian.locator('body').innerText();
   if (!gbody.includes('controlled by you, the guardian')) fail('P3: guardian-controlled sharing wording missing');
   say("P3: guardian sees the child's passport; sharing is explicitly guardian-controlled");
@@ -319,7 +319,7 @@ await grass.waitForSelector('.player-card:has-text("Guni Adebayo")', { timeout: 
   await admin.fill('input[type="password"]', 'scoutbox-admin');
   await admin.click('button:has-text("Enter")');
   await admin.waitForSelector('nav.sidebar', { timeout: 20000 });
-  await admin.click('nav.sidebar button:has-text("Evidence")'); // M24D: Passport, Box Cam and Trust left Cases for Evidence
+  await admin.click('nav.sidebar button:has-text("Evidence")'); // Passport, Box Cam and Trust left Cases for Evidence
   await admin.click('nav.subnav button:has-text("Passport")');
   await admin.waitForSelector('text=Correction requests', { timeout: 15000 });
   await admin.waitForSelector('text=Joined in August', { timeout: 15000 });

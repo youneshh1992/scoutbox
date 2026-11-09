@@ -1,4 +1,4 @@
-// M20 LIVE browser journeys — the Director Dashboard, driven through the real
+// LIVE browser journeys — the Director Dashboard, driven through the real
 // Pro workspace against a real server.
 //
 // D1   a lead reaches the dashboard from inside Recruitment — no new sidebar
@@ -133,9 +133,9 @@ async function enterClub(ctx, org, name, role) {
 const tokenOf = (page) => page.evaluate(() => {
   try { return JSON.parse(localStorage.getItem('scoutbox-club-session') ?? 'null')?.token ?? null; } catch { return null; }
 });
-// M24F.5 — the dashboard root is the executive layer; the filters, the governing
-// sentence with the window, and every panel are one tap deeper. Open all three,
-// then assert exactly what M20 asserted.
+// The dashboard root is the executive layer; the filters, the governing
+// sentence with the window, and every panel are one tap deeper. Open all three
+// before asserting.
 async function openDash(page) {
   await page.waitForTimeout(500);
   for (const id of ['dash-more-filters', 'dash-about-toggle', 'dash-detail-toggle']) {
@@ -211,8 +211,7 @@ await goto(maria, DASH, '[data-screen="director-dashboard"]');
   // Inside Recruitment, not a section of its own.
   const nav = await maria.locator('nav.sidebar').innerText();
   ok(/Recruitment/i.test(nav), 'D1 the Recruitment section is present in the sidebar');
-  // The destination must not have earned a top-level section of its own: the
-  // sidebar's own top level is unchanged from before M20.
+  // The destination must not have earned a top-level section of its own.
   const topLevel = (nav.match(/\n/g) ?? []).length;
   ok(!/^\s*Director Dashboard\s*$/m.test(nav.split('Recruitment')[0] ?? ''),
     `D1 the Director Dashboard is not a new top-level sidebar item (${topLevel} sidebar lines)`);
@@ -374,7 +373,7 @@ await goto(maria, DASH, '[data-screen="director-dashboard"]');
 // ------------------------------------------------------------------ D10
 {
   await goto(maria, `${DASH}`, '[data-screen="director-dashboard"]');
-  // The fault-injection hook is the M18.2 mechanism, dev-only.
+  // The fault-injection hook (simulateFailure) is dev-only.
   const partial = await j('GET', '/org/recruitment-analytics?simulateFailure=coverage', undefined, MARIA);
   ok(partial.status === 200 && partial.body.partial === true,
     'D10 a family that cannot be computed still returns the page, with the failure named');

@@ -1,4 +1,4 @@
-// M16.2 org screen — the Trust Profile panel in the player drawer.
+// Org screen — the Trust Profile panel in the player drawer.
 //
 // The Trust Score is EVIDENCE CONFIDENCE: how strongly this player's football
 // record is supported by trustworthy, current, attributable evidence. It is

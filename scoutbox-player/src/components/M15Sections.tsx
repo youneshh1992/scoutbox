@@ -1,12 +1,12 @@
 import { GuidanceNote } from './InformationRows';
-// M15 — the Football Passport, player/guardian surface.
+// The Football Passport, player/guardian surface.
 // One server-built projection renders here: status with provenance, the
 // career timeline, club history (trials are never employment), evidence
 // summary, references, achievements, the non-shaming gap list, corrections
 // and revocable sharing. Adults manage their own shares; a minor's shares
 // are guardian-managed — the SERVER enforces all of it, this is only UI.
 //
-// M24F.3 — the root is the essentials: the verified status, the current
+// The root is the essentials: the verified status, the current
 // club, the availability, the evidence in one word, a short timeline. The
 // disclaimer sits behind "About Passport", a conflict behind "Review", the
 // counts behind "View evidence", provenance behind each event, and the three
@@ -150,7 +150,7 @@ export function FootballPassportSection({ actor, isMinor, childName }: { actor: 
   const coverage = pt(`m15cov_${p.completeness.evidenceCoverage}` as Parameters<typeof pt>[0]);
   const club = p.status.currentClub;
   const count = (n: number, one: Parameters<typeof pt>[0], many: Parameters<typeof pt>[0]) => n === 0 ? pt('m15noneYet') : n === 1 ? pt(one) : pt(many).replace('{n}', String(n));
-  // M24F.4 — the root is seven rows: the record line, three facts, then
+  // The root is seven rows: the record line, three facts, then
   // Timeline / Club history / Achievements / Share / About as rows that open.
   // The forms live inside the row they belong to (add an achievement under
   // Achievements, add a club and file a correction under Club history).

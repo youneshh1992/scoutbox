@@ -19,7 +19,7 @@ html = html.replace(/<script([^>]*)src="([^"]+)"([^>]*)><\/script>/g, (m, pre, s
   return `<script${isModule ? ' type="module"' : ''}>${esc(js)}</script>`;
 });
 
-// M24A — bundled fonts. The Player export refers to its Albert Sans faces by
+// Bundled fonts. The Player export refers to its Albert Sans faces by
 // asset path; a single-file demo has no /assets beside it, so each referenced
 // font becomes a data: URI inside the bundle (the portals inline theirs at
 // build time through Vite's assetsInlineLimit).
@@ -30,7 +30,7 @@ html = html.replace(/"(\/?assets\/[^"]+\.(ttf|woff2|otf))"/g, (m, ref, ext) => {
   return `"data:${mime};base64,${fs.readFileSync(file).toString('base64')}"`;
 });
 
-// M24E — the Inter variable faces (880 / 910 KB) are above Vite's inline
+// The Inter variable faces (880 / 910 KB) are above Vite's inline
 // limit, so the portal CSS refers to them as url(/assets/Inter-…ttf) (unquoted);
 // the same data: URI treatment applies to those references.
 html = html.replace(/url\((["']?)(\/?assets\/[^)"']+\.(ttf|woff2|otf))\1\)/g, (m, q, ref, ext) => {

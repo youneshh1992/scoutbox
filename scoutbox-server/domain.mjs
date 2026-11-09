@@ -20,25 +20,21 @@ export function adultAgeFor(country) {
 /**
  * Age in completed years on a given instant.
  *
- * M18.2: computed in UTC throughout. A date of birth is stored as a calendar
- * day ('YYYY-MM-DD'), which `new Date()` parses as UTC midnight; the previous
- * implementation then read it back through LOCAL getters, so in any
- * negative-offset timezone `getDate()` returned the day BEFORE the birthday
- * and every player was a day older or younger than they are around their
- * birthday. The container that runs the suites is UTC, which is why nothing
- * caught it. Birthday semantics: the player turns N at 00:00 UTC on the
+ * Computed in UTC throughout. A date of birth is stored as a calendar day
+ * ('YYYY-MM-DD'), which `new Date()` parses as UTC midnight; reading it back
+ * through LOCAL getters would put every birthday a day out in a
+ * negative-offset timezone. The suites run in UTC, so they would not notice.
+ * Birthday semantics: the player turns N at 00:00 UTC on the
  * birthday; a 29 February birthday counts on 1 March in a non-leap year.
  */
 /**
  * Age on a date, or NaN when the date of birth cannot be read.
  *
- * M23 P5.6F (F-8). `new Date(null)` is not an invalid date — it is the epoch, so
- * a record with `dob: null` used to compute as a 56-year-old and sail through
- * every adult gate on the platform. `0` and `false` did the same. Only
- * `undefined`, `''` and an unparseable string happened to fail closed, and they
- * did so by accident rather than by rule.
+ * `new Date(null)` is not an invalid date — it is the epoch, so a naive reading
+ * of `dob: null` (or `0`, or `false`) computes a 56-year-old who passes every
+ * adult gate on the platform. Unreadable must fail closed by rule.
  *
- * A missing date of birth is exactly the shape an IMPORTED record has: the M13
+ * A missing date of birth is exactly the shape an IMPORTED record has: the
  * prospect import treats dob as optional (domains/integrations/imports.mjs) and projects a
  * missing one as `dob: null`. So "age unknown" is a real state, and the only
  * safe reading of it is NOT "adult".
@@ -52,17 +48,15 @@ export function adultAgeFor(country) {
  * The one reading of a date of birth the platform accepts: a `YYYY-MM-DD`
  * string that names a day which EXISTS. Returns the normalised string, or null.
  *
- * M23 P5.6F review (F-12b). `new Date('2010-02-30')` is not an invalid date in
- * V8 — it rolls over to 2 March — so a format check alone let 30 February, 31
- * April and 29 February in a non-leap year through as readable dates, and the
- * platform created accounts with birthdays that do not exist. The round-trip
- * (`parse`, then print, then compare) is what catches a day that only exists
- * because the engine was polite about it. Month 13 never needed this: ISO
- * parsing already refuses it.
+ * `new Date('2010-02-30')` is not an invalid date in V8 — it rolls over to 2
+ * March — so a format check alone would let 30 February, 31 April and 29
+ * February in a non-leap year through as birthdays that do not exist. The
+ * round-trip (`parse`, then print, then compare) is what catches a day that
+ * only exists because the engine was polite about it.
  */
 export function parseDob(dob) {
-  // M23 P5.7: the shape, calendar and year-bound checks live in ONE place
-  // (temporal.mjs). This is the DOB name for that rule, kept for its callers.
+  // The shape, calendar and year-bound checks live in ONE place
+  // (temporal.mjs). This is the DOB name for that rule.
   const p = parseStrictDateOnly(dob);
   return p.ok ? p.value : null;
 }
@@ -173,7 +167,7 @@ export const TRUST = {
 /**
  * The profile-completeness figure ("profileSignal", served as the deprecated `trustScore`) from its five facts. The ONE
  * definition: `computeTrustScore` reads them off a record, and the identity repository off row counts to keep
- * `players.profile_signal` (S14i), which the directory sorts by.
+ * `players.profile_signal`, which the directory sorts by.
  */
 export function trustScoreFromFacts({ identityVerified, attendanceCount, trialReportCount, mediaCount, profileComplete }) {
   const t = TRUST;
@@ -233,7 +227,7 @@ export function validateTrialReport(report) {
 
 // --------------------------------------------------------------- Trial dates
 //
-// M23 P4A-D1. ONE validator for every date a Trial carries — the proposed
+// ONE validator for every date a Trial carries — the proposed
 // date, the alternative slots, the slot a family picks, a postponement. The
 // accepted syntax is a calendar date only, `YYYY-MM-DD`: a trial is booked on
 // a day, and the day is what the club, the family and the calendar export all
@@ -261,7 +255,7 @@ export const TRIAL_DETAIL_LIMITS = Object.freeze({ venue: 200, notes: 500, altSl
 export function parseTrialDate(input) {
   if (input === undefined || input === null || input === '') return { ok: true, value: null, t: null };
   const invalid = (why) => ({ ok: false, error: 'TRIAL_DATE_INVALID', message: `A trial date must be a calendar day written ${TRIAL_DATE_SYNTAX} (${why}).`, expected: TRIAL_DATE_SYNTAX });
-  // M23 P5.7: one DATE_ONLY parser for the platform; this keeps the Trial
+  // One DATE_ONLY parser for the platform (temporal.mjs); this keeps the Trial
   // vocabulary (its error code and its 2000–2100 bound) at the edge.
   const p = parseStrictDateOnly(input, { yearMin: TRIAL_DATE_YEAR_MIN, yearMax: TRIAL_DATE_YEAR_MAX });
   if (!p.ok) return invalid(p.why);
@@ -333,10 +327,9 @@ export function validateTrialDetails(input) {
 
 /**
  * The slot a family picks when accepting. Absent means "the proposed date";
- * anything else must be exactly one of the days the club offered (P4A-D12:
- * an unknown slot is refused, never silently swapped for the proposal). A
- * stored date that no longer parses (legacy rows written before the
- * validator existed) yields no date rather than a fabricated one.
+ * anything else must be exactly one of the days the club offered (an unknown
+ * slot is refused, never silently swapped for the proposal). A stored date
+ * that does not parse yields no date rather than a fabricated one.
  */
 export function chooseTrialSlot(details, chosenSlot) {
   const d = details && typeof details === 'object' ? details : {};

@@ -1,4 +1,4 @@
-// M24F.4/M24F.5 — captures + density metrics for the high-priority screens (Player 390 + widths, portals).
+// Captures + density metrics for the high-priority screens (Player 390 + widths, portals).
 // Usage (from e2e/, after buildDemos.mjs): node tools/captureScreens.mjs <outdir> <prefix> [player|portals|all]
 //   optional env: DEMO_DIR (default e2e/dist), PORT, CHROMIUM_PATH
 import http from 'node:http'; import fs from 'node:fs'; import path from 'node:path';

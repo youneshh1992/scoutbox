@@ -1,4 +1,4 @@
-// M16 org screens — coach-assigned Box Training in the player drawer.
+// Org screens — coach-assigned Box Training in the player drawer.
 // The coach assigns supported drills, sees Box Cam results (never footage),
 // and can publish Box Challenges. Honest wall copy when the standing gates
 // refuse (agency excluded, unverified/suspended orgs, radius, blocks).

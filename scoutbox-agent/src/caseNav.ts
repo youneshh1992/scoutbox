@@ -1,8 +1,8 @@
-// M24B — the Agent's case navigation: a CLIENT (one representation
+// The Agent's case navigation: a CLIENT (one representation
 // relationship) and a TRANSACTION workspace, each as category → subcategory.
 //
-// The agent's authorization is exactly as frozen in M23: every subcategory
-// here reads an endpoint the agent already had, and every one of those
+// Navigation adds no authorization: every subcategory here reads an
+// endpoint the agent already has, and every one of those
 // endpoints refuses on its own terms (client disclosure, scope, licence) at
 // read time. Nothing here exposes a club's assessment, decision rationale,
 // Room discussion, another client, or same-agency data without authorisation

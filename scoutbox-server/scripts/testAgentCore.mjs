@@ -1,13 +1,8 @@
-// S11a — the agent core (profiles, agency affiliations, representation agreements, agency settings) as typed tables
-// with explicit writes (repositories/agentCore.mjs, migration 0026). What this suite proves: the migration creates the
-// fifteen STRICT tables (no JSON column), empty on a fresh database, and removes the retired orgs.agencySettings facet;
-// the typers refuse junk with the record and field named (an unknown field, an unknown facet state or agreement status,
-// a facet filed under the wrong member association, a request entry that disagrees with its agreement, a minor);
-// each record is created whole and read back; an update keeps what never changes, writes a key once, never reopens an
-// ended membership, keeps a share's content and only grows the history; the queries answer what the routes need; a
-// client's removal leaves id-only tombstones; a rolled-back unit leaves nothing; and a
-// fixture written through the repository is typed, refuses a missing staff member and reads back what it wrote. Temporary databases
-// only; nothing touches DATA_DIR. Run with: npm test
+// The agent core (profiles, agency affiliations, representation agreements, agency settings;
+// repositories/agentCore.mjs, migration 0026): the STRICT tables, the typers' refusals (a minor included), records read
+// back whole, updates that keep what never changes and never reopen an ended membership, the routes' queries, a
+// client's removal leaving id-only tombstones, units of work and fixtures. Temporary databases only; nothing touches
+// DATA_DIR. Run with: npm test
 
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -67,7 +62,7 @@ function serverOpen(dir) {
 }
 
 // ------------------------------------------------------------- schema
-test('[schema] 0026 is registered after 0025, creates the fifteen STRICT tables (no JSON column), empty on a fresh database (S14g: the organisations have no facets to clean up)', () => {
+test('[schema] 0026 is registered after 0025, creates the fifteen STRICT tables (no JSON column), empty on a fresh database', () => {
   const ids = DATA_MIGRATIONS.map((m) => m.id);
   assert.equal(ids.indexOf(MIGRATION), ids.indexOf('0025_transitions_vouches') + 1);
   assert.equal(TABLES.length, 15);

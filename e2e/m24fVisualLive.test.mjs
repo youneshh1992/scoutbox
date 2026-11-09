@@ -1,11 +1,10 @@
-// M24F — live visual-quality journeys, in a real browser against the real
-// bundles and a live scoutbox-server: the Grassroots entry (its M24E scheme —
-// the blade-banded introduction, Inter, row hover, title-cased metadata), the
-// Grassroots LIGHT workspace (M24E: #E5F5E9, turf grain, pitch markings — the
-// M24F Sage palette was reverted at the Founder's direction), the Grassroots DARK workspace
-// unchanged against the frozen M24E values, the Agent entry fixed LIGHT with
-// the saved dark theme restored after sign-in, the Player's major routes and
-// the guardian's requests in their M24F composition, and the de-boxed Pro /
+// Live visual-quality journeys, in a real browser against the real
+// bundles and a live scoutbox-server: the Grassroots entry (the blade-banded
+// green introduction, Inter, row hover, title-cased metadata), the Grassroots
+// LIGHT workspace, the Grassroots DARK workspace unchanged against the frozen
+// dark-token fixture, the Agent entry fixed LIGHT with the saved dark theme
+// restored after sign-in, the Player's major routes and the guardian's
+// requests, and the de-boxed Pro /
 // Trust & Safety dense screens. Widths 390, 430, 1024, 1440. Zero page errors.
 //
 // Run from e2e/: node m24fVisualLive.test.mjs   (KEEP_DIST=1 reuses bundles)
@@ -81,7 +80,7 @@ async function enter(ctx, port, org, name, role, who) {
 
 // ================================================================== G — the Grassroots entry
 console.log('\n— G: the Grassroots entry —');
-// the Pro entry is the shared M24C/M24E scheme (brand-green page, soft-green introduction, deep-green form); Grassroots must match it again
+// the Pro entry is the shared scheme (brand-green page, soft-green introduction, deep-green form); Grassroots must match it again
 const proRef = await (async () => {
   const ctx = await ctxFor(1440); const page = watch(await ctx.newPage(), 'pro entry reference');
   await page.goto(`${origin(PORTS.club)}/`); await page.waitForSelector('.org-card', { timeout: 25000 });
@@ -118,7 +117,7 @@ for (const w of WIDTHS) {
     r.pitchRule = r.rules.some((t) => /\.login\.auth-page::before/.test(t) && !/data-app="grass"/.test(t));
     r.pitchHidden = r.rules.some((t) => /data-app="grass"\] \.login\.auth-page::before/.test(t));
     const tag = `Grassroots entry ${w}px (${saved} saved)`;
-    // The Founder's direction after M24F.2: the M24E green introduction again — no photograph anywhere.
+    // The Founder's direction: the green introduction — no photograph anywhere.
     ok(!r.photo && !r.formHasImage, `${tag}: no photograph anywhere on the entry (restored)`);
     ok(r.blades, `${tag}: the introduction carries the M24E blade-of-grass bands`);
     ok(w >= 721 ? r.promoLeftOfForm : r.promoAboveForm, `${tag}: the introduction is ${w >= 721 ? 'the LEFT panel' : 'stacked above the form'}`);
@@ -153,7 +152,7 @@ for (const w of [390, 1024, 1440]) {
     return { markings: rules.some((t) => t === ':root[data-app="grass"] .content::before') && rules.some((t) => t === ':root[data-app="grass"] .content::after'), theme: document.documentElement.getAttribute('data-theme'), content: cs(content).backgroundColor, contentImage: cs(content).backgroundImage, before: cs(content, '::before').content, sidebar: cs(document.querySelector('nav.sidebar')).backgroundColor, ink: cs(document.querySelector('.content')).color, serif: cs(document.querySelector('nav.sidebar .brand-sub') ?? document.querySelector('.crumb')).fontFamily, grass: [...document.styleSheets].some((s) => { try { return [...s.cssRules].some((r) => /grassroots-auth-grass/.test(r.cssText) && !/auth-promo/.test(r.selectorText ?? '')); } catch { return false; } }) };
   });
   const tag = `Grassroots light ${w}px`;
-  // M24F.2 — the light workspace follows the Founder's dashboard reference: cool canvas, navy sidebar, no pitch lines, no photograph.
+  // The light workspace follows the Founder's dashboard reference: cool canvas, navy sidebar, no pitch lines, no photograph.
   ok(r.content === 'rgb(247, 249, 252)' && r.sidebar === 'rgb(6, 56, 86)', `${tag}: the cool canvas and the navy sidebar (${r.content} / ${r.sidebar})`);
   ok(r.contentImage === 'none' && !r.markings, `${tag}: no turf grain and no pitch-marking rule behind the light workspace (${r.contentImage.slice(0, 40)})`);
   ok(r.ink === 'rgb(11, 28, 45)', `${tag}: the deep navy ink (${r.ink})`);

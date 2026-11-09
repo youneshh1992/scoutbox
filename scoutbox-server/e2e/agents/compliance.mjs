@@ -1,6 +1,6 @@
-// M23 P5.6C acceptance suite — ScoutBox Agent Conflict & Compliance Engine.
+// Agent Conflict & Compliance Engine battery.
 //
-// The governing principle this suite enforces (mandate §99): ScoutBox never
+// The governing principle this suite enforces: ScoutBox never
 // converts an agency relationship, a stale licence, an ambiguous rule, a
 // missing consent, an unsupported jurisdiction, a shared reviewer credential
 // or an old conflict check into authority to perform a regulated
@@ -8,16 +8,8 @@
 // attributable actor, current client authority, current policy, current
 // verification, current consent and current conflict state.
 //
-// Groups (mandate §76), pure first, then a real server:
-//   C policy versioning · D policy status · E jurisdiction resolution · F unsupported
-//   jurisdiction · G/H/I provider states · J representation scope · K–O conflict
-//   engine (CLEAR, consent, prohibited, review, connected) · P–S consent sufficiency
-//   · U/V/W minors gate · Z error contract
-//   A G-C0 attribution · B reviewer revocation · G/H/I provider over HTTP · R reviews
-//   · K–O contexts over HTTP · P–T consents, revocation, party change · U–W minors
-//   over HTTP · X blocks · Y tenant · Z privacy · AA rev · AB idempotency · AE
-//   audit/events · AF notifications · AJ tombstones · C/policy publication (dual
-//   control, historical snapshots) · the thirty adversarial cases (§77), numbered.
+// Pure groups first, then a real server. The adversarial cases are numbered (#n)
+// in their check labels.
 //
 // No assertion is `status !== 200`. Every refusal names the status and code.
 
@@ -44,7 +36,7 @@ import { pickPort } from '../../scripts/testPort.mjs';
 
 const SCHEMA_VERSION = Number(DATA_MIGRATIONS.map((m) => m.id).sort().at(-1).slice(0, 4));
 
-const PORT = pickPort(6500, 200, [0]); // TH-6: never a fetch-blocked port
+const PORT = pickPort(6500, 200, [0]); // never a fetch-blocked port
 const BASE = `http://localhost:${PORT}`;
 const DATA_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-m25-'));
 const SERVER = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'server.mjs');
@@ -251,12 +243,10 @@ section('Z — error contract, permissions, registry, notifications, rate polici
   for (const t of ['regulatory_review_required', 'regulatory_review_completed', 'regulatory_consent_requested', 'regulatory_consent_granted', 'regulatory_consent_declined', 'regulatory_consent_revoked', 'agent_verification_stale']) ok(TYPE_CATEGORY[t] === 'compliance', `AF1 notification ${t} → compliance category`);
   ok(CATEGORIES.compliance.mandatory === true && CATEGORIES.compliance.default === true, 'AF2 the compliance category is mandatory — a regulatory obligation cannot be muted');
   for (const [k, scope] of [['compliance_context_write', 'actor'], ['compliance_consent_request', 'actor'], ['compliance_consent_response', 'actor'], ['ts_review_decision', 'actor'], ['ts_policy_publish', 'actor']]) ok(RATE_LIMIT_POLICY[k]?.scope === scope && RATE_LIMIT_POLICY[k].max > 0, `Z8 rate policy ${k}`);
-  // S11b: the five stores are tables (migrations 0027 and 0028), not collections.
-  // Rewritten in S14a: these described the retired snapshot registry (step m250_001 at 2306) and the store contract.
   for (const s of ['tsReviewers', 'jurisdictionPolicies', 'regulatoryReviews', 'regulatoryConsents', 'complianceContexts']) ok(TABLE_BACKED.includes(s), `AD1 ${s} is a table of the compliance repositories, not a collection`);
   const compliance = [COMPLIANCE_POLICIES_MIGRATION, COMPLIANCE_RECORDS_MIGRATION];
   ok(compliance.every((id) => DATA_MIGRATIONS.filter((m) => m.id === id).length === 1) && SCHEMA_VERSION >= 28, 'AD2 exactly one migration each creates the compliance tables (0027, 0028), and the current schema is at or past them');
-  neg(![...COMPLIANCE_POLICIES_TABLES, ...COMPLIANCE_RECORDS_TABLES].some((t) => /transaction|offer|signing|invoice/i.test(t)), 'AD3 the compliance migrations create no transaction, offer, signing or invoice table — P5.6C owns evaluation, not the Transaction Room');
+  neg(![...COMPLIANCE_POLICIES_TABLES, ...COMPLIANCE_RECORDS_TABLES].some((t) => /transaction|offer|signing|invoice/i.test(t)), 'AD3 the compliance migrations create no transaction, offer, signing or invoice table — compliance owns evaluation, not the Transaction Room');
   ok(COMPLIANCE_AUDIT_ACTIONS.has('regulatory_review_resolved') && COMPLIANCE_AUDIT_ACTIONS.has('regulatory_consent_revoked') && !COMPLIANCE_AUDIT_ACTIONS.has('offer_made'), 'AE3 the audit projection lists review, consent and context actions and no offer action');
 }
 function TIERS_ALL() { return ['licensed_agent', 'agency_admin', 'analyst', 'assistant', 'finance']; }
@@ -297,7 +287,7 @@ const collect = (label, r) => { if (r.status >= 400) ERROR_BODIES.push({ label, 
 section('A — G-C0: reviewer identity is authenticated, derived by the server, and never the shared key');
 let PRIYA, MARCUS, LEA;
 {
-  ok((await j('GET', '/healthz')).body.schemaVersion === SCHEMA_VERSION && SCHEMA_VERSION >= 28, `A0 schema ${SCHEMA_VERSION} (P5.6C requires the compliance tables, 0028)`);
+  ok((await j('GET', '/healthz')).body.schemaVersion === SCHEMA_VERSION && SCHEMA_VERSION >= 28, `A0 schema ${SCHEMA_VERSION} (the compliance tables need 0028)`);
   neg(expect(collect('A1', await j('GET', '/ts/compliance/reviews', undefined, null, ADMIN)), 401, 'REVIEWER_AUTH_REQUIRED'), 'A1 the shared admin key alone gets no reviewer lane (#1)');
   neg(expect(collect('A2', await j('POST', '/ts/compliance/reviews/rrv-1/resolve', { outcome: 'APPROVED' }, null, ADMIN)), 401, 'REVIEWER_AUTH_REQUIRED'), 'A2 …and cannot resolve anything');
   PRIYA = (await reviewerLogin('tsr-dev-admin', 'dev-reviewer-admin')).body;
@@ -583,7 +573,7 @@ let CTX3, CTX3_REVIEW;
   CTX3_REVIEW = ind.body.reviewId;
   neg((await j('GET', `/org/agent/compliance/contexts/${CTX3}`, undefined, ANA.token)).body.context.representations.filter((r) => r.status !== 'withdrawn').length === 1, 'N12 nothing was recorded for Mateus');
   neg(expect(collect('N13', await j('POST', `/org/agent/compliance/contexts/${CTX3}/consents/request`, { partyRole: 'individual', fullParticularsProvided: true, legalAdviceOffered: true }, ANA.token)), 422, 'REGULATORY_REVIEW_REQUIRED'), 'N13 consent cannot be requested under an uncertain rule — consent would not cure it');
-  neg(expect(collect('N14', await j('POST', `/ts/compliance/reviews/${CTX3_REVIEW}/resolve`, { outcome: 'APPROVED', reasonCode: 'looks_fine', reason: 'Seems permitted.', evidenceRefs: ['FAQ'] }, PRIYA.token)), 409, 'REVIEW_REQUIRES_POLICY_VERSION'), 'N14 a reviewer cannot approve past an uncertain rule: only a published policy version can settle it (§37)');
+  neg(expect(collect('N14', await j('POST', `/ts/compliance/reviews/${CTX3_REVIEW}/resolve`, { outcome: 'APPROVED', reasonCode: 'looks_fine', reason: 'Seems permitted.', evidenceRefs: ['FAQ'] }, PRIYA.token)), 409, 'REVIEW_REQUIRES_POLICY_VERSION'), 'N14 a reviewer cannot approve past an uncertain rule: only a published policy version can settle it');
   const rv = await j('GET', `/ts/compliance/reviews/${CTX3_REVIEW}`, undefined, PRIYA.token);
   ok(rv.body.review.status === 'PENDING' && rv.body.review.policyVersions.join() === 'jp-fifa-2025-1' && rv.body.review.snapshot.outcome === 'MANUAL_REGULATORY_REVIEW_REQUIRED', 'N15 the review item preserves the evaluation snapshot and the policy version it was made under');
   // Connected agents: Dan's context on the same transaction.
@@ -738,7 +728,7 @@ section('policy — dual-control publication; historical snapshots keep their ve
   ok(expect(ind, 422, 'CONSENT_REQUIRED') && ind.body.policyVersions.join() === 'jp-fifa-2025-2', 'C23 E16 over HTTP: what was "manual review" under v1 is "consent required" under v2 — a data change, not code');
   const db = readRecords(DATA_DIR);
   const ctx = db.complianceContexts.find((c) => c.id === CTX3);
-  ok(ctx.evaluations[0].policyVersions.join() === 'jp-fifa-2025-1' && ctx.evaluations.at(-1).policyVersions.join() === 'jp-fifa-2025-2' && ctx.evaluations.every((e) => e.inputHash && e.ruleStatuses), 'C24 the earlier evaluation rows keep v1 and their rule statuses; the latest names v2 (§80)');
+  ok(ctx.evaluations[0].policyVersions.join() === 'jp-fifa-2025-1' && ctx.evaluations.at(-1).policyVersions.join() === 'jp-fifa-2025-2' && ctx.evaluations.every((e) => e.inputHash && e.ruleStatuses), 'C24 the earlier evaluation rows keep v1 and their rule statuses; the latest names v2');
   const oldReview = await j('GET', `/ts/compliance/reviews/${CTX3_REVIEW}`, undefined, PRIYA.token);
   ok(oldReview.body.review.policyVersions.join() === 'jp-fifa-2025-1' && oldReview.body.review.status === 'PENDING', 'C25 the pending review still records the version it was raised under');
   const rej = await j('POST', `/ts/compliance/reviews/${CTX3_REVIEW}/resolve`, { outcome: 'REJECTED', reasonCode: 'superseded_by_policy', reason: 'jp-fifa-2025-2 settles the question; the item is closed.' }, LEA.token);

@@ -1,34 +1,31 @@
 /**
- * M23 — the recruitment evidence provider.
+ * The recruitment evidence provider.
  *
  * A lifecycle status that asserts a durable football-business fact must be
  * supported by a record that independently establishes it. This module is the
  * only thing that answers "does that record exist?", and it answers from
  * canonical stores it does not own and never writes.
  *
- * THE DIRECTION OF CAUSATION, WHICH IS THE WHOLE POINT (§17)
+ * THE DIRECTION OF CAUSATION, WHICH IS THE WHOLE POINT
  *
  *   signing truth  ->  lifecycle
  *   lifecycle      -/-> signing truth
  *
- * `db.signings` is not lifecycle bookkeeping. Creating one issues a success-fee
+ * A signing is not lifecycle bookkeeping. Creating one issues a success-fee
  * invoice, moves the player's level, sets `contractStatus: 'under_contract'`
- * and adds them to a squad. So M23 reads signings and never writes them: a
+ * and adds them to a squad. So the lifecycle reads signings and never writes them: a
  * recruitment status can follow a signing, but no recruitment status may cause
  * one. If that were reversed, moving a case on a screen would bill a club.
  *
- * WHAT IS DELIBERATELY NOT ANSWERABLE YET
- *
- * Trial and Offer evidence belong to phases that have not shipped. Their kinds
- * answer `not_implemented`, which refuses the transition. That is the honest
- * state: the product cannot prove those things happened, so it does not let
- * the lifecycle claim they did. `contact_delivered` is answered from P3's
- * Contact store, and in the same direction: contact truth -> lifecycle.
+ * Contact, Trial, Decision and Offer evidence run in the same direction
+ * (record truth -> lifecycle). A kind this provider cannot answer gets
+ * `not_implemented`, which refuses the transition: the product cannot prove
+ * it happened, so it does not let the lifecycle claim it did.
  */
 
 import { CONTACT_EVIDENCE_STATUSES, contactIntegrity } from './contact.mjs';
 import { trialIntegrity, deriveWorkflowState } from './trial.mjs';
-// M23 P6 — the Offer domain's pure evidence predicate. The lifecycle asks; the
+// The Offer domain's pure evidence predicate. The lifecycle asks; the
 // Offer store answers; nothing here writes an Offer or a status.
 import { offerEvidence } from '../offers/offer.mjs';
 
@@ -38,7 +35,7 @@ const OFFER_EVIDENCE_KINDS = Object.freeze(['offer_sent', 'offer_accepted_by_rec
 export const EVIDENCE_KINDS = Object.freeze([
   'contact_delivered',
   'trial_invited',
-  // M23 P5 — the ONE decision-shaped kind: a finalized formal decision to progress.
+  // The ONE decision-shaped kind: a finalized formal decision to progress.
   'decision_progress',
   'trial_confirmed',
   'trial_completed',
@@ -50,7 +47,7 @@ export const EVIDENCE_KINDS = Object.freeze([
 
 /**
  * Is this signing record usable as proof that THIS case's player joined THIS
- * club? (§15)
+ * club?
  *
  * Three independent checks, because each closes a different hole:
  *   - same organisation — a rival's signing is not this club's business
@@ -62,17 +59,17 @@ function signingSupports(signing, kase, packages = null) {
   if (signing.orgId !== kase.orgId) return false;
   if (signing.playerId !== kase.playerId) return false;
   if (signing.cancelledAt || signing.revokedAt || signing.voidedAt) return false;
-  // M23 P7.1 (§32): a row that names a signing package is evidence only if that package exists, is COMPLETED and names
-  // this row back — a row planted beside a live package proves nothing. A legacy row (no package) keeps its meaning.
+  // A row that names a signing package is evidence only if that package exists, is COMPLETED and names
+  // this row back — a row planted beside a live package proves nothing. A row with no package is judged below.
   if (signing.signingPackageId) {
     const pkg = Array.isArray(packages) ? packages.find((x) => x && x.id === signing.signingPackageId) ?? null : null;
     if (!pkg || pkg.status !== 'COMPLETED' || pkg.completion?.signingId !== signing.id || pkg.orgId !== kase.orgId || pkg.playerId !== kase.playerId) return false;
-    // M23 P8 (§9/§52): a canonical package proves the case it was opened on,
+    // A canonical package proves the case it was opened on,
     // not another case of the same club and player.
     if (pkg.caseId !== kase.id) return false;
     return true;
   }
-  // M23 P8: a LEGACY row (no package) proves a joining only for a case that
+  // A row with no package proves a joining only for a case that
   // existed when it was recorded. A historical row from years before this
   // case was opened is not this case's outcome.
   const ts = Number(signing.ts); const opened = Number(kase.createdAt);
@@ -83,8 +80,8 @@ function signingSupports(signing, kase, packages = null) {
 /**
  * Build the provider over a live database.
  *
- * `reads` carries the recruitment domains that are read through SQL rather than
- * `db` (§4.3 step 2): `contacts` and `offers` (the contacts/offers repository),
+ * `reads` carries the recruitment repositories' queries:
+ * `contacts` and `offers` (the contacts/offers repository),
  * `signings` and `signingPackages` (the signings repository), `requests` and `trials`
  * (the recruitment repository), `decisions` (the recruitment-cases repository). A missing one is a
  * broken composition, answered as an unavailable store, never as "no record".
@@ -100,7 +97,7 @@ export function createEvidenceProvider(reads = {}) {
      */
     check(kind, { kase, now: at } = {}) {
       // The lifecycle passes its own clock; a caller that passes none gets
-      // the real one. A P6 Offer expiry is judged at THIS instant (§48).
+      // the real one. An Offer expiry is judged at THIS instant.
       const now = Number.isFinite(at) ? at : Date.now();
       if (!EVIDENCE_KINDS.includes(kind)) {
         // An unknown kind is a bug in the caller, not a business answer.
@@ -110,7 +107,7 @@ export function createEvidenceProvider(reads = {}) {
       if (!kase) return { satisfied: false, reason: 'no_case' };
 
       if (kind === 'confirmed_join') {
-        // The D2 lesson: a missing store is not "no signings". If the
+        // A missing store is not "no signings". If the
         // queries are absent the composition is broken, and answering
         // "unsatisfied" would be indistinguishable from answering truthfully.
         if (typeof reads.signings?.forOrgPlayer !== 'function') return { satisfied: false, reason: 'signings_store_unavailable' };
@@ -123,7 +120,7 @@ export function createEvidenceProvider(reads = {}) {
       }
 
       if (kind === 'contact_delivered') {
-        // P3. The contract (§3): a contact record exists for THIS org and
+        // A contact record exists for THIS org and
         // THIS player, is not cancelled, and reached a state that means the
         // recipient could have received it — delivered in-app, answered, or
         // recorded as having happened outside ScoutBox. A draft is not
@@ -137,11 +134,11 @@ export function createEvidenceProvider(reads = {}) {
           : { satisfied: false, reason: 'no_contact_delivered' };
       }
 
-      // ---- P4B Trial evidence. Same direction as every other kind: trial
+      // ---- Trial evidence. Same direction as every other kind: trial
       // truth -> lifecycle. The provider reads the requests and trials of the
       // case (`reads.requests`, `reads.trials`) and writes nothing.
       if (kind === 'trial_invited') {
-        // D-3: an authorised invitation that was actually delivered — a
+        // An authorised invitation that was actually delivered — a
         // request row of type `trial` FOR THIS CASE (caseId on the request),
         // issued through the single request writer, still pending or
         // accepted. A declined or suspended invitation proves nothing; a
@@ -157,12 +154,12 @@ export function createEvidenceProvider(reads = {}) {
       }
 
       if (kind === 'trial_confirmed' || kind === 'trial_completed') {
-        // D-4 / D-5. A Trial row for THIS case, structurally sound, whose
+        // A Trial row for THIS case, structurally sound, whose
         // stored operational state matches what its own fields derive.
         // `legacy_accepted` never satisfies `trial_confirmed` (no confirmed
         // schedule exists) and `reported` never satisfies `trial_completed`
         // (a report is not completion). A tombstoned trial still answers —
-        // history stays honest after the person left (D-26).
+        // history stays honest after the person left.
         if (typeof reads.trials?.forCase !== 'function') return { satisfied: false, reason: 'trials_store_unavailable' };
         const own = reads.trials.forCase(kase.id).filter((t) => t && t.caseId === kase.id && t.orgId === kase.orgId && t.playerId === kase.playerId
           && trialIntegrity(t, { orgId: kase.orgId, caseId: kase.id }).length === 0);
@@ -178,10 +175,9 @@ export function createEvidenceProvider(reads = {}) {
           : { satisfied: false, reason: 'no_completed_trial' };
       }
 
-      // ---- P5 Decision evidence. The ONE widening P5 makes: `offer_consideration`
-      // now needs a FINALIZED formal decision to progress (mandate §56). A draft
-      // is not a decision; a superseded decision no longer speaks; an advisory
-      // M17 recommendation is not a formal decision. Same direction as every
+      // ---- Decision evidence. `offer_consideration` needs a FINALIZED formal
+      // decision to progress. A draft is not a decision; a superseded decision
+      // does not speak; an advisory recommendation is not a formal decision. Same direction as every
       // other kind: decision truth -> lifecycle; nothing written.
       if (kind === 'decision_progress') {
         if (typeof reads.decisions?.forRoom !== 'function') return { satisfied: false, reason: 'decisions_store_unavailable' };
@@ -192,8 +188,8 @@ export function createEvidenceProvider(reads = {}) {
           : { satisfied: false, reason: 'no_finalized_progress_decision' };
       }
 
-      // ---- P6 Offer evidence. Answered from the canonical Offer store through
-      // a pure predicate owned by the Offer domain (domains/recruitment/offers/offer.mjs): an ISSUED
+      // ---- Offer evidence. Answered from the canonical Offer store through
+      // a pure predicate owned by the Offer domain (offers/offer.mjs): an ISSUED
       // revision satisfies `offer_sent`; a response row on that revision, by
       // the recipient the revision was addressed to, satisfies the accepted
       // or declined kind. A draft is not an Offer sent; a club user naming

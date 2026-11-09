@@ -1,24 +1,13 @@
 /**
- * M18.1 — rate limiting: one provider, one policy table, one honest capability.
+ * Rate limiting: one provider, one policy table, one honest capability.
  *
- * Before this there were six independent limiters: the adapter's IP limiter on
- * /auth, plus five copy-pasted `limited(key, max, windowMs)` helpers with their
- * own Maps in Combine, Box Cam sessions, Rooms, Nobody Missed and Second Look.
- * Every limit was a number written inline at the call site, so nobody could
- * answer "what are we actually limiting, and to what?" without grepping.
- *
- * Two things are fixed here and one is deliberately NOT:
- *
- *   fixed — every limited action is named once in POLICY below, with its
- *   window and its scope, so the answer to that question is one file;
- *   fixed — consumption goes through a provider interface, so a shared backend
- *   can be added later without touching a single call site;
- *   NOT fixed — there is no shared backend today. The memory provider counts
- *   per process, which is correct for development, demo and a single instance
- *   and WRONG for several instances behind a load balancer, where each one
- *   would allow the full quota. The capability report says exactly that
- *   (`distributed_rate_limit: not_configured`) rather than implying protection
- *   that does not exist.
+ * Every limited action is named once in RATE_LIMIT_POLICY with its window and
+ * scope, and consumption goes through a provider interface so a shared backend
+ * can be added without touching call sites. There is no shared backend today:
+ * the memory provider counts per process, which is correct for a single
+ * instance and WRONG behind a load balancer, where each instance allows the
+ * full quota. The capability report says so (`not_configured`) rather than
+ * implying protection that does not exist.
  */
 
 /**
@@ -48,7 +37,7 @@ export const RATE_LIMIT_POLICY = {
   // full scan of the organisation's recruitment records.
   analytics_read: { max: 600, windowMs: 3_600_000, scope: 'org', note: 'Recruitment analytics dashboard reads.' },
 
-  // M21 Development Hub. Scoped to the ACTOR rather than the organisation,
+  // Development Hub. Scoped to the ACTOR rather than the organisation,
   // because a plan has three possible authors — a player, a guardian and club
   // staff — and an org-scoped limit would let a busy club exhaust a quota a
   // player then hits. Deliberately generous on items: ticking off a session's
@@ -64,7 +53,7 @@ export const RATE_LIMIT_POLICY = {
   box_session_create: { max: 30, windowMs: 3_600_000, scope: 'player', note: 'Box Cam capture sessions.' },
   box_dispute: { max: 5, windowMs: 3_600_000, scope: 'player', note: 'Box Cam result disputes.' },
 
-  // M22 production CV (§40). THREE separate policies, because the three
+  // Production CV. THREE separate policies, because the three
   // actions cost wildly different things and one shared limit would be tuned
   // for the wrong one.
   //
@@ -84,7 +73,7 @@ export const RATE_LIMIT_POLICY = {
   box_cv_finalize: { max: 80, windowMs: 3_600_000, scope: 'player', note: 'Production CV finalization.' },
   box_cv_ready_check: { max: 120, windowMs: 3_600_000, scope: 'player', note: 'Box Cam CV Ready Check runs.' },
 
-  // M23 P3 Contact. Sends are the abuse-sensitive one: a message reaches a
+  // Contact. Sends are the abuse-sensitive one: a message reaches a
   // real person, or a guardian on a child's behalf. Drafts and external
   // records stay inside the organisation and are limited only to bound a
   // runaway client. The response limit is per ACTOR (a player or guardian),
@@ -96,7 +85,7 @@ export const RATE_LIMIT_POLICY = {
   contact_external_record: { max: 60, windowMs: 3_600_000, scope: 'org', note: 'External contacts recorded.' },
   contact_response: { max: 30, windowMs: 3_600_000, scope: 'actor', note: 'Responses to contacts.' },
 
-  // M23 P4B Trial. Invitations reach a real person (or a guardian on a
+  // Trial. Invitations reach a real person (or a guardian on a
   // child's behalf) and are the abuse-sensitive one; scheduling, attendance
   // and evidence links stay inside the organisation and are bounded only
   // against a runaway client. Responses are per ACTOR, so a busy club cannot
@@ -105,18 +94,18 @@ export const RATE_LIMIT_POLICY = {
   trial_invite: { max: 30, windowMs: 3_600_000, scope: 'org', note: 'Trial invitations sent to players and guardians.' },
   trial_schedule: { max: 60, windowMs: 3_600_000, scope: 'org', note: 'Trial schedules proposed, revised or cancelled.' },
   trial_response: { max: 30, windowMs: 3_600_000, scope: 'actor', note: 'Trial schedule confirmations, declines and cancellations by a player or guardian.' },
-  // M23 P6 — Offer. Drafting and revising are quiet club work (one budget, so
-  // an alias cannot double it — the F-11 lesson); issuing and withdrawing are
+  // Offer. Drafting and revising are quiet club work (one budget, so an alias
+  // route cannot double it); issuing and withdrawing are
   // outward acts with a person on the other end and get a tighter budget;
   // a recipient's answers are keyed by the person answering, never by the
   // player the Offer names (a guardian answering for two children is one
-  // person). The "one live Offer per case" rule in m28 is deterministic and
-  // separate from these limits.
+  // person). The "one live Offer per case" rule (domains/recruitment/offers) is
+  // deterministic and separate from these limits.
   offer_draft_write: { max: 120, windowMs: 3_600_000, scope: 'org', note: 'Offer drafts created, edited or revised.' },
   offer_issue: { max: 30, windowMs: 3_600_000, scope: 'org', note: 'Offers issued to players and guardians.' },
   offer_withdraw: { max: 30, windowMs: 3_600_000, scope: 'org', note: 'Offers withdrawn.' },
   offer_response: { max: 30, windowMs: 3_600_000, scope: 'actor', note: 'Offer acceptances and declines by a player or guardian.' },
-  // M23 P7 — the signing workflow. Club acts share one budget per organisation
+  // The signing workflow. Club acts share one budget per organisation
   // per action family; a party's own completion is per person. Closure acts
   // (cancel, void, complete) sit on their own budget so a busy club is never
   // starved of the act that ends a signing.
@@ -127,32 +116,32 @@ export const RATE_LIMIT_POLICY = {
   signing_safety_closure: { max: 60, windowMs: 3_600_000, scope: 'org', note: 'Signings cancelled or voided by the club: a safety closure with its own budget, so completion traffic cannot exhaust it (P7.1 §68).' },
   trial_evidence_link: { max: 60, windowMs: 3_600_000, scope: 'org', note: 'Box Cam sessions linked to a Trial.' },
   trial_attendance: { max: 120, windowMs: 3_600_000, scope: 'org', note: 'Trial attendance and completion records.' },
-  // M23 P5 — formal recruitment decisions. Drafting is cheap and frequent;
+  // Formal recruitment decisions. Drafting is cheap and frequent;
   // finalizing is the recruitment act itself.
   decision_draft: { max: 60, windowMs: 3_600_000, scope: 'org', note: 'Decision drafts opened or edited.' },
   decision_finalize: { max: 30, windowMs: 3_600_000, scope: 'org', note: 'Formal recruitment decisions finalized or superseded.' },
 
-  // M23 P5.6B ScoutBox Agent core. Relationship requests are solicitations of
-  // a person and are the abuse-sensitive one: per ACTOR (the licensed
-  // individual), per day, and separate from the deterministic per-player
-  // cooldown in m24. Lookups are bounded against enumeration.
+  // ScoutBox Agent core. Relationship requests are solicitations of a person
+  // and are the abuse-sensitive one: per ACTOR (the licensed individual), per
+  // day, and separate from the deterministic per-player cooldown in
+  // domains/agents/core. Lookups are bounded against enumeration.
   agent_representation_request: { max: 40, windowMs: 86_400_000, scope: 'actor', note: 'Representation relationship requests that reach a player lookup (malformed input and the agent\'s own verification refusals do not count).' },
   agent_player_lookup: { max: 120, windowMs: 3_600_000, scope: 'actor', note: 'Player lookups from the Agent workspace.' },
   agent_profile_write: { max: 60, windowMs: 3_600_000, scope: 'actor', note: 'Agent profile edits and verification submissions.' },
   agent_affiliation_write: { max: 60, windowMs: 3_600_000, scope: 'org', note: 'Agency team and settings changes.' },
   agent_client_response: { max: 30, windowMs: 3_600_000, scope: 'actor', note: 'Relationship confirmations, declines, terminations and disputes by a player.' },
-  // M23 P5.6C Conflict & Compliance Engine.
+  // Conflict & Compliance Engine.
   compliance_context_write: { max: 60, windowMs: 3_600_000, scope: 'actor', note: 'Compliance context creation, party additions and representation declarations by a licensed agent.' },
   compliance_consent_request: { max: 30, windowMs: 3_600_000, scope: 'actor', note: 'Consent requests sent to parties by a licensed agent.' },
   compliance_consent_response: { max: 30, windowMs: 3_600_000, scope: 'actor', note: 'Consent grants, declines and revocations by a party.' },
   ts_review_decision: { max: 120, windowMs: 3_600_000, scope: 'actor', note: 'Attributed Trust & Safety review decisions.' },
   ts_policy_publish: { max: 10, windowMs: 86_400_000, scope: 'actor', note: 'Policy version proposals by a Trust & Safety administrator.' },
-  // M23 P5.6D Agent Transaction Workspace.
+  // Agent Transaction Workspace.
   transaction_write: { max: 60, windowMs: 3_600_000, scope: 'actor', note: 'Transaction creation, party changes, representation bindings, terms and re-evaluations by a licensed agent.' },
   transaction_status_write: { max: 60, windowMs: 3_600_000, scope: 'actor', note: 'Transaction status transitions and party confirmations.' },
   transaction_document_write: { max: 120, windowMs: 3_600_000, scope: 'actor', note: 'Transaction document metadata by any party to a transaction.' },
   transaction_note_write: { max: 120, windowMs: 3_600_000, scope: 'actor', note: 'Scoped transaction notes by any party to a transaction.' },
-  // M23 P5.6E cross-app integration. Both writes reach a PERSON with a
+  // Cross-app integration. Both writes reach a PERSON with a
   // notification, and both can be repeated: a share can be withdrawn and a new
   // one made, and a handoff invitation can be withdrawn and re-issued (only
   // 'invited' and 'accepted' block a new one, by design — a club must be able to
@@ -163,9 +152,9 @@ export const RATE_LIMIT_POLICY = {
   opportunity_share: { max: 60, windowMs: 3_600_000, scope: 'actor', note: 'Opportunities an agent shares with a client, and withdrawals of them.' },
   transaction_handoff: { max: 30, windowMs: 3_600_000, scope: 'org', note: 'Transaction-workspace invitations a club issues from a recruitment case, and withdrawals of them.' },
 
-  // M23 P5.6F — credential guessing, per identifier.
+  // Credential guessing, per identifier.
   //
-  // `app.use('/auth', authLimiter)` (M7, adapters.mjs) already throttles the
+  // `app.use('/auth', authLimiter)` (server.mjs) already throttles the
   // whole /auth surface at 40/min per IP, and that stays. What it cannot do is
   // bound guessing against ONE account: an attacker spread across addresses gets
   // 40/min from each, while a shared-NAT office shares a single bucket. Worse,
@@ -177,7 +166,7 @@ export const RATE_LIMIT_POLICY = {
   // guess is WRONG, and keyed by the identifier that was tried.
   login_failure: { max: 20, windowMs: 900_000, scope: 'actor', note: 'Failed sign-in attempts, per identifier tried. A successful sign-in costs nothing.' },
 
-  // S6a one-time codes (repositories/oneTimeCodes.mjs). The four are complements
+  // One-time codes (repositories/oneTimeCodes.mjs). The four are complements
   // of the per-IP `/auth` limiter and of the row-level attempt count on an e-mail
   // challenge: a request that mints or sends is bounded per owner; a guess is
   // charged only when it is WRONG (a correct code costs nothing, as a correct
@@ -202,15 +191,13 @@ export function memoryRateLimitProvider() {
     consume(key, max, windowMs, now = Date.now()) {
       const b = buckets.get(key);
       if (!b || now - b.start > windowMs) {
-        // M23 P8.1 (D-P81-5): the memory bound EVICTS, it never resets. The
-        // old rule cleared every bucket once 20 000 existed — and login
-        // failures are keyed by whatever identifier the caller typed, so
-        // 20 000 wrong guesses at made-up names emptied every club's, agent's
-        // and player's budget at once. Now: expired buckets go first; if the
-        // store is still full, a quarter goes — the buckets with the FEWEST
-        // hits first (a flood is 20 000 keys touched once), oldest among
-        // equals — so a budget that is actually being spent is the last thing
-        // evicted (P8.1 hardening U5: the flood alone never reaches it).
+        // The memory bound EVICTS, it never resets: login failures are keyed
+        // by whatever identifier the caller typed, so clearing every bucket
+        // when full would let 20 000 wrong guesses at made-up names empty
+        // every real budget at once. Expired buckets go first; if the store is
+        // still full, a quarter goes — the buckets with the FEWEST hits first
+        // (a flood is 20 000 keys touched once), oldest among equals — so a
+        // budget that is actually being spent is the last thing evicted.
         if (buckets.size >= 20_000) {
           for (const [k, v] of buckets) if (now - v.start > v.windowMs) buckets.delete(k);
           if (buckets.size >= 20_000) {
@@ -239,7 +226,7 @@ export function memoryRateLimitProvider() {
  * a deployment can ASK for the shared backend — and is refused loudly, because
  * no such backend is configured. Silently falling back to per-process counting
  * while an operator believes they have distributed protection is exactly the
- * kind of quiet lie this milestone exists to remove.
+ * kind of quiet lie this module exists to prevent.
  */
 export function createRateLimiter({ provider = process.env.SCOUTBOX_RATE_LIMIT_PROVIDER ?? 'memory' } = {}) {
   if (provider !== 'memory') {

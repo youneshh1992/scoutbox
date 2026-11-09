@@ -30,7 +30,7 @@ export const markClean = () => { dirtyFlag = false; };
 import type { ClientOffer, ClientSigning } from './agentApi';
 import { fmtDate, fmtStamp, t } from './i18n';
 import { AGENCY_TABS, hashForTransaction, hashForContext, type AgencyTab, type ClientTab } from './nav';
-// M24B — the client case as category → subcategory.
+// The client case as category → subcategory.
 import { CaseNav, CaseCrumb, casePanelProps } from '../../design-system/CaseNavigation';
 import { defaultLocation, locate } from '../../design-system/caseNav';
 import { CLIENT_NAV } from './caseNav';
@@ -111,7 +111,7 @@ export function HomeScreen({ session, tick, onNavigate }: ScreenProps & { onNavi
   const h = home.data as Home | null;
   return (
     <div data-testid="agent-home">
-      {/* M24F.5 — one way in to every explanation on Home: what the workspace is, and the regulatory notice. */}
+      {/* One way in to every explanation on Home: what the workspace is, and the regulatory notice. */}
       <Hint>{[t('home.whatThisIsBody'), h?.regulatoryNotice ?? ''].filter(Boolean).join(' ')}</Hint>
       <ErrorLine error={home.error} onRetry={home.reload} />
       {home.loading && !h && <Loading />}
@@ -155,7 +155,7 @@ function FacetCard({ title, facet, ma, testProvider, onSubmit, note }: { title: 
       )}
       {facet?.note && <div className="dim" style={{ fontSize: 12.5 }}>{facet.note}</div>}
       {note && <Hint className="dim" style={{ fontSize: 12.5 }}>{note}</Hint>}
-      {/* M24F.5 — a verified facet keeps its reference form one tap away; an unverified one shows it. */}
+      {/* A verified facet keeps its reference form one tap away; an unverified one shows it. */}
       {state === 'VERIFIED' && !editing ? (
         <div><button type="button" className="linklike" style={{ color: 'var(--sb-link)' }} onClick={() => setEditing(true)} data-testid="facet-new-reference">{t('profile.newReference')}</button></div>
       ) : <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -390,7 +390,7 @@ function ClientList({ rows, onOpen }: { rows: ClientRow[]; onOpen: (id: string) 
 }
 
 /**
- * M23 P8 §17 — the client's journeys with clubs, as the server projects them
+ * The client's journeys with clubs, as the server projects them
  * for THIS agent: only clubs that shared something (a contact routed to the
  * agent, an Offer the client shared, a trial the client disclosed), only
  * factual stage words, never a club's assessment, decision or priority. A
@@ -423,17 +423,17 @@ function ClientDetailView({ session, id, tab, onTab, onBack, notify, tick }: { s
   const d = useLoad(() => agent.client(session, id), [session, id, tick]);
   const det = d.data as ClientDetail | null;
   const opps = useLoad(() => (det && det.mode === 'own' && det.access ? agent.clientOpportunities(session, id) : Promise.resolve(null)), [session, id, det?.access, tick]);
-  // M23 P5.6E. Loaded only where a basis exists, and each one refuses on its own
+  // Loaded only where a basis exists, and each one refuses on its own
   // terms when the client's disclosure for it is off — the error IS the answer, so
   // it is rendered rather than swallowed.
   const contacts = useLoad(() => (det && det.mode === 'own' && det.access && tab === 'contacts' ? agent.clientContacts(session, id) : Promise.resolve(null)), [session, id, det?.access, tab, tick]);
   const trials = useLoad(() => (det && det.mode === 'own' && det.access && (tab === 'trials' || tab === 'tasks') ? agent.clientTrials(session, id) : Promise.resolve(null)), [session, id, det?.access, tab, tick]);
-  // M23 P6. Loaded only on its tab; the server answers 403 when the mandate, scope or licence does not hold NOW, and that answer is rendered.
+  // Loaded only on its tab; the server answers 403 when the mandate, scope or licence does not hold NOW, and that answer is rendered.
   const offers = useLoad(() => (det && det.mode === 'own' && det.access && (tab === 'offers' || tab === 'tasks' || tab === 'past-offers') ? agent.clientOffers(session, id) : Promise.resolve(null)), [session, id, det?.access, tab, tick]);
-  // M23 P7 — signing progress over the shared Offers; a refusal (scope, licence, basis) hides the line rather than the Offers.
+  // Signing progress over the shared Offers; a refusal (scope, licence, basis) hides the line rather than the Offers.
   const signings = useLoad(() => (det && det.mode === 'own' && det.access && (tab === 'signings' || tab === 'tasks' || tab === 'past-signings') ? agent.clientSignings(session, id).then((r) => ({ ...r, refused: null as string | null })).catch((e: unknown) => ({ items: [], clientId: id, clientName: null, honest: '', refused: (e as { code?: string } | null)?.code ?? 'REFUSED' })) : Promise.resolve(null)), [session, id, det?.access, tab, tick]);
   const shares = useLoad(() => (det && det.mode === 'own' && det.access ? agent.clientShares(session, id) : Promise.resolve(null)), [session, id, det?.access, tick]);
-  // M24B — read-only pages over records the agent already reads elsewhere: the
+  // Read-only pages over records the agent already reads elsewhere: the
   // compliance contexts naming this client, the transaction workspaces the
   // client is a party to (where the agent's own documents live), the full
   // journey timeline. Each is loaded only on its page and refuses on its own terms.
@@ -466,7 +466,7 @@ function ClientDetailView({ session, id, tab, onTab, onBack, notify, tick }: { s
     setBusy(true); setErr(null);
     try { await agent.terminate(session, r.id, { reasonCode: withdrawing ? 'withdrawn' : 'agent_ended', clientKey: clientKey(), expectedRev: r.rev }); notify(t('clients.terminated')); d.reload(); } catch (e) { setErr(e); } finally { setBusy(false); }
   };
-  /** §18 — share, and nothing else. A refused share says which rule refused. */
+  /** Share, and nothing else. A refused share says which rule refused. */
   const share = async (oppId: string) => {
     setBusy(true); setErr(null);
     try {
@@ -516,7 +516,7 @@ function ClientDetailView({ session, id, tab, onTab, onBack, notify, tick }: { s
       {r.status === 'disputed' && <div className="notice block" style={{ marginTop: 8 }} data-testid="disputed-note">{t('clients.disputedNote')}</div>}
       {r.status === 'expired' && <div className="notice warn" style={{ marginTop: 8 }}>{t('clients.expiredNote')}</div>}
       <div style={{ marginTop: 12 }}>
-        {/* M24B — category → subcategory; only the current category's pages are in the DOM. */}
+        {/* Category → subcategory; only the current category's pages are in the DOM. */}
         <CaseCrumb model={CLIENT_NAV} value={loc} translate={tr} prefix={[t('clients.title'), c.name ?? r.clientId]} />
         <CaseNav
           model={CLIENT_NAV} value={loc} onChange={(l) => onTab(l.sub)} translate={tr} idPrefix="client"
@@ -1085,7 +1085,7 @@ export function AgencyScreen({ session, tick, notify, me, tab, onTab }: ScreenPr
 
 // ============================================================ Report / Block
 export function SafetyModal({ session, notify, onClose }: { session: Session; notify: ScreenProps['notify']; onClose: () => void }) {
-  const dialogRef = useDialog<HTMLDivElement>(onClose); // PRE-M24 (PM-8)
+  const dialogRef = useDialog<HTMLDivElement>(onClose);
   const [reason, setReason] = useState('');
   const [target, setTarget] = useState('');
   const [urgent, setUrgent] = useState(false);

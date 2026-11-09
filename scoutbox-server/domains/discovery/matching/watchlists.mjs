@@ -1,5 +1,5 @@
 /**
- * M19 — Dynamic Watchlists: the pure part.
+ * Dynamic Watchlists: the pure part.
  *
  * A watchlist is saved criteria, not a saved list of players. Membership is
  * DERIVED from the current visible candidates every time it is read, because
@@ -41,7 +41,7 @@ export const EXIT_REASONS = {
  * Reasons that must never be spelled out. Losing visibility can mean the
  * player blocked this club, or a safeguarding rule changed, or the account was
  * removed. Naming which one would leak exactly what the rule exists to
- * protect, so all of them surface as `unavailable` (§37–38).
+ * protect, so all of them surface as `unavailable`.
  */
 export const PRIVACY_SAFE_EXIT = 'unavailable';
 
@@ -64,7 +64,7 @@ export function reconcileMembership(previous = [], current = []) {
 /**
  * The deterministic identity of one membership transition. Two reconciliations
  * that observe the same transition under the same criteria produce the same
- * fingerprint, so a transition is never notified or recorded twice (§44).
+ * fingerprint, so a transition is never notified or recorded twice.
  */
 export function transitionFingerprint({ watchlistId, playerId, criteriaVersion, transition, reason }) {
   return `wl:${watchlistId}:${playerId}:${criteriaVersion}:${transition}:${reason}`;
@@ -75,9 +75,8 @@ export function transitionFingerprint({ watchlistId, playerId, criteriaVersion, 
  * match results, name the criterion that actually flipped rather than saying
  * "something changed".
  *
- * Returns `{ reason, criterionId, text }`. When the criteria set itself
- * changed, comparing criterion by criterion would be misleading, so the caller
- * passes `criteriaChanged` and gets the honest answer instead.
+ * When the criteria set itself changed, comparing criterion by criterion would be misleading, so the caller passes
+ * `criteriaChanged` and gets the honest answer instead.
  */
 export function explainTransition({ previousMatch, currentMatch, criteriaChanged, briefChanged, transition }) {
   if (briefChanged) {
@@ -135,7 +134,7 @@ export function membershipSummary({ entered = [], left = [], unchanged = [] }) {
 }
 
 /**
- * Group membership changes into at most one notification per watchlist (§47).
+ * Group membership changes into at most one notification per watchlist.
  * Twenty-five players entering after a brief edit is one sentence, not
  * twenty-five notifications.
  */
@@ -157,7 +156,7 @@ export function membershipNotification({ watchlistName, entered = [], left = [],
 }
 
 /** A watchlist that cannot currently produce matches, and why. Never a zero
- *  presented as a factual "no players match" (§107). */
+ *  presented as a factual "no players match". */
 export function watchlistBlockedState({ status, mode, brief }) {
   if (status === 'archived') return { blocked: true, code: 'WATCHLIST_ARCHIVED', message: 'This watchlist is archived. Its history is kept; membership is no longer maintained.' };
   if (status === 'paused') return { blocked: false, paused: true, code: 'WATCHLIST_PAUSED', message: 'This watchlist is paused. Membership is still shown, and no change notifications are sent.' };

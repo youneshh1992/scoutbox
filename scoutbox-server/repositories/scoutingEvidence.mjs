@@ -1,6 +1,5 @@
 /**
- * S9a — the evidence passport, coach affiliations and squad invitations as typed tables (migration
- * `0019_scouting_evidence`; docs/architecture/migration.md §4.3 "The pattern", §4.5 S9; sql/04_scouting_assessment.sql).
+ * The evidence passport, coach affiliations and squad invitations.
  *
  * Tables: evidence, evidence_media, evidence_disputes, evidence_history; coach_affiliations, coach_affiliation_history;
  * squad_invites. Every field is a typed column with its vocabulary and length CHECKs; there are no side columns, and a
@@ -10,13 +9,12 @@
  * joined into the open unit of work (a failure poisons it), the caller's open transaction, or a transaction of their
  * own. An unknown field is refused, and so is an update of a record from inside its own update.
  *
- * READS are SQL: there is no mirror and no db.evidence / db.coachAffiliations / db.squadInvites (reading one throws,
- * naming this repository). Every query decodes fresh, deep-frozen records in insertion (rowid) order unless it says
- * otherwise; a read inside a unit of work sees the unit's own writes. Modules receive the queries as `scoutingReads`.
+ * Every query decodes fresh, deep-frozen records in insertion (rowid) order unless it says otherwise; a read inside a
+ * unit of work sees the unit's own writes. Modules receive the queries as `scoutingReads`.
  *
- * References. Player ids have NO foreign key: tolerant and counted, like recruitment (Q7a/Q8a/Q8c-a applied, not
- * re-asked) — evidence and invitations stay after an account deletion, as they always have (retention is an open
- * question, decisions.md §5). Media ids on evidence have no key either: a removed clip stays named, as before.
+ * References. Player ids have NO foreign key: tolerant and counted, like recruitment (Q7a/Q8a/Q8c-a in
+ * docs/decisions.md): evidence and invitations stay after an account deletion (retention is an open question, Q6).
+ * Media ids on evidence have no key either: a removed clip stays named.
  * `org_id` → orgs and the staff ids → org_users are immediate RESTRICT keys (organisations are never deleted, O2).
  * `correction_of_id` / `superseded_by_id` → evidence are immediate RESTRICT keys: the correction is inserted first,
  * then the original is pointed at it, in one unit.
@@ -29,7 +27,7 @@ export const SCOUTING_EVIDENCE_COLLECTIONS = Object.freeze(['evidence', 'coachAf
 export const SCOUTING_EVIDENCE_TABLES = Object.freeze(['evidence', 'evidence_media', 'evidence_disputes', 'evidence_history', 'coach_affiliations', 'coach_affiliation_history', 'squad_invites']);
 
 export const CLAIM_TYPES = Object.freeze(['statistic', 'attendance', 'assessment_result', 'reference', 'footage', 'availability']);
-/** The tiers a record can hold. 'independent' exists in the M12 ladder but no route can set it, so no row holds it. */
+/** The tiers a record can hold. 'independent' exists in the tier ladder but no route can set it, so no row holds it. */
 export const EVIDENCE_TIERS_STORED = Object.freeze(['self_reported', 'coach_confirmed', 'club_assessed']);
 export const EVIDENCE_SOURCE_KINDS = Object.freeze(['player', 'guardian', 'org']);
 export const DISPUTE_BY_KINDS = Object.freeze(['player', 'org']);
@@ -37,7 +35,7 @@ export const DISPUTE_OUTCOMES = Object.freeze(['upheld', 'rejected']);
 export const AFFILIATION_STATUSES = Object.freeze(['confirmed', 'ended', 'revoked']);
 export const INVITE_STATUSES = Object.freeze(['pending_guardian', 'pending_player', 'approved', 'declined']);
 export const HISTORY_BY_KINDS = Object.freeze(['player', 'guardian', 'org', 'admin']);
-/** Text limits: the routes shorten longer text to these (as they always have); the columns refuse anything longer. */
+/** Text limits: the routes shorten longer text to these; the columns refuse anything longer. */
 export const EVIDENCE_LIMITS = Object.freeze({
   label: 120, valueText: 120, units: 20, season: 20, note: 300, method: 80, reason: 300, resolutionNote: 300, sourceName: 200,
   coachName: 80, coachEmail: 120, role: 60, conflict: 200, closeReason: 200, inviteNote: 200, detail: 500, name: 200,
@@ -150,7 +148,7 @@ CREATE INDEX squad_invites_player_status ON squad_invites (player_id, status);
 `;
 
 // ------------------------------------------------------------------ typing (the one place a value is judged)
-// The helpers below are shared with the scouting assessments repository (S9b, scoutingAssessments.mjs).
+// The helpers below are shared with the scouting assessments repository (scoutingAssessments.mjs).
 export const refusal = (code, message, extra = {}) => Object.assign(new Error(`${code}: ${message}`), { code, ...extra });
 export const isInt = (v) => Number.isSafeInteger(v);
 export const isStr = (v) => typeof v === 'string';
@@ -389,7 +387,7 @@ function readAll(sqlite) {
   return { evidence: ev.map((r) => decodeEvidence(bst, r)), coachAffiliations: af.map((r) => decodeAffiliation(bst, r)), squadInvites: st.inviteAll.all().map((r) => decodeInvite(st, r)) };
 }
 
-/** The whole domain read back as plain records (`readAllRecords` in index.mjs: the test suites' read-back); null before its migration. */
+/** The whole domain read back as plain records (`readAllRecords` in index.mjs: the test suites' read-back). */
 export const SCOUTING_EVIDENCE_RECORDS = {
   names: SCOUTING_EVIDENCE_COLLECTIONS,
   read(sqlite) { return scoutingEvidenceLive(sqlite) ? readAll(sqlite) : null; },

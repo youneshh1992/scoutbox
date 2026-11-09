@@ -1,4 +1,4 @@
-// M18.2 LIVE browser journeys — the cleanup, in a real browser.
+// LIVE browser journeys — the cleanup, in a real browser.
 //
 // J1  a Brief conflict is shown by the shared notice, names the colleague,
 //     keeps the typed draft, and "Reload latest" recovers
@@ -117,7 +117,7 @@ const tokenOf = (page) => page.evaluate(() => {
 });
 async function goto(page, hash, selector) {
   await page.evaluate((h) => { window.location.hash = h; }, hash);
-  if (hash === '#/organisation') { for (let i = 0; i < 20 && !(await page.locator('details.settings-row').count()); i++) await page.waitForTimeout(250); await page.evaluate(() => document.querySelectorAll('details.settings-row').forEach((d) => { d.open = true; })); } // M24F.5 — Staff & Security sections are rows; open them, then assert the same
+  if (hash === '#/organisation') { for (let i = 0; i < 20 && !(await page.locator('details.settings-row').count()); i++) await page.waitForTimeout(250); await page.evaluate(() => document.querySelectorAll('details.settings-row').forEach((d) => { d.open = true; })); } // Staff & Security sections are rows; open them, then assert the same
   if (selector) {
     await page.waitForSelector(selector, { timeout: 25000 }).catch(async (e) => {
       const where = await page.evaluate(() => location.hash);
@@ -234,7 +234,7 @@ say('J2: the scout opens a Recruitment Room from Discover');
   await scout.click('button:has-text("New brief")');
   await scout.waitForSelector('[aria-label="Recruitment brief criteria"]', { timeout: 15000 });
   // Clean form: navigating away must NOT prompt.
-  await scout.evaluate(() => { window.location.hash = '#/recruitment/rooms'; }); // the parent of a deep link — resolves since M18.2
+  await scout.evaluate(() => { window.location.hash = '#/recruitment/rooms'; }); // the parent of a deep link resolves
   await scout.waitForTimeout(1200);
   if (dialogs.length) fail('J3: a CLEAN form prompted on navigation — that trains people to click through');
   {
@@ -257,7 +257,7 @@ say('J2: the scout opens a Recruitment Room from Discover');
   if (!stillHere || !/briefs/.test(hash)) fail(`J3: declining the prompt did not keep the form (hash ${hash})`);
   say('J3: declining keeps the form and reverses the navigation');
   // Sidebar navigation goes through the same guard.
-  // P2.5: Discover is a group inside Recruitment now; click a section button that navigates.
+  // Discover is a group inside Recruitment now; click a section button that navigates.
   await scout.click('nav.sidebar button.nav-section:has-text("Squad & Planning")', { timeout: 5000 }).catch(() => {});
   await scout.waitForTimeout(600);
   if (dialogs.length < 2) fail('J3: sidebar navigation bypassed the guard');
@@ -282,8 +282,8 @@ await goto(scout, ORG, '[data-panel="notification-preferences"]');
   say('J4: the preferences panel says email is a local outbox, not delivery');
   const mandatory = panel.locator('input[type="checkbox"][disabled]');
   if (!(await mandatory.count())) fail('J4: the mandatory category is not locked in the UI');
-  // There is more than one mandatory category since P5.6C added the regulatory
-  // lane, so this asserts the CLAIM — every locked control says why it is locked,
+  // There is more than one mandatory category (security and the regulatory
+  // lane), so this asserts the CLAIM — every locked control says why it is locked,
   // and the security category is one of them — rather than which one happens to
   // render first.
   const mLabels = await mandatory.evaluateAll((els) => els.map((e) => e.getAttribute('aria-label') ?? ''));
@@ -418,7 +418,7 @@ await goto(scout, ORG, '[data-panel="notification-preferences"]');
   await p.click('button:has-text("Enter workspace")');
   await p.waitForSelector('.topbar', { timeout: 30000 });
   await p.evaluate((h) => { window.location.hash = h; }, ORG);
-  for (let i = 0; i < 20 && !(await p.locator('details.settings-row').count()); i++) await p.waitForTimeout(250); await p.evaluate(() => document.querySelectorAll('details.settings-row').forEach((d) => { d.open = true; })); // M24F.5 — Staff & Security sections are rows; open them, then assert the same
+  for (let i = 0; i < 20 && !(await p.locator('details.settings-row').count()); i++) await p.waitForTimeout(250); await p.evaluate(() => document.querySelectorAll('details.settings-row').forEach((d) => { d.open = true; })); // Staff & Security sections are rows; open them, then assert the same
   await p.waitForSelector('[data-panel="notification-preferences"]', { timeout: 20000 });
   await p.waitForTimeout(1200);
   const overflow = await p.evaluate(() => Math.max(

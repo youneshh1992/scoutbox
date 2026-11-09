@@ -1,4 +1,4 @@
-// M16 — Box Cam drill registry + observation provider contracts.
+// Box Cam drill registry + observation provider contracts.
 //
 // A deliberately BOUNDED first library: each drill is a versioned detector
 // contract. A drill only ever claims the verification capabilities its
@@ -102,18 +102,18 @@ export const latestDrill = (id) => DRILLS.filter((d) => d.id === id).sort((a, b)
 // provider can HONESTLY do in this environment; a session only verifies the
 // intersection of drill capabilities and provider capabilities.
 export const PROVIDERS = {
-  // M22: a REAL server-side computer-vision provider. Executable code, not a
-  // capability claim — see m22/provider.mjs (orchestration) and the v2 engine
-  // in m22/{detect,track,protocol,quality}.mjs (all observation semantics).
+  // A REAL server-side computer-vision provider. Executable code, not a
+  // capability claim — see cv/provider.mjs (orchestration) and the v2 engine
+  // in cv/{detect,track,protocol,quality}.mjs (all observation semantics).
   //
   // `capabilities` here is the OBSERVATION list: what the engine can actually
-  // see, evidenced by 14/14 golden fixtures, 39/39 variation-family variants,
-  // and 0 false touches across 56 adversarial scenes and three holdout
-  // generations.
+  // see, evidenced by the recorded synthetic evaluation (cv/evaluation.json,
+  // cv/holdout.json: golden fixtures, variation families, adversarial scenes
+  // and holdout generations, with no false touches).
   //
   // It is deliberately NOT the list that authorises a Combine measurement.
   // Combine eligibility is derived per protocol from the versioned real-world
-  // validation record (m22/eligibility.mjs) and is currently EMPTY for every
+  // validation record (cv/eligibility.mjs) and is currently EMPTY for every
   // protocol. Health and observation capability say what this can see;
   // neither says what it may certify.
   production_cv: {

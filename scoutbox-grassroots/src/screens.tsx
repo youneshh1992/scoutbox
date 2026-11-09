@@ -61,8 +61,8 @@ const CONTRACT_LABELS: Record<string, string> = {
 
 /**
  * Every confirmation and every failure in the app arrives through this one
- * element, and until M18.1 it was an unannounced <div>: a screen-reader user
- * got no signal at all that their action had succeeded or failed. Errors are
+ * element, so it is a live region: without one a screen-reader user gets no
+ * signal at all that their action succeeded or failed. Errors are
  * assertive because they interrupt what the user was about to do next;
  * confirmations are polite because they do not.
  */
@@ -79,19 +79,19 @@ export function Toast({ text, error }: { text: string; error?: boolean }) {
 }
 
 function errMsg(e: unknown): string {
-  // M23 P5.7: a temporal refusal (DATE_INVALID, INTERVAL_INVALID, …) has a
+  // A temporal refusal (DATE_INVALID, INTERVAL_INVALID, …) has a
   // translated sentence; anything else keeps the server's own message.
   if (e instanceof ApiError) { const translated = t(`err.${e.code}`, ''); if (translated) return translated; }
   return e instanceof Error ? e.message : 'Something went wrong';
 }
 
 /**
- * M18.1 — PROFILE COMPLETENESS, not the ScoutBox Trust Score.
+ * PROFILE COMPLETENESS, not the ScoutBox Trust Score.
  *
- * This number is the legacy profile signal: identity flag, recorded
- * attendance, filed trial reports, uploaded clips, profile fields. It was
- * rendered as "Trust NN" beside M16.2's Trust Score, which measures evidence
- * confidence and means something else entirely. One word, two meanings, in the
+ * This number is the profile signal: identity flag, recorded attendance,
+ * filed trial reports, uploaded clips, profile fields. Labelled "Trust NN" it
+ * would sit beside the Trust Score, which measures evidence confidence and
+ * means something else entirely. One word, two meanings, in the
  * same product — so this one says what it is.
  */
 function TrustBar({ score }: { score: number }) {
@@ -141,7 +141,7 @@ export function SafetyModal({ session, notify, onClose, presetPlayerId }: {
   onClose: () => void;
   presetPlayerId?: string;
 }) {
-  const dialogRef = useDialog<HTMLDivElement>(onClose); // PRE-M24 (PM-8)
+  const dialogRef = useDialog<HTMLDivElement>(onClose);
   const [targetKind, setTargetKind] = useState<'player' | 'scout' | 'club'>(presetPlayerId ? 'player' : 'scout');
   const [target, setTarget] = useState(presetPlayerId ?? '');
   const [reason, setReason] = useState('');
@@ -410,7 +410,7 @@ export function CompareModal({ session, playerIds, onClose }: {
   playerIds: string[];
   onClose: () => void;
 }) {
-  const dialogRef = useDialog<HTMLDivElement>(onClose); // PRE-M24 (PM-8)
+  const dialogRef = useDialog<HTMLDivElement>(onClose);
   const [players, setPlayers] = useState<PlayerDetail[]>([]);
   useEffect(() => {
     Promise.all(playerIds.map((id) => api.getPlayer(session, id).catch(() => null)))
@@ -495,7 +495,7 @@ export function SearchScreen({ session, tick, notify, openPlayer }: ScreenProps)
     setCompareIds((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : prev.length >= 3 ? prev : [...prev, id]);
   };
 
-  // M15: one batch call decorates every visible card — never N+1 passports.
+  // One batch call decorates every visible card — never N+1 passports.
   const fpSummaries = usePassportSummaries(session, players.map((p) => p.id));
 
   return (
@@ -1068,7 +1068,7 @@ export function OpenDaysScreen({ session, tick, notify }: ScreenProps) {
           for an answer. Every registrant gets an invite or a kind no before you can post the next one.
         </div>
       )}
-      {/* M24F.4 — the local radar reads as a line; the input appears only while editing. */}
+      {/* The local radar reads as a line; the input appears only while editing. */}
       <div className="section" data-testid="radar">
         <h4>Local radar</h4>
         {editingRadar ? (
@@ -1091,7 +1091,7 @@ export function OpenDaysScreen({ session, tick, notify }: ScreenProps) {
           </p>
         )}
       </div>
-      {/* M24F.5 — the form opens when a manager means to post; the list is the page. */}
+      {/* The form opens when a manager means to post; the list is the page. */}
       {!showPost ? (
         <div style={{ margin: '4px 0 14px' }}><button className="primary" data-testid="openday-post-toggle" onClick={() => setShowPost(true)}>Post an open day</button></div>
       ) : (
@@ -1208,7 +1208,7 @@ export function SquadScreen({ session, tick, notify, openPlayer }: ScreenProps) 
       <div className="section">
         <h4>Squad · {squad.entries.length} players</h4>
         {squad.entries.length === 0 && <div className="notice">Nobody rostered yet. Signings land here automatically; add the rest of your Sunday squad below.</div>}
-        {/* M24F.4 — flat rows: initials, the name, the position; the row itself opens an on-platform player. No bordered name chip, no state pills. */}
+        {/* Flat rows: initials, the name, the position; the row itself opens an on-platform player. No bordered name chip, no state pills. */}
         <div className="list-rows" data-testid="squad-list">
           {squad.entries.map((e) => (
             <div
@@ -1564,11 +1564,11 @@ export function PlayerDrawer({ session, playerId, notify, onClose, onOpenRoom }:
   playerId: string;
   notify: (text: string, error?: boolean) => void;
   onClose: () => void;
-  /** M17: navigate to the player's Recruitment Room (the club's private
+  /** Navigate to the player's Recruitment Room (the club's private
    *  decision layer). Absent in surfaces that cannot navigate. */
   onOpenRoom?: (roomId: string) => void;
 }) {
-  const dialogRef = useDialog<HTMLDivElement>(onClose); // PRE-M24 (PM-8)
+  const dialogRef = useDialog<HTMLDivElement>(onClose);
   const [player, setPlayer] = useState<PlayerDetail | null>(null);
   const [proof, setProof] = useState<ProofPack | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -1612,7 +1612,7 @@ export function PlayerDrawer({ session, playerId, notify, onClose, onOpenRoom }:
 
   const loadProof = () => api.getProofPack(session, playerId).then(setProof).catch((e) => notify(errMsg(e), true));
 
-  // M17 — open (or re-open) this player's Recruitment Room. A room is private
+  // Open (or re-open) this player's Recruitment Room. A room is private
   // to this organisation: the player, their guardian and every other club can
   // never see it, and creating one grants no new access to anything.
   // One active room per org per player, so 409 ROOM_EXISTS is a routing answer,
@@ -1767,7 +1767,7 @@ export function PlayerDrawer({ session, playerId, notify, onClose, onOpenRoom }:
               </div>
             </div>
 
-            {/* M21 — Development sits inside the player, which is where a
+            {/* Development sits inside the player, which is where a
                 development plan belongs. It adds no top-level destination. */}
             <DevelopmentPanel session={session} playerId={playerId} notify={notify} />
             <FootballPassportPanel session={session} playerId={playerId} notify={notify} />

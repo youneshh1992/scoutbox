@@ -186,7 +186,7 @@ await test('adapters: IDV, billing and storage name the dev provider they are, w
     const idv = createIdvProvider();
     assert.equal(idv.provider, 'dev-attestation');
     assert.equal((await idv.verify({ name: 'Parent', documentType: 'passport', documentRef: '123456789' })).provider, 'dev-attestation');
-    const issued = []; // S13e: the invoices repository's two operations the adapter uses
+    const issued = []; // the invoices repository's two operations the adapter uses
     const billing = createBilling({ invoices: { forSigning: () => null, issue: (row) => (issued.push(row), row) }, nextId: (p) => `${p}-1` });
     assert.equal(billing.provider, 'dev-ledger');
     assert.equal((await billing.invoiceForSigning({ id: 'sg-1', playerName: 'Player' }, { id: 'org-1', name: 'Club', plan: 'Pro' })).provider, 'dev-ledger');

@@ -1,4 +1,4 @@
-// Demo mirror of the M13 player/guardian surface (EXPO_PUBLIC_DEMO=1).
+// Demo mirror of the m13client player/guardian surface (EXPO_PUBLIC_DEMO=1).
 // Synthetic examples; state lives in this tab's memory and resets on reload.
 import type {
   PlayerM13, Preferences, Verdict, TransitionCase,

@@ -57,10 +57,10 @@ export function runDataMigrations(sqlite, migrations, { now = Date.now(), log = 
 }
 
 /**
- * S14j: work that must run inside every write transaction just before its COMMIT, on this connection: a derived
- * projection bringing itself up to date with what the transaction wrote (the match facts re-derive the players their
- * triggers marked). Runs in `transaction()` below and in the store's units of work and saves; a failure rolls the
- * transaction back like any other. Not a save hook: it never decides what the domains write.
+ * Work that must run inside every write transaction just before its COMMIT, on this connection: a derived projection
+ * bringing itself up to date with what the transaction wrote (the match facts re-derive the players their triggers
+ * marked). Runs in `transaction()` below and in the store's units of work; a failure rolls the transaction back like
+ * any other. It never decides what the domains write.
  */
 const BEFORE_COMMIT = new WeakMap();
 export function onBeforeCommit(sqlite, fn) {
@@ -89,7 +89,7 @@ export function transaction(sqlite, fn) {
 }
 
 /**
- * A newest-first history feed, one page's worth (§4.3 step 4): the rows of `from` matching `where` with `h.at` at or
+ * A newest-first history feed, one page's worth: the rows of `from` matching `where` with `h.at` at or
  * before `atMost` (all when null), newest first, enough of them that `n` remain after any skipped at `atMost` itself,
  * and every row that shares the oldest returned instant. A caller merging several feeds and ordering ties its own way
  * (the audit feed orders them by id) can therefore never miss a row that belongs before one it was given.
@@ -104,7 +104,7 @@ export function newestHistory(sqlite, { select, from, where, params = [] }, atMo
 }
 
 /**
- * The child rows of many parents in one query per chunk of ids, for decoding a list (§4.3 step 4): rather than one
+ * The child rows of many parents in one query per chunk of ids, for decoding a list: rather than one
  * query per child table per record, a list reads each child table once. Returns a stand-in for the per-record
  * statement, `{ all(parentId, ...subKey) }`, answering the same rows in the same order: `order` must be the per-record
  * statement's ORDER BY, and `subKey` names the further columns that statement filters on (a revision, a session).
@@ -127,10 +127,8 @@ export function childRowsOf(sqlite, table, parentCol, parentIds, { order = 'rowi
 }
 
 /**
- * Has this migration been recorded as applied? False when the bookkeeping
- * table does not exist yet. This is the ONLY way to tell whether a domain has
- * cut over: a table's existence or occupancy says nothing (the S1 shadow
- * created `sessions` long before S2 made it authoritative).
+ * Has this migration been recorded as applied? False when the bookkeeping table does not exist yet. A table's
+ * existence or occupancy says nothing about which migrations have run.
  */
 export function migrationApplied(sqlite, id) {
   if (!sqlite.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'data_migrations'").get()) return false;

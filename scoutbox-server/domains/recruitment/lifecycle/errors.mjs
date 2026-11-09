@@ -1,18 +1,16 @@
 /**
- * M23 — the lifecycle and journey error contract.
+ * The lifecycle and journey error contract.
  *
- * ONE table mapping every domain error this milestone can produce to the HTTP
+ * ONE table mapping every domain error this module can produce to the HTTP
  * status it must answer with, and one function that projects an internal
  * result into a body that is safe to hand a client.
  *
  * WHY THIS IS A TABLE AND NOT A TERNARY CHAIN
  *
- * It used to be two ternary chains, one per route, each ending in a default.
- * A default is the problem: a new error code added to the validator inherits
- * whatever the last branch happened to be, silently, and the wrong status is
- * indistinguishable from a considered one. `LIFECYCLE_REASON_REQUIRED` and
- * `LIFECYCLE_CASE_NOT_A_ROOM` were both already arriving at their status that
- * way — correctly, as it turned out for the first, and wrongly for the second.
+ * A ternary chain ends in a default, and a default is the problem: a new error
+ * code added to the validator inherits whatever the last branch happened to
+ * be, silently, and the wrong status is indistinguishable from a considered
+ * one.
  *
  * With a table there is no default. `httpStatusFor` returns `null` for a code
  * it has never been told about, the caller answers 500 and says so in the log,
@@ -45,13 +43,13 @@ export const M23_ERROR_HTTP = table({
   LIFECYCLE_REASONS_TOO_MANY: 400,
   LIFECYCLE_REASON_UNKNOWN: 400,
   LIFECYCLE_REASON_REQUIRED: 400,
-  // M17's rule, shared deliberately: a protected characteristic can never be a
+  // The rooms' rule, shared deliberately: a protected characteristic can never be a
   // reason for anything, and that must not have two implementations.
   ROOM_REASON_PROHIBITED: 400,
 
   // ---- 403: not yours to do.
   LIFECYCLE_NOT_PERMITTED: 403,
-  // M23 P8 — the agent journey route: a summary row opens no client's journey.
+  // The agent journey route: a summary row opens no client's journey.
   AGENT_ACTION_NOT_PERMITTED: 403,
 
   // ---- 404: concealment. A case in another organisation, a case that never
@@ -59,7 +57,7 @@ export const M23_ERROR_HTTP = table({
   // that distinguishes them is an existence oracle.
   CASE_NOT_FOUND: 404,
   CASE_NOT_A_ROOM: 404,
-  // M23 P8 — the guardian journey route: not this guardian's child.
+  // The guardian journey route: not this guardian's child.
   CHILD_NOT_FOUND: 404,
   LIFECYCLE_CASE_NOT_A_ROOM: 404,
 
@@ -80,8 +78,8 @@ export const M23_ERROR_HTTP = table({
   JOURNEY_STORE_MISSING: 500,
   CASE_HISTORY_CORRUPT: 500,
   // A viewer kind the projector does not know is a defect in whoever called
-  // it, not a statement about the case. It answered 404 until the P2 closure
-  // pass — which told a caller "no such case" about a case that exists.
+  // it, not a statement about the case; a 404 would tell a caller "no such
+  // case" about a case that exists.
   JOURNEY_VIEWER_UNKNOWN: 500,
   // The fallback the routes emit when a code reaches them that this table has
   // never heard of. It is in the table because it is a code this module can
@@ -89,9 +87,9 @@ export const M23_ERROR_HTTP = table({
   // exists to report drift.
   LIFECYCLE_INTERNAL: 500,
 
-  // ======================================================== M23 P3 Contact
+  // ============================================================== Contact
   // Same bands, same rule: no default. Every code below is produced by
-  // domains/recruitment/lifecycle/contact.mjs or domains/recruitment/lifecycle/contactRoutes.mjs and swept by the drift guard.
+  // contact.mjs or contactRoutes.mjs and swept by the drift guard.
 
   // ---- 400: fix the request.
   CONTACT_CONTENT_INVALID: 400,
@@ -103,7 +101,7 @@ export const M23_ERROR_HTTP = table({
   CONTACT_RECIPIENT_MISMATCH: 400,
   CONTACT_ACTION_UNKNOWN: 400,
   CONTACT_RESPONSE_INVALID: 400,
-  // M23 P5.6E. A routing mode this build does not know. 400, because it is the
+  // A routing mode this build does not know. 400, because it is the
   // request that is wrong and the caller can fix it — and refusing beats
   // silently reading it as `player_only`, which would hide the caller's bug.
   CONTACT_MODE_INVALID: 400,
@@ -129,20 +127,20 @@ export const M23_ERROR_HTTP = table({
   CONTACT_GUARDIAN_REQUIRED: 422,
 
   // ---- 429: deterministic per-recipient cooldown. The limiter's own
-  // `RATE_LIMITED` answers are produced by m181 and are not in this table.
+  // `RATE_LIMITED` answers come from the platform rate limiter and are not in this table.
   CONTACT_COOLDOWN: 429,
 
   // ---- 500: ours.
   CONTACT_STATE_UNKNOWN: 500,
 
-  // ======================================================== M23 P4B Trial
+  // ================================================================ Trial
   // Same bands, same rule: no default. Every code below is produced by
-  // domains/recruitment/lifecycle/trial.mjs or domains/recruitment/lifecycle/trialRoutes.mjs and swept by the drift guard.
+  // trial.mjs or trialRoutes.mjs and swept by the drift guard.
 
   // ---- 400: fix the request.
   // (`TRIAL_DATE_INVALID`, `TRIAL_SLOT_INVALID` and `TRIAL_NOTES_INVALID` are
-  // the P4A-D1 date module's codes, answered by the legacy request and
-  // respond routes in server.mjs directly; they are not in this table.)
+  // the trial date validator's codes (domain.mjs), answered by the request
+  // and respond routes in server.mjs directly; they are not in this table.)
   TRIAL_SCHEDULE_INVALID: 400,
   TRIAL_TIMEZONE_INVALID: 400,
   TRIAL_VENUE_INVALID: 400,
@@ -188,9 +186,9 @@ export const M23_ERROR_HTTP = table({
   TRIAL_STATE_UNKNOWN: 500,
   TRIAL_TRANSPORT_REFUSED: 500,
 
-  // ======================================================== M23 P5 Decision
+  // ============================================================= Decision
   // Same bands, same rule: no default. Every code below is produced by
-  // domains/recruitment/lifecycle/decision.mjs or domains/recruitment/lifecycle/decisionRoutes.mjs and swept by the drift guard.
+  // decision.mjs or decisionRoutes.mjs and swept by the drift guard.
 
   // ---- 400: fix the request.
   DECISION_OUTCOME_INVALID: 400,
@@ -249,26 +247,26 @@ export const httpStatusFor = (code) => M23_ERROR_HTTP[code] ?? null;
  * evidence KIND — `confirmed_join`, `contact_delivered` — not a record, not an
  * id, and not a person; `evidenceReason` is `not_implemented`, `unsatisfied`
  * or `no_confirmed_join`. Neither reveals anything about a player, and being
- * honest in the product about what this deployment cannot yet check is the
- * same honesty M18.1's capabilities surface already publishes.
+ * honest about what this deployment cannot yet check is the same honesty the
+ * capabilities surface publishes.
  */
 const PUBLIC_ERROR_FIELDS = [
   'error', 'message', 'allowed', 'to', 'actions',
   'requires', 'evidenceReason',
   'current', 'expectedRev', 'rev',
-  // P3: when a contact is refused for cooldown, the caller may know when it
+  // When a contact is refused for cooldown, the caller may know when it
   // can try again. A timestamp, not a person and not a record.
   'retryAt',
-  // P4B: a Trial refusal names the FIELD it refused, the days that WERE
+  // A Trial refusal names the FIELD it refused, the days that WERE
   // offered, the syntax it expected, and — for the completion gate — the
   // requirement codes that are missing. Vocabulary, never a person.
   'field', 'offered', 'expected', 'reasons',
-  // P5: a Decision refusal may name the LIFECYCLE code underneath a
+  // A Decision refusal may name the LIFECYCLE code underneath a
   // DECISION_LIFECYCLE_CONFLICT, echo the reference `{ kind, id }` it refused
   // and echo the `supersedes` id the caller named. All of it is the caller's
   // own input or vocabulary; none of it is a person or a record. The reason
-  // code lists (`unknown`, `prohibited`) stay internal, as they were for the
-  // lifecycle route (e2e/recruitment/lifecycle Y11 pins that shape).
+  // code lists (`unknown`, `prohibited`) stay internal, as for the lifecycle
+  // route (e2e/recruitment/lifecycle pins that shape).
   'lifecycle', 'ref', 'supersedes',
 ];
 

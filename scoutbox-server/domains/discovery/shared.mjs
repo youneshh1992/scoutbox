@@ -1,4 +1,4 @@
-// M18 — Second Look + Nobody Missed: the pure engine and its policy.
+// Second Look + Nobody Missed: the pure engine and its policy.
 //
 // Two systems, one file of deterministic rules:
 //
@@ -18,7 +18,7 @@
 //
 // Everything here is pure: no Express, no database handle, no session.
 //
-// M19: the one exception to "no imports" is the explainable match engine.
+// The one exception to "no imports" is the explainable match engine.
 // `playerMatchesBrief` delegates to it so that Nobody Missed and Matching
 // cannot drift apart. The import is circular (the engine reads this file's
 // vocabulary), which is safe because the engine touches that vocabulary only
@@ -34,7 +34,7 @@ export const SECOND_LOOK_POLICY_VERSION = 1;
 
 /**
  * Normalised material change types. Source systems each have their own
- * vocabulary; M18 speaks exactly these.
+ * vocabulary; Second Look speaks exactly these.
  */
 export const CHANGE_TYPES = [
   // evidence
@@ -49,7 +49,7 @@ export const CHANGE_TYPES = [
   // standardized measurement
   'combine_verified_added',
   'combine_verified_invalidated',
-  // M18.1: a restoration is its own change. Trust & Safety restoring a result
+  // A restoration is its own change. Trust & Safety restoring a result
   // after a provider bug is news to a club that saw it disappear, and saying
   // nothing would leave the earlier "no longer valid" note standing forever.
   'combine_verified_restored',
@@ -92,7 +92,7 @@ export const CHANGE_COPY = {
 };
 
 /**
- * The reason → change mapping. This is the heart of Second Look: M17's archive
+ * The reason → change mapping. This is the heart of Second Look: the rooms' archive
  * reasons are structured precisely so this table can ask whether the reason a
  * club gave may no longer apply.
  *
@@ -252,7 +252,7 @@ export const changeFingerprint = ({ type, sourceSystem, sourceId }) =>
   `${type}:${sourceSystem}:${sourceId ?? 'none'}`;
 
 /**
- * One real-world change often reaches M18 through several systems at once — a
+ * One real-world change often reaches Second Look through several systems at once — a
  * Combine result appears in the Combine projection, in the Passport and as a
  * Trust component movement. Dedupe by canonical identity, keeping the earliest
  * observation so the timeline stays honest.
@@ -337,12 +337,12 @@ export function compareToSnapshot(snapshot, current) {
  * Derive Trust movement from the snapshot's component LEVELS.
  *
  * The stored snapshot deliberately drops per-component coverage (a club may
- * not see it), so M16.2's `trustChangeReasons` cannot read it. Rather than
- * persist coverage we were not allowed to show, M18 compares levels — coarser,
- * but honest, and it keeps the existing vocabulary.
+ * not see it), so `trustChangeReasons` cannot read it. Rather than persist
+ * coverage we were not allowed to show, this compares levels — coarser, but
+ * honest, and it keeps the existing vocabulary.
  *
- * Trust movement is CONTEXT. It is never a trigger on its own: §10 requires the
- * underlying facts, and `buildSecondLookCandidate` enforces that.
+ * Trust movement is CONTEXT. It is never a trigger on its own: Second Look requires
+ * the underlying facts, and `buildSecondLookCandidate` enforces that.
  */
 const LEVEL_RANK = { none: 0, limited: 1, established: 2, strong: 3, very_strong: 4 };
 
@@ -367,7 +367,7 @@ export function trustLevelChanges(snapshotTrust, currentProfile) {
   return out;
 }
 
-// A snapshot stores a level id string; older fixtures stored `{id}`.
+// A snapshot stores a level id string; the `{id}` shape is tolerated too.
 const levelId = (v) => (typeof v === 'string' ? v : v?.id ?? null);
 
 // -------------------------------------------------------- candidate assembly
@@ -382,7 +382,7 @@ export function buildSecondLookCandidate({
   room, decision, snapshot, changes = [], trustMovement = [],
   playerVisible = true, currentTrust = null, now = Date.now(),
 }) {
-  // §4 preconditions, in order.
+  // Preconditions, in order.
   if (!room || !decision) return null;
   if (!playerVisible) return null;
   // A room the club is actively working is not a Second Look — it is open work.
@@ -579,7 +579,7 @@ export const EVIDENCE_REQUIREMENTS = [
 export const TRUST_BANDS = ['limited_evidence', 'developing_evidence', 'established_evidence', 'strong_evidence', 'very_strong_evidence'];
 
 /**
- * Criteria a brief may NEVER contain. Reuses M17's protected-characteristic
+ * Criteria a brief may NEVER contain. Reuses the rooms' protected-characteristic
  * list so the two systems cannot drift apart, plus the recruitment-specific
  * proxies a brief could otherwise smuggle a protected trait through.
  */
@@ -594,8 +594,8 @@ export const PROHIBITED_BRIEF_FIELDS = [
 
 export function validateRecruitmentBrief(input = {}, { orgLevel = 'pro', protocols = null } = {}) {
   const errs = [];
-  // S12c: a field of the wrong type is refused, naming it, rather than coerced (an object title, a list that is not a
-  // list, an unknown foot or Combine protocol). Over-long free text is still shortened.
+  // A field of the wrong type is refused, naming it, rather than coerced (an object title, a list that is not a
+  // list, an unknown foot or Combine protocol). Over-long free text is shortened.
   if (input.title != null && typeof input.title !== 'string') errs.push({ field: 'title', error: 'FIELD_INVALID' });
   const title = typeof input.title === 'string' ? input.title.trim().slice(0, 120) : '';
   if (!title && !errs.length) errs.push({ field: 'title', error: 'BRIEF_TITLE_REQUIRED' });
@@ -647,8 +647,8 @@ export function validateRecruitmentBrief(input = {}, { orgLevel = 'pro', protoco
   const availability = input.availability ?? null;
   if (availability !== null && typeof availability !== 'string') errs.push({ field: 'availability', error: 'FIELD_INVALID' });
 
-  // M23 P5.7: the window bounds are calendar days that EXIST. An unreadable
-  // `activeUntil` used to compare as "never passed" and keep a brief live for ever.
+  // The window bounds are calendar days that EXIST: an unreadable `activeUntil`
+  // must not compare as "never passed" and keep a brief live for ever.
   const activeFrom = isAbsent(input.activeFrom) ? null : input.activeFrom;
   const activeUntil = isAbsent(input.activeUntil) ? null : input.activeUntil;
   if (activeFrom !== null && !parseStrictDateOnly(activeFrom).ok) errs.push({ field: 'activeFrom', error: 'DATE_INVALID' });
@@ -704,10 +704,8 @@ export function explainBriefCriteria(criteria = {}) {
  * `facts` is the lightweight match projection, never a full Passport.
  */
 export function playerMatchesBrief(facts, criteria = {}, opts = {}) {
-  // M19: a thin adapter over the ONE explainable match engine (matching/match.mjs).
-  // Everything a brief carries is REQUIRED, which is what a brief has always
-  // meant, so the output is unchanged: the same keys, the same `met` flags,
-  // the same words, in the same order. There is deliberately no second
+  // A thin adapter over the ONE explainable match engine (matching/match.mjs).
+  // Everything a brief carries is REQUIRED. There is deliberately no second
   // matching implementation for this one to drift from.
   return matchBrief(facts, criteria, opts);
 }
@@ -804,7 +802,7 @@ export const LIMITS = {
   reviewActionsPerHour: 300,
   pageSize: 25,
   maxPageSize: 100,
-  // S14j: no candidate cap — matching and Nobody Missed are SQL over every visible player (matching/query.mjs).
+  // No candidate cap: matching and Nobody Missed are SQL over every visible player (matching/query.mjs).
 };
 
 export const clampPage = (n, fallback = LIMITS.pageSize) => {
@@ -813,7 +811,7 @@ export const clampPage = (n, fallback = LIMITS.pageSize) => {
 };
 
 /**
- * The viewer-safe projection. M18 output is organisation-private and carries
+ * The viewer-safe projection. Discovery output is organisation-private and carries
  * only facts the club could already read about the player.
  */
 export function safeM18Projection(item) {
@@ -823,17 +821,16 @@ export function safeM18Projection(item) {
 }
 
 /**
- * M18.2 — is a Recruitment Brief live on a given calendar day?
+ * Is a Recruitment Brief live on a given calendar day?
  *
  * `activeFrom` / `activeUntil` are calendar days ('YYYY-MM-DD'), inclusive at
  * both ends, compared as UTC calendar-day strings. There is no time-of-day and
  * no time zone on a brief: a brief that runs "until the 30th" is live for the
  * whole of the 30th everywhere, and stops being live at the first UTC instant
- * of the 31st. Extracted from the Nobody Missed router so the boundary can be
- * tested without a clock.
+ * of the 31st. Pure so the boundary can be tested without a clock.
  */
 export function briefIsLiveOn(b, today = new Date().toISOString().slice(0, 10)) {
   if (!b || b.status !== 'active') return false;
-  // M23 P5.7: unreadable bounds close the window (a pre-P5.7 row with garbage in it is not live).
+  // Unreadable bounds close the window.
   return isDayWithin(today, b.activeFrom, b.activeUntil);
 }

@@ -1,10 +1,10 @@
 import net from 'node:net';
 
-// PRE-M24 (TH-6): a random test port that fetch() will actually connect to.
+// A random test port that fetch() will actually connect to.
 //
 // Prefer `freePort()`: the operating system hands out a port nobody holds, so
 // suites running side by side (the parallel `npm test`) never collide. The
-// fixed ranges of `pickPort` remain for the milestone end-to-end scripts.
+// fixed ranges of `pickPort` remain for the end-to-end scripts.
 //
 // The suites draw a base port at random so that parallel runs rarely collide,
 // then boot servers on base plus a few fixed offsets. The WHATWG Fetch standard refuses a

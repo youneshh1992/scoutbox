@@ -1,37 +1,16 @@
 /**
- * Bearer sessions — the second live domain (plan step S2).
+ * Bearer sessions: the `sessions` table.
  *
- * Owns the `sessions` table (no mirror and no db.* view since S14f: every read is a query). A session
- * row never stores the bearer token: only `token_hash` (sha256 hex) is kept,
- * and a token is looked up by hashing what the client presents. The token
- * string exists exactly once outside the client: in the return value of
- * `create`, which the login handlers put in their response. Nothing here logs,
- * reports or exports it.
+ * A session row never stores the bearer token: only `token_hash` (sha256 hex) is kept, and a token is looked up by
+ * hashing what the client presents. The token string exists exactly once outside the client: in the return value of
+ * `create`, which the login handlers put in their response. Nothing here logs, reports or exports it.
  *
- * Lifetime. A session is live while `now - created_at < sessionTtlMs` and
- * `created_at > 0`, the same rule the server has applied since PRE-M24
- * (`sessionLive`), evaluated against the TTL configured NOW. `expires_at`
- * (= created_at + TTL) is a materialised copy for the prune index and for
- * reporting; when the configured lifetime changes between boots, `attach`
- * rewrites `expires_at` for every row and records the new lifetime in `meta`,
- * so a TTL change applies to existing sessions immediately — exactly as the
- * blob store did, where the TTL was read at boot and applied to every lookup.
+ * Lifetime. A session is live while `now - created_at < sessionTtlMs` and `created_at > 0`, evaluated against the TTL
+ * configured now. `expires_at` (= created_at + TTL) is a materialised copy for the prune index and for reporting; when
+ * the configured lifetime changes between boots, `attach` rewrites `expires_at` for every row and records the new
+ * lifetime in `meta`, so a TTL change applies to existing sessions immediately.
  *
- * Rows that cannot be represented (no token, unknown kind, non-integer
- * creation time, an org session without a staff row, a duplicate sid or
- * token) are refused: by the cutover migration with an abort
- * (repositories/migrations/0003_sessions_live.mjs) and by the snapshot tooling
- * with an error that rolls the whole save back. Nothing is coerced, repaired
- * or dropped. The server itself never creates such a row.
- *
- * Whether the table is authoritative is decided by the cutover record in
- * `data_migrations`, never by the table's existence or contents: the S1
- * shadow created the table (migration 0002) long before S2 (0003) made it the
- * source of truth, and a rollback copy has the table but not the record.
- *
- * node:sqlite is required; there is no in-memory or JSON fallback for
- * sessions (one would have to keep plain tokens somewhere, which is the very
- * thing S2 removes).
+ * node:sqlite is required; there is no in-memory or JSON fallback (one would have to keep plain tokens somewhere).
  */
 import crypto from 'node:crypto';
 import { migrationApplied } from './database.mjs';
@@ -51,10 +30,10 @@ const toRow = (r) => {
   if (r.via != null) row.via = r.via;
   return row;
 };
-/** The table is the source of truth only once the cutover migration is recorded. */
+/** The table is trusted only once its migration is recorded. */
 const cutOver = (sqlite) => migrationApplied(sqlite, SESSIONS_CUTOVER_MIGRATION);
 
-/** The whole domain read back as plain records (`readAllRecords` in index.mjs: the test suites' read-back); null before its migration. */
+/** The whole domain read back as plain records (`readAllRecords` in index.mjs: the test suites' read-back). */
 export const SESSIONS_TABLE = {
   name: 'sessions',
   read(sqlite) {
@@ -62,17 +41,6 @@ export const SESSIONS_TABLE = {
     return sqlite.prepare('SELECT token_hash, sid, kind, ref_id, org_user_id, via, created_at, expires_at FROM sessions ORDER BY created_at, sid').all()
       .map((r) => ({ ...toRow(r), tokenHash: r.token_hash }));
   },
-  /**
-   * Make the table's contents equal to `rows`; the caller owns the transaction.
-   * Every row is validated first and the first problem (an unrepresentable
-   * row, a duplicate sid or token, a staff relationship the snapshot itself
-   * breaks) THROWS, naming the sid and the reason and never a token, so the
-   * caller's transaction rolls back and the sessions already stored, and every
-   * other collection in the same save, stay exactly as they were. Removing a
-   * session is an explicit act (the repository's revoke methods, or a snapshot
-   * that simply no longer lists it), never a side effect of a bad row.
-   */
-
 };
 
 export function createSessionsRepository({ sqlite, sessionTtlMs = DEFAULT_SESSION_TTL_MS, now = Date.now, newToken = () => crypto.randomBytes(24).toString('hex'), newSid = () => crypto.randomBytes(6).toString('hex'), log = () => {} }) {
@@ -100,13 +68,13 @@ export function createSessionsRepository({ sqlite, sessionTtlMs = DEFAULT_SESSIO
   const live = (row, at = now()) => !!row && Number.isInteger(row.createdAt) && row.createdAt > 0 && at - row.createdAt < sessionTtlMs;
 
   // Every read is a query and every write a statement on the store's connection, so a write inside a unit of work
-  // joins it and is undone by its rollback; there is no in-memory state to restore.
+  // joins it and is undone by its rollback.
 
   const repo = {
     ttlMs: sessionTtlMs,
     isLive: live,
 
-    /** Boot: refuse to run without the cutover record; align expires_at with the configured lifetime. */
+    /** Boot: refuse to run without the migration record; align expires_at with the configured lifetime. */
     attach() {
       if (!stmt.cutover.get(SESSIONS_CUTOVER_MIGRATION)) throw new Error(`sessions: the cutover record ${SESSIONS_CUTOVER_MIGRATION} is missing from data_migrations; the table cannot be trusted as the source of truth`);
       const stored = Number(stmt.metaGet.get('sessionTtlMs')?.value) || null;
@@ -157,12 +125,7 @@ export function createSessionsRepository({ sqlite, sessionTtlMs = DEFAULT_SESSIO
     listFor: (kind, refId) => stmt.listFor.all(kind, refId).map(toRow),
     listOrgUser: (userId) => stmt.listOrgUser.all(userId).map(toRow),
     count: () => stmt.count.get().n,
-    /**
-     * Every stored row in snapshot form (with `tokenHash`, never a token), for
-     * the admin backup: a restore of that snapshot keeps the sessions alive
-     * exactly as a copy of the database file would. The hash-free rows of the
-     * list queries cannot round-trip, so they must not be exported.
-     */
+    /** Every stored row with its `tokenHash` (never a token). */
     exportRows: () => SESSIONS_TABLE.read(sqlite) ?? [],
 
     revokeSid: (sid) => stmt.delSid.run(sid).changes,

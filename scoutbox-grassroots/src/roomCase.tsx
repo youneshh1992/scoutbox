@@ -1,7 +1,6 @@
-// M24B — the Recruitment Room's new subcategory panels.
+// The Recruitment Room's subcategory panels.
 //
-// Every panel here is either a function the Room already had, moved to its
-// own page (Tasks), or a READ over records the Room already reads (Journey,
+// Every panel here is either a Room function on its own page (Tasks), or a READ over records the Room already reads (Journey,
 // Second Look, Inbox, Documents, Timeline, Previous …). None of them writes
 // anything new, none invents an event, none keeps a store of its own: a
 // document is listed where it lives, a previous Offer is the Offer record
@@ -30,7 +29,7 @@ export interface CasePanelProps {
   reload: () => void;
   staff: StaffRow[];
   journey?: RoomJourney | null;
-  /** Jump to another subcategory of this case (a sub id or a legacy tab id). */
+  /** Jump to another subcategory of this case (a sub id or a flat tab id). */
   openSub: (sub: string) => void;
 }
 

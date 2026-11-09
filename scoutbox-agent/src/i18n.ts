@@ -104,7 +104,7 @@ const en = {
   'clients.accessSuspended': 'Access suspended: disputed by the client', 'clients.summaryOnly': 'Summary only — the client chose to share their relationship status with agency staff, and nothing else.',
   'clients.terminate': 'End relationship', 'clients.withdraw': 'Withdraw request', 'clients.terminated': 'Ended. The record stays.',
   'clients.tab.overview': 'Overview', 'clients.tab.representation': 'Representation', 'clients.tab.opportunities': 'Opportunities', 'clients.tab.contacts': 'Club contacts', 'clients.tab.trials': 'Trials', 'clients.tab.offers': 'Offers', 'clients.tab.activity': 'Activity',
-  // M24B — category → subcategory navigation of a client, and its read-only pages.
+  // Category → subcategory navigation of a client, and its read-only pages.
   'clients.cat.overview': 'Overview', 'clients.cat.player': 'Player', 'clients.cat.recruitment': 'Recruitment', 'clients.cat.transaction': 'Transaction', 'clients.cat.history': 'History',
   'clients.tab.summary': 'Summary', 'clients.tab.journey': 'Journey', 'clients.tab.tasks': 'Tasks', 'clients.tab.profile': 'Profile', 'clients.tab.compliance': 'Compliance', 'clients.tab.signings': 'Signing', 'clients.tab.documents': 'Documents', 'clients.tab.timeline': 'Timeline', 'clients.tab.past-offers': 'Previous offers', 'clients.tab.past-signings': 'Previous signings',
   'clients.areas': 'Areas of this client', 'clients.pagesIn': 'Pages in', 'clients.sections': 'Client sections',
@@ -114,11 +114,11 @@ const en = {
   'clients.timelineNote': 'Every milestone a club shared with you, in order. Read-only; nothing is reconstructed.', 'clients.timelineNone': 'No milestone yet.',
   'clients.pastOffersNone': 'No previous Offer.', 'clients.pastSigningsNone': 'No previous signing.', 'clients.historyNote': 'Read-only, from the same records as the live pages.',
   'tx.cat.workspace': 'Workspace', 'tx.cat.records': 'Records', 'tx.areas': 'Areas of this transaction', 'tx.pagesIn': 'Pages in',
-  // M23 P8 — the client's factual journey line.
+  // The client's factual journey line.
   'clients.journey.title': 'Recruitment journeys', 'clients.journey.honest': 'Only what your client shared with you, from clubs that put something in front of them. No club’s internal shortlist, assessment or decision ever appears here.', 'clients.journey.none': 'No club has shared a stage with you for this client.', 'clients.journey.last': 'Latest:',
   'clients.journey.st.contacted': 'Contacted', 'clients.journey.st.trial_invited': 'Trial invitation', 'clients.journey.st.trial_scheduled': 'Trial scheduled', 'clients.journey.st.trial_completed': 'Trial completed', 'clients.journey.st.offer_received': 'Offer received', 'clients.journey.st.offer_accepted': 'Offer accepted — signing pending', 'clients.journey.st.offer_declined': 'Offer declined', 'clients.journey.st.signing': 'Signing in progress', 'clients.journey.st.signed': 'Signed', 'clients.journey.st.none': 'In touch',
   'clients.journey.ev.contact_initiated': 'contact sent', 'clients.journey.ev.contact_response_received': 'contact answered', 'clients.journey.ev.trial_invited': 'trial invitation', 'clients.journey.ev.trial_accepted': 'invitation accepted', 'clients.journey.ev.trial_declined': 'invitation declined', 'clients.journey.ev.trial_schedule_confirmed': 'schedule confirmed', 'clients.journey.ev.trial_completed': 'trial completed', 'clients.journey.ev.trial_cancelled': 'trial cancelled', 'clients.journey.ev.offer_issued': 'Offer issued', 'clients.journey.ev.offer_accepted': 'Offer accepted', 'clients.journey.ev.offer_declined': 'Offer declined', 'clients.journey.ev.offer_withdrawn': 'Offer withdrawn', 'clients.journey.ev.offer_superseded': 'Offer revised', 'clients.journey.ev.offer_expired': 'Offer expired', 'clients.journey.ev.signing_ready': 'signing presented', 'clients.journey.ev.signing_party_completed': 'signature recorded', 'clients.journey.ev.signing_completed': 'signing completed', 'clients.journey.ev.signing_cancelled': 'signing cancelled', 'clients.journey.ev.signing_voided': 'signing voided', 'clients.journey.ev.signing_superseded': 'signing revision replaced',
-  // ---- M23 P5.6E cross-app integration
+  // ---- cross-app integration
   'share.action': 'Share with client', 'share.shared': 'Shared', 'share.withdraw': 'Withdraw', 'share.done': 'Shared with your client.', 'share.withdrawn': 'Share withdrawn.',
   'share.noteLabel': 'A short note for your client', 'share.notePlaceholder': 'Why this one? (optional)',
   'share.honest': 'Sharing brings an opportunity to your client\u2019s attention. Applying is their own action on their own screen \u2014 you cannot apply for them, and ScoutBox will not do it on your word.',
@@ -130,7 +130,7 @@ const en = {
   'trials.none': 'No trials to show for this client.',
   'trials.awaitingClient': 'Awaiting your client\u2019s confirmation',
   'trials.reportOutstanding': 'The club still owes a trial report.', 'trials.reportFiled': 'The club has filed its trial report.',
-  // M23 P6 — a client's Offers, read-only, only what the client shared. No accept-as-client, no negotiation, no signing.
+  // A client's Offers, read-only, only what the client shared. No accept-as-client, no negotiation, no signing.
   'offers.intro': 'Only the Offers your client chose to share with you, exactly as the club issued them.',
   'offers.none': 'No Offer has been shared with you by this client.',
   'offers.awaitingClient': 'Awaiting your client\u2019s answer', 'offers.revision': 'Revision', 'offers.expires': 'expires', 'offers.sharedAt': 'Shared with you',
@@ -182,7 +182,7 @@ const en = {
   'tier.licensed_agent': 'Licensed agent', 'tier.agency_admin': 'Agency administrator', 'tier.analyst': 'Analyst', 'tier.assistant': 'Assistant', 'tier.finance': 'Finance',
   'tierNote.licensed_agent': 'May hold client relationships once their own verification is current.', 'tierNote.agency_admin': 'Manages membership, roles and settings; is not an agent.',
   'tierNote.analyst': 'Reads what clients chose to share with staff.', 'tierNote.assistant': 'Reads what clients chose to share with staff.', 'tierNote.finance': 'Reads what clients chose to share with staff.',
-  // ---- M23 P5.6C compliance (conflict, consent, policy, attributed review)
+  // ---- compliance (conflict, consent, policy, attributed review)
   'nav.compliance': 'Conflicts & compliance', 'navshort.compliance': 'Compliance',
   'cx.intro': 'Your regulatory standing, the jurisdiction rules ScoutBox has encoded, and the conflict check for each transaction you act in. Not a transaction room: no offer, terms, fee or negotiation exists here.',
   'cx.openContexts': 'Open transaction contexts', 'cx.consentsOutstanding': 'Consents outstanding', 'cx.reviewsPending': 'Awaiting attributed review', 'cx.staleFacets': 'Verifications gone stale',
@@ -261,7 +261,7 @@ const en = {
   // ---- report
   'report.title': 'Report / Block', 'report.body': 'Describe what happened. Urgent reports suspend communication pending review.', 'report.reason': 'What happened', 'report.urgent': 'Urgent — someone may be at risk', 'report.send': 'File report', 'report.sent': 'Report filed for review.',
   'report.target': 'Player id (optional)',
-  // ---- M23 P5.6D transaction workspace
+  // ---- transaction workspace
   'nav.transactions': 'Transactions', 'navshort.transactions': 'Transactions', 'navsec.transactions': 'Transactions',
   'tx.tabs': 'Transaction sections',
   'txTab.overview': 'Overview', 'txTab.parties': 'Parties', 'txTab.compliance': 'Compliance', 'txTab.documents': 'Documents', 'txTab.messages': 'Messages', 'txTab.timeline': 'Timeline',
@@ -435,11 +435,11 @@ const fr: typeof en = {
   'clients.timelineNote': 'Chaque jalon qu’un club a partagé avec vous, dans l’ordre. Lecture seule ; rien n’est reconstitué.', 'clients.timelineNone': 'Aucun jalon pour l’instant.',
   'clients.pastOffersNone': 'Aucune Offre précédente.', 'clients.pastSigningsNone': 'Aucune signature précédente.', 'clients.historyNote': 'Lecture seule, à partir des mêmes enregistrements que les pages en cours.',
   'tx.cat.workspace': 'Espace', 'tx.cat.records': 'Enregistrements', 'tx.areas': 'Zones de cette transaction', 'tx.pagesIn': 'Pages de',
-  // M23 P8 — la ligne de parcours factuelle du client.
+  // La ligne de parcours factuelle du client.
   'clients.journey.title': 'Parcours de recrutement', 'clients.journey.honest': 'Uniquement ce que votre client a partagé avec vous, de la part des clubs qui lui ont présenté quelque chose. Aucune présélection, évaluation ou décision interne d’un club n’apparaît ici.', 'clients.journey.none': 'Aucun club n’a partagé d’étape avec vous pour ce client.', 'clients.journey.last': 'Dernier :',
   'clients.journey.st.contacted': 'Contacté', 'clients.journey.st.trial_invited': 'Invitation à un essai', 'clients.journey.st.trial_scheduled': 'Essai programmé', 'clients.journey.st.trial_completed': 'Essai terminé', 'clients.journey.st.offer_received': 'Offre reçue', 'clients.journey.st.offer_accepted': 'Offre acceptée — signature en attente', 'clients.journey.st.offer_declined': 'Offre refusée', 'clients.journey.st.signing': 'Signature en cours', 'clients.journey.st.signed': 'Signé', 'clients.journey.st.none': 'En contact',
   'clients.journey.ev.contact_initiated': 'contact envoyé', 'clients.journey.ev.contact_response_received': 'réponse au contact', 'clients.journey.ev.trial_invited': 'invitation à un essai', 'clients.journey.ev.trial_accepted': 'invitation acceptée', 'clients.journey.ev.trial_declined': 'invitation refusée', 'clients.journey.ev.trial_schedule_confirmed': 'horaire confirmé', 'clients.journey.ev.trial_completed': 'essai terminé', 'clients.journey.ev.trial_cancelled': 'essai annulé', 'clients.journey.ev.offer_issued': 'Offre émise', 'clients.journey.ev.offer_accepted': 'Offre acceptée', 'clients.journey.ev.offer_declined': 'Offre refusée', 'clients.journey.ev.offer_withdrawn': 'Offre retirée', 'clients.journey.ev.offer_superseded': 'Offre révisée', 'clients.journey.ev.offer_expired': 'Offre expirée', 'clients.journey.ev.signing_ready': 'signature présentée', 'clients.journey.ev.signing_party_completed': 'signature enregistrée', 'clients.journey.ev.signing_completed': 'signature clôturée', 'clients.journey.ev.signing_cancelled': 'signature annulée', 'clients.journey.ev.signing_voided': 'signature invalidée', 'clients.journey.ev.signing_superseded': 'révision de signature remplacée',
-  // ---- M23 P5.6E
+  // ---- intégration entre applications
   'share.action': 'Partager avec le client', 'share.shared': 'Partag\u00e9', 'share.withdraw': 'Retirer', 'share.done': 'Partag\u00e9 avec votre client.', 'share.withdrawn': 'Partage retir\u00e9.',
   'share.noteLabel': 'Une note br\u00e8ve pour votre client', 'share.notePlaceholder': 'Pourquoi celle-ci ? (facultatif)',
   'share.honest': 'Le partage porte une opportunit\u00e9 \u00e0 l\u2019attention de votre client. Postuler est son propre acte sur son propre \u00e9cran \u2014 vous ne pouvez pas postuler pour lui, et ScoutBox ne le fera pas sur votre parole.',
@@ -451,7 +451,7 @@ const fr: typeof en = {
   'trials.none': 'Aucun essai \u00e0 afficher pour ce client.',
   'trials.awaitingClient': 'En attente de la confirmation de votre client',
   'trials.reportOutstanding': 'Le club doit encore un rapport d\u2019essai.', 'trials.reportFiled': 'Le club a d\u00e9pos\u00e9 son rapport d\u2019essai.',
-  // M23 P6 — les Offres d\u2019un client, en lecture seule, seulement ce que le client a partag\u00e9.
+  // Les Offres d\u2019un client, en lecture seule, seulement ce que le client a partag\u00e9.
   'offers.intro': 'Seules les Offres que votre client a choisi de partager avec vous, exactement telles que le club les a \u00e9mises.',
   'offers.none': 'Aucune Offre n\u2019a \u00e9t\u00e9 partag\u00e9e avec vous par ce client.',
   'offers.awaitingClient': 'En attente de la r\u00e9ponse de votre client', 'offers.revision': 'R\u00e9vision', 'offers.expires': 'expire le', 'offers.sharedAt': 'Partag\u00e9e avec vous le',
@@ -500,7 +500,7 @@ const fr: typeof en = {
   'tier.licensed_agent': 'Agent licencié', 'tier.agency_admin': 'Administrateur d’agence', 'tier.analyst': 'Analyste', 'tier.assistant': 'Assistant', 'tier.finance': 'Finance',
   'tierNote.licensed_agent': 'Peut détenir des relations clients une fois sa vérification à jour.', 'tierNote.agency_admin': 'Gère les adhésions, les rôles et les paramètres ; n’est pas un agent.',
   'tierNote.analyst': 'Lit ce que les clients ont choisi de partager avec le personnel.', 'tierNote.assistant': 'Lit ce que les clients ont choisi de partager avec le personnel.', 'tierNote.finance': 'Lit ce que les clients ont choisi de partager avec le personnel.',
-  // ---- M23 P5.6C conformit\u00e9 (FR)
+  // ---- conformit\u00e9 (FR)
   'nav.compliance': 'Conflits et conformit\u00e9', 'navshort.compliance': 'Conformit\u00e9',
   'cx.intro': 'Votre situation r\u00e9glementaire, les r\u00e8gles de juridiction encod\u00e9es par ScoutBox, et le contr\u00f4le de conflit de chaque transaction o\u00f9 vous agissez. Ce n\u2019est pas une salle de transaction : aucune offre, condition, commission ni n\u00e9gociation n\u2019existe ici.',
   'cx.openContexts': 'Contextes de transaction ouverts', 'cx.consentsOutstanding': 'Consentements en attente', 'cx.reviewsPending': 'En attente de revue attribu\u00e9e', 'cx.staleFacets': 'V\u00e9rifications p\u00e9rim\u00e9es',
@@ -573,7 +573,7 @@ const fr: typeof en = {
   'cxAction.regulatory_review_requested': '\u00c9l\u00e9ment de revue cr\u00e9\u00e9', 'cxAction.regulatory_review_resolved': '\u00c9l\u00e9ment de revue r\u00e9solu',
   'report.title': 'Signaler / Bloquer', 'report.body': 'Décrivez ce qui s’est passé. Les signalements urgents suspendent la communication en attendant la revue.', 'report.reason': 'Ce qui s’est passé', 'report.urgent': 'Urgent — quelqu’un peut être en danger', 'report.send': 'Déposer le signalement', 'report.sent': 'Signalement déposé pour revue.',
   'report.target': 'Identifiant du joueur (facultatif)',
-  // ---- M23 P5.6D espace de transaction (FR)
+  // ---- espace de transaction (FR)
   'nav.transactions': 'Transactions', 'navshort.transactions': 'Transactions', 'navsec.transactions': 'Transactions',
   'tx.tabs': 'Sections de la transaction',
   'txTab.overview': 'Vue d’ensemble', 'txTab.parties': 'Parties', 'txTab.compliance': 'Conformité', 'txTab.documents': 'Documents', 'txTab.messages': 'Messages', 'txTab.timeline': 'Chronologie',
@@ -661,9 +661,9 @@ export function t(key: keyof typeof en | (string & {}), fallback?: string): stri
   const dict = current === 'fr' ? fr : en;
   return (dict as Record<string, string>)[key] ?? fallback ?? key;
 }
-// M23 P5.7 (§6): a calendar day (`YYYY-MM-DD`) has no zone and renders as that day everywhere.
+// A calendar day (`YYYY-MM-DD`) has no zone and renders as that day everywhere.
 const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
-// PRE-M24 (PM-12): an unreadable stamp shows a dash, never "Invalid Date".
+// An unreadable stamp shows a dash, never "Invalid Date".
 const badStamp = (ts: unknown) => ts === null || ts === undefined || ts === '' || Number.isNaN(new Date(ts as number | string).getTime());
 export const fmtDate = (ts: number | string) => badStamp(ts) ? '—' : new Date(ts).toLocaleDateString(current === 'fr' ? 'fr-FR' : 'en-GB', { day: 'numeric', month: 'short', year: 'numeric', ...(typeof ts === 'string' && DATE_ONLY.test(ts) ? { timeZone: 'UTC' } : {}) });
 export const fmtStamp = (ts: number | string) => {

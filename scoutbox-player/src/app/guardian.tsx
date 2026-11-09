@@ -113,7 +113,7 @@ export default function GuardianDashboard() {
 
   if (kind !== 'guardian') return <Redirect href="/onboarding" />;
 
-  // M23 P3: an optional short reply that travels with the answer to a contact.
+  // An optional short reply that travels with the answer to a contact.
   const [replies, setReplies] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState<string | null>(null);
 
@@ -163,7 +163,7 @@ export default function GuardianDashboard() {
           </Row>
         </Row>
 
-        {/* M24F — who you are, as one quiet line; standing that is not in order is said in words, in the danger colour. */}
+        {/* Who you are, as one quiet line; standing that is not in order is said in words, in the danger colour. */}
         <View style={styles.who}>
           <Text style={styles.whoName}>{guardian?.name}</Text>
           <Text style={[styles.whoLine, !(guardian?.idVerified && guardian?.disclaimerAccepted) && { color: colors.danger }]}>
@@ -225,7 +225,7 @@ export default function GuardianDashboard() {
             <InvitationDetail icon="users" title={pt('detailInvitePlayer')}>{r.playerName ?? r.playerId}</InvitationDetail>
             {r.status !== 'pending' && <Pill label={r.status.charAt(0).toUpperCase() + r.status.slice(1)} />}
             {r.subject ? <Text style={styles.subject} testID={`req-subject-${r.id}`}>{r.subject}</Text> : null}
-            {/* M24F.3 — one-line rule: who, what, for whom, where, the dates and the decision in view; the club's words, the notes and the scout line behind View details */}
+            {/* One-line rule: who, what, for whom, where, the dates and the decision in view; the club's words, the notes and the scout line behind View details */}
             {r.status === 'pending' && r.type === 'trial' && r.trialDetails?.proposedDate && (
               <>
                 {r.trialDetails.slots && r.trialDetails.slots.length > 0 ? (
@@ -305,7 +305,7 @@ export default function GuardianDashboard() {
                   />
                 ))}
               </Row>
-              {/* M24F.4 — the switches, pairing, open days, references and the
+              {/* The switches, pairing, open days, references and the
                   deletion sit behind one row; the card itself is the child, the
                   completeness, the evidence counts and the availability. */}
               <Disclosure label={`Manage ${c.name.split(' ')[0]}'s profile`} hint={`Medical sharing ${c.medical.shared ? 'on' : 'off'} · First Team Seeker ${c.firstTeamSeeker ? 'on' : 'off'}${(openDays[c.id]?.length ?? 0) > 0 ? ` · ${openDays[c.id]!.length} open day${openDays[c.id]!.length === 1 ? '' : 's'} nearby` : ''}`} testID={`guardian-manage-${c.id}`}>
@@ -535,7 +535,7 @@ export default function GuardianDashboard() {
           <PolicyList minor />
         </Disclosure>
 
-        {/* M24E — the way out. Sign out ends this identity's session on the
+        {/* The way out. Sign out ends this identity's session on the
             server and on the device and returns to the entry screen; Switch
             account does the same and opens the entry screen on Sign in, so the
             next person signs in as themselves — no identity carries over. */}
@@ -549,7 +549,7 @@ export default function GuardianDashboard() {
           <>
             {children.map((c) => (
               <View key={c.id}>
-                {/* M24F.5 — the child's football, one row each: the dashboard stays a list; every section opens one tap deeper. */}
+                {/* The child's football, one row each: the dashboard stays a list; every section opens one tap deeper. */}
                 <View style={{ marginTop: 22 }}><SectionTitle testID={`guardian-child-head-${c.id}`}>{c.name}</SectionTitle></View>
                 <Disclosure label={pt('gSec_evidence')} testID={`guardian-child-evidence-${c.id}`}>
                   <PassportSection actor={{ kind: 'guardian', id: guardianId, childId: c.id }} />

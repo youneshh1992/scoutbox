@@ -1,4 +1,4 @@
-// M16 Trust & Safety — Box Cam cases. T&S can invalidate a Box Cam result
+// Trust & Safety — Box Cam cases. T&S can invalidate a Box Cam result
 // (or let it stand) with a written reason, and restore an invalidated one —
 // but can NEVER fabricate verified duration, rep counts or completion. The
 // integrity inspector shows the server-derived result and its hash; frame
@@ -43,7 +43,7 @@ export function M16Panel({ adminKey, say }: { tab: M16Tab; adminKey: string; say
 
   const load = useCallback(async () => {
     if (DEMO) { setDisputes(canned); return; }
-    // S12b: the first page of the queue (oldest first); a "load more" that follows `nextCursor` is still needed.
+    // The first page of the queue (oldest first); a "load more" that follows `nextCursor` is still needed.
     try { setDisputes((await call<{ items: Dispute[] }>(adminKey, `/admin/box-cam/disputes${showResolved ? '?all=1' : ''}`)).items); }
     catch (e) { say(e instanceof Error ? e.message : 'load failed'); }
   }, [adminKey, say, showResolved]);

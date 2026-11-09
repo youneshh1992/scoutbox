@@ -1,4 +1,4 @@
-// M24F.5 — staff read words, not machine codes. A server reason such as
+// Staff read words, not machine codes. A server reason such as
 // DOCUMENT_AUTHENTICITY_UNCONFIRMED reads "Document authenticity unconfirmed";
 // a check such as emailDomainAlignment=passed reads "Email domain alignment: passed".
 // The code itself stays available as the element's title for anyone who needs it.

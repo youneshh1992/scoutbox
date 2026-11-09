@@ -1,8 +1,7 @@
 import { GuidanceNote } from './InformationRows';
-// M12 player/guardian sections, dropped into the existing tabs:
-// passport (Profile), opportunity board (Home), campaigns + resumable upload
-// (Upload), feedback→objectives + follow-ups + access settings (You),
-// squad invites + trial safety (Inbox), and the guardian panel (guardian.tsx).
+// Player/guardian sections: passport, opportunity board, campaigns +
+// resumable upload, feedback→objectives + follow-ups + access settings,
+// squad invites + trial safety, and the guardian panel (guardian.tsx).
 // Accessibility: accessibilityLabel/role on controls, status text announced
 // via accessibilityLiveRegion.
 import { useCallback, useEffect, useState } from 'react';
@@ -15,7 +14,7 @@ import { getDataSaver, getPLang, pFmtDate, pt, setDataSaver, setPLang } from '..
 import { InvitationCard, InvitationDetail } from './InvitationCard';
 import { humanDate } from '../time';
 
-// M24F — presentation casing for status labels; the data value is never changed.
+// Presentation casing for status labels; the data value is never changed.
 const cap = (v: string | null | undefined) => (v ? v.charAt(0).toUpperCase() + v.slice(1).replace(/_/g, ' ') : '');
 
 export type Actor = { kind: 'player'; id: string } | { kind: 'guardian'; id: string; childId: string };
@@ -40,7 +39,7 @@ const inputStyle = (colors: Palette) => ({
   paddingHorizontal: 10, paddingVertical: 8, fontSize: 13, borderWidth: 1, borderColor: colors.line,
 } as const);
 
-// ------------------------------------------------------------- F1 passport
+// ------------------------------------------------------------- passport
 export function PassportSection({ actor }: { actor: Actor }) {
   const colors = useColors();
   const [pp, reload] = useLoad<PassportView>(
@@ -97,7 +96,7 @@ export function PassportSection({ actor }: { actor: Actor }) {
   );
 }
 
-// --------------------------------------------------------------- F5 board
+// --------------------------------------------------------------- board
 export function BoardSection({ actor }: { actor: Actor }) {
   const colors = useColors();
   const [board, reload] = useLoad<{ items: BoardItem[]; minor?: boolean; note?: string | null }>(
@@ -106,7 +105,7 @@ export function BoardSection({ actor }: { actor: Actor }) {
   );
   const [msg, setMsg] = useState<string | null>(null);
   if (!board) return null;
-  // M24F.3 — one row per opportunity: the title, then club · date · distance,
+  // One row per opportunity: the title, then club · date · distance,
   // and the one state word. The description, the schedule, what to bring and
   // the actions sit behind "View".
   const appliedWord = (s: string) => (s === 'accepted' ? pt('boardAccepted') : s === 'declined' || s === 'rejected' ? pt('boardDeclinedApp') : s === 'withdrawn' ? pt('boardWithdrawn') : pt('boardApplied'));
@@ -151,7 +150,7 @@ export function BoardSection({ actor }: { actor: Actor }) {
   );
 }
 
-// ----------------------------------------------------------- F6 campaigns
+// ----------------------------------------------------------- campaigns
 export function CampaignsSection({ actor, mediaOptions }: { actor: Actor; mediaOptions: { id: string; title: string }[] }) {
   const colors = useColors();
   const [camps, reload] = useLoad<CampaignView[]>(
@@ -208,7 +207,7 @@ function AttemptForm({ actor, campaign, mediaOptions, onDone }: { actor: Actor; 
   );
 }
 
-// -------------------------------------------- F2 feedback + F8 development
+// -------------------------------------------- feedback + development
 export function FeedbackDevSection({ actor }: { actor: Actor }) {
   const colors = useColors();
   const [fb] = useLoad<{ guardianManaged?: boolean; count?: number; items: FeedbackItem[] }>(
@@ -292,7 +291,7 @@ export function FeedbackDevSection({ actor }: { actor: Actor }) {
   );
 }
 
-// ---------------------------------------------------------- F9 trial days
+// ---------------------------------------------------------- trial days
 export function TrialSafetySection({ actor }: { actor: Actor }) {
   const colors = useColors();
   const [trials, reload] = useLoad<FamilyTrial[]>(
@@ -362,7 +361,7 @@ export function TrialSafetySection({ actor }: { actor: Actor }) {
   );
 }
 
-// ------------------------------------------------------- F10 squad invites
+// ------------------------------------------------------- squad invites
 export function SquadInvitesSection({ actor }: { actor: Actor }) {
   const colors = useColors();
   const [invites, reload] = useLoad<SquadInvite[]>(
@@ -394,7 +393,7 @@ export function SquadInvitesSection({ actor }: { actor: Actor }) {
   );
 }
 
-// ---------------------------------------------------------- F11 follow-ups
+// ---------------------------------------------------------- follow-ups
 export function FollowUpsSection({ actor }: { actor: Actor }) {
   const colors = useColors();
   const [ups, reload] = useLoad<FollowUpView[]>(
@@ -430,7 +429,7 @@ export function FollowUpsSection({ actor }: { actor: Actor }) {
   );
 }
 
-// -------------------------------------- F12 access & inclusion (You tab)
+// -------------------------------------- access & inclusion (You tab)
 export function AccessSection({ playerId, mediaOptions, isMinor }: { playerId: string; mediaOptions: { id: string; title: string }[]; isMinor: boolean }) {
   const colors = useColors();
   const [lang, setLangState] = useState(getPLang());
@@ -445,7 +444,7 @@ export function AccessSection({ playerId, mediaOptions, isMinor }: { playerId: s
         <Button small primary={lang === 'en'} label="EN" onPress={() => { setPLang('en'); setLangState('en'); }} />
         <Button small primary={lang === 'fr'} label="FR" onPress={() => { setPLang('fr'); setLangState('fr'); }} />
       </Row>
-      {/* M24F.2 — the machine-translation note only once French is the chosen language. */}
+      {/* The machine-translation note only once French is the chosen language. */}
       {lang === 'fr' && <Muted size={11.5}>{pt('machineNote')}</Muted>}
       <Row style={{ marginTop: 8 }}>
         <Text style={{ color: colors.text, fontSize: 13, flex: 1 }}>{pt('dataSaver')}</Text>
@@ -475,7 +474,7 @@ export function AccessSection({ playerId, mediaOptions, isMinor }: { playerId: s
   );
 }
 
-// ------------------------------------------------ F12A resumable uploads
+// ------------------------------------------------ resumable uploads
 export function ResumableUploadCard({ playerId, onDone }: { playerId: string; onDone: () => void }) {
   const colors = useColors();
   const [session, setSession] = useState<UploadSession | null>(null);

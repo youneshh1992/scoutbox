@@ -1,10 +1,9 @@
 /**
- * S14j — the match facts builder and keeper (the tables: repositories/matchFacts.mjs).
+ * The match facts builder and keeper (the tables: repositories/matchFacts.mjs).
  *
- * `build(player)` is the facts projection matching, the watchlists and Nobody Missed test: before S14j it was
- * nobodyMissed.mjs `matchFacts(player, org)`, assembled for every visible player on every read. Nothing in it
- * depends on the organisation reading (the organisation's part, visibility, age, distance, is the query's), so it is
- * derived once per player and stored. The rules are the ones that function had, read through the same repositories:
+ * `build(player)` is the facts projection that matching, the watchlists and Nobody Missed test. Nothing in it
+ * depends on the organisation reading (visibility, age and distance are the query's), so it is derived once per
+ * player and stored:
  *   position, secondaryPositions, availability   the Passport preferences, else the profile
  *   lastEvidenceAt, lastFootageAt                 the current (not superseded) evidence, newest instant
  *   coachReference                                an active reference, or coach-confirmed evidence

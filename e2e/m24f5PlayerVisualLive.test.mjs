@@ -1,4 +1,4 @@
-// M24F.5 — final visual acceptance of the Player, in a real browser, on the shipped
+// Final visual acceptance of the Player, in a real browser, on the shipped
 // demo bundle (e2e/dist/scoutbox-player-demo.html) at 320 / 360 / 390 / 430 and
 // 640×360: Home, Activity, Development, Box Cam, Combine, Evidence, Passport,
 // Trust Score, Messages, Trial and Offer.

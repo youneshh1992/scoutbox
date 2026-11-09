@@ -1,14 +1,8 @@
-// S13d — grassroots operations as typed tables with explicit writes (repositories/grassroots.mjs, migration 0037).
-// What this suite proves: the migration creates the STRICT tables (no JSON column), empty; the typers refuse junk
-// naming the record and field (a day that does not exist, a repeated position, a guardian id on a player's own
-// registration, an outcome without its time, a player credited twice, a response from the poster); an open day is
-// created with its positions, registered once per player, answered once, counted by the no-ghosting rule only while
-// past and unanswered, and deleting it stamps it (it leaves every list, the row and a coverage assignment's key stay);
-// a deleted player's registrations lose the name and keep the id; match days and the organisation's open days page
-// newest first; the friendlies board pages by date with the radius box and an exact filter, and takes one response per
-// club; a rolled-back unit leaves nothing; and a fixture written through the repository is typed, names a missing
-// reference and reads back what it wrote. Temporary databases only.
-// Run with: npm test
+// Grassroots operations (repositories/grassroots.mjs, migration 0037): open days (registered once per player, answered
+// once, counted by the no-ghosting rule only while past and unanswered; deleting one stamps it, so a coverage
+// assignment's key stays), a deleted player's registrations keeping the id but not the name, match days, the
+// friendlies board (radius box prefilter plus an exact filter, one response per club), the typers, paging, units of
+// work and fixtures. Temporary databases only. Run with: npm test
 
 import assert from 'node:assert/strict';
 import fs from 'node:fs';

@@ -1,8 +1,8 @@
-// M20 demo spotcheck — the Director Dashboard as it appears in the SHIPPED
+// Demo spotcheck — the Director Dashboard as it appears in the SHIPPED
 // single-file bundles.
 //
 // The demo bundles are the artifact HTML: no server, no network. What this
-// asserts is that the M20 surface is really in them and really behaves:
+// asserts is that the dashboard is really in them and really behaves:
 //   • both org bundles boot clean and reach the dashboard
 //   • all seven families render, and every panel carries its limitation
 //   • a withheld rate, a zero and "nothing happened" read as three different
@@ -16,15 +16,11 @@
 //   • the player bundle knows nothing about any of it
 //   • 390px
 //
-// Requires `node serve.mjs` on :8099 with freshly built demo bundles.
+// Needs freshly built demo bundles (buildDemos.mjs).
 import { chromium } from 'playwright-core';
 import { ensureDemoHost } from './demoHost.mjs';
 
-// D7 (M22 §74-§76): this test OWNS its demo host rather than assuming one
-// is already listening. The old comment above said "Requires node
-// serve.mjs on :8099" — an instruction nobody followed, because
-// crosstab and demoOffline happened to leave a host behind. They no
-// longer do.
+// This test owns its demo host: it starts one if none is running (see demoHost.mjs).
 const demo = await ensureDemoHost();
 const BASE = demo.host.replace('localhost', '127.0.0.1');
 const EXE = process.env.CHROMIUM || '/opt/pw-browsers/chromium';
@@ -71,7 +67,7 @@ async function login(p) {
 const goHash = async (p, hash, wait = 1400) => {
   await p.evaluate((h) => { window.location.hash = h; }, hash);
   await p.waitForTimeout(wait);
-  // M24F.5 — the root is the executive layer; filters, the governing sentence and every panel are one tap deeper. Open them, then assert the same.
+  // The root is the executive layer; filters, the governing sentence and every panel are one tap deeper. Open them, then assert the same.
   if (hash.startsWith('#/recruitment/dashboard')) {
     for (const id of ['dash-more-filters', 'dash-about-toggle', 'dash-detail-toggle']) {
       const b = p.locator(`[data-testid="${id}"][aria-expanded="false"]`);
@@ -195,7 +191,7 @@ for (const [name, path] of [['club', 'club/'], ['grassroots', 'grassroots/']]) {
   await p.close();
 }
 
-// ---- the player bundle knows nothing about M20
+// ---- the player bundle knows nothing about the dashboard
 {
   const { p, errors } = await open(`${BASE}/player/`, { width: 420, height: 900 });
   await p.waitForTimeout(1800);

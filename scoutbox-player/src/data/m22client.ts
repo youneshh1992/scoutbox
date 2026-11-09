@@ -1,14 +1,14 @@
-// M22 — Box Cam CV client: Ready Check, frame transport, result.
+// Box Cam CV client: Ready Check, frame transport, result.
 //
 // TWO THINGS THIS FILE IS CAREFUL ABOUT
 //
 // 1. It never asserts a count. The server derives every number from pixels it
 //    saw itself; this client sends frames and renders what comes back. There
 //    is deliberately no local counter, no optimistic count and no field in any
-//    request body that could be mistaken for one — see §22 and the §107
-//    regression, which POSTs `touchCount: 176` and proves it changes nothing.
+//    request body that could be mistaken for one — the server's
+//    regression test POSTs `touchCount: 176` and proves it changes nothing.
 //
-// 2. It never retains a frame (§51, §52). A frame's whole life is: draw the
+// 2. It never retains a frame. A frame's whole life is: draw the
 //    current video frame to one reused canvas, read the luminance plane,
 //    base64 it, hand it to the request, drop the reference. Nothing is kept in
 //    component state, nothing accumulates in an array, and the canvas is a
@@ -18,7 +18,7 @@ import { m12Request as req } from './httpClient';
 
 const DEMO = process.env.EXPO_PUBLIC_DEMO === '1';
 
-/** One Ready Check row. The client maps copy; the server sends structure (§49). */
+/** One Ready Check row. The client maps copy; the server sends structure. */
 export interface ReadyCheckItem {
   id: string;
   state: 'pass' | 'fail' | 'unknown';
@@ -56,7 +56,7 @@ export interface CvResult {
     personPresent: boolean; ballPresent: boolean;
     touchCount: number | null; juggleCount: number | null; activeDurationMs: number;
   };
-  /** §32/§33 — carried, labelled, and never rendered as an official result. */
+  /** Carried, labelled, and never rendered as an official result. */
   experimental: { exactCount: number | null; status: string; note: string };
   integrity: Record<string, unknown>;
   serverStartedAt: number; serverEndedAt: number; serverDurationMs: number;
@@ -83,7 +83,7 @@ export interface FrameEnvelope {
 // One canvas, reused for the life of the capture. Creating a canvas per frame
 // is the obvious version of this and it quietly holds a bitmap per frame alive
 // until GC catches up — exactly the "camera screenshots kept in app state"
-// failure §52 warns about.
+// failure to avoid.
 
 let canvas: HTMLCanvasElement | null = null;
 let ctx: CanvasRenderingContext2D | null = null;

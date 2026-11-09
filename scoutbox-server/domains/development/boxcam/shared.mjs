@@ -1,4 +1,4 @@
-// M16 shared — Box Cam pure engine.
+// Box Cam pure engine.
 //
 // Box Cam is ScoutBox's first-party observed training evidence system. The
 // strongest statement it is ever allowed to make is: "ScoutBox Box Cam
@@ -298,7 +298,7 @@ export function boxCamDetail(session) {
   return `${base} ScoutBox observed activity consistent with the selected supported drill for ${fmtMs(session.verifiedActiveMs)}.`;
 }
 
-// ------------------------------------------------------------- paging (S12b)
+// ------------------------------------------------------------------- paging
 /**
  * One page of a newest-first list the route has already filtered (an organisation's assignments, challenges or
  * Combine requests: bounded by one club's, the visibility rule applied in code before the page is cut).

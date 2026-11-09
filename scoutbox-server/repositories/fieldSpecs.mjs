@@ -1,9 +1,9 @@
 /**
  * Field specs: one description of a record's fields drives its typing, its row encoding and decoding, and its DDL, so
- * the three cannot drift (S10a, repositories/verification.mjs; reused by S10b, repositories/passport.mjs).
+ * the three cannot drift.
  *
  * A field is `{ k, c, t, … }`: the record key `k`, the column `c` and the type `t` — `text` (with `max`, optionally
- * `nonEmpty`), `int`, `num` (a finite number, REAL; S12a), `bool`, `enum` (with `vals`) or `date` (a football date as given: 'YYYY', 'YYYY-MM' or
+ * `nonEmpty`), `int`, `num` (a finite number, REAL), `bool`, `enum` (with `vals`) or `date` (a football date as given: 'YYYY', 'YYYY-MM' or
  * 'YYYY-MM-DD', a day that exists). `req` makes it required, `def` gives a default. A `group` is a nested object stored
  * as columns: `nullable` groups are null when their first column is; `sparse` objects keep only non-null keys.
  */

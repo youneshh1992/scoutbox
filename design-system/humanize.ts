@@ -1,4 +1,4 @@
-// M24F.5 — server criteria and summaries sometimes carry machine tokens
+// Server criteria and summaries sometimes carry machine tokens
 // (semi_pro, developing_evidence, combine-box-touch-60). People read words:
 // "semi-pro", "developing evidence", "Box Touch 60". Meaning is unchanged —
 // only the spelling of the token.

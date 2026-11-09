@@ -1,14 +1,8 @@
-// S12c — Recruitment Briefs, Nobody Missed reviews, Second Look items and Dynamic Watchlists as typed tables with
-// explicit writes (repositories/discovery.mjs, migration 0032). What this suite proves: the migration creates the STRICT
-// tables (no JSON column), empty; the typers refuse junk with the record and field named (an unknown foot, position
-// groups that are not the positions', a day that does not exist, an unknown trigger, a system trail entry with a person,
-// a criterion whose id is not its own, a live-linked list without a brief); every record is created and read back whole
-// (every criterion kind the schema evaluates included, the position groups worked out); an update keeps the fields that
-// never change, only grows the trail and refuses itself from inside itself; a review is unique per organisation, brief
-// and player, an item per decision cycle; a reconciliation replaces the membership, appends only unseen transitions and
-// records its clock; the watchlist list and its transitions page; a rolled-back unit leaves nothing; the db.* names
-// throw; and a fixture written through the repository is typed, names a missing reference and reads back what it wrote. Temporary databases
-// only; nothing touches DATA_DIR. Run with: npm test
+// Recruitment Briefs, Nobody Missed reviews, Second Look items and Dynamic Watchlists (repositories/discovery.mjs,
+// migration 0032): the STRICT tables, the typers' refusals, records read back whole, updates that keep what never
+// changes, a review unique per organisation, brief and player and an item per decision cycle, a reconciliation that
+// replaces the membership and appends only unseen transitions, paging, units of work and fixtures. Temporary
+// databases only; nothing touches DATA_DIR. Run with: npm test
 
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -107,7 +101,7 @@ function serverOpen(dir) {
   const layer = attachDataLayer({ store, nextId, sessionTtlMs: TTL, now: () => NOW, warn: () => {} });
   return { store, repo: layer.discovery, unit: (w) => store.unitOfWork(w), close: () => store.sqlite.close() };
 }
-/** The S8b graph (case-1, the room of pl-adult at org-pro, with decisions rdec-1 and its head rdec-2) and the requests and trial it links. */
+/** The case graph (case-1, the room of pl-adult at org-pro, with decisions rdec-1 and its head rdec-2) and the requests and trial it links. */
 const CASES_FIX = () => ({ notifications: [], dispatches: [], requests: [acceptedRequest(p4bInvitation(), 'trial-1'), minorInvitation(), legacyTrialRequest()], trials: [scheduledTrial()], ...S8B_FIX() });
 /** A watchlist is created unreconciled; its membership and transitions come from a reconciliation (needing the whole fixture). */
 const writersFor = (fix) => ({

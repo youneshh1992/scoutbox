@@ -1,9 +1,9 @@
 // Saved searches: "Tell me when a left-footed U16 winger joins" — the club feed made personal.
 //
-// S13e: a saved search is a row of `saved_searches` (repositories/operations.mjs), its filters typed columns; the
-// scout's name is read live from the staff row. Creating and deleting are explicit repository writes. When a player
-// joins, SQL narrows the saved searches of current staff to those whose position, foot, country and availability the
-// player could match, and the whole filter is then applied to the player as the club sees them.
+// A saved search is a row of `saved_searches` (repositories/operations.mjs), its filters typed columns; the scout's
+// name is read live from the staff row. When a player joins, SQL narrows the saved searches of current staff to those
+// whose position, foot, country and availability the player could match, and the whole filter is then applied to the
+// player as the club sees them.
 //
 // Filters are refused when junk (400 FIELD_INVALID naming `filters.<key>`): an unknown key, a value of the wrong type,
 // a position, foot, availability or age group outside the vocabulary, a newDays that is not a whole number of days.
@@ -80,7 +80,7 @@ export function registerSavedSearches({ byId, orgRouter, notify, nextId, playerV
 
   orgRouter.post('/searches', (req, res) => {
     const { name, filters } = req.body || {};
-    if (!reqText(name, L.searchName)) return res.status(400).json({ error: 'NAME_REQUIRED' }); // PRE-M24 (PM-10)
+    if (!reqText(name, L.searchName)) return res.status(400).json({ error: 'NAME_REQUIRED' });
     const read = readSearchFilters(filters);
     if (read.field) return res.status(400).json({ error: 'FIELD_INVALID', field: read.field, message: `${read.field} is not a search filter this build accepts.` });
     const ss = savedSearches.create({ id: nextId('ss'), orgId: req.org.id, userId: req.orgUser.id, name: name.trim(), filters: read.filters, createdAt: Date.now() });

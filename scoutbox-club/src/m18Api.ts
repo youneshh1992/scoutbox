@@ -1,4 +1,4 @@
-// M18 typed client (org side): Second Look, Nobody Missed, Recruitment Briefs.
+// Typed client (org side): Second Look, Nobody Missed, Recruitment Briefs.
 //
 // What these systems ARE: two pieces of recruitment WORKFLOW hygiene for the
 // club. Second Look reports what changed in a player's record since the club's
@@ -6,8 +6,8 @@
 // club's own written brief never entered the club's evaluation workflow.
 //
 // What they are NOT, and what nothing in this module may ever become:
-//   • Player-facing. There is no player, guardian or public route in M18 at
-//     all. A player is never told they were "missed" or "reconsidered".
+//   • Player-facing. There is no player, guardian or public route for these
+//     at all. A player is never told they were "missed" or "reconsidered".
 //   • A judgement of the club's decision. Second Look reports facts that moved;
 //     it never says a decision was wrong and never recommends signing anyone.
 //   • A talent measure. Nobody Missed is EVALUATION COVERAGE — workflow
@@ -19,7 +19,7 @@
 //     verification, suspension, the agency wall) has already run server-side.
 //
 // A room reopens ONLY through an explicit recruiter click on `reopenRoom`, and
-// that call goes through M17's own reopen path — one transition table, one
+// that call goes through the Room's own reopen path — one transition table, one
 // decision memory, one activity trail.
 import { API_URL, DEMO_MODE, ApiError, type Session } from './api';
 import { demoM18 } from './m18Demo';
@@ -237,7 +237,7 @@ export interface RecruitmentBrief {
   status: string;
   /** Criteria version — what historical Evaluation Coverage points at. */
   version: number;
-  /** Mutation revision — the optimistic-concurrency token (M18.1). */
+  /** Mutation revision — the optimistic-concurrency token. */
   rev?: number;
   revAt?: number | null;
   revBy?: string | null;
@@ -272,7 +272,7 @@ export interface BriefListResult {
 
 export interface BriefInput {
   /**
-   * The `rev` this edit was composed against (M18.1). The server refuses a
+   * The `rev` this edit was composed against. The server refuses a
    * write built on a stale read with 409 BRIEF_VERSION_CONFLICT rather than
    * discarding a colleague's edit. It is optional on the wire so nothing
    * older breaks, but every ScoutBox surface sends it.
@@ -357,7 +357,7 @@ export interface NobodyMissedResult {
   items: NobodyMissedItem[];
   total: number;
   limit?: number;
-  /** S14j: the candidates page by cursor; pass this back as `cursor` for the next page (null on the last). */
+  /** The candidates page by cursor; pass this back as `cursor` for the next page (null on the last). */
   nextCursor?: string | null;
   coverage: EvaluationCoverage | null;
   sorts?: string[];

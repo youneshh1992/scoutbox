@@ -1,4 +1,4 @@
-// M23 P4B — Trial persistence suite.
+// Trial persistence suite.
 //
 // THE INVARIANTS
 //
@@ -6,7 +6,7 @@
 //      values (`legacy_accepted`, no schedule, no attendance, no completion)
 //      and never renames `awaiting_report` / `reported`, never invents a
 //      date, an attendance or a completion.
-//   2. A fixture that carries P4B trial rows restores them byte-faithfully
+//   2. A fixture that carries workflow trial rows restores them byte-faithfully
 //      through a real boot: sessions keep their ids and order, the append-only
 //      revisions and attendance history keep every entry, the idempotency
 //      keys live on the row.
@@ -29,8 +29,8 @@ import { JOURNEY_REQUIRED_STORES } from '../../domains/recruitment/lifecycle/jou
 import { trialIntegrity, deriveWorkflowState, TRIAL_WORKFLOW_STATES } from '../../domains/recruitment/lifecycle/trial.mjs';
 import { typeTrial } from '../../repositories/recruitment.mjs';
 import { DATA_MIGRATIONS, TABLE_BACKED } from '../../repositories/index.mjs';
-import { createEvidenceProvider } from '../../scripts/recruitmentReadsFixture.mjs'; // §4.3 step 2: the contacts/offers queries over the plain arrays
-const LATEST_SCHEMA = Number(DATA_MIGRATIONS.map((m) => m.id).sort().at(-1).slice(0, 4)); // S14a: the latest table migration's number
+import { createEvidenceProvider } from '../../scripts/recruitmentReadsFixture.mjs'; // the contacts/offers queries over plain arrays
+const LATEST_SCHEMA = Number(DATA_MIGRATIONS.map((m) => m.id).sort().at(-1).slice(0, 4)); // the latest table migration's number
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SERVER = path.join(HERE, '..', '..', 'server.mjs');
@@ -45,7 +45,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const children = [];
 process.on('exit', () => { for (const c of children) { try { c.kill('SIGKILL'); } catch { /* gone */ } } });
 
-/** Boot the real server on a directory; return a client and a stop() that SIGTERMs and reads the snapshot back. */
+/** Boot the real server on a directory; return a client and a stop() that SIGTERMs and reads the stored records back. */
 async function bootOn(dataDir, port) {
   const base = `http://localhost:${port}`;
   const proc = spawn(process.execPath, [SERVER], { env: { ...process.env, PORT: String(port), DATA_DIR: dataDir, M13_QUIET_LOGS: '1', SCOUTBOX_TEST_CLOCK: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
@@ -84,7 +84,7 @@ function baseDb() {
     players: [{ id: 'pl-x', name: 'Xavier Adult', dob: '2000-05-05', country: 'GB', city: 'London', media: [], attendance: [], trialReports: [], badges: [], timeline: [], medical: { shared: false, records: [], conditionStatus: 'unknown' }, level: 'amateur', location: { lat: 51.5, lng: -0.1 } }],
     orgs: [{ id: 'org-x', name: 'X FC', type: 'club', level: 'pro', plan: 'Pro', verified: true, safeguardingContractSigned: true, location: { lat: 51.5, lng: -0.1 } }],
     guardians: [],
-    // S8a-core: a request names its staff member by a real key (recruitment_requests.user_id → org_users), so the
+    // A request names its staff member by a real key (recruitment_requests.user_id → org_users), so the
     // fixture carries the staff row the case and the request name (the dev login below finds it by org and name).
     users: [{ id: 'usr-owner', orgId: 'org-x', name: 'Owner', role: 'Head of Recruitment', createdAt: 1 }],
     sessions: [], ledger: [], notifications: [],
@@ -99,7 +99,7 @@ function baseDb() {
   return db;
 }
 
-/** A sound, fully-populated P4B trial row: two sessions, two revisions, two attendance records, one evidence link, keys. */
+/** A sound, fully-populated workflow trial row: two sessions, two revisions, two attendance records, one evidence link, keys. */
 const soundTrial = (over = {}) => ({
   id: 'trial-1', requestId: 'req-1', caseId: 'case-x', playerId: 'pl-x', playerName: 'Xavier Adult', orgId: 'org-x', orgName: 'X FC', scoutName: 'Owner',
   acceptedAt: T0, acceptedBy: 'player', guardianApproved: false, proposedDate: '2027-01-15', venue: 'Dome, London', notes: '',
@@ -134,7 +134,7 @@ const soundTrial = (over = {}) => ({
   ...over,
 });
 
-/** A trial without the P4B containers (M12's shape, stored as `legacy_accepted`): a filed report (the report route's literal) and a trial day. */
+/** A trial without the workflow containers (the older shape, stored as `legacy_accepted`): a filed report (the report route's literal) and a trial day. */
 const legacyTrial = () => ({
   id: 'trial-legacy', requestId: 'req-0', playerId: 'pl-x', playerName: 'Xavier Adult', orgId: 'org-x', orgName: 'X FC', scoutName: 'Owner',
   acceptedAt: T0 - 400 * H, acceptedBy: 'player', guardianApproved: false, proposedDate: '2026-12-01', venue: 'Old Ground', notes: 'Bring boots',
@@ -149,16 +149,14 @@ const write = (dir, db) => writeFixture(dir, db);
 // organisation and player, by id): the yardstick for "nothing was written".
 const rowIds = (d) => JSON.stringify(Object.fromEntries(Object.entries(d).map(([k, rows]) => [k, rows.map((r) => r?.id ?? JSON.stringify(r))])));
 const FRESH = (() => { const { orgs, players, guardians } = baseDb(); return rowIds(readRecords(writeFixture(mkdtempSync(path.join(tmpdir(), 'sbx-m23t-fresh-')), { orgs, players, guardians }))); })();
-/** S8a: what a typed trial row reads back as — the record as written, with every absent field null and every absent list empty. */
+/** What a typed trial row reads back as — the record as written, with every absent field null and every absent list empty. */
 const typedJson = (t) => { const r = typeTrial(t); if (!r.ok) throw new Error(r.reason); return stableJson(r.record); };
 
 // ======================================================= 1 — the migration
 section('1 — a trial row: neutral containers, nothing renamed, nothing invented');
 {
-  // Rewritten in S14a: the 2303 → 2304 upgrade, the store contract and runMigrations described the blob (an in-memory
-  // upgrade path, ground rule 1). The trials are typed rows read through SQL; every trial reads back from its row with
-  // the containers (typeTrial).
-  ok(TABLE_BACKED.includes('trials') && !JOURNEY_REQUIRED_STORES.includes('trials') && DATA_MIGRATIONS.length === LATEST_SCHEMA, 'trials is a typed table read through SQL (schema 39)');
+  // The trials are typed rows read through SQL; every trial reads back from its row with the containers (typeTrial).
+  ok(TABLE_BACKED.includes('trials') && !JOURNEY_REQUIRED_STORES.includes('trials') && DATA_MIGRATIONS.length === LATEST_SCHEMA, 'trials is a typed table read through SQL');
   const input = legacyTrial();
   const l = JSON.parse(typedJson(input)); // the legacy row as its typed table row reads back
   ok(stableJson(input) === stableJson(legacyTrial()) && l.workflowState === 'legacy_accepted' && l.caseId === null && l.schedule === null && Array.isArray(l.attendance) && l.attendance.length === 0 && l.completion === null && l.rev === 1 && Array.isArray(l.history) && l.history.length === 0 && Object.values(l.keys).every((k) => k === null || (Array.isArray(k) && k.length === 0)) && stableJson(l.reminders) === '{}', 'the legacy row, typed, reads back with legacy_accepted and empty containers (the record it came from untouched)');
@@ -170,16 +168,16 @@ section('1 — a trial row: neutral containers, nothing renamed, nothing invente
 }
 
 // ======================================================= 2 — byte-faithful restore
-section('2 — a fixture with P4B trial rows restores byte-faithfully through a real boot');
+section('2 — a fixture with trial rows restores byte-faithfully through a real boot');
 {
   const RESTORE_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-m23t-restore-'));
   const db = baseDb();
   db.trials.push(soundTrial(), legacyTrial());
-  // The legacy trial carries a filed report; the player's trialReports are read from the trials (S5), so a snapshot
-  // player carries no copy (S14h: a copy is refused).
-  // S8a-core: a trial names its request by a real key (trials.request_id → recruitment_requests), so the legacy trial
-  // gets the accepted invitation it came from (req-0, the legacy direct-request literal) beside the P4B pair; a trial
-  // naming an absent request is refused at the cutover with its id (PAIR_MISMATCH), never repaired. The legacy trial
+  // The legacy trial carries a filed report; the player's trialReports are read from the trials, so the fixture
+  // player carries no copy (a copy is refused).
+  // A trial names its request by a real key (trials.request_id → recruitment_requests), so the legacy trial
+  // gets the accepted invitation it came from (req-0, the legacy direct-request literal) beside the sound pair; a trial
+  // naming an absent request is refused at the write with its id (PAIR_MISMATCH), never repaired. The legacy trial
   // row itself is unchanged.
   db.requests = [{ id: 'req-0', orgId: 'org-x', orgName: 'X FC', orgType: 'club', orgVerified: true, orgSafeguardingCertified: true, playerId: 'pl-x', playerName: 'Xavier Adult', userId: 'usr-owner', scoutName: 'Owner', scoutRole: 'Head of Recruitment', type: 'trial', message: 'Come and train.', trialDetails: { proposedDate: '2026-12-01', altSlots: [], venue: 'Old Ground', notes: 'Bring boots' }, status: 'accepted', createdAt: T0 - 401 * H, respondedAt: T0 - 400 * H, respondedBy: 'player', routedTo: 'player', guardianId: null, contactChannel: null }, { id: 'req-1', orgId: 'org-x', orgName: 'X FC', orgType: 'club', orgVerified: true, orgSafeguardingCertified: true, playerId: 'pl-x', playerName: 'Xavier Adult', userId: 'usr-owner', scoutName: 'Owner', scoutRole: 'Head of Recruitment', type: 'trial', message: 'Come.', status: 'accepted', routedTo: 'player', guardianId: null, contactChannel: null, createdAt: T0 - 1000, respondedAt: T0, respondedBy: 'player', caseId: 'case-x', trialId: 'trial-1', recipient: { type: 'player', playerId: 'pl-x', guardianId: null, minor: false }, keys: { invite: { key: 'ik-1', fp: 'fp-i' } }, trialDetails: { proposedDate: '2027-01-15', altSlots: [], venue: 'Dome, London', notes: '', slots: [{ id: 'tslot-1', day: '2027-01-15', kind: 'training', startsAt: T0 + 2 * H, endsAt: T0 + 4 * H, timezone: 'Europe/London', venue: { name: 'Dome', town: 'London' } }], private: { venueAddress: '1 Dome Road', instructions: null } } }];
   db.recruitmentCases[0].room.status = 'trial_scheduled';
@@ -211,7 +209,7 @@ section('3 — corrupt trial rows are named and omitted, never fabricated, never
 {
   const CORRUPT_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-m23t-corrupt-'));
   const db = baseDb();
-  // S8a: every trial names its own accepted invitation (trials.request_id is a UNIQUE key to recruitment_requests) and
+  // Every trial names its own accepted invitation (trials.request_id is a UNIQUE key to recruitment_requests) and
   // only the sound trial is OPEN in case-x (trials_one_open_per_case). The typed tables hold a trial whose stored state
   // disagrees with its facts, a timezone that is not a zone and rev 0 — corruption a typed row can still carry — so
   // those three are planted and judged on read. A state, a completion or an attendance row outside the vocabulary and
@@ -246,7 +244,7 @@ section('3 — corrupt trial rows are named and omitted, never fabricated, never
   if (after.trials.map(stableJson).join() !== db.trials.map(typedJson).join()) { for (let i = 0; i < db.trials.length; i += 1) if (stableJson(after.trials[i]) !== typedJson(db.trials[i])) console.error('   changed row', i, JSON.stringify(after.trials[i]).slice(0, 200)); }
 }
 
-// ======================================================= 3c — records the typed tables cannot hold (S8a)
+// ======================================================= 3c — records the typed tables cannot hold
 section('3c — a state, a completion or an attendance row outside the vocabulary, or an off-type list, is refused by the write with its id');
 {
   const db = baseDb();
@@ -268,7 +266,7 @@ section('3c — a state, a completion or an attendance row outside the vocabular
   }
 }
 
-// ======================================================= 3b — alien entries (S8a-core)
+// ======================================================= 3b — alien entries
 section('3b — alien entries in the trials store are refused with their positions; the file is not modified');
 {
   // A null, a string or a number in the trials store is not a record: the trials repository's create refuses each by

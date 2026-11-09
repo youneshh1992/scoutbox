@@ -1,4 +1,4 @@
-// M14 acceptance suite — Verification & Trust.
+// Verification & Trust battery: organisations, staff and their claims.
 // Spawns its own server on an ISOLATED throwaway database, runs unit fixtures
 // against the pure helpers (state machine, effective engine, decision engine,
 // tokens, projector), then drives journeys V1–V18 and the eighteen security
@@ -19,7 +19,7 @@ import {
 import { totp } from '../../m13/shared.mjs';
 import { pickPort } from '../../scripts/testPort.mjs';
 
-const PORT = pickPort(4600, 300, [0, 300]); // TH-6: never a fetch-blocked port
+const PORT = pickPort(4600, 300, [0, 300]); // never a fetch-blocked port
 const DOWN_PORT = PORT + 300;
 const BASE = `http://localhost:${PORT}`;
 const DATA_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-m14-'));
@@ -124,7 +124,7 @@ section('unit fixtures — email/domain/evidence/token primitives');
   ok(evidenceFileProblem({ mime: 'application/pdf', bytes: 9 * 1024 * 1024, filename: 'big.pdf' }) === 'FILE_TOO_LARGE', 'oversize refused');
   ok(!evidenceCompleteness('PERSON_IDENTITY', []).complete && evidenceCompleteness('PERSON_IDENTITY', ['document']).complete, 'identity claims need a document before submission');
 
-  const fdb = { verTokens: [] }; const ts = arrayTokenStore(fdb.verTokens); // S10a: the token functions take a store (the server's is the repository)
+  const fdb = { verTokens: [] }; const ts = arrayTokenStore(fdb.verTokens); // the token functions take a store (the server's is the repository)
   const nid = (() => { let n = 0; return (p) => `${p}-${++n}`; })();
   const secret = mintToken(ts, nid, { purpose: 'work_email', email: 'a@club.com', subjectId: 'u1' });
   ok(!fdb.verTokens[0].hash.includes(secret) && fdb.verTokens[0].hash.length === 64, 'tokens are stored hashed, never in plain text');
@@ -174,7 +174,7 @@ const amara = (await j('POST', '/auth/guardian/login', { guardianId: 'gd-amara' 
 ok([maria, tom, sam, rita, uma, eve, bea, alex, dee, adeyemi, amara].every((a) => a?.token), 'all actors logged in');
 
 {
-  // Honest migration (§48): pre-verified orgs got ORGANISATION_IDENTITY claims
+  // Honest migration: pre-verified orgs got ORGANISATION_IDENTITY claims
   // with method `migration`; nothing else was upgraded.
   const r = await j('GET', '/org/verification/public/org/org-eastport', undefined, maria.token);
   ok(r.body.organisationStatus === 'verified' && r.body.badges.some((b) => b.claimType === 'ORGANISATION_IDENTITY' && b.provenance.includes('previously established')), 'migrated org shows verified with honest migration provenance');
@@ -403,7 +403,7 @@ let samLicId;
   const m2 = (await jAt(dBase, 'POST', '/auth/org/login', { orgId: 'org-eastport', scoutName: 'Down Tester', role: 'Coach' })).body;
   let r = await jAt(dBase, 'POST', '/org/verification/licence', { licenceType: 'UEFA B Licence', issuer: 'UEFA', identifier: 'UEFA-B-77777', holderName: 'Down Tester' }, m2.token);
   r = await jAt(dBase, 'POST', `/org/verification/licence/${r.body.claim.id}/submit`, { providerId: 'local-test-registry' }, m2.token);
-  ok(r.body.provider.state === 'temporarily_unavailable' && r.body.note.includes('remains pending'), 'provider outage: honest “remains pending” — never verified, never rejected (§62)');
+  ok(r.body.provider.state === 'temporarily_unavailable' && r.body.note.includes('remains pending'), 'provider outage: honest “remains pending” — never verified, never rejected');
   children.at(-1).kill('SIGKILL');
 }
 
@@ -414,10 +414,9 @@ let kid17;
   const dobY = (y) => { const d = new Date(); d.setFullYear(d.getFullYear() - y); d.setDate(d.getDate() + 10); return d.toISOString().slice(0, 10); };
   kid17 = (await j('POST', '/guardian/children', { name: 'Noor Test17', dob: dobY(18), position: 'CM', foot: 'right', lat: 51.5, lng: -0.06 }, amara.token)).body?.player;
   ok(kid17?.id, 'guardian creates a 17-year-old (existing DOB/country logic — no new age system)');
-  // M23 P5.6E: the legacy lane creates nothing at all now (E-1), for a minor and
-  // an adult alike. The claim this check protects — that verifying an agency
-  // changes nothing about a minor — moves to the canonical lane, which refuses a
-  // minor on its own gate.
+  // The legacy representation lane creates nothing, for a minor or an adult. The
+  // claim this check protects — that verifying an agency changes nothing about a
+  // minor — is proved on the canonical lane, which refuses a minor on its own gate.
   let r = await j('POST', '/org/representation/propose', { playerId: kid17.id, scope: 'full_representation' }, alex.token);
   ok(r.status === 404, 'the legacy representation lane is gone — verification does not reopen it');
   const canonicalMinor = await j('POST', '/org/agent/clients/request', { playerId: kid17.id, scope: ['employment'], jurisdiction: 'INT' }, alex.token);
@@ -578,7 +577,7 @@ section('V17 — grassroots evidence path: prepared, never auto-approved');
   ok(r.body.status === 'requires_human_review', 'insufficient authoritative evidence → human review, NOT a lowered bar');
   r = await j('POST', `/admin/verification/root-requests/${id}/reject`, { reason: 'federation listing could not be corroborated — invited to reapply with the county FA affiliation number' }, null, A);
   ok(r.status === 200 && r.body.request.status === 'rejected', 'T&S can reject with a recorded reason');
-  // S9c: approving a grassroots application creates the club (its squad is rows of org_squad_members, not a field on the record).
+  // Approving a grassroots application creates the club.
   r = await j('POST', '/auth/org/verification/apply', {
     orgName: 'Brook Lane Colts', orgType: 'grassroots club', country: 'GB', website: 'https://brooklanecolts.example.org', federation: 'London FA',
     applicantName: 'Sol Ade', applicantRole: 'Club Secretary', workEmail: 'sol.ade.blc@gmail.com',
@@ -624,7 +623,7 @@ section('V18 — admin takeover fails; root changes need two people');
   ok(r.status === 403 && r.body.error === 'SELF_REVOKE_FORBIDDEN', 'nobody removes their own authority — orphaning is prevented with T&S as recovery');
 }
 
-// ==================================== authorization sweep (security 32/54)
+// ==================================== authorization sweep
 section('authorization sweep — every surface fails closed');
 {
   let r = await j('GET', '/org/verification/dashboard', undefined, uma.token);
@@ -667,7 +666,7 @@ section('operational: deterministic rate limit, batch projector, metrics');
   ok(audit.body.ledger.some((l) => l.type === 'verification_decision'), 'verification decisions appear in the tenant audit export');
 }
 
-section('S10a — junk input is refused at the route (typed tables)');
+section('junk input is refused at the route (typed tables)');
 {
   const bad = (r, field, what) => ok(r.status === 400 && (r.body.field === field || r.body.error === field), `${what} → 400 naming ${field}`);
   bad(await j('POST', '/org/verification/affiliation', { role: 'Scout', validFrom: 'soon' }, eve.token), 'validFrom', 'an affiliation start that is not a date');
@@ -688,7 +687,7 @@ section('S10a — junk input is refused at the route (typed tables)');
   ok((await j('GET', '/admin/verification/disputes', undefined, null, A)).body.items.find((d) => d.id === open.id).status === 'open', 'and the refused resolution changed nothing');
 }
 
-section('S10a — one open identity claim per user, reinstatement included');
+section('one open identity claim per user, reinstatement included');
 {
   let r = await j('POST', '/org/verification/identity', {}, eve.token);
   const first = r.body.claim.id;

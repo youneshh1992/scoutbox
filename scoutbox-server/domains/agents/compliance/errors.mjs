@@ -1,8 +1,8 @@
 /**
- * M23 P5.6C — the compliance domain error contract. ONE table, no default
- * branch, a public-field allowlist. A refusal never carries a hidden minor,
- * another agent's agreement, a club that was not already shared, a fee term
- * or a reviewer's private note (mandate §67).
+ * The compliance domain error contract. ONE table, no default branch, a
+ * public-field allowlist. A refusal never carries a hidden minor, another
+ * agent's agreement, a club that was not already shared, a fee term or a
+ * reviewer's private note.
  */
 
 const table = (o) => Object.freeze(Object.assign(Object.create(null), o));

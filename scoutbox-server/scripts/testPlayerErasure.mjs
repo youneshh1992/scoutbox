@@ -1,17 +1,11 @@
-// S4b-R — the retained player record (migration plan §D.6/§D.6.1; the Founder's
-// decisions: the full birth date, 12 October 2026, and the country code KEPT,
-// 21 October 2026). The identity repositories on temporary databases through the
-// real data layer: `players.erase` retains exactly the agreed row and nothing
-// else of the person, removes the owned rows and links, is excluded from every
-// account reader, survives later fixture writes byte-identical,
-// refuses the reintroduction of a retained id, keeps the under-18 refusal for
-// LIVE records, fails atomically (memory restored, held views included) and
-// lands once on retry; migration 0014 (a record, no table, no row changed). Synthetic records only; nothing here touches DATA_DIR. Run with:
+// The retained player record (the Founder's decisions, docs/decisions.md: the full
+// birth date and the country code are KEPT). The identity repositories on temporary
+// databases through the real data layer: `players.erase` retains exactly the agreed
+// row and nothing else of the person, removes the owned rows and links, is excluded
+// from every account reader, refuses the reintroduction of a retained id, keeps the
+// under-18 refusal for LIVE records, fails atomically and lands once on retry;
+// migration 0014. Synthetic records only; nothing here touches DATA_DIR. Run with:
 // npm test
-//
-// FAILING-FIRST NOTE (recorded on the unchanged d16362f tree before the
-// implementation): every test below fails there on a concrete assertion
-// (no players.erase, no retained accessor, no 0014 record).
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -23,7 +17,7 @@ import { SUBRECORD_TABLES } from '../repositories/playerSubrecords.mjs';
 import { NOW, TTL, DAY, tempDir, clone, adult, child, seeded, gPrimary, gCo, gSignup, freshFile, openRaw, applied, dump } from './coreIdentityTestFixtures.mjs';
 
 let passed = 0;
-/** A fixture record as `create` takes it: the password hash beside the record, not on it (S14h). */
+/** A fixture record as `create` takes it: the password hash beside the record, not on it. */
 const asCreate = ({ password = null, ...r }) => ({ ...r, passwordHash: password });
 const only = process.env.TEST_ONLY || '';
 function test(name, fn) { if (only && !name.includes(only)) return; fn(); passed++; console.log(`  ✓ ${name}`); }
@@ -33,7 +27,7 @@ const MIGRATION = '0014_player_erasure';
 let erasureMod = null;
 try { erasureMod = await import('../repositories/identity.mjs'); } catch { erasureMod = null; }
 
-/** The retained row, column by column (plan §D.6.1 item 1): the identifier, the deletion instant, the two retained facts, fixed placeholders, NULL everywhere else. */
+/** The retained row, column by column: the identifier, the deletion instant, the two retained facts, fixed placeholders, NULL everywhere else. */
 const RETAINED_ROW = (id, deletedAt, birthDate, country) => ({
   id, name: 'Deleted player', birth_date: birthDate, country, city: null, position: null, foot: null, height_cm: null, weight_kg: null, squad_number: null,
   contract_until_date: null, market_value_range: null, agent_name: null, academy_plus: 0, first_team_seeker: 0, availability: 'not_seeking', contract_status: 'unknown', level: 'amateur',
@@ -72,7 +66,7 @@ function wire({ store, layer, warnings }) {
 // ------------------------------------------------------------------ the erase
 test('erase: a deleted player keeps EXACTLY the agreed row — id, the deletion instant, the full birth date and the country; a fixed placeholder in every NOT NULL column (never the previous value: a verified semi-pro academy player reads 0 / amateur / not_seeking afterwards), NULL everywhere else, no facets — the twelve child tables and the links are emptied explicitly, every guardian stops listing the id (the held childIds array in place); the retained row is served by no account reader (byId, byGuardian, count, linksOf, the whole-database read) and only by the narrow accessor; a second erase, remove, update, link and a re-creation under the same id are refused before any statement', () => {
   const dir = tempDir('erase-row'); const t = boot(dir, FIXTURE());
-  assert.equal(typeof t.players.erase, 'function', 'players.erase exists (S4b-R)');
+  assert.equal(typeof t.players.erase, 'function', 'players.erase exists');
   const before = t.row('pl-seeded');
   assert.deepEqual([before.identity_verified, before.academy_plus, before.level, before.availability, before.contract_status, before.medical_shared, before.medical_condition_status], [1, 1, 'semi_pro', 'available_now', 'expiring_summer', 1, 'fully_fit'], 'the fixture carries non-default values in every placeholder column');
   assert.ok(t.childRows('pl-seeded') > 5, 'the fixture has child rows');
@@ -148,13 +142,13 @@ test('unit of work: an erase inside a unit that fails after every write — and 
   t.sessions.create('player', 'pl-child1');
   const code = t.codes.issuePairingCode('pl-child1');
   assert.ok(code?.code, 'a pairing code was issued');
-  t.layer.safetyAudit.ledger.append({ id: 'led-erase', ts: NOW, type: 'view', playerId: 'pl-child1', orgId: 'org-pro', orgName: 'Eastport FC', userId: null, scoutName: 'Maria' }); // no staff row in this fixture: the staff key is RESTRICT (S14b)
+  t.layer.safetyAudit.ledger.append({ id: 'led-erase', ts: NOW, type: 'view', playerId: 'pl-child1', orgId: 'org-pro', orgName: 'Eastport FC', userId: null, scoutName: 'Maria' }); // no staff row in this fixture: the staff key is RESTRICT
   const ledgerBefore = JSON.stringify(t.all('SELECT * FROM ledger ORDER BY seq'));
   const view = t.players.byId('pl-child1'); const kids = t.guardians.byId('gd-primary').childIds;
   const sessionsBefore = t.raw("SELECT COUNT(*) AS n FROM sessions WHERE kind = 'player' AND ref_id = 'pl-child1'").n; assert.equal(sessionsBefore, 1);
   const stateOf = () => JSON.stringify({ row: t.row('pl-child1'), children: t.childRows('pl-child1'), links: t.links('pl-child1'), sessions: t.raw("SELECT COUNT(*) AS n FROM sessions WHERE kind = 'player' AND ref_id = 'pl-child1'").n, queue: t.raw('SELECT COUNT(*) AS n FROM media_deletions').n, codes: t.raw("SELECT COUNT(*) AS n FROM pairing_codes WHERE player_id = 'pl-child1'").n, ledger: t.all('SELECT * FROM ledger ORDER BY seq') });
   const before = stateOf();
-  // An unrelated write committed before the unit (S4a-E: every write is explicit; there is no pending edit to carry).
+  // An unrelated write committed before the unit.
   t.players.update('pl-seeded', (d) => { d.city = 'Northgate'; });
   const fileBefore = t.fileDump();
   const attempt = (label, failHow) => {
@@ -188,7 +182,7 @@ test('unit of work: an erase inside a unit that fails after every write — and 
 
 // ------------------------------------------------------------------ migration 0014
 test('migration 0014_player_erasure: registered after 0013; on a database at 0013 it records the step and changes no row and no table; it refuses to run outside the runner or before 0013; a second run is a no-op; retained records the erase wrote read back by deletion instant, then id', () => {
-  assert.equal(DATA_MIGRATIONS.map((m) => m.id).filter((id) => id < '0019').at(-5), MIGRATION, 'registered after 0013 (S8a\'s 0015, S8b\'s 0016, S8c\'s 0017 and S8d\'s 0018 follow it)');
+  assert.equal(DATA_MIGRATIONS.map((m) => m.id).filter((id) => id < '0019').at(-5), MIGRATION, 'registered after 0013 (0015–0018 follow it)');
   const step = DATA_MIGRATIONS.find((m) => m.id === MIGRATION);
   const tables = (s) => s.prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").all().map((r) => r.name);
   const a = tempDir('m14-plain'); freshFile(a);

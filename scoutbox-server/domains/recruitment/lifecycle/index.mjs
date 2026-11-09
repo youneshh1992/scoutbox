@@ -1,5 +1,5 @@
 /**
- * M23 — recruitment lifecycle routes.
+ * Recruitment lifecycle routes.
  *
  * Two surfaces only, and neither of them is a stage setter:
  *
@@ -28,11 +28,11 @@ import { guardRev, revMeta } from '../../platform/concurrency.mjs';
 import { buildShared } from '../../../m12/shared.mjs';
 
 export function registerM23(rawCtx) {
-  // The established seam: isLead, orgCanSee, audit and paginate come from one
-  // place rather than being re-derived per milestone.
+  // isLead, orgCanSee, audit and paginate come from one place rather than
+  // being re-derived per domain.
   const ctx = { ...rawCtx, ...buildShared(rawCtx) };
   const { recruitmentReads, scoutingReads, orgRouter, isLead } = ctx;
-  // The journey reads the club's assessments too (S9b: scoutingReads).
+  // The journey reads the club's assessments too (scoutingReads).
   if (!ctx.safetyReads?.blocks) throw new TypeError('the lifecycle routes need safetyReads (the safety repository\'s queries)');
   const journeyReads = { ...recruitmentReads, ...scoutingReads, blocks: ctx.safetyReads.blocks, player: (id) => ctx.byId.player(id) };
   if (!recruitmentReads?.contacts || !recruitmentReads?.offers) throw new TypeError('registerM23 needs recruitmentReads (contacts, offers) from the data layer');
@@ -53,15 +53,15 @@ export function registerM23(rawCtx) {
     ) ?? null;
   };
 
-  /** Evidence provider. P2 ships the null provider: no phase supplies evidence yet. */
+  /** The composed evidence provider (evidence.mjs); without one, the null provider refuses every evidence-bearing move. */
   const evidenceProvider = () => ctx.recruitmentEvidenceProvider ?? NULL_EVIDENCE_PROVIDER;
-  // M23 P8 — the same per-request test clock the Offer and signing routes
+  // The same per-request test clock the Offer and signing routes
   // honour (development only), so an expiry-derived stage reads the same here.
   const TEST_CLOCK = process.env.SCOUTBOX_TEST_CLOCK === '1' && process.env.NODE_ENV !== 'production';
   const nowOf = (req) => { if (TEST_CLOCK && req?.get) { const n = Number(req.get('x-scoutbox-test-clock')); if (Number.isFinite(n) && n > 0) return n; } return Date.now(); };
 
   // Domain errors answer through `sendDomainError` in errors.mjs — the ONE
-  // mapping table, shared with the P3 Contact routes.
+  // mapping table, shared with the Contact, Trial and Decision routes.
 
   // ------------------------------------------------------------- journey read
   orgRouter.get('/rooms/:id/journey', (req, res) => {
@@ -103,10 +103,10 @@ export function registerM23(rawCtx) {
       }, 'lifecycle');
     }
 
-    // The LIFECYCLE taxonomy, not M17's decision taxonomy. The two describe
+    // The LIFECYCLE taxonomy, not the decision taxonomy. The two describe
     // different things and share no code; validating a transition against the
-    // decision vocabulary wrote a judgement about a player into a record of
-    // what happened to a case.
+    // decision vocabulary would write a judgement about a player into a record
+    // of what happened to a case.
     const reasons = validateLifecycleReasons(reasonCodes);
     if (!reasons.ok) return sendDomainError(res, reasons, 'lifecycle');
 
@@ -151,7 +151,7 @@ export function registerM23(rawCtx) {
     if (!guardRev(req, res, room.room, { errorCode: 'ROOM_VERSION_CONFLICT', current: { status: room.room.status } })) return undefined;
 
     // The action identity is recorded on the history entry the transition
-    // writes, so a replay can find it. The entry is the one M20 already reads;
+    // writes, so a replay can find it. The entry is the one analytics reads;
     // the keys are part of its detail, not a second entry.
     const { from, to, room: fresh } = ctx.applyLifecycleTransition({
       req, room, to: verdict.to, reasonCodes: reasons.codes, trigger: `lifecycle:${action}`,
@@ -172,28 +172,27 @@ export function registerM23(rawCtx) {
         reasonCodesRequired: !!LIFECYCLE_ACTIONS[a].reasonCodesRequired,
       })),
       // Published, because a client that must supply a reason code needs to be
-      // able to discover which ones exist. They were unreachable before: the
-      // route validated against a different taxonomy entirely.
+      // able to discover which ones exist.
       reasonCodes: LIFECYCLE_REASON_CODES,
     });
   });
 
-  // ------------------------------------------------------- P3 — Contact
+  // ------------------------------------------------------------- Contact
   // The Contact workflow registers on the same context: the same concealing
   // room lookup, the same single status writer, the same evidence provider.
   registerContact(ctx);
 
-  // ------------------------------------------------------- P4B — Trial
+  // --------------------------------------------------------------- Trial
   // The Trial workflow registers on the same context: the same concealing
   // room lookup, the same single status writer, the same evidence provider
-  // (which now answers trial_invited / trial_confirmed / trial_completed),
+  // (which answers trial_invited / trial_confirmed / trial_completed),
   // and the same single request writer for the invitation.
   registerTrial(ctx);
 
-  // ------------------------------------------------------- P5 — Decision
+  // ------------------------------------------------------------ Decision
   // The formal decision registers on the same context: the same concealing
   // room lookup, the same single status writer, the same evidence provider
-  // (which now answers decision_progress), the same decision memory M17 owns.
+  // (which answers decision_progress), the same decision memory the rooms own.
   registerDecision(ctx);
 
   return ctx;

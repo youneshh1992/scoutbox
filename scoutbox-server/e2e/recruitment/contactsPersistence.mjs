@@ -1,19 +1,19 @@
-// M23 P3 — Contact persistence suite.
+// Contact persistence suite.
 //
 // THE INVARIANTS
 //
-//   1. The contacts are rows of recruitment_contacts (table migration 0017),
+//   1. The contacts are rows of recruitment_contacts,
 //      there after a clean boot and after a restart — never only because a
 //      module registered or a request arrived.
-//   2. A snapshot that carries Contact rows restores them byte-faithfully.
+//   2. A fixture that carries Contact rows restores them byte-faithfully.
 //      Nothing is rewritten, re-ordered or "repaired" on boot.
 //   3. A corrupt Contact row is NAMED and OMITTED, never fabricated into a
 //      sound-looking one, and never allowed to take the server down.
 //   4. The idempotency keys live on the record, so a replay after the process
-//      died is still a replay (proved over HTTP in m23ContactE2E group Z;
-//      re-proved here from the snapshot).
+//      died is still a replay (proved over HTTP in contacts.mjs group Z;
+//      re-proved here after a restart).
 //
-// Like m23Persistence, no fixture here calls buildSeed(): the whole defect
+// No fixture here calls buildSeed(): the whole defect
 // class lives in the gap between "the seed made it" and "the database
 // guarantees it".
 
@@ -27,8 +27,8 @@ import { DatabaseSync } from 'node:sqlite';
 import { writeFixture, readRecords } from '../../scripts/dataLayerFixture.mjs';
 import { contactIntegrity, CONTACT_STATUSES } from '../../domains/recruitment/lifecycle/contact.mjs';
 import { DATA_MIGRATIONS, TABLE_BACKED } from '../../repositories/index.mjs';
-import { buildRecruitmentJourney, createEvidenceProvider } from '../../scripts/recruitmentReadsFixture.mjs'; // §4.3 step 2: the contacts/offers queries over the plain arrays
-const LATEST_SCHEMA = Number(DATA_MIGRATIONS.map((m) => m.id).sort().at(-1).slice(0, 4)); // S14a: the latest table migration's number
+import { buildRecruitmentJourney, createEvidenceProvider } from '../../scripts/recruitmentReadsFixture.mjs'; // the contacts/offers queries over plain arrays
+const LATEST_SCHEMA = Number(DATA_MIGRATIONS.map((m) => m.id).sort().at(-1).slice(0, 4)); // the latest table migration's number
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SERVER = path.join(HERE, '..', '..', 'server.mjs');
@@ -44,7 +44,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const children = [];
 process.on('exit', () => { for (const c of children) { try { c.kill('SIGKILL'); } catch { /* gone */ } } });
 
-/** Boot the real server on a directory; return a client and a stop() that SIGTERMs and reads the snapshot back. */
+/** Boot the real server on a directory; return a client and a stop() that SIGTERMs and reads the records back. */
 async function bootOn(dataDir, port) {
   const base = `http://localhost:${port}`;
   const proc = spawn(process.execPath, [SERVER], { env: { ...process.env, PORT: String(port), DATA_DIR: dataDir, M13_QUIET_LOGS: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
@@ -81,7 +81,7 @@ function baseDb() {
     players: [{ id: 'pl-x', name: 'Xavier Adult', dob: '2000-05-05', country: 'GB', city: 'London', media: [], attendance: [], trialReports: [], badges: [], timeline: [], medical: { shared: false, records: [], conditionStatus: 'unknown' }, level: 'amateur', location: { lat: 51.5, lng: -0.1 } }],
     orgs: [{ id: 'org-x', name: 'X FC', type: 'club', level: 'pro', plan: 'Pro', verified: true, safeguardingContractSigned: true, location: { lat: 51.5, lng: -0.1 } }],
     guardians: [],
-    // S8a-core: a request names its staff member by a real key (recruitment_requests.user_id → org_users), so the
+    // A request names its staff member by a real key (recruitment_requests.user_id → org_users), so the
     // fixture carries the staff row the case and the request name (the dev login below finds it by org and name).
     users: [{ id: 'usr-owner', orgId: 'org-x', name: 'Owner', role: 'Head of Recruitment', createdAt: 1 }],
     sessions: [], ledger: [], notifications: [],
@@ -111,18 +111,16 @@ const soundContact = (over = {}) => ({
 // The table-migration ledger of a stopped server's file: every id with the time it was applied.
 const ledger = (dir) => { const db = new DatabaseSync(path.join(dir, 'scoutbox.db'), { readOnly: true }); try { return JSON.stringify(db.prepare('SELECT id, applied_at FROM data_migrations ORDER BY id').all()); } finally { db.close(); } };
 
-// ======================================================= §100 — the guarantee
-section('§100/§101 — the store is guaranteed by the registry, on every path');
+// ======================================================= the guarantee
+section('the store is guaranteed by the registry, on every path');
 {
-  // Rewritten in S14a: the store-contract, runMigrations and 2302/2303 upgrade cases described the blob (an in-memory
-  // upgrade path, ground rule 1). The contacts are rows of recruitment_contacts, created by table migration 0017.
   ok(TABLE_BACKED.includes('recruitmentContacts') && DATA_MIGRATIONS.filter((m) => m.id === '0017_recruitment_contacts_offers').length === 1, 'recruitmentContacts is a table, created by migration 0017 (read through SQL)');
   const noContacts = buildRecruitmentJourney({ recruitmentCases: [], roomDecisions: [], requests: [], trials: [], assessments: [], signings: [] }, 'k', { kind: 'org_staff', orgId: 'o1' });
   ok(noContacts.ok === false && noContacts.error === 'JOURNEY_STORE_MISSING' && noContacts.missing.includes('recruitmentContacts'), 'the journey still requires the contacts: without their queries it reports the store missing');
 }
 
-// ======================================================= §144 — byte-faithful restore
-section('§144 — a fixture with Contact rows restores byte-faithfully through a real boot');
+// ======================================================= byte-faithful restore
+section('a fixture with Contact rows restores byte-faithfully through a real boot');
 const RESTORE_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-cp-restore-'));
 {
   const db = baseDb();
@@ -130,14 +128,14 @@ const RESTORE_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-cp-restore-'));
     soundContact(),
     soundContact({ id: 'rct-2', status: 'draft', recipient: null, sentBy: null, sentAt: null, deliveredAt: null, attempts: [], requestId: null, keys: { create: null, send: null, record: null }, history: [{ id: 'aud-20', at: 3000, action: 'contact_created', by: { kind: 'org', userId: 'usr-owner', name: 'Owner' }, detail: { channel: 'in_app' } }], rev: 1, revAt: 3000 }),
     soundContact({ id: 'rct-3', status: 'recorded', channel: 'phone', body: null, subject: null, summary: 'Called.', occurredAt: 3500, recordedAt: 3600, recordedBy: { kind: 'org', userId: 'usr-owner', name: 'Owner' }, sentBy: null, sentAt: null, deliveredAt: null, attempts: [], requestId: null, keys: { create: null, send: null, record: { key: 'rk-1', fp: 'x' } }, history: [{ id: 'aud-30', at: 3600, action: 'contact_external_recorded', by: { kind: 'org', userId: 'usr-owner', name: 'Owner' }, detail: { channel: 'phone', occurredAt: 3500, recipientType: 'player' } }] }),
-    // S8c (migration 0017): a sent contact and its request are a PAIR (recruitment_contacts.request_id is a real key and the
-    // request names its contact back); two contacts naming ONE request is a state the production writer never produces
-    // (the send creates the request for that contact) and the cutover refuses it with the ids (CONTACT_REQUEST_MISMATCH),
-    // never repairs it. The responded contact therefore carries its own request, as a real one would.
+    // A sent contact and its request are a PAIR (recruitment_contacts.request_id is a real key and the request names its
+    // contact back); two contacts naming ONE request is a state the production writer never produces (the send creates
+    // the request for that contact) and a save refuses it with the ids (CONTACT_REQUEST_MISMATCH), never repairs it. The
+    // responded contact therefore carries its own request, as a real one would.
     soundContact({ id: 'rct-4', status: 'responded', requestId: 'req-4', respondedAt: 4000, response: { kind: 'accepted', message: 'Yes', by: 'player', at: 4000 }, history: [{ id: 'aud-40', at: 2001, action: 'contact_sent', by: { kind: 'org', userId: 'usr-owner', name: 'Owner' }, detail: {} }, { id: 'aud-41', at: 4000, action: 'contact_responded', by: { kind: 'player', name: 'Player' }, detail: { kind: 'accepted' } }], rev: 3 }),
   ];
   db.recruitmentContacts = rows;
-  // S8a: the request rows are issueRecruitmentRequest's literal (the staff member and the organisation's flags it
+  // The request rows are issueRecruitmentRequest's literal (the staff member and the organisation's flags it
   // always sets); a row the typed table cannot hold is refused with its id, never repaired.
   db.requests = [
     { id: 'req-1', playerId: 'pl-x', playerName: 'Xavier Adult', orgId: 'org-x', orgName: 'X FC', orgType: 'club', orgVerified: true, orgSafeguardingCertified: true, userId: 'usr-owner', scoutName: 'Owner', scoutRole: 'Head of Recruitment', type: 'contact', message: 'Hi Xavier.', status: 'pending', createdAt: 2001, routedTo: 'player', guardianId: null, contactId: 'rct-1', contactChannel: null },
@@ -145,8 +143,8 @@ const RESTORE_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-cp-restore-'));
   ];
   writeFixture(RESTORE_DIR, db, { idCounter: 500 });
   const L0 = ledger(RESTORE_DIR);
-  // S8c: the rows are read back from the tables, every key and value identical, the keys in the stored shape's order (the
-  // documented table-read property; m23DecisionPersistence compares the same way since S8b) — key-order-insensitive here.
+  // The rows are read back from the tables in column order, every key and value identical, so the comparison is
+  // key-order-insensitive.
   const canon = (v) => (Array.isArray(v) ? v.map(canon) : v && typeof v === 'object' ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, canon(v[k])])) : v);
   const stable = (v) => JSON.stringify(canon(v));
   const before = stable(rows);
@@ -171,15 +169,15 @@ const RESTORE_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-cp-restore-'));
   const after = await s.stop();
   ok(after !== null, 'the server shut down and wrote the snapshot back');
   neg(stable(after.recruitmentContacts) === before, 'the four Contact rows came back IDENTICAL in every key and value — reads, replays and a boot rewrote nothing');
-  neg(JSON.parse(L0).length === DATA_MIGRATIONS.length && ledger(RESTORE_DIR) === L0, 'and the migration record did not churn'); // rewritten in S14a: it read db.schema
+  neg(JSON.parse(L0).length === DATA_MIGRATIONS.length && ledger(RESTORE_DIR) === L0, 'and the migration record did not churn');
 }
 function expect422(r) { return r.status === 409 && r.body?.error === 'CONTACT_IDEMPOTENCY_CONFLICT'; }
 
-// ======================================================= §143 — corruption
-section('§143 — corrupt Contact rows are named and omitted, never fabricated, and never take the server down');
+// ======================================================= corruption
+section('corrupt Contact rows are named and omitted, never fabricated, and never take the server down');
 const CORRUPT_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-cp-corrupt-'));
 {
-  // S8c (migration 0017; typed since §4.3): the contacts are rows of typed tables. A row the columns cannot hold — an
+  // The contacts are rows of typed tables. A row the columns cannot hold — an
   // entry that is not a record, a duplicated id, an unknown status word, an off-type history or timestamp, a channel
   // the vocabulary does not know, a record missing the writer's fields — and a contact naming a request that is not in
   // the file are REFUSED by the save, naming the entry, and nothing is written; asserted below, one directory each. The
@@ -277,14 +275,13 @@ const CORRUPT_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-cp-corrupt-'));
   ok(ev2.satisfied === true && ev2.sourceId === 'rct-1', 'the sound row beside them is');
   const after = await s.stop();
   neg(JSON.stringify(canon(after.recruitmentContacts)) === before, 'shutdown wrote the corrupt rows back UNCHANGED in every key and value — reported, never repaired (the missing recipient and the impossible state carried as written)');
-  // Boot-time integrity: contacts are not part of the M18.2 report's subject, and must not make it lie.
-  // Rewritten in S14a: the report has no store list any more (it described the blob's required stores).
+  // Boot-time integrity: contacts are not part of the boot integrity report's subject, and must not make it lie.
   const rep = integrityReport(after, { cases: after.recruitmentCases ?? [] });
   ok(rep.ok === true && rep.violations.length === 0, 'the boot integrity report is clean');
 }
 
-// ======================================================= §100 — clean boot, empty
-section('§100 — clean boot: empty store, first write, restart');
+// ======================================================= clean boot, empty
+section('clean boot: empty store, first write, restart');
 const CLEAN_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-cp-clean-'));
 {
   writeFixture(CLEAN_DIR, baseDb(), { idCounter: 500 });

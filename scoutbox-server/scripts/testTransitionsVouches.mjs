@@ -1,13 +1,7 @@
-// S10c — transition cases and coach references (vouches) as typed tables with explicit writes
-// (repositories/transitionsVouches.mjs, migration 0025). What this suite proves: the migration creates the five STRICT
-// tables (no JSON column) and a fresh database holds no row; the typers refuse junk
-// with the record and field named (an unknown field, an empty pack, a history detail that does not fit its action, a
-// plain code, a published reference without text); a case is created with its pack, grants and history and read back
-// whole; an update keeps the pack, owner and period, only adds grants (a revocation happens once) and only grows the
-// history; a reference code is stored only as its hash, found by the code as typed, single use and unique; the club,
-// sweep and T&S queries answer what the routes need; a rolled-back unit leaves nothing; db.transitionCases and
-// db.vouches throw; and a fixture written through the repository is typed, refuses a missing organisation (nothing
-// written) and reads back what it wrote. Temporary databases only; nothing touches DATA_DIR. Run with: npm test
+// Transition cases and coach references (vouches; repositories/transitionsVouches.mjs, migration 0025): the STRICT
+// tables, the typers' refusals, a case read back whole with its pack, grants and history, updates that keep the pack,
+// owner and period and only add grants, a reference code stored only as its hash (single use, unique), the routes'
+// queries, units of work and fixtures. Temporary databases only; nothing touches DATA_DIR. Run with: npm test
 
 import assert from 'node:assert/strict';
 import fs from 'node:fs';

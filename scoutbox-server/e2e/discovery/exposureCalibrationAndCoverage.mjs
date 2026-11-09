@@ -1,10 +1,9 @@
 // Exposure, calibration, missing evidence and coverage planning, end to end.
 //
 // The exposure funnel and review queue, calibration sessions, the missing-evidence engine and
-// coverage planning (S12 collections). Moved out of e2e/operations/clubOperations.mjs (was
-// m13E2E, sections F4–F7) with the same server setup and actors; the checks are unchanged.
-// S12d (typed tables) adds the last section: junk the routes used to clamp or coerce is refused naming the field, the
-// growing lists page, and reading a player's evidence gaps rewrites nothing that did not change.
+// coverage planning. The last section: junk is refused naming the field rather than clamped or
+// coerced, the growing lists page, and reading a player's evidence gaps rewrites nothing that
+// did not change.
 
 import { spawn } from 'node:child_process';
 import { mkdtempSync } from 'node:fs';
@@ -82,8 +81,8 @@ const kid17Id = kid17?.player?.id ?? kid17?.id;
 const kid16Id = kid16?.player?.id ?? kid16?.id;
 ok(!!kid17Id && !!kid16Id, 'guardian created 17- and 16-year-old boundary players (DOB-derived)');
 
-// ================================================================ F4
-section('F4 — exposure funnel + review queue');
+// ================================================================ exposure
+section('exposure funnel + review queue');
 {
   let r = await j('POST', '/org/exposure/impressions', { playerIds: ['pl-adeyemi', 'pl-svensson', 'pl-osei'] }, maria.token);
   const rec1 = r.body.recorded;
@@ -118,8 +117,8 @@ section('F4 — exposure funnel + review queue');
   ok(typeof r.body.appearedInSearches === 'string' && r.body.note.includes('Which club looked is not shown'), 'player sees coarse bands only, no org identities');
 }
 
-// ================================================================ F5
-section('F5 — calibration');
+// ================================================================ calibration
+section('calibration');
 {
   const templates = (await j('GET', '/org/assessment-templates', undefined, maria.token)).body;
   const tpl = (templates.templates ?? templates.items ?? templates)[0];
@@ -161,8 +160,8 @@ section('F5 — calibration');
   ok(r.body.disclaimer.includes('does not measure whether a scout “caused”'), 'decision review refuses causal claims about scouts');
 }
 
-// ================================================================ F6
-section('F6 — missing-evidence engine');
+// ================================================================ missing evidence
+section('missing-evidence engine');
 {
   let r = await j('GET', '/org/players/pl-osei/evidence-gaps', undefined, maria.token);
   const first = r.body.items.map((x) => x.ruleId).sort();
@@ -201,8 +200,8 @@ section('F6 — missing-evidence engine');
   ok(!notifText.includes('disagree') && !notifText.includes('rating'), 'guardian-visible text is from the whitelist — no scout-report content leaks');
 }
 
-// ================================================================ F7
-section('F7 — coverage planning');
+// ================================================================ coverage
+section('coverage planning');
 {
   let r = await j('POST', '/org/coverage/fixtures', { competition: 'U21 Development League', home: 'Eastport U21', away: 'Harbour Rovers U21', date: '2026-10-01', lat: 53.48, lng: -2.24, city: 'Manchester' }, maria.token);
   const fix = r.body.fixture;
@@ -232,8 +231,8 @@ section('F7 — coverage planning');
   ok(r.status === 200 && r.body.note.includes('never includes players outside your visibility rules'), 'suggestions honestly scoped to permitted players/events');
 }
 
-// ================================================================ S12d
-section('S12d — junk refused, paging, explicit upserts');
+// ================================================================ input, paging
+section('junk refused, paging, explicit upserts');
 {
   const field = (r, f) => r.status === 400 && r.body?.field === f;
   let r = await j('POST', '/org/exposure/impressions', { playerIds: 'pl-adeyemi' }, maria.token);

@@ -1,7 +1,7 @@
 import { sentenceCase } from './presentation';
 import { RecordFacts, DetailItems } from './RecordDetails';
 import { CountChart, countBy } from './ScoutVisuals';
-// M19 org screens — Player Matching and Dynamic Watchlists.
+// Org screens — Player Matching and Dynamic Watchlists.
 //
 // The three rules this file keeps visible, because they are the product:
 //
@@ -40,7 +40,7 @@ import { ConflictNotice, conflictOf, type Conflict } from './conflict';
 import { registerDirtyGuard } from './dirtyGuard';
 import { confirmDestructive, DESTRUCTIVE_ACTIONS } from './confirmAction';
 
-// Two per-app switches, set the same way M18 sets its brief vocabulary.
+// Two per-app switches, set the same way the Briefs screens set their vocabulary.
 //
 //   ALLOW_COMBINE_CRITERIA  Pro clubs may require a standardized Combine
 //                           Verified result; Grassroots keeps a simpler set.
@@ -333,7 +333,7 @@ function CriteriaClassEditor({
 }) {
   const errFor = (i: number) => errors.find((e) => e.class === cls && e.index === i)?.error;
   return (
-    // M24F.5 — a titled group on the page, not a browser fieldset box.
+    // A titled group on the page, not a browser fieldset box.
     <fieldset
       disabled={disabled}
       className="m19-criteria"
@@ -525,7 +525,7 @@ export function MatchingScreen({
     setMessage(null);
     setDetails([]);
     try {
-      // Matches page by cursor (S14j): this reads the first page; a "load more" (nextCursor) is needed.
+      // Matches page by cursor: this reads the first page; a "load more" (nextCursor) is needed.
       const out = await m19.match(session, source === 'brief'
         ? { briefId, sort: nextSort }
         : { criteria, sort: nextSort });
@@ -751,7 +751,7 @@ function WatchlistList({ session, tick, onOpenWatchlist, onNewWatchlist }: Watch
     let live = true;
     setErr(null);
     // The server pages this list (first 50, newest activity first; `nextCursor` names the next page): a "load more" is
-    // needed here once a club keeps more than 50 watchlists, archived ones included (S12c).
+    // needed here once a club keeps more than 50 watchlists, archived ones included.
     m19.watchlists(session, status || undefined)
       .then((d) => { if (live) { setItems(d.items); setNote(d.note); } })
       .catch((e) => { if (live) setErr(errMessage(e)); });
@@ -819,7 +819,7 @@ function WatchlistDetailView({
   useEffect(() => {
     let live = true;
     setErr(null);
-    // The members page by cursor (S14j): this reads the first page; a "load more" (nextCursor) is needed.
+    // The members page by cursor: this reads the first page; a "load more" (nextCursor) is needed.
     m19.watchlist(session, watchlistId, { sort })
       // A refetch never overwrites a name the person is in the middle of typing.
       .then((d) => { if (live) { setData(d); if (!renaming) setName(d.watchlist.name); } })

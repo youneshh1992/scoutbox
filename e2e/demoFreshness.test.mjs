@@ -1,4 +1,4 @@
-// P2.5 closure — stale-artifact guard. Every demo bundle in e2e/dist must
+// Stale-artifact guard. Every demo bundle in e2e/dist must
 // have been built from the CURRENT client source: its stamped source
 // fingerprint (a content hash written by buildDemos.mjs) must equal the
 // fingerprint recomputed from the working tree. No browser, no timestamps,
@@ -23,7 +23,7 @@ for (const [file, { app, extra }] of Object.entries(DEMO_APPS)) {
   const now = sourceFingerprint(app, extra);
   ok(fingerprint === now, `${file}: built from the current ${app} source (${fingerprint?.slice(0, 8) ?? '—'} vs ${now.slice(0, 8)})`);
   ok(/data-demo-badge/.test(html) && /Interactive demo/.test(html), `${file}: declares itself an interactive demo with its build id`);
-  // M23 P8 §60/§76 — the entry-screen credit ships in every demo bundle: the
+  // The entry-screen credit ships in every demo bundle: the
   // signature element and the words, in whichever case the app sets them.
   ok(/login-signature/.test(html) && /built by/i.test(html) && /Guni (&amp;|&) Younes/.test(html), `${file}: carries the entry-screen credit (login-signature, "Built by Guni & Younes")`);
 }

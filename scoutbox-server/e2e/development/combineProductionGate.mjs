@@ -1,6 +1,6 @@
-// M22 — the production Combine blocker, end to end (§59, §60, §2).
+// The production Combine blocker, end to end (§59, §60, §2).
 //
-// THE TEST THIS PHASE EXISTS TO PASS
+// THE TEST THIS SUITE EXISTS TO PASS
 //
 // Everything else in the provider wiring is plumbing. This is the assertion
 // that decides whether the plumbing is safe: give the system a PERFECT
@@ -9,8 +9,8 @@
 // confirm that it still does not mint Combine Verified, because
 // `realWorldValidation.status` is `not_completed`.
 //
-// §59 calls this mandatory, and it is mandatory for a specific reason. Every
-// other guard in M22 is a guard against something going WRONG. This one is a
+// This check is mandatory for a specific reason. Every other guard in the
+// provider is a guard against something going WRONG. This one is a
 // guard against everything going RIGHT and being over-claimed anyway, which is
 // the failure mode with no error message, no stack trace and no angry user —
 // just a number that quietly means more than it should.
@@ -129,7 +129,7 @@ ok(result.combineVerifiedBlockedBy === 'REAL_WORLD_VALIDATION_NOT_COMPLETED',
 ok(result.experimental.status === 'experimental_unvalidated',
   'the exact count is carried as experimental_unvalidated, never as a published measurement');
 
-// The M16.1 measurement path, with the capability list the server actually
+// The Combine measurement path, with the capability list the server actually
 // hands it. This is the line that would mint Combine Verified if it were wrong.
 const proto = combineProtocol(PROTO, 1);
 ok(!!proto, 'the Combine protocol definition resolves');
@@ -248,10 +248,9 @@ const futureRecord = {
       datasetId: 'ds-test-only-fixture',
       datasetVersion: 1,
       // The contract is a VERDICT, not a bag of numbers: `result` must be the
-      // literal string 'passed'. An earlier cut of this fixture passed an
-      // object of measurements here and validateRecord() rejected it — which
-      // is the contract working. The measurements live alongside, where they
-      // cannot be mistaken for the verdict.
+      // literal string 'passed', and validateRecord() rejects an object of
+      // measurements here. The measurements live alongside, where they cannot
+      // be mistaken for the verdict.
       result: 'passed',
       measurements: { falseVerifications: 0, meanAbsCountError: 0.4, attempts: 200 },
       approvalVersion: 1,
@@ -312,10 +311,10 @@ delete process.env.SCOUTBOX_COMBINE_CV_ENABLED;
 delete process.env.M22_REAL_WORLD_VALIDATION;
 
 // =====================================================================
-section('§66/§67 — M19 matching does not see an unvalidated result');
+section('§66/§67 — matching does not see an unvalidated result');
 // =====================================================================
 //
-// M19 matches on FACTS, and the fact projections are built only from
+// Club criteria match on FACTS, and the fact projections are built only from
 // production-valid Combine Verified measurements. An unvalidated CV
 // observation never becomes one, so it cannot satisfy a club's criterion.
 
@@ -334,9 +333,8 @@ section('§66/§67 — M19 matching does not see an unvalidated result');
   const m2 = matchPlayerToCriteria(unvalidatedFacts, { required: thresholdReq, preferred: [] });
   ok(m2.matchesRequired === false,
     '§66. a measurement threshold is not satisfied either — the count never reaches the facts');
-  // Precise, not substring-fishing: an earlier cut searched the whole JSON for
-  // the digit "9" and matched a criterion id hash, which asserted nothing. The
-  // real property is that the facts projection carries no measurement for this
+  // Precise, not substring-fishing: a search of the whole JSON for the digit
+  // "9" matches a criterion id hash and asserts nothing. The real property is that the facts projection carries no measurement for this
   // protocol and the explanation reports its absence rather than a value.
   ok(unvalidatedFacts.combineMeasurements[PROTO] === undefined,
     '§66. the facts projection carries no measurement for this protocol');
@@ -373,12 +371,12 @@ section('§68/§69 — invalidation removes it, restoration brings it back');
   ok((r.reasons ?? []).includes('SESSION_INVALIDATED'),
     '§68. with a machine-readable reason');
 
-  // Downstream: the facts projection loses the protocol, so M19 stops matching.
+  // Downstream: the facts projection loses the protocol, so the criterion stops matching.
   const factsAfter = { combineProtocols: [], combineMeasurements: {} };
   const mAfter = matchPlayerToCriteria(factsAfter, {
     required: [{ id: 'c1', type: 'combine_result', operator: 'exists', value: PROTO }], preferred: [],
   });
-  ok(mAfter.matchesRequired === false, '§68. and the M19 criterion stops matching once it is gone');
+  ok(mAfter.matchesRequired === false, '§68. and the criterion stops matching once it is gone');
 
   // §69 — restoration is deterministic: the same session, valid again,
   // reproduces the same measurement exactly.

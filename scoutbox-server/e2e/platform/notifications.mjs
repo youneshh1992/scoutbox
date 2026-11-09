@@ -1,5 +1,4 @@
-// The notification feed and preferences (S14e: the notifications repository's explicit writes and SQL reads), against
-// a real server on a temporary data directory with the synthetic seed.
+// The notification feed and preferences, against a real server on a temporary data directory with the synthetic seed.
 //
 //   A the feed: a notice reaches the person it is for, newest first, each row an allowlist with its resolved target
 //   B coalescing: the same unread sentence about the same thread is one row counted twice, no second push; once read,

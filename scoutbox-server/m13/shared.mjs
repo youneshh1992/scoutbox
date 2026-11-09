@@ -1,9 +1,9 @@
-// M13 shared: cross-cutting helpers. Every helper enforces at the server, never in a client.
+// Cross-cutting helpers for the m13/ feature modules. Every helper enforces at the server, never in a client.
 import crypto from 'node:crypto';
 import { isAdult, ageOn, adultAgeFor, visibleToOrg, haversineKm } from '../domain.mjs';
 import { isLeadUser, isFinanceUser } from '../roles.mjs';
 
-// ----- TOTP (F12, RFC 6238 / HOTP RFC 4226, SHA-1, 6 digits, 30s step).
+// ----- TOTP (RFC 6238 / HOTP RFC 4226, SHA-1, 6 digits, 30s step).
 // Module-level so the login path in server.mjs can verify codes too.
 // Small and fully fixture-tested against the RFC test vectors.
 const B32 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
@@ -49,11 +49,11 @@ export function totpValid(secretB32, code, nowMs = Date.now()) {
   return false;
 }
 
-// ----- money (F9): integer minor units only. No floating-point arithmetic
+// ----- money: integer minor units only. No floating-point arithmetic
 // ever touches an amount; conversion uses a scaled-integer rate.
 export const validAmountMinor = (v) => Number.isInteger(v) && Math.abs(v) <= Number.MAX_SAFE_INTEGER;
 export const CURRENCIES = ['GBP', 'EUR', 'USD', 'CHF', 'SEK', 'NOK', 'DKK', 'PLN', 'BRL'];
-/** F9 budget lines: what a line is and how often it is paid. */
+/** Budget lines: what a line is and how often it is paid. */
 export const BUDGET_LINE_KINDS = ['wage', 'fee', 'bonus', 'expense'];
 export const BUDGET_SCHEDULES = ['one_off', 'weekly', 'monthly', 'annual'];
 /** Convert via an explicit assumption. rate is a decimal STRING (e.g. "1.1732").
@@ -68,7 +68,7 @@ export function convertMinor(amountMinor, rateStr) {
   return Number(rounded);
 }
 
-// ----- time slots with time zones (F3). A slot is
+// ----- time slots with time zones. A slot is
 // {day: 'mon'.., start: 'HH:MM', end: 'HH:MM', tz: IANA string}.
 // Comparison converts both slots to minutes-from-week-start in UTC.
 const DAYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
@@ -131,28 +131,28 @@ export function webhookUrlProblem(rawUrl) {
 export function buildSharedM13(ctx) {
   const { nextId } = ctx;
 
-  // ----- small-group suppression (shared by F4/F8): never show n<3.
+  // ----- small-group suppression: never show n<3.
   const SUPPRESS_MIN = 3;
   const suppress = (n) => n < SUPPRESS_MIN;
 
-  // ----- webhook/HMAC (F1, F11 callbacks)
+  // ----- webhook/HMAC (webhooks, delivery callbacks)
   const signBody = (secret, eventId, ts, body) =>
     crypto.createHmac('sha256', secret).update(`${eventId}.${ts}.${body}`).digest('hex');
   const timingSafeEq = timingSafeEqStr;
 
-  // ----- coarse location (F3): clubs see an area label + distance band only.
+  // ----- coarse location: clubs see an area label + distance band only.
   const coarseArea = (loc) => loc?.city || 'area withheld';
 
-  // ----- finance-visible roles (F9): the lead tier plus finance roles (roles.mjs)
+  // ----- finance-visible roles: the lead tier plus finance roles (roles.mjs)
   const canViewFinance = isFinanceUser;
 
-  // ----- append-only history, same shape m12 records use.
+  // ----- append-only history, same shape the m12/ records use.
   const histAppend = (record, byKind, byId, byName, action, detail = null) => {
     record.history ??= [];
     record.history.push({ id: nextId('aud'), at: Date.now(), byKind, byId, byName, action, detail });
   };
 
-  // Lead tier — the same rule as m12, from the one definition in roles.mjs.
+  // Lead tier — the same rule as m12/, from the one definition in roles.mjs.
   const isLead = isLeadUser;
   const requireLead = (req, res) => {
     if (isLead(req.orgUser)) return true;

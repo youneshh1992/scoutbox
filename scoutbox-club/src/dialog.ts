@@ -1,8 +1,7 @@
-// PRE-M24 (PM-8): a drawer behaves as a modal dialog for keyboard users.
+// A drawer behaves as a modal dialog for keyboard users.
 // Focus moves into it when it opens, Escape closes it, and focus returns to
-// whatever opened it when it closes. Before this, the Report & block, Compare
-// and player drawers had no Escape, no dialog role and left focus behind the
-// veil, so a keyboard user had to tab through the page to reach "Close".
+// whatever opened it when it closes, so a keyboard user never has to tab
+// through the page behind the veil to reach "Close".
 import { useEffect, useRef } from 'react';
 
 export function useDialog<T extends HTMLElement>(onClose: () => void) {
@@ -22,10 +21,9 @@ export function useDialog<T extends HTMLElement>(onClose: () => void) {
   return ref;
 }
 
-// PRE-M24 (PM-14): a clickable row, card or link without an href is reachable
-// and operable from the keyboard. Before this, player cards, feed rows and the
-// player-name links opened the player only on a mouse click: Tab skipped them
-// and Enter did nothing. Keys pressed on a control inside the element (the
+// A clickable row, card or link without an href is reachable
+// and operable from the keyboard (Tab reaches it, Enter and Space activate it),
+// not only by a mouse click. Keys pressed on a control inside the element (the
 // compare checkbox on a card) are left to that control.
 export function pressable(onActivate: () => void) {
   return {

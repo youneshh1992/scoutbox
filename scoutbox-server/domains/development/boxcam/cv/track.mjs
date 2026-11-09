@@ -1,4 +1,4 @@
-// M22 — LAYER 2: TRACKING (§24, §26).
+// LAYER 2: TRACKING.
 //
 //   input:  detections + trusted timestamps
 //   output: ball track, person track, player-relative motion, continuity,
@@ -8,7 +8,7 @@
 // touch is. It knows where things were, when, how reliably, and how long the
 // gaps were.
 //
-// The one idea that makes the rest of M22 scale-free lives here: every
+// The one idea that makes the rest of the engine scale-free lives here: every
 // spatial quantity is emitted in BALL DIAMETERS and every velocity in ball
 // diameters per second. A scene at twice the resolution has a ball twice as
 // wide, so the normalised numbers are identical — and a scene at four times
@@ -22,7 +22,7 @@ import { EVENT_RULES, CAPTURE_REQUIREMENTS } from './policy.mjs';
  *
  * Pure: same detections in, same tracks out. No clock, no randomness, no
  * module-level state — which is what makes session isolation structural
- * rather than a discipline someone has to remember (§11, §75).
+ * rather than a discipline someone has to remember.
  */
 export function buildTracks(detections) {
   const samples = [];
@@ -111,8 +111,8 @@ export function buildTracks(detections) {
   const withBoth = samples.filter((s) => s.ball && s.person);
   const n = samples.length || 1;
 
-  // Cadence, measured from the trusted timestamps rather than assumed. §22
-  // of the fix pack: input is never assumed to be perfectly periodic.
+  // Cadence, measured from the trusted timestamps rather than assumed:
+  // input is never assumed to be perfectly periodic.
   const intervals = [];
   for (let i = 1; i < samples.length; i += 1) intervals.push(samples[i].atMs - samples[i - 1].atMs);
   const medianIntervalMs = median(intervals);

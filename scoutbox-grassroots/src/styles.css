@@ -5,7 +5,7 @@
    app-specific rules (if any) below the import. */
 @import '../../design-system/platform.css';
 
-/* M24F.2 — the Home: welcome, one primary action, counts, progress, activity, quick actions. */
+/* The Home: welcome, one primary action, counts, progress, activity, quick actions. */
 .home-welcome { font-size: 15px; color: var(--sb-ink); margin: -10px 0 18px; }
 .home-welcome .dim { margin-left: 6px; }
 .home-primary { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-bottom: 22px; }

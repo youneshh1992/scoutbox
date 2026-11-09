@@ -1,9 +1,7 @@
-// M24B — case navigation: CATEGORY → SUBCATEGORY, for one recruitment case.
+// Case navigation: CATEGORY → SUBCATEGORY, for one recruitment case.
 //
 // A case (a Recruitment Room, a client, a transaction, the player's own
-// journey) has many FUNCTIONS. They used to sit in one flat tab strip that
-// grew by one tab per milestone. They are now arranged in a small number of
-// categories, each holding at most CASE_NAV_MAX_SUBS subcategories.
+// journey) has many FUNCTIONS, arranged in a small number of categories, each holding at most CASE_NAV_MAX_SUBS subcategories.
 //
 // Three rules this module keeps:
 //   • A category is UI organisation only. It is not a lifecycle state, it is
@@ -15,9 +13,9 @@
 //     e2e/caseNav.test.mjs, so a sixth subcategory fails a test rather than
 //     quietly widening a row.
 //
-// Routing: a deep link names `<category>/<sub>`; a legacy flat link names a
-// single tab id, which `parseCaseSegments` still resolves — the server's
-// notification targets and next-action tabs keep working unchanged.
+// Routing: a deep link names `<category>/<sub>`; a flat link names a single
+// tab id, which `parseCaseSegments` also resolves, because the server's
+// notification targets and next-action tabs name flat tab ids.
 
 export interface CaseSub {
   /** Stable id; appears in deep links and in `data-sub` attributes. */
@@ -94,7 +92,7 @@ export function locate(model: CaseNavModel, subId: string): CaseLocation | null 
   return null;
 }
 
-/** A sub id OR a legacy flat tab id → its location. */
+/** A sub id OR a flat tab id → its location. */
 export function resolveTab(model: CaseNavModel, tab: string | null | undefined): CaseLocation | null {
   if (!tab) return null;
   const direct = locate(model, tab);
@@ -107,9 +105,9 @@ export function resolveTab(model: CaseNavModel, tab: string | null | undefined):
  * Path segments after the case id → a location, strictly:
  *   []                 → the default (first category, first sub)
  *   [category]         → that category's first sub
- *   [tab]              → a sub id or a legacy tab id
+ *   [tab]              → a sub id or a flat tab id
  *   [category, sub]    → that sub, which must belong to that category
- * Anything else is null (a malformed link rejects, exactly as before).
+ * Anything else is null (a malformed link rejects).
  */
 export function parseCaseSegments(model: CaseNavModel, segs: readonly string[]): CaseLocation | null {
   if (segs.length === 0) return defaultLocation(model);

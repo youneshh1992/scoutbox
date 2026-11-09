@@ -1,8 +1,8 @@
 /**
- * M23 P6 — the Offer domain error contract. ONE table, no default branch, a
- * public-field allowlist (the M23 / P5.6D pattern, unchanged).
+ * The Offer domain error contract. ONE table, no default branch, a
+ * public-field allowlist.
  *
- * The refusals this table keeps indistinguishable (§50, §51): an Offer that
+ * The refusals this table keeps indistinguishable: an Offer that
  * does not exist, one in another organisation, one addressed to another
  * player, one a colleague at the same agency is not entitled to, and a
  * document that is not on an issued revision the caller may read all answer

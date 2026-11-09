@@ -1,4 +1,4 @@
-// M22 — observation quality and refusal precedence (§28–§37).
+// Observation quality and refusal precedence.
 //
 // TWO things live here, and both exist to stop a number being trusted more
 // than the observation behind it deserves.
@@ -6,7 +6,7 @@
 import { CAPTURE_REQUIREMENTS, DETECTION, EVENT_RULES, CONFIDENCE } from './policy.mjs';
 
 // =========================================================================
-// 1. OBSERVATION QUALITY (§28–§33)
+// 1. OBSERVATION QUALITY
 //
 // This is NOT a player score. It is never shown as ability, never compared
 // between players, never stored on a player record. It answers exactly one
@@ -14,13 +14,13 @@ import { CAPTURE_REQUIREMENTS, DETECTION, EVENT_RULES, CONFIDENCE } from './poli
 //
 //     is this attempt observable enough to support the claimed measurement?
 //
-// It deliberately resolves to a STATE with reasons (§30), not a headline
+// It deliberately resolves to a STATE with reasons, not a headline
 // figure. A numeric margin exists internally because thresholds need
 // numbers, but it is not exposed as a rating.
 //
 // Its inputs are properties of the CAPTURE — continuity, cadence, lighting,
 // occlusion, duplicates. Its inputs are never the count, never the speed,
-// never the Trust Score, never who the player is (§29).
+// never the Trust Score, never who the player is.
 
 export const QUALITY_THRESHOLDS = Object.freeze({
   minUsableFrameFrac: 0.8,        // unit — frames the detector could read at all
@@ -36,7 +36,7 @@ export const QUALITY_THRESHOLDS = Object.freeze({
 /**
  * Project observation quality.
  *
- * §33 is the point: two attempts that happen to derive the same count but
+ * The point: two attempts that happen to derive the same count but
  * have 98% and 60% tracking continuity must not receive identical treatment.
  * The count is not an input here, so it cannot rescue a bad capture.
  */
@@ -99,7 +99,7 @@ export function observationQuality({ continuity, cadence, duplicates = 0, frames
 }
 
 // =========================================================================
-// 2. REFUSAL PRECEDENCE (§34–§37)
+// 2. REFUSAL PRECEDENCE
 //
 // Several failure conditions routinely coexist: a dark capture usually also
 // has no ball, and often a poor frame rate too. If the reported reason
@@ -133,7 +133,7 @@ const PRECEDENCE_INDEX = new Map(REFUSAL_PRECEDENCE.map((c, i) => [c, i]));
 
 /**
  * Choose ONE primary reason deterministically, keeping the rest as
- * secondary diagnostics (§35).
+ * secondary diagnostics.
  *
  * Sorting by a total order on the codes means the answer cannot depend on
  * iteration order, Set ordering, or the sequence in which checks ran.
@@ -145,7 +145,7 @@ export function primaryRefusal(conditions) {
   return { primaryReason: known[0], secondaryDiagnostics: known.slice(1) };
 }
 
-/** Map quality reason codes onto the canonical refusal vocabulary (§37). */
+/** Map quality reason codes onto the canonical refusal vocabulary. */
 export function qualityToRefusalConditions(quality) {
   const out = [];
   for (const r of quality.reasons) {

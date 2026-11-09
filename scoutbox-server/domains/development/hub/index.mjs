@@ -1,5 +1,5 @@
 /**
- * M21 — Development Hub: stores, routes and wiring.
+ * Development Hub: stores, routes and wiring.
  *
  * The Hub is WORKFLOW. It records what was agreed, who is doing it, what
  * evidence was cited and what a reviewer saw. It holds no fact about a player
@@ -10,19 +10,19 @@
  * Two structural decisions are worth stating up front, because they are not
  * obvious from the route list.
  *
- * **Live events are organisation-private, always.** Every event M21 broadcasts
+ * **Live events are organisation-private, always.** Every event the Hub broadcasts
  * carries an `orgId` and reaches that organisation's own streams and nobody
  * else's. Player-facing changes travel by notification instead, which is
  * directed at exactly one person and passes through their preferences on the
  * way. The alternative — an event carrying only a playerId — is delivered by
  * the existing rules to every organisation that can currently see the player,
  * which for a private development plan would be a leak dressed as a cache
- * ping. §44 asks that org-private development events stay org-private; making
- * every event org-private is the version of that promise with no edge cases.
+ * ping. Making every event org-private is the version of the private-plan
+ * promise with no edge cases.
  *
  * **Idempotency is natural, not a key store.** A retried create is recognised
  * by being the same create — same actor, same content, inside a short window —
- * and returns the record that already exists, the way M17 handles a repeated
+ * and returns the record that already exists, the way the rooms handle a repeated
  * decision. No new store, nothing to expire, and it survives a restart in the
  * only way that matters: the duplicate it would have prevented is the one the
  * client is retrying right now.
@@ -51,9 +51,9 @@ import { readPage, sendPageError, pageSorted } from '../../platform/paging.mjs';
 const IDEMPOTENCY_WINDOW_MS = 60_000;
 
 /**
- * The Hub's records are tables of the development repository since S12a (migration 0030,
- * repositories/development.mjs): plans, goals, actions, evidence links and reviews, with one history table. Every
- * route that writes runs in one unit of work and writes through the repository; nothing here creates a db.* store.
+ * The Hub's records are tables of the development repository (repositories/development.mjs): plans, goals,
+ * actions, evidence links and reviews, with one history table. Every route that writes runs in one unit of work and
+ * writes through the repository.
  */
 export const M21_STORES = Object.freeze([
   'developmentPlans', 'developmentGoals', 'developmentActions',
@@ -64,9 +64,9 @@ export function registerDevelopment(ctx) {
   const {
     byId, users, nextId, notify, broadcast, findPlayer, orgCanSee, isLead,
     orgRouter, playerRouter, guardianRouter, audit, isAdult, unit,
-    recruitmentReads, scoutingReads, // §4.3 step 2: the trials (and, since S9a, the evidence) are read through SQL
-    development, developmentReads, // S12a: the Hub's own records
-    boxCamReads, // S12b: Box Cam sessions and Combine attempts, the Hub's linkable evidence and target states
+    recruitmentReads, scoutingReads,
+    development, developmentReads, // the Hub's own records
+    boxCamReads, // Box Cam sessions and Combine attempts, the Hub's linkable evidence and target states
   } = ctx;
   const reads = { ...recruitmentReads, ...scoutingReads, development: developmentReads, boxCam: boxCamReads };
   if (typeof reads?.trials?.byId !== 'function') throw new TypeError('registerDevelopment needs recruitmentReads (trials) from the data layer');
@@ -95,10 +95,10 @@ export function registerDevelopment(ctx) {
   // ------------------------------------------------------------- primitives
 
   /**
-   * Every event M21 emits is organisation-private and carries ids only.
+   * Every event the Hub emits is organisation-private and carries ids only.
    *
    * The names are written out as literal `broadcast('…')` call sites rather
-   * than dispatched from a variable. That is deliberate: the M18.2 suite greps
+   * than dispatched from a variable. That is deliberate: a test suite greps
    * the server tree for literal call sites and fails if they disagree with
    * `EMITTED_EVENTS`, and an event sent through a variable is invisible to
    * that check — and to anyone grepping for where a name is used.
@@ -135,7 +135,7 @@ export function registerDevelopment(ctx) {
   /**
    * Tell a person something happened, through the preference-aware channel.
    * `development` is one notification type mapping to one category, so a
-   * person who does not want development mail turns off one switch (§81).
+   * person who does not want development mail turns off one switch.
    */
   const tellPlayer = (plan, text) => {
     const p = findPlayer(plan.playerId);
@@ -162,12 +162,12 @@ export function registerDevelopment(ctx) {
 
   /**
    * A create that is the same create, by the same actor, moments ago, is a
-   * retry rather than a second record (§109). (Plans ask the repository: reads.development.plans.recentCreate.)
+   * retry rather than a second record. (Plans ask the repository: reads.development.plans.recentCreate.)
    */
   const recentDuplicate = (list, match, at) =>
     list.find((r) => at - (r.createdAt ?? 0) < IDEMPOTENCY_WINDOW_MS && match(r)) ?? null;
 
-  /** Refuse a body that asserts something the server derives (§93). */
+  /** Refuse a body that asserts something the server derives. */
   const refuseDerived = (req, res) => {
     const bad = refusedClientFields(req.body);
     if (!bad.length) return false;
@@ -186,7 +186,7 @@ export function registerDevelopment(ctx) {
    *
    * Authorisation comes before existence in the ANSWER even though the lookup
    * has to come first: a viewer without access gets 404, so a plan id cannot
-   * be probed for existence from outside (§78/§79).
+   * be probed for existence from outside.
    */
   function resolvePlan(req, res, planId, viewer) {
     const bundle = collectPlan(developmentReads, planId);
@@ -226,7 +226,7 @@ export function registerDevelopment(ctx) {
   /**
    * What the Hub is, and what it refuses to be, served from the server's own
    * vocabulary so a client renders definitions rather than carrying a copy
-   * that drifts. The M20 pattern, for the same reason.
+   * that drifts.
    */
   const catalogue = () => ({
     policyVersion: DEVELOPMENT_POLICY_VERSION,
@@ -237,8 +237,8 @@ export function registerDevelopment(ctx) {
       categories: GOAL_CATEGORIES, categoryLabels: GOAL_CATEGORY_LABELS,
       statuses: GOAL_STATUSES, transitions: GOAL_TRANSITIONS,
       blockReasons: BLOCK_REASONS, achievedMeaning: ACHIEVED_MEANING,
-      // Said in the catalogue, not only in a document: the two vocabularies
-      // §13 and §48 offered conditionally are absent, and this is why.
+      // Said in the catalogue, not only in a document: the availability goal
+      // category and the injury block reason are absent, and this is why.
       omitted: {
         categories: ['availability_rehabilitation'],
         blockReasons: ['injury_or_unavailable'],
@@ -257,7 +257,7 @@ export function registerDevelopment(ctx) {
     capabilities: CAPABILITIES,
     reminders: {
       scheduler: 'none',
-      // The M19 honesty standard, applied to dates (§84/§85).
+      // Honest about dates: there is no scheduler.
       note: 'Due and overdue are worked out when you open the page. ScoutBox has no background scheduler in this build and does not send reminders while the app is closed.',
     },
     neverBuilt: {
@@ -425,7 +425,7 @@ export function registerDevelopment(ctx) {
     });
 
     // ---- list
-    // S12a: the plans this viewer may read, newest change first then id, paged by cursor (`?limit=&cursor=` →
+    // The plans this viewer may read, newest change first then id, paged by cursor (`?limit=&cursor=` →
     // `{ items, nextCursor, total }`). The candidates come from an indexed query (one player's, one guardian's
     // children's, or the plans one organisation owns or was shared); the access rule is applied in code, so the page
     // is cut from the filtered list. The count is of plans THIS viewer may read.
@@ -480,7 +480,7 @@ export function registerDevelopment(ctx) {
       const parsed = validatePlanBody(req.body, { ownerKind });
       if (parsed.error) return res.status(400).json(parsed);
 
-      // §64: a draft may be empty; an active plan may not. Decided explicitly
+      // A draft may be empty; an active plan may not. Decided explicitly
       // rather than left to whichever route happened to check.
       const goalBodies = Array.isArray(req.body?.goals) ? req.body.goals : [];
       const wantsActive = String(req.body?.status ?? 'draft') === 'active';
@@ -534,7 +534,7 @@ export function registerDevelopment(ctx) {
         nextReviewAt: parsed.value.nextReviewAt,
         endDate: parsed.value.endDate,
         templateId: parsed.value.templateId,
-        // The M12 bridge (§57): a plan may record where the idea came from.
+        // The objectives bridge: a plan may record where the idea came from.
         // Recording an origin is not adopting the record — the objective and
         // its Passport projection are untouched.
         originObjectiveId: originObjectiveFor(req.body?.originObjectiveId, player, res),
@@ -759,7 +759,7 @@ export function registerDevelopment(ctx) {
         return res.status(409).json({ error: 'PLAN_NOT_EDITABLE', status: plan.status });
       }
       if (limited('development_item_write', rateKeyFor(req))) return res.status(429).json(rateLimitedBody('development_item_write'));
-      // Two coaches editing one goal is the case §70 exists for.
+      // Two coaches editing one goal is the case this guard exists for.
       // The conflict body carries the goal's id and status and NOT its title:
       // the other person's edit is content, and the caller reloads through its
       // own authorised read rather than learning it from a 409.
@@ -916,7 +916,7 @@ export function registerDevelopment(ctx) {
         development.actions.update(action.id, () => action);
         if (statusChanged?.to === 'done') {
           // The goal does NOT move. Completing an action is completing an
-          // action (§123/G5) — no code path here touches goal.status.
+          // action — no code path here touches goal.status.
           emitAll('development_action_completed', plan, { actionId: action.id });
           if (plan.owner.kind === 'org' && actor.kind !== 'org') tellOrg(plan.owner.orgId, `${player.name} completed a development action: ${action.title}`);
         }
@@ -954,7 +954,7 @@ export function registerDevelopment(ctx) {
       });
       if (parsed.error) return res.status(parsed.error === 'EVIDENCE_NOT_FOUND' ? 404 : 400).json(parsed);
 
-      // Linking the same evidence twice is one link, not two (§118#30).
+      // Linking the same evidence twice is one link, not two.
       const existing = mine.find((l) => l.sourceType === parsed.value.sourceType && l.sourceId === parsed.value.sourceId);
       if (existing) {
         vmetric('development_idempotent_retries');
@@ -1033,7 +1033,7 @@ export function registerDevelopment(ctx) {
       const parsed = validateReview({ body: req.body, access, viewer, now: now() });
       if (parsed.error) return res.status(parsed.error === 'REVIEW_NOT_PERMITTED' ? 403 : 400).json(parsed);
 
-      // A correction is a new review that names the one it replaces (§34).
+      // A correction is a new review that names the one it replaces.
       let superseded = null;
       if (req.body?.supersedes) {
         const target = reviews.find((r) => r.id === String(req.body.supersedes));
@@ -1171,14 +1171,14 @@ export function registerDevelopment(ctx) {
   }
 
   /**
-   * The M12 bridge. A plan or goal may record that it grew out of an existing
-   * development objective — by id, on explicit user action, and only for this
-   * player. Nothing about the M12 record, its routes or its Passport
-   * projection changes; M21 reads an id and stores an id.
+   * The objectives bridge. A plan or goal may record that it grew out of an
+   * existing development objective — by id, on explicit user action, and only
+   * for this player. Nothing about the objective record, its routes or its
+   * Passport projection changes; the Hub reads an id and stores an id.
    */
   function originObjectiveFor(raw, player, res) {
     if (raw == null || raw === '') return null;
-    const found = typeof raw === 'string' ? developmentReads.objectives.byId(raw) : null; // S12a: read through SQL
+    const found = typeof raw === 'string' ? developmentReads.objectives.byId(raw) : null;
     const rec = found && found.playerId === player.id ? found : null;
     if (!rec) {
       res.status(404).json({ error: 'DEVELOPMENT_OBJECTIVE_NOT_FOUND', detail: 'No such development objective exists for this player.' });
@@ -1199,7 +1199,7 @@ export function registerDevelopment(ctx) {
         return {
           player,
           // The existing safeguarding model, unchanged: a minor's records are
-          // created and managed by their guardian (§74).
+          // created and managed by their guardian.
           minorRefusal: {
             error: 'GUARDIAN_MANAGED',
             message: 'A guardian creates and manages development plans for a player under 18. You can read the plan here.',

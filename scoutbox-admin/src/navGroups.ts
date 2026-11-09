@@ -1,4 +1,4 @@
-// M24D — the Trust & Safety console's navigation, as plain data so the
+// The Trust & Safety console's navigation, as plain data so the
 // navigation suite can assert the five rule on it without a browser.
 //
 // Presentation only. Every tab id stays a live destination; the admin key and
@@ -17,9 +17,9 @@ export const ADMIN_NAV_GROUPS = [
   { id: 'safety', label: 'Safety', tabs: ['blocks', 'moderation', 'threads', 'drillguide'] },
   { id: 'operations', label: 'Operations', tabs: ['outcomes', 'groups'] },
   { id: 'delivery', label: 'Delivery & Billing', tabs: ['deliverycentre', 'outbox', 'billing'] },
-  // M23 P5.6C: the attributed compliance lane. Its own credentialed sign-in —
-  // the admin key that opens this console is not a reviewer identity (G-C0).
-  // M23 P5.6D adds the transaction READ to the same lane: same reviewer gate,
+  // The attributed compliance lane. Its own credentialed sign-in —
+  // the admin key that opens this console is not a reviewer identity.
+  // The transaction READ sits in the same lane: same reviewer gate,
   // states and party roles only, and no action on a transaction at all.
   { id: 'agents', label: 'Agents', tabs: ['agentreview', 'agentpolicy', 'agentreviewers', 'agenttransactions'] },
   { id: 'system', label: 'System', tabs: ['servicehealth', 'backups'] },

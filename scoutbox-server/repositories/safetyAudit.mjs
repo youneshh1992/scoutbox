@@ -1,6 +1,6 @@
 /**
- * Safety and audit as typed tables with explicit writes (S6b, migration `0013_safety_audit`; explicit since S14b,
- * docs/architecture/migration.md §4.6; sql/03_messaging_safety_audit.sql).
+ * Safety and audit: blocks, reports, the moderation log, club notes, the Discovery Ledger, ops events, source changes
+ * and the ID-check queue.
  *
  * Records (the keys every reader sees):
  *   blocks          { id, playerId, orgId, by, reason, ts }: a player or guardian blocking an organisation, or an
@@ -13,16 +13,16 @@
  *   ledger          { id, ts, type, playerId, orgId, orgName, userId, scoutName, detail }: the Discovery Ledger, append
  *                   only. `detail` is typed columns by type (LEDGER_DETAIL), null when the type has none.
  *   opsEvents       { id, at, kind, detail }: operational events; `detail` is typed columns by kind (OPS_DETAIL).
- *   sourceChanges   { id, playerId, type, sourceSystem, sourceId, occurredAt, detail }: the canonical change log
- *                   (M18.1), capped at the newest SOURCE_CHANGE_CAP rows.
+ *   sourceChanges   { id, playerId, type, sourceSystem, sourceId, occurredAt, detail }: the canonical change log,
+ *                   capped at the newest SOURCE_CHANGE_CAP rows.
  *   idvQueue        { id, guardianId, guardianName, documentType, documentRef, provider, reference, ts, status }.
  *
- * WRITES are explicit operations: each joins the open unit of work, the caller's transaction or its own. READS are
- * SQL: no mirror, no db.* view. Fresh, deep-frozen records; lists that grow without limit page by `seq`, newest first.
+ * Each write joins the open unit of work, the caller's transaction or its own. Records are deep-frozen; lists that
+ * grow without limit page by `seq`, newest first.
  *
- * References. Organisations and staff are RESTRICT keys. Player ids carry no key and no existence rule (Q4: a row
- * outlives the account; an unresolved id is counted, never refused). The ID-check queue's guardian is checked on
- * every write (Q4b), without a key while the guardians are still the staged identity repository's.
+ * References. Organisations and staff are RESTRICT keys. Player ids carry no key and no existence rule (Q4 in
+ * docs/decisions.md: a row outlives the account; an unresolved id is counted, never refused). The ID-check queue's
+ * guardian is checked in code on every write (Q4b), without a key.
  *
  * Refusals name tables, ids and fields, never a reason, note, excerpt, name or document value.
  */
@@ -326,18 +326,18 @@ export function unresolvedPlayerReferences(sqlite) {
   return Object.fromEntries(PLAYER_REFERENCE_TABLES.map(({ name: n, table: t, column }) => [n, !tableExists(sqlite, t) ? 0
     : sqlite.prepare(`SELECT COUNT(*) AS n FROM ${t} WHERE ${column} IS NOT NULL${players ? ` AND ${column} NOT IN (SELECT id FROM players)` : ''}`).get().n]));
 }
-/** S4b-R, the companion diagnostic: per collection, rows naming a player whose record is retained (an account deleted). */
+/** The companion diagnostic: per collection, rows naming a player whose record is retained (an account deleted). */
 export function retainedPlayerReferences(sqlite) {
   const players = tableExists(sqlite, 'players');
   return Object.fromEntries(PLAYER_REFERENCE_TABLES.map(({ name: n, table: t, column }) => [n, !tableExists(sqlite, t) || !players ? 0
     : sqlite.prepare(`SELECT COUNT(*) AS n FROM ${t} WHERE ${column} IS NOT NULL AND ${column} IN (SELECT id FROM players WHERE deleted_at IS NOT NULL)`).get().n]));
 }
 
-// ------------------------------------------------------------------ snapshot (fixtures and the persistence batteries)
+// ------------------------------------------------------------------ whole-domain read (the test suites)
 function readAll(sqlite) {
   return Object.fromEntries(AUDIT_COLLECTIONS.map((n) => [n, decodeRows(sqlite, n, sqlite.prepare(`SELECT * FROM ${TABLE_OF[n]} ORDER BY seq`).all())]));
 }
-/** The whole domain read back as plain records (`readAllRecords` in index.mjs: the test suites' read-back); null before its migration. */
+/** The whole domain read back as plain records (`readAllRecords` in index.mjs: the test suites' read-back). */
 export const SAFETY_AUDIT_RECORDS = {
   names: AUDIT_COLLECTIONS,
   read(sqlite) { return safetyAuditLive(sqlite) ? readAll(sqlite) : null; },
@@ -509,7 +509,7 @@ export function createSafetyAuditRepository({ sqlite, unit = null, now = Date.no
     counts: () => Object.fromEntries(AUDIT_COLLECTIONS.map((n) => [n, q(`SELECT COUNT(*) AS n FROM ${TABLE_OF[n]}`).get().n])),
     pending: () => 0,
     unresolvedPlayerReferences: () => unresolvedPlayerReferences(sqlite),
-    /** Every collection's records, detached (the admin backup). */
+    /** Every collection's records, detached. */
     exportAll: () => JSON.parse(JSON.stringify(readAll(sqlite))),
     now,
   };

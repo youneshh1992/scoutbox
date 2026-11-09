@@ -1,58 +1,34 @@
 /**
- * The media-deletion queue over `media_deletions` (migration 0006). The
- * database decides WHAT must disappear, inside the deletion's transaction;
- * the filesystem (or the object store) is a separate boundary and is handled
- * after COMMIT, retried until it succeeds. The row is the source of truth for
- * "this file is gone or going": `/media/:id` refuses a queued id before it
- * looks at storage, so a file whose removal is still pending is never served.
+ * The media-deletion queue over `media_deletions`. The database decides what must disappear, inside the deletion's
+ * transaction; the filesystem (or the object store) is a separate boundary and is handled after COMMIT, retried until
+ * it succeeds. The row is the source of truth for "this file is gone or going": `/media/:id` refuses a queued id before
+ * it looks at storage, so a file whose removal is still pending is never served.
  *
- *   enqueue(ids, { playerId, at })  — inside the caller's open transaction only
- *   process(storage)                — after commit: remove each queued file,
- *                                     drop the row when storage reports the
- *                                     file removed or already absent, keep it
- *                                     (attempts + 1, the error) otherwise
+ *   enqueue(ids, { playerId, at })  inside the caller's open transaction only
+ *   process(storage)                after commit: remove each queued file, drop the row when storage reports the file
+ *                                   removed or already absent, keep it (attempts + 1, the error) otherwise
  *   isQueued(id) / pending() / count()
  *
- * `storage.delete(id)` must resolve the filesystem truthfully: it returns the
- * number of files removed (0 when none existed) and THROWS on any error other
- * than "absent" — a permission problem must keep the row, never clear it.
+ * `storage.delete(id)` must resolve the filesystem truthfully: it returns the number of files removed (0 when none
+ * existed) and throws on any error other than "absent": a permission problem must keep the row, never clear it.
  *
- * Backups and restores (review of 9656a4b, finding 2): the queue lives only in
- * this table, so a snapshot of the database carries it as the `mediaDeletions`
- * collection, in the rows' stored form (`pending()`; `MEDIA_DELETIONS_TABLE`
- * for the snapshot tools). A file whose removal is queued is never copied into
- * a backup — a backup must not carry a file without the intent to remove it —
- * and the restored server imports the queue (migration 0006 on a restored
- * `db.json`, `MEDIA_DELETIONS_TABLE.replace` for a snapshot tool), serves
- * nothing for those ids and finishes the removal at boot. Every imported entry
- * is validated (a media id is `[a-z0-9-]+`, so an entry can never name a path
- * outside the media directory); one invalid entry refuses the whole import.
+ * A media id is `[a-z0-9-]+`, so an entry can never name a path outside the media directory.
  */
 import { migrationApplied } from './database.mjs';
 import { subrecordsLive } from './playerSubrecords.mjs';
 
 export const MEDIA_DELETIONS_MIGRATION = '0006_media_deletions';
 
-// ------------------------------------------------------------ the ownership invariant (review of 4ef9345)
-// A file referenced by ANY live player must never be deleted by the removed-owner
-// cleanup queue. A queue entry's own player_id is metadata, not proof that the
-// file is unowned: the authority is the identity records themselves — every
-// `media[].id` a live player carries — read through the established mapping
-// (whatever facets layout the row was written in). The invariant is checked
-// wherever queue rows become authoritative (a restored blob imported by migration
-// 0006, a snapshot written through MEDIA_DELETIONS_TABLE, an identity write that
-// gives a queued id an owner) and again at the execution boundary (every sweep),
-// so a conflicting entry that is already stored is retained with a diagnostic
-// and never acted on.
+// ------------------------------------------------------------ the ownership invariant
+// A file referenced by any live player must never be deleted by the removed-owner cleanup queue. A queue entry's own
+// player_id is metadata, not proof that the file is unowned: the authority is every `media[].id` a live player
+// carries. The invariant is checked again at the execution boundary (every sweep), so a conflicting entry that is
+// already stored is retained with a diagnostic and never acted on.
 const tableExists = (sqlite, name) => !!sqlite.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(name);
 
 /**
- * Every media id a live player references, with the ids of the players that
- * carry it: the authoritative players table once the identity cutover is
- * recorded (rows decoded through the mapping), the `players` blob before it
- * (a snapshot tool on a pre-S4 file, a restored db.json before 0005 ran), plus
- * any `records` the caller holds (the server's in-memory view, so an upload
- * whose facet is not flushed yet counts too).
+ * Every media id a live player references, with the ids of the players that carry it: the `player_media` rows, plus
+ * any `records` the caller passes.
  */
 export function liveMediaReferences(sqlite, { records = [] } = {}) {
   const refs = new Map();
@@ -66,7 +42,7 @@ export function liveMediaReferences(sqlite, { records = [] } = {}) {
     }
   };
   if (subrecordsLive(sqlite)) {
-    // S5: the clips are rows of player_media; every row is a live player's reference (the rows cascade with the player row).
+    // Every player_media row is a live player's reference (the rows cascade with the player row).
     for (const r of sqlite.prepare('SELECT player_id, id FROM player_media ORDER BY player_id, position').all()) {
       if (!refs.has(r.id)) refs.set(r.id, []);
       if (!refs.get(r.id).includes(r.player_id)) refs.get(r.id).push(r.player_id);
@@ -113,7 +89,7 @@ export function validateMediaDeletionRow(raw) {
 
 
 
-/** The whole domain read back as plain records (`readAllRecords` in index.mjs: the test suites' read-back); null before its migration. */
+/** The whole domain read back as plain records (`readAllRecords` in index.mjs: the test suites' read-back). */
 export const MEDIA_DELETIONS_TABLE = {
   name: 'mediaDeletions',
   read(sqlite) {
@@ -122,11 +98,7 @@ export const MEDIA_DELETIONS_TABLE = {
   },
 };
 
-/**
- * `liveRecords()` (optional) returns the player records the caller holds in
- * memory (the server's authoritative view): they count as live references
- * alongside the table, so an upload whose facet is not flushed yet is protected.
- */
+/** `liveRecords()` (optional) returns further player records that count as live references alongside the table. */
 export function createMediaDeletionsQueue({ sqlite, log = () => {}, warn = () => {}, now = Date.now, liveRecords = null }) {
   if (!sqlite) throw new TypeError('the media-deletion queue needs a SQLite connection (node:sqlite)');
   if (!sqlite.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'media_deletions'").get()) throw new Error('media deletions: the media_deletions table does not exist (migration 0006 has not run)');

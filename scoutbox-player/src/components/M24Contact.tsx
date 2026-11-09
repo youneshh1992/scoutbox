@@ -1,5 +1,5 @@
 import { GuidanceNote } from './InformationRows';
-// M24B — the Club contact and Trial › Invitation views: the person's own
+// The Club contact and Trial › Invitation views: the person's own
 // requests and threads, read from the session's inbox and channels exactly as
 // the Inbox tab shows them. Answering stays in the Inbox — the one place the
 // safeguarding wording and the slot picker live — so nothing is duplicated

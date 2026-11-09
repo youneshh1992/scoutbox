@@ -1,15 +1,9 @@
-// Milestone 14 registration point — Verification & Trust.
-// Same architecture as m12/ and m13/: focused modules receive the shared
-// server context and register on the EXISTING authenticated routers, so every
-// standing gate (bearer sessions, org suspension, guardian ownership,
-// visibleToOrg, blocks, moderation) runs before any M14 handler.
+// Verification & Trust: claims, evidence and the review flow. Handlers register on the existing authenticated
+// routers, so every standing gate (bearer sessions, org suspension, guardian ownership, visibleToOrg, blocks,
+// moderation) runs first.
 //
-// Verification proves FACTS; authorization decides ACCESS. Nothing registered
-// here loosens visibleToOrg, guardian routing, adult-only representation, the
-// grassroots radius, or any other standing rule.
-//
-// S10a: every record is a row of the verification repository (repositories/verification.mjs), written by explicit
-// operations — inside a unit of work wherever a route writes more than one row — and read by SQL queries.
+// Verification proves FACTS; authorization decides ACCESS. Nothing registered here loosens visibleToOrg, guardian
+// routing, adult-only representation, the grassroots radius, or any other standing rule.
 import crypto from 'node:crypto';
 import {
   bootstrapVerification, applyTransition, effectiveStatus,
@@ -27,7 +21,7 @@ export function registerM14(ctx) {
   const reads = verification.reads;
   bootstrapVerification({ verification, orgs: ctx.orgs.list() });
 
-  // -------- verification metrics (§61): counters only, never names/emails.
+  // -------- verification metrics: counters only, never names/emails.
   metrics.verification = {
     requestsCreated: 0, autoPrechecksPassed: 0, routedToHumanReview: 0,
     approvals: 0, rejections: 0, disputes: 0, expiries: 0, revocations: 0,
@@ -36,7 +30,7 @@ export function registerM14(ctx) {
   const vmetric = (k) => { metrics.verification[k] = (metrics.verification[k] ?? 0) + 1; };
   const cut = (v, max) => (v === null || v === undefined ? null : String(v).slice(0, max));
 
-  // -------- append-only verification event log (§11). The before/after payloads become one detail line.
+  // -------- append-only verification event log. The before/after payloads become one detail line.
   function verEvent(type, fields = {}, req = null) {
     return verification.events.append({
       id: nextId('vevt'), ts: Date.now(), type,
@@ -45,7 +39,7 @@ export function registerM14(ctx) {
       actorName: cut(fields.actorName ?? req?.orgUser?.name ?? null, VERIFICATION_LIMITS.name),
       actorOrgId: fields.actorOrgId ?? req?.org?.id ?? null,
       requestId: cut(req?.correlationId ?? req?.headers?.['x-request-id'] ?? null, VERIFICATION_LIMITS.requestId),
-      // M14.1: how the actor identity was established — 'declared_reviewer'
+      // How the actor identity was established — 'declared_reviewer'
       // (a named T&S reviewer declared on the request) vs 'shared_admin_key'
       // (the shared prototype admin credential; no individual identity).
       attribution: fields.attribution ?? null,
@@ -118,7 +112,7 @@ export function registerM14(ctx) {
     return null;
   }
 
-  // -------- evidence records (§12, §40). Files go through the same storage
+  // -------- evidence records. Files go through the same storage
   // engine as media but are NEVER exposed on public/static paths — retrieval
   // is a dedicated, authorised route in review.mjs. `claimIds` link the record to those claims at once.
   function addEvidence(fields, req = null) {
@@ -145,9 +139,7 @@ export function registerM14(ctx) {
     // sanitized server name = our own id; the original name is metadata only
     ctx.storage.saveDataUrl(id, `data:${mime};base64,${buf.toString('base64')}`);
     return {
-      // M23 P7 (D-P7-1): the digest is of the exact BYTES. `sha256(String(buf))`
-      // hashed a UTF-8 decoding of the file, so two different binaries could
-      // share a digest and a signing document's digest did not name its bytes.
+      // The digest is of the exact bytes (not a UTF-8 decoding), so it names the file a signing document refers to.
       mediaId: id, sha256: crypto.createHash('sha256').update(buf).digest('hex'), mime, bytes: buf.length, filename: String(filename ?? '').slice(0, VERIFICATION_LIMITS.filename),
       // contentSignature is format identification (magic bytes), NOT malware
       // scanning — malwareScan stays not_configured and is never conflated.
@@ -155,9 +147,9 @@ export function registerM14(ctx) {
     };
   }
 
-  // -------- verification-permission guard (§9). Server-enforced; a disabled
+  // -------- verification-permission guard. Server-enforced; a disabled
   // button is never the control. Root-level operations additionally require
-  // an MFA-enabled account (existing F12 infrastructure).
+  // an MFA-enabled account.
   function requireVer(req, res, atLeast, { root = false } = {}) {
     if (!hasVerLevel(reads, req.org.id, req.orgUser.id, atLeast)) {
       res.status(403).json({ error: 'VERIFICATION_PERMISSION_REQUIRED', message: `This needs ${atLeast.replace(/_/g, ' ')} authority for your organisation.` });
@@ -177,7 +169,7 @@ export function registerM14(ctx) {
     // Removed/deactivated accounts lose CURRENT public verification at once:
     // the removed state feeds the read-time engine on every projection — no
     // cached boolean can bypass it. Closed historical periods stay visible
-    // as history per §15 (truth is not erased).
+    // as history (truth is not erased).
     const user = byId.user(userId);
     const claims = reads.claims.forSubject('user', userId);
     return toPublicVerificationProfile({

@@ -1,14 +1,7 @@
-// S8b — recruitment cases, room comments, room snapshots, room decisions and room evidence states as typed tables with
-// EXPLICIT writes (repositories/recruitmentCases.mjs, migration 0016; docs/architecture/migration.md §4.3). What this
-// suite proves: the migration creates the twenty-five typed STRICT tables (no lossless side column, the vocabulary
-// CHECKs, the children cascading, the room rows RESTRICT) and the case keys of requests, trials, contacts and offers are
-// immediate; a fixture written through the repository types every writer shape into its columns and reads back the
-// typed record, refuses a record it cannot type and names every missing reference with ids; the player references are counted, never
-// refused (Q8a); the repository's operations write rows at once and return fresh read-only records (§4.3 step 2: no
-// db.* view, every query matches a table scan), the records refuse an
-// in-place edit, an update inside its own update is refused, a unit of work rolls rows AND mirrors back; a decision's
-// snapshot is the snapshot row it names; the deletion unit's redaction.
-// Temporary databases only; nothing touches DATA_DIR. Run with: npm test
+// Recruitment cases, room comments, room snapshots, room decisions and room evidence states
+// (repositories/recruitmentCases.mjs, migration 0016): the typed tables, typed writes and refusals, SQL reads that match a
+// table scan, read-only records, units of work, and the deletion unit's redaction. Player references are counted, never
+// refused (Q8a, docs/decisions.md). Temporary databases only; nothing touches DATA_DIR. Run with: npm test
 import assert from 'node:assert/strict';
 import { checkHistoryFeed } from './historyFeedCheck.mjs';
 import fs from 'node:fs';
@@ -76,7 +69,7 @@ test('[schema] migration 0016 is registered between 0015 and 0017 and creates th
   assert.ok(fkOf(f, 'room_decisions').includes('snapshot_id->room_snapshots RESTRICT'));
   for (const t of ['recruitment_requests', 'trials', 'recruitment_contacts', 'recruitment_offers']) assert.ok(fkOf(f, t).includes('case_id->recruitment_cases RESTRICT'), `${t}.case_id is immediate`);
   assert.match(ddlOf(f, 'idempotency_keys'), /owner_table IN \('signing_packages'\)/);
-  assert.equal(hasBlobTable(f), false, 'no blob table'); // rewritten in S14a: it described the blob
+  assert.equal(hasBlobTable(f), false, 'no blob table');
   F.close(); rm(d);
 });
 
@@ -145,7 +138,7 @@ test('[repository] explicit writes: there is no db.* view (reading or assigning 
   L.close(); rm(d);
 });
 
-test('[repository] SQL reads (§4.3 step 2): byId and every list query of the five collections return exactly what a scan of the tables would, in insertion order; the handoff-agent query, the Room counts and the per-status counts agree; `reads` carries no write', () => {
+test('[repository] SQL reads: byId and every list query of the five collections return exactly what a scan of the tables would, in insertion order; the handoff-agent query, the Room counts and the per-status counts agree; `reads` carries no write', () => {
   const d = file('reads'); const L = serverOpen(d); const R = L.repo;
   const all = R.exportAll();
   const ids = (rows) => rows.map((r) => r.id);
@@ -163,7 +156,7 @@ test('[repository] SQL reads (§4.3 step 2): byId and every list query of the fi
   for (const v of values(cases, (c) => c.transactionHandoff?.invitedAgentUserId)) check(`cases.forHandoffAgent ${v}`, R.cases.forHandoffAgent(v), cases.filter((c) => c.transactionHandoff?.invitedAgentUserId === v));
   check('cases.withRoom', R.cases.withRoom(), cases.filter((c) => c.room)); assert.equal(R.cases.roomCount(), cases.filter((c) => c.room).length);
   checkHistoryFeed('cases.roomHistoryFeed', { feed: R.cases.roomHistoryFeed, count: R.cases.roomHistoryCount, records: cases.filter((c) => c.room), ownerKey: 'caseId' });
-  // §4.3 step 4: a list decodes its cases' children in one batch; each record is the one byId decodes on its own.
+  // A list decodes its cases' children in one batch; each record is the one byId decodes on its own.
   const whole = (list) => assert.deepEqual(plain(list), plain(list.map((c) => R.cases.byId(c.id))), 'a batch-decoded list is the per-case decode');
   for (const v of values(cases, (c) => c.orgId)) whole(R.cases.forOrg(v)); whole(R.cases.withRoom()); whole(cases);
   for (const part of ['budget', 'decisionDraft', 'transactionHandoff', 'room']) assert.ok(cases.some((c) => c[part]), `the fixture exercises ${part}`);
@@ -180,7 +173,7 @@ test('[repository] SQL reads (§4.3 step 2): byId and every list query of the fi
   L.close(); rm(d);
 });
 
-test('[repository] the per-viewer lists in SQL (§4.3 step 4): over sixty varied cases, every viewer (lead or not, owner, Room lead, assignee, stranger), every filter and every page size, pageForViewer and roomPageForViewer return exactly the pages the old in-code filter, sort and pageSorted returned; the search filter keeps reading until the page is full; the access-scoped Room counts, the open-Room rows, the overdue-task counts and the Rooms with a decision agree with the records', () => {
+test('[repository] the per-viewer lists in SQL: over sixty varied cases, every viewer (lead or not, owner, Room lead, assignee, stranger), every filter and every page size, pageForViewer and roomPageForViewer return exactly the pages the old in-code filter, sort and pageSorted returned; the search filter keeps reading until the page is full; the access-scoped Room counts, the open-Room rows, the overdue-task counts and the Rooms with a decision agree with the records', () => {
   const H = 3_600_000;
   let seed = 7; const rnd = (n) => { seed = (seed * 1103515245 + 12345) % 2147483648; return Math.floor(seed / 65536) % n; };
   const pick = (xs) => xs[rnd(xs.length)];

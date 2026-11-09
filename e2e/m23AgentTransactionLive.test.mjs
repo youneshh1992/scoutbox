@@ -1,4 +1,4 @@
-// M23 P5.6D LIVE — the Agent Transaction Workspace driven through the real
+// Live: the Agent Transaction Workspace driven through the real
 // clients against a real server. Five browser contexts, one backend, four
 // genuinely different parties plus the Trust & Safety read.
 //
@@ -136,9 +136,9 @@ const ADMIN_H = { 'x-admin-key': ADMIN_KEY };
 const key = () => `live-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 
 // ------------------------------------------------- setup the world over HTTP
-// P5.6B (team, profile, verification, a confirmed relationship) and P5.6C
-// (policy, facets) are proven in their own live suites; here they are
-// scaffolding, so they go over HTTP and the browser does the P5.6D work.
+// The agency setup (team, profile, verification, a confirmed relationship) and
+// compliance (policy, facets) are proven in their own live suites; here they are
+// scaffolding, so they go over HTTP and the browser does the transaction work.
 const login = async (orgId, scoutName, role, platform = 'agent') => (await j('POST', '/auth/org/login', { orgId, scoutName, role, platform })).body;
 const tomas = await login('org-northstar', 'Tomás Rivera', 'Director');
 await j('POST', '/org/agent/agency/team', { name: 'Ana Costa', tiers: ['licensed_agent'] }, tomas.token);
@@ -151,7 +151,7 @@ const REL = relReq.body?.relationship?.id;
 const kolaApi = (await j('POST', '/auth/player/login', { playerId: 'pl-adeyemi' })).body;
 await j('POST', `/player/agent/relationships/${REL}/confirm`, { expectedRev: 1 }, kolaApi.token);
 // The releasing club has to be a VERIFIED organisation, because a recorded club
-// signatory only exists inside one (M14). The seeded academy is not, so verify it.
+// signatory only exists inside one. The seeded academy is not, so verify it.
 const verifyHarbour = await j('POST', '/admin/clubs/org-harbour/verification', { verified: true, verifiedDomain: 'harbourcityfc.example', safeguardingContractSigned: true }, null, ADMIN_H);
 const maria = await login('org-eastport', 'Maria Keane', 'Head of Recruitment', 'main');
 const devA = await login('org-harbour', 'Dev Ansah', 'Director of Football', 'main');
@@ -232,7 +232,7 @@ await go(ana, '#/transactions');
 await ana.waitForSelector('[data-testid="transactions-screen"]', { timeout: 20000 });
 say('A3: Transactions opens by deep link');
 {
-  await ana.locator('[data-testid="transactions-screen"] .f-about > summary').first().click().catch(() => {}); // M24F.3 — the honest line sits behind About
+  await ana.locator('[data-testid="transactions-screen"] .f-about > summary').first().click().catch(() => {}); // the honest line sits behind About
   const honest = await ana.locator('[data-testid="tx-list-honest"]').innerText();
   ok(/not/i.test(honest) && /(legal|valid|approv)/i.test(honest), 'A4: the list states what a ScoutBox state is not — no claim of legal validity or approval (§17/§77)');
   ok((await ana.locator('[data-testid="tx-counts"]').count()) === 1, 'A5: the list opens on counts, not on a guess about what needs attention');
@@ -292,7 +292,7 @@ const kola = watch(await ctxKola.newPage(), 'kola');
   const row = kola.locator('div', { hasText: 'Kola Adeyemi' }).filter({ has: kola.locator('text=Enter') }).last();
   await row.locator('text=Enter').last().click();
   await kola.waitForSelector('a[href^="/you"]', { timeout: 30000 });
-  await kola.goto(`http://localhost:${PLAYER_PORT}/you?tab=clubs&section=history`); // M24F.2 — transactions live under Clubs › History
+  await kola.goto(`http://localhost:${PLAYER_PORT}/you?tab=clubs&section=history`); // transactions live under Clubs › History
   await kola.waitForSelector('[data-testid="agent-transactions"]', { timeout: 30000 });
   const card = kola.locator('[data-testid="agent-transactions"]');
   ok(await waitFor(async () => (await kola.locator(`[data-testid="agent-transaction-${TX}"]`).count()) > 0, 20000), 'D1: Kola sees his own side of the transaction on his phone');
@@ -455,16 +455,16 @@ const ts = watch(await ctxTs.newPage(), 'trust-safety');
   for (const [h, sel] of [['#/transactions', 'transactions-screen'], [`#/transactions/${TX}`, 'transaction-detail'], [`#/transactions/${TX}/compliance`, 'transaction-detail'], [`#/transactions/${TX}/messages`, 'transaction-detail']]) {
     await go(ana, h);
     // The hash decides which screen this is — going back to the list must leave
-    // the detail behind, not keep it on screen (D12).
+    // the detail behind, not keep it on screen.
     ok(await waitFor(async () => (await ana.locator(`[data-testid="${sel}"]`).count()) > 0, 15000), `N0 ${h} renders its own screen, and only that one`);
     await sleep(500);
-    for (const sm of await ana.locator('.f-about > summary').all()) await sm.click().catch(() => {}); // M24F.3 — honest lines sit behind About
+    for (const sm of await ana.locator('.f-about > summary').all()) await sm.click().catch(() => {}); // honest lines sit behind About
     screens.push(await bodyText(ana));
   }
   const txt = stripHonest(screens.join('\n'));
   neg(!/\boffers?\b|negotiat|commission|\bsalary\b|\bescrow\b/i.test(txt), 'N1: after removing the sentences that say there is none, no offer, negotiation, commission, salary or escrow wording remains on any transaction screen');
   neg(/no offer|not an offer|nothing has been signed/i.test(screens.slice(1).join('\n')), 'N1b: and the workspace says explicitly what it is not (§53)');
-  // D14: the tab in the hash is the tab on screen, so screens[2] really was the
+  // The tab in the hash is the tab on screen, so screens[2] really was the
   // compliance tab and not whatever tab happened to be open before.
   await go(ana, `#/transactions/${TX}/documents`);
   await ana.waitForSelector('[data-testid="transaction-detail"]', { timeout: 15000 });
@@ -501,8 +501,7 @@ const ts = watch(await ctxTs.newPage(), 'trust-safety');
     await go(ana, `#/transactions/${TX}`);
     await ana.waitForSelector('[data-testid="transaction-detail"]', { timeout: 15000 });
   }
-  // M23 P5.6F (F-6): the two tablet widths the release checklist names had never
-  // been rendered on the Agent portal by any suite. Content is asserted at each
+  // The two tablet widths the release checklist names. Content is asserted at each
   // width as well as fit — a blank page has no horizontal scroll either.
   for (const w of [{ width: 1024, height: 900 }, { width: 768, height: 1024 }]) {
     await ana.setViewportSize(w);

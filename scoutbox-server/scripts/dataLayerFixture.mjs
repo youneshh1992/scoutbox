@@ -1,7 +1,6 @@
-// Test helper (S14 last): a test database written the way the server writes one. There is no snapshot mode: a fixture
-// opens the directory in server mode (the table migrations, then every repository), and each record goes through its
-// repository's own write operation (`create`, `record`, `schedule`, …), which types it exactly as a route's write is
-// typed. Junk is refused with the repository's own code (`*_INPUT_INVALID`, a foreign-key refusal for a dangling
+// Test helper: a test database written the way the server writes one. A fixture opens the directory in server mode
+// (the table migrations, then every repository), and each record goes through its repository's own write operation
+// (`create`, `record`, `schedule`, …), which types it exactly as a route's write is typed. Junk is refused with the repository's own code (`*_INPUT_INVALID`, a foreign-key refusal for a dangling
 // reference) and, because the whole fixture is one unit of work, nothing of a refused fixture is written.
 //
 // `writeFixture(dir, collections)` is ADDITIVE. On a new directory the organisations, players and guardians are the

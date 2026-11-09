@@ -1,8 +1,5 @@
 /**
- * One-time codes (S6a): club e-mail challenges and child pairing codes get their own tables, stored as hashes
- * with expiry and attempt counts.
- * REGISTERED in DATA_MIGRATIONS. `up()` is the DDL only: the tables start empty and are written
- * through the repository.
+ * One-time codes: club e-mail challenges and child pairing codes, stored as hashes with expiry and attempt counts.
  */
 import { migrationApplied } from '../database.mjs';
 import { CORE_IDENTITY_LIVE_MIGRATION } from '../identity.mjs';

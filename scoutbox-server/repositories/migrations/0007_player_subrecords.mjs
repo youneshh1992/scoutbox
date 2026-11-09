@@ -1,9 +1,7 @@
 /**
- * Player sub-records (S5) get their own tables: media, attendance, timeline, badges, drills, drill results,
- * activity, external ids, season history, medical records, programme completions and the rest
- * (`SUBRECORDS_DDL`). On a new database the players table is empty here; the seed's arrays are written to these
- * tables when the data layer initialises the players (repositories/identity.mjs).
- * REGISTERED in DATA_MIGRATIONS.
+ * Player sub-records (`SUBRECORDS_DDL`): media, attendance, timeline, badges, drills, drill results, activity,
+ * external ids, season history, medical records, programme completions and the rest. The seed's rows are written
+ * when the data layer initialises the players (repositories/identity.mjs).
  */
 import { CORE_IDENTITY_LIVE_MIGRATION } from '../identity.mjs';
 import { PLAYER_SUBRECORDS_MIGRATION, SUBRECORDS_DDL, SUBRECORD_TABLES } from '../playerSubrecords.mjs';

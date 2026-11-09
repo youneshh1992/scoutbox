@@ -1,7 +1,7 @@
-// M22 — Real Box Cam CV v1: the policy surface.
+// Real Box Cam CV v1: the policy surface.
 //
 // Every threshold the observation engine uses lives HERE, in one frozen
-// object, for one reason: §15 of the threat model. A threshold that is
+// object, for one reason: a threshold that is
 // scattered through the engine can be quietly relaxed to make a test pass.
 // A threshold that sits in a single named policy object, is version-stamped,
 // and is asserted by the evaluation harness cannot be moved without the move
@@ -13,24 +13,24 @@
 
 export const BOX_CAM_CV_POLICY_VERSION = 1;
 
-// The engine's own version. v2 = the robustness fix pack: three-layer split,
+// The engine's own version. v2: the three-layer split, the
 // contact state machine, normalised units, quality gate, refusal precedence.
-// Event semantics changed materially, so the version moves (§55) rather than
+// Event semantics changed materially, so the version moves rather than
 // pretending one version produced two behaviours. BOX_CAM_CV_POLICY_VERSION
 // stays at 1: version 1 encompasses pre-release development of this policy,
 // and no released result exists under it.
 // Bumped whenever a rule changes in a way that
 // could change a count. A stored result keeps the version that produced it —
-// history is never re-derived under a new engine (§46).
+// history is never re-derived under a new engine.
 export const CV_ENGINE_VERSION = 2;
 
-// The provider that this engine backs. `production_cv` keeps its id: §6
-// forbids renaming a test implementation into a production one.
+// The provider that this engine backs. `production_cv` keeps its id: a test
+// implementation is never renamed into a production one.
 export const CV_PROVIDER_ID = 'production_cv';
 
 // ---------------------------------------------------------------- frames
 //
-// §83: support only documented formats; do not auto-decode arbitrary files.
+// Support only documented formats; do not auto-decode arbitrary files.
 //
 // The transport accepts exactly ONE encoding: `gray8` — a raw 8-bit
 // luminance plane, width × height bytes, row-major, no header, no
@@ -46,23 +46,23 @@ export const FRAME_LIMITS = Object.freeze({
   maxWidth: 320, maxHeight: 240,
   // A frame is exactly w*h bytes. The cap is the largest legal frame plus
   // base64 expansion and JSON overhead, so an oversized body is refused on
-  // size before anything tries to interpret it (§82).
+  // size before anything tries to interpret it.
   maxBytes: 320 * 240,
   maxFramesPerBatch: 12,
   maxBatchesPerSession: 120,
-  // §76/§77: the in-process queue is bounded. Frames beyond it are dropped
+  // The in-process queue is bounded. Frames beyond it are dropped
   // according to the documented policy, never buffered indefinitely.
   maxQueuedFrames: 24,
 });
 
-// §35/§38: capture conditions the engine will accept at all. Anything
+// Capture conditions the engine will accept at all. Anything
 // outside these is refused at Ready Check rather than silently degraded.
 export const CAPTURE_REQUIREMENTS = Object.freeze({
   minFps: 6,
   maxFps: 30,
   minWidth: FRAME_LIMITS.minWidth,
   minHeight: FRAME_LIMITS.minHeight,
-  // §21 of the fix pack: below this sustained cadence an exact count cannot
+  // Below this sustained cadence an exact count cannot
   // be established, because contacts fall between observations.
   minSustainedFps: 12,
   // unit — fraction of the attempt that may sit below minSustainedFps before
@@ -75,9 +75,9 @@ export const CAPTURE_REQUIREMENTS = Object.freeze({
   // integer timestamps alternate 83/84 ms, and every 84 reads as 11.9 fps.
   // Real cadence loss is a sustained gap, not a rounding artefact.
   lowFpsIntervalTolerance: 1.15,
-  // Only orientations actually exercised by the evaluation fixtures (§37).
+  // Only orientations actually exercised by the evaluation fixtures.
   supportedOrientations: Object.freeze(['landscape', 'portrait']),
-  // Web only (§39/§40). No native device tests exist, so no native claim.
+  // Web only. No native device tests exist, so no native claim.
   supportedPlatforms: Object.freeze(['web']),
 });
 
@@ -97,7 +97,7 @@ export const DETECTION = Object.freeze({
   ballMinRoundness: 0.55,
   // A person candidate is a large non-background region.
   personMinAreaFrac: 0.01,
-  // §31: below this mean luminance the scene cannot be read reliably and the
+  // Below this mean luminance the scene cannot be read reliably and the
   // attempt is refused as insufficient_visibility. It is never estimated.
   minMeanLuma: 28,
   // Below this, the frame has no usable structure at all (a covered lens, a
@@ -107,7 +107,7 @@ export const DETECTION = Object.freeze({
   // refusal reason — refusing for the wrong stated reason is its own
   // dishonesty, even though the attempt is refused either way.
   minLumaStdDev: 3,
-  // §8 of the threat model: a run of frames whose inter-frame difference is
+  // A run of frames whose inter-frame difference is
   // under this floor is a static image or a frozen stream, not activity.
   staticFrameMaxMeanDiff: 1.2,
   // How many consecutive static frames before the sequence is called static.
@@ -116,7 +116,7 @@ export const DETECTION = Object.freeze({
 
 // ------------------------------------------------------------ event rules
 //
-// §21 (touch) and §23 (juggle), and §17 (normalized geometry).
+// Touch and juggle rules, in normalized geometry.
 //
 // EVERY spatial threshold here is expressed in BALL DIAMETERS, and every
 // velocity in ball diameters per second. That is the whole resolution- and
@@ -129,8 +129,8 @@ export const DETECTION = Object.freeze({
 // Unit key:  d  = ball diameters        d/s = ball diameters per second
 //            ms = milliseconds          —   = dimensionless ratio
 export const EVENT_RULES = Object.freeze({
-  // unit ms — §21 refractory. Two contacts closer together in TIME than this
-  // are one contact observed twice. Milliseconds, never frames (§6), so the
+  // unit ms — refractory. Two contacts closer together in TIME than this
+  // are one contact observed twice. Milliseconds, never frames, so the
   // rule means the same thing at every cadence.
   touchRefractoryMs: 180,
   juggleRefractoryMs: 300,
@@ -148,31 +148,30 @@ export const EVENT_RULES = Object.freeze({
   // EDGE of the player region. Contact means touching, so this is about one
   // ball width, allowing for the silhouette's imprecision.
   //
-  // An earlier cut used 5.5, inherited from an arbitrary frame-diagonal
-  // fraction and never justified physically. At five ball-widths a ball
-  // bouncing on its own across the room counts as "in contact with the
-  // player", and the false-touch suite duly scored nine touches on a ball
-  // nobody went near. Contact range is not "somewhere in the same scene".
+  // A larger range (5.5, a frame-diagonal fraction, was tried) has no
+  // physical justification: at five ball-widths a ball bouncing on its own
+  // across the room counts as "in contact with the player", and the
+  // false-touch suite scored nine touches on a ball nobody went near.
+  // Contact range is not "somewhere in the same scene".
   touchMaxContactDiameters: 1.2,
 
   // unit d — the ball must be DISPLACED this far from where it was last
   // struck before another contact can be counted. This is the spatial half
-  // of the debounce (§6): the refractory timer alone cannot stop a ball
+  // of the debounce: the refractory timer alone cannot stop a ball
   // resting against a foot from re-triggering, because time keeps passing.
   //
   // The value is a fraction of a ball width because that is what a ball
   // mastery touch physically does — a toe-tap nudges the ball a little, it
-  // does not send it a ball-and-a-bit away. An earlier cut used 1.2, chosen
-  // with no physical justification, and it silently suppressed genuine
-  // touches at anything above a slow pace: the ball never travelled far
-  // enough to "separate", so the state machine latched after the first
-  // contact and a 14-touch attempt counted 1.
+  // does not send it a ball-and-a-bit away. A larger value (1.2 was tried)
+  // silently suppresses genuine touches at anything above a slow pace: the
+  // ball never travels far enough to "separate", so the state machine latches
+  // after the first contact and a 14-touch attempt counts 1.
   //
-  // Lowering a debounce is exactly the move §56 warns about, so it is
+  // Lowering a debounce is the classic way to make a test pass, so it is
   // justified against measurement rather than convenience: with this value
   // the 20-case false-touch stress suite must remain at ZERO false touches.
-  // If it ever does not, this number is wrong again and the answer is to
-  // narrow supported pace, not to raise it back and lose real touches.
+  // If it ever does not, this number is wrong and the answer is to narrow
+  // supported pace, not to raise it and lose real touches.
   touchMinSeparationDiameters: 0.35,
 
   // unit ms — the ball must have been continuously within contact range for
@@ -182,7 +181,7 @@ export const EVENT_RULES = Object.freeze({
   // apparent velocity change on arrival is a detector artefact, not a strike.
   touchMinApproachMs: 120,
 
-  // --- gap policy (§23) -------------------------------------------------
+  // --- gap policy -------------------------------------------------------
   // A SHORT gap may be bridged: the track survives and the count stays exact.
   // A LONG gap may not: continuity is broken, and an exact measurement is
   // refused rather than interpolated across the missing evidence.
@@ -198,7 +197,7 @@ export const EVENT_RULES = Object.freeze({
   maxBallGapFrames: 4,
   maxBallGapMs: 400,
 
-  // --- supported cadence envelope (§29) ---------------------------------
+  // --- supported cadence envelope ---------------------------------------
   // Measured, not aspired to: the engine counts within tolerance down to
   // 340 ms between touches and under-counts at 260 ms. Anything faster is
   // outside the validated envelope and must not be certified as exact.
@@ -251,12 +250,12 @@ export const EVENT_RULES = Object.freeze({
 });
 // ---------------------------------------------------------- confidence
 //
-// §19: this is MODEL CERTAINTY about an observation. It is never rendered as
+// This is MODEL CERTAINTY about an observation. It is never rendered as
 // a football-quality figure, and `refusedConfidenceFields()` below exists to
 // make that failure mode loud rather than subtle.
 export const CONFIDENCE = Object.freeze({
   // Below this aggregate confidence the attempt is refused rather than
-  // reported. §62: prefer refusal over false verification.
+  // reported. Prefer refusal over false verification.
   minAcceptable: 0.62,
   // A single event below this does not count toward the total.
   minPerEvent: 0.5,
@@ -267,7 +266,7 @@ export const CONFIDENCE = Object.freeze({
 
 // ------------------------------------------------------------- outcomes
 //
-// §20. `accepted` is one value among many, and deliberately not the default.
+// `accepted` is one value among many, and deliberately not the default.
 export const OBSERVATION_STATES = Object.freeze([
   'accepted',
   'insufficient_confidence',
@@ -281,7 +280,7 @@ export const OBSERVATION_STATES = Object.freeze([
   'unsupported_event_cadence',
 ]);
 
-// Reader-facing sentences. §94/§95: a refusal describes the OBSERVATION,
+// Reader-facing sentences. A refusal describes the OBSERVATION,
 // never the player. "Could not verify", never "you failed".
 export const STATE_COPY = Object.freeze({
   accepted: 'This attempt was observed and measured.',
@@ -296,14 +295,14 @@ export const STATE_COPY = Object.freeze({
   unsupported_event_cadence: 'Could not verify this attempt — the touches came faster than ScoutBox can reliably count, so no exact result was produced.',
 });
 
-// §67 provider health.
+// Provider health.
 export const PROVIDER_HEALTH = Object.freeze([
   'not_configured', 'configured', 'warming', 'ready', 'degraded', 'unavailable',
 ]);
 
 // ------------------------------------------------- client-supplied fields
 //
-// §22/§A4: the client may supply FRAMES. It may not supply a measurement.
+// The client may supply FRAMES. It may not supply a measurement.
 // These names are refused BY NAME rather than ignored, so that an attempt to
 // self-report is a loud 422 in a log rather than a silent no-op that someone
 // later mistakes for acceptance.
@@ -319,7 +318,7 @@ export function refusedClientFields(body) {
   return FORBIDDEN_CLIENT_FIELDS.filter((f) => Object.prototype.hasOwnProperty.call(body, f));
 }
 
-// §19 again, from the other direction: confidence must never be rendered as
+// From the other direction: confidence must never be rendered as
 // a player-quality value. The suite scans copy for these shapes.
 export const FORBIDDEN_CONFIDENCE_PHRASINGS = Object.freeze([
   /player\s+confidence/i,
@@ -341,7 +340,7 @@ export function scanCopyForConfidenceMisuse(pairs) {
 
 // ------------------------------------------------------- protocol scope
 //
-// §3: the smallest set that can be made genuinely reliable. Presence in this
+// The smallest set that can be made genuinely reliable. Presence in this
 // list means "the engine has a documented rule for it", NOT "it is enabled
 // in production". Enablement is decided by measured evaluation in gate.mjs.
 export const CANDIDATE_PROTOCOLS = Object.freeze({
@@ -365,13 +364,13 @@ export const CANDIDATE_PROTOCOLS = Object.freeze({
 // The capabilities this engine can genuinely offer when it is healthy.
 // `rep_count` appears here because the engine HAS a counting rule; whether
 // any protocol may USE it in production is the gate's decision, not this
-// list's (§129).
+// list's.
 export const ENGINE_CAPABILITIES = Object.freeze([
   'player_presence', 'ball_presence', 'active_motion', 'active_duration', 'rep_count',
 ]);
 
 // Capabilities the engine explicitly does NOT have, stated so that nothing
-// silently assumes them (§12).
+// silently assumes them.
 export const ENGINE_NON_CAPABILITIES = Object.freeze({
   foot_classification: 'Which foot touched the ball is not observed. No limb classification is attempted.',
   technique_signals: 'No technique judgement of any kind is produced.',

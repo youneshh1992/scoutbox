@@ -1,5 +1,5 @@
 /**
- * M20 — how long the process takes, and what has stopped moving.
+ * Recruitment analytics: how long the process takes, and what has stopped moving.
  *
  * Pure functions over the reporting context. Two rules run through every
  * function here:
@@ -163,7 +163,7 @@ export function stalledRooms(ctx, { thresholdDays = DEFAULT_STALL_DAYS } = {}) {
   const aged = open.map((r) => ({ room: r, idleDays: days(lastActivityAt(r), ctx.now) }));
   const rows = aged
     .filter((a) => a.idleDays >= threshold)
-    // Oldest first, then id: a stable order across reads, as M18.2 requires.
+    // Oldest first, then id: a stable order across reads, as the audit-log rules require.
     .sort((a, b) => (b.idleDays - a.idleDays) || String(a.room.id).localeCompare(String(b.room.id)))
     .map((a) => ({
       roomId: a.room.id,
@@ -184,9 +184,9 @@ export function stalledRooms(ctx, { thresholdDays = DEFAULT_STALL_DAYS } = {}) {
 // --------------------------------------------------- A2 · overdue obligations
 
 export function overdueTrialReports(ctx) {
-  // M23 P4A-D1/D14: a missing deadline is unknown, not overdue (Number(null)
-  // is 0), and a trial whose subject removed their account is no longer an
-  // obligation anyone can meet.
+  // A missing deadline is unknown, not overdue (Number(null) is 0), and a
+  // trial whose subject removed their account is not an obligation anyone
+  // can meet.
   const awaiting = ctx.trials.filter((t) => t.status === 'awaiting_report' && !t.subjectRemovedAt);
   const late = awaiting.filter((t) => Number.isFinite(t.reportDueAt) && t.reportDueAt < ctx.now);
   return {
@@ -203,7 +203,7 @@ export function overdueTrialReports(ctx) {
 
 // ----------------------------------------------------- A3 · decision missing
 
-/** The statuses M17 itself treats as owing a decision. One definition, not two. */
+/** The statuses the Room lifecycle itself treats as owing a decision. One definition, not two. */
 export const DECISION_OWED_STATUSES = ['offer_consideration', 'offer_made'];
 
 export function decisionOutstanding(ctx) {

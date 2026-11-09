@@ -1,6 +1,5 @@
 /**
- * S13d — grassroots operations as typed tables (migration `0037_grassroots`; docs/architecture/migration.md §4.5 S13;
- * sql/08_operations_integrations.sql).
+ * Grassroots operations: open days, match days and the friendlies board.
  *
  * Records:
  *   - An open day (`openTrials`): a grassroots club's open trial session, its positions as ordered rows and the players
@@ -10,9 +9,8 @@
  *   - A match day (`matchdays`): the squad-wide log of one game, with the rostered players it credited as rows.
  *   - A friendly (`friendlies`): a club's post on the local friendlies board, with one response per other club.
  *
- * WRITES are explicit operations; every write joins the open unit of work, the caller's transaction or its own.
- * READS are SQL: no mirror. Fresh, deep-frozen records; lists decode child rows in one batch. Modules receive the
- * queries as `grassrootsReads`.
+ * Every write joins the open unit of work, the caller's transaction or its own. Records are deep-frozen; lists decode
+ * child rows in one batch. Modules receive the queries as `grassrootsReads`.
  *
  * References. Organisations and staff are RESTRICT keys. Player and guardian ids carry no key (a registration and a
  * match-day credit outlive the account; the registration's copy of the name goes with it). Child rows cascade with
@@ -234,13 +232,13 @@ function decodeFriendlies(sqlite, rows) {
   return rows.map((row) => ({ ...decode(FRIENDLY_SPEC, row), responses: responses.all(row.id).map((r) => decode(RESPONSE_SPEC, r)) }));
 }
 
-// ------------------------------------------------------------------ snapshot (fixtures and the persistence batteries)
+// ------------------------------------------------------------------ whole-domain read (the test suites)
 export const grassrootsLive = (sqlite) => migrationApplied(sqlite, GRASSROOTS_MIGRATION);
 function readAll(sqlite) {
   const all = (t) => sqlite.prepare(`SELECT * FROM ${t} ORDER BY rowid`).all();
   return { openTrials: decodeTrials(sqlite, all('open_trials')), matchdays: decodeMatchdays(sqlite, all('matchdays')), friendlies: decodeFriendlies(sqlite, all('friendlies')) };
 }
-/** The whole domain read back as plain records (`readAllRecords` in index.mjs: the test suites' read-back); null before its migration. */
+/** The whole domain read back as plain records (`readAllRecords` in index.mjs: the test suites' read-back). */
 export const GRASSROOTS_RECORDS = {
   names: GRASSROOTS_COLLECTIONS,
   read(sqlite) { return grassrootsLive(sqlite) ? readAll(sqlite) : null; },

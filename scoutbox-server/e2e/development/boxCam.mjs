@@ -1,7 +1,7 @@
-// M16 acceptance suite — Box Cam + Development Intelligence.
-// Pure-engine unit fixtures (active-time §102, reps §103, states, streak,
-// challenge progress), then full HTTP journeys B1–B12 and the §99 abuse
-// catalogue. Well over 40% of checks are negative/edge/security cases.
+// Box Cam + Development Intelligence.
+// Pure-engine unit fixtures (active time, reps, states, streak, challenge
+// progress), then full HTTP journeys B1–B12 and the abuse catalogue. Well
+// over 40% of checks are negative/edge/security cases.
 //
 // The test-only observation provider (local_test) is enabled via
 // BOX_CAM_TEST_PROVIDER=1 — simulated observations are always labelled
@@ -58,7 +58,7 @@ const A = { 'x-admin-key': 'scoutbox-admin' };
 const MIN = 60_000;
 
 // ============================================================ U1 active time
-section('U1 — active-time engine (§102): observed active ≠ elapsed');
+section('U1 — active-time engine: observed active ≠ elapsed');
 {
   ok(verifiedActiveMs({ activeIntervals: [{ fromMs: 0, toMs: 5 * MIN }], sessionDurationMs: 10 * MIN }) === 5 * MIN, 'plain active interval sums');
   ok(verifiedActiveMs({ activeIntervals: [{ fromMs: 0, toMs: 5 * MIN }, { fromMs: 2 * MIN, toMs: 6 * MIN }], sessionDurationMs: 10 * MIN }) === 6 * MIN, 'overlapping intervals union (no double count)');
@@ -80,7 +80,7 @@ section('U1 — active-time engine (§102): observed active ≠ elapsed');
 }
 
 // ============================================================ U2 reps
-section('U2 — repetition engine (§103): honest dedupe');
+section('U2 — repetition engine: honest dedupe');
 {
   ok(dedupeReps([{ atMs: 0 }, { atMs: 300 }, { atMs: 600 }], { minGapMs: 250 }).length === 3, 'well-spaced reps counted');
   neg(dedupeReps([{ atMs: 0 }, { atMs: 100 }], { minGapMs: 250 }).length === 1, 'physically-impossible rapid duplicate collapsed');
@@ -113,13 +113,11 @@ section('U3 — verification states, streak, challenge progress');
   const cs = challengeProgress(chal, [{ id: 's1', drillId: 'box-touches', verificationState: 'verified', verifiedReps: 600, endedAt: wk }, { id: 's1', drillId: 'box-touches', verificationState: 'verified', verifiedReps: 600, endedAt: wk }, { id: 's2', drillId: 'box-touches', verificationState: 'verified', verifiedReps: 500, endedAt: 2 * wk }]);
   neg(cs.total === 1100 && cs.completed, 'duplicate session id counts once in challenge progress (replay-safe)');
   ok(providerFor('local_test', { testProviderEnabled: false }) === null && providerFor('local_test', { testProviderEnabled: true }) !== null, 'test provider hidden unless explicitly enabled');
-  // M22 changed the world this assertion described: a real server-side CV
-  // provider now exists, so "not_configured" is no longer the truth. The
-  // assertion is REPLACED BY A STRICTLY STRONGER ONE rather than deleted —
+  // A real server-side CV provider exists, so the property asserted is that
   // the provider is genuinely configured AND still cannot mint a Combine
   // measurement, which is a harder property than "it does nothing".
   ok(PROVIDERS.production_cv.status === 'configured' && PROVIDERS.production_cv.capabilities.length > 0,
-    'production CV is a real configured provider with genuine observation capabilities (M22)');
+    'production CV is a real configured provider with genuine observation capabilities');
   ok(combineVerifiedProtocols().length === 0,
     'and it still verifies NO Combine protocol — real-world validation is not completed');
   ok(combineCapabilities('combine-box-touch-60').length === 0,
@@ -298,7 +296,7 @@ section('B8 — replay / duplicate terminal submission rejected');
   neg(lateEvents.status === 409, 'B8: events after completion rejected');
 }
 
-section('B9/§99 — integrity: forged fields, sequence, timestamps, cross-session, other player');
+section('B9 — integrity: forged fields, sequence, timestamps, cross-session, other player');
 {
   // sequence must be monotonic
   const c = await j('POST', '/player/box-cam/sessions', { drillId: 'box-mobility', target: { type: 'duration', value: 5 * MIN } }, kola.token);
@@ -319,12 +317,10 @@ section('B9/§99 — integrity: forged fields, sequence, timestamps, cross-sessi
   neg(noLive.status === 403 && noLive.body.error === 'LIVENESS_REQUIRED', 'missing liveness blocks the session start');
   const wrongLive = await j('POST', `/player/box-cam/sessions/${c2.body.session.id}/start`, { nonce: c2.body.nonce, liveness: 'not_the_challenge' }, kola.token);
   neg(wrongLive.status === 403 && wrongLive.body.error === 'LIVENESS_MISMATCH', 'wrong liveness challenge rejected');
-  // M22: the production CV provider is now real, so a session CAN be created
-  // against it. The assertion that used to prove "it refuses because nothing
-  // is configured" is replaced by the stronger one: it accepts the session
-  // and still grants no Combine verification.
+  // The production CV provider is real, so a session CAN be created against
+  // it; what matters is that it still grants no Combine verification.
   const prod = await j('POST', '/player/box-cam/sessions', { drillId: 'box-mobility', target: { type: 'duration', value: 5 * MIN }, provider: 'production_cv' }, kola.token);
-  ok(prod.status === 201, 'production CV provider accepts a Box Cam session (M22: it is real)');
+  ok(prod.status === 201, 'production CV provider accepts a Box Cam session (it is real)');
   const protos = await j('GET', '/player/combine/protocols', undefined, kola.token);
   const touch60 = (protos.body?.protocols ?? []).find((p) => p.id === 'combine-box-touch-60');
   neg(!touch60 || touch60.measurementCapability === 'not_configured',
@@ -377,7 +373,7 @@ section('B12 — dispute → T&S invalidation → Passport drops it → restore'
   neg(badResolve.status === 409 || badResolve.status === 400, 'B12: T&S cannot fabricate a verified outcome');
 }
 
-section('§104 — privacy matrix: the same session across viewers');
+section('privacy matrix: the same session across viewers');
 {
   const self = await j('GET', `/player/box-cam/sessions/${b1SessionId}`, undefined, kola.token);
   ok(self.status === 200 && typeof self.body.session.verifiedActiveMs === 'number', 'SELF: full session detail (duration/state)');
@@ -406,7 +402,7 @@ section('§104 — privacy matrix: the same session across viewers');
   neg(agencyRaw.status === 403, 'AGENCY: no passport (and thus no development activity) for a minor');
 }
 
-section('§99 — remaining abuse cases');
+section('remaining abuse cases');
 {
   // minor cannot mint/join without guardian; minor cannot change prefs
   const minorShare = await j('POST', `/player/box-cam/challenges/nope/join`, {}, guni.token);
@@ -436,9 +432,9 @@ section('§99 — remaining abuse cases');
   neg(badMetric.status === 400 && badMetric.body.error === 'METRIC_NOT_SUPPORTED', 'challenge cannot demand rep counts a drill cannot verify');
 }
 
-section('S12b — junk refused naming the field, never coerced; lists that grow page by cursor');
+section('junk refused naming the field, never coerced; lists that grow page by cursor');
 {
-  // Observation events the engine cannot read are refused (they were dropped at finalize, or read as 'good', before).
+  // Observation events the engine cannot read are refused.
   const c = await j('POST', '/player/box-cam/sessions', { drillId: 'box-touches', target: { type: 'repetitions', value: 50 }, provider: 'local_test' }, kola.token);
   ok(c.status === 201, 'a session is minted for the junk checks');
   const { session, nonce, livenessChallenge } = c.body;
@@ -507,7 +503,7 @@ section('metrics — privacy-safe counters, no PII');
 }
 
 // rate limit LAST — deliberately exhausts the per-player session window
-section('§109 — session creation rate limit');
+section('session creation rate limit');
 {
   let hit429 = false;
   for (let i = 0; i < 40; i++) {

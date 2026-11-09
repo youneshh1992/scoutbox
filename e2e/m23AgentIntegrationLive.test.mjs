@@ -1,4 +1,4 @@
-// M23 P5.6E LIVE — the cross-app integration driven through the real clients
+// Live: the cross-app integration driven through the real clients
 // against one real server. Four browser contexts, one backend, and the whole
 // point of the milestone: an agent becomes a participant in work the other apps
 // already owned, and never a second copy of it.
@@ -137,9 +137,9 @@ const j = async (method, p, body, token, extra = {}) => {
 const ADMIN_H = { 'x-admin-key': ADMIN_KEY };
 
 // ------------------------------------------------- set the world up over HTTP
-// P5.6B (agency team, profile, verification, a client-confirmed relationship)
-// and P5.6C (policy, facets) have their own live suites. Here they are
-// scaffolding, so they go over HTTP and the browser does the P5.6E work.
+// The agency setup (team, profile, verification, a client-confirmed relationship)
+// and compliance (policy, facets) have their own live suites. Here they are
+// scaffolding, so they go over HTTP and the browser does the integration work.
 const login = async (orgId, scoutName, role, platform = 'agent') => (await j('POST', '/auth/org/login', { orgId, scoutName, role, platform })).body;
 const tomas = await login('org-northstar', 'Tomás Rivera', 'Director');
 await j('POST', '/org/agent/agency/team', { name: 'Ana Costa', tiers: ['licensed_agent'] }, tomas.token);
@@ -235,7 +235,7 @@ const myAgentCard = async (page) => {
   await waitIn(card, /Ana Costa/, 20000);
   return card;
 };
-// M24B — the Room is category → subcategory; the helper opens the category that holds the page, then the page.
+// The Room is category → subcategory; the helper opens the category that holds the page, then the page.
 const roomTab = async (page, name) => { await openRoomTab(page, name); };
 const openRoom = async (page, tabName) => {
   await page.evaluate((h) => { location.hash = h; }, `#/recruitment/rooms/${RID}`);
@@ -262,7 +262,7 @@ say('A1: Kola signs in to the real player app on a 390-wide screen');
   for (const k of ['clubPresence', 'contactRouting', 'trialVisibility']) {
     ok((await card.locator(`[data-testid="my-agent-d-${k}"]`).count()) === 1, `A5 ${k}: it is its own row with its own control, so one choice cannot be made by making another`);
   }
-  // M24F.2 — no intro sentence; each row carries its state word and its own "Turn on" / "Turn off" control, which is the statement.
+  // No intro sentence; each row carries its state word and its own "Turn on" / "Turn off" control, which is the statement.
   ok((dTxt.match(/Turn (on|off)/gi) ?? []).length === 3, 'A6: each choice carries its own Turn on / Turn off control — it can be turned off again at any time');
   neg(!/fee|commission|salary/i.test(stripHonest(dTxt)), 'A7: nothing here mentions a fee, a commission or a salary');
   ok(await noSideScroll(kola), 'A8: the section fits 390 with no horizontal scroll');
@@ -373,7 +373,7 @@ say('C1: Ana signs in to the real Agent client');
   // And the client sees it on his own phone, named to the agent who shared it.
   const shared = await j('GET', '/player/agent/shared-opportunities', undefined, kolaApi.token);
   ok(shared.status === 200 && (shared.body?.items ?? []).length === 1, 'D14: it reaches the client\'s own surface');
-  // M24F.2 — the opportunities an agent shared sit under Clubs › Requests.
+  // The opportunities an agent shared sit under Clubs › Requests.
   await kola.goto(`http://localhost:${PLAYER_PORT}/you?tab=clubs&section=requests`);
   ok(await waitFor(async () => (await kola.locator('[data-testid="agent-shared-opportunities"]').count()) > 0, 30000), 'D15: and his app shows it in its own card');
   const card = await kola.locator('[data-testid="agent-shared-opportunities"]').innerText();
@@ -396,7 +396,7 @@ say('C1: Ana signs in to the real Agent client');
   ok(/decision/i.test(await section.locator('[data-testid="handoff-blockers"]').innerText()), 'E4: and the reason is the missing finalised decision, not a vague "not yet"');
   neg(!/Make an offer|Send offer|Start an offer|Sign|Fee|Commission/i.test(stripHonest(await section.innerText())), 'E5: no Offer, Sign, Fee or Commission control exists anywhere in it (§35)');
 
-  // The canonical decision path, driven over HTTP: P5 has its own live suite.
+  // The canonical decision path, driven over HTTP: m23DecisionLive has its own live suite.
   await j('POST', `/org/rooms/${RID}/lifecycle`, { action: 'shortlist', expectedRev: await caseRev() }, mariaApi.token).catch(() => {});
   const H = 3600_000;
   const t = ((await j('GET', `/org/rooms/${RID}/trials`, undefined, mariaApi.token)).body?.items ?? [])[0];
@@ -440,7 +440,7 @@ let TX = null;
   ok(apiHof.length === 1 && apiHof[0].recruitmentCaseId === RID, 'F2b: while the case reference itself reaches the WORKSPACE, so the transaction she opens can cite the invitation it answers (§36)');
   const swept = stripHonest(txt);
   neg(!/progress|reject|hold|rationale|assessment|reason code/i.test(swept), 'F3: and nothing of the club\'s recruitment decision — not its outcome, not its reasons (§34)');
-  await hofs.locator('.f-about > summary').first().click().catch(() => {}); // M24F.3 — the honest line sits behind About
+  await hofs.locator('.f-about > summary').first().click().catch(() => {}); // the honest line sits behind About
   ok(/not an offer/i.test(await hofs.innerText()), 'F4: it says on her side too that an invitation is not an offer');
   // The agent's own row is not told "you represent this client" — she knows, and
   // the row instead carries the agreement it was derived from, so the workspace
@@ -449,7 +449,7 @@ let TX = null;
   const clubSide = (await j('GET', `/org/rooms/${RID}/transaction-handoff`, undefined, mariaApi.token)).body?.handoff ?? {};
   ok(clubSide.representedAtInvitation === true, 'F5b: and the CLUB\'s record says only THAT the client was represented — the fact it needed, learned from the server rather than from the agent');
   neg(!/Ana|North Star/.test(JSON.stringify(clubSide)), 'F5c: never who — that stays the client\'s to disclose (§15)');
-  // She opens the workspace that answers it, over HTTP: P5.6D's own live suite
+  // She opens the workspace that answers it, over HTTP: m23AgentTransactionLive
   // drives that UI. What matters here is that the two ends meet.
   const tx = await j('POST', '/org/agent/transactions', {
     type: 'employment_contract', jurisdictions: ['ENG'], clientKey: 'live-tx', recruitmentCaseId: RID,

@@ -1,33 +1,21 @@
 /**
- * S8d — signing packages, completed signings, post-signing follow-ups and outcome reports as tables (migration
- * `0018_signings_follow_ups`; docs/architecture/s8d-design-note.md; the rules of 30 October 2026 in CLAUDE.md).
+ * Signing packages (revisions, documents, parties, history), completed signings (parties), post-signing follow-ups
+ * and outcome reports (confirmations).
  *
- * The first domain built under the fidelity rule: EVERY field is a typed column with the vocabulary and length CHECKs
- * of the drafted schema (docs/architecture/sql/02_recruitment.sql), there is no `absent_keys_json`, `offtype_json` or
- * `extra_json`, and a record the columns cannot hold is REFUSED with its id — at a route (400, the field named), and at
- * the cutover (the boot stops). The cutover normalises exactly what the
- * design note lists (a legacy signing without `method` → LEGACY_RECORDED, a missing `rev` → 1, the three dead signing
- * fields dropped, an unknown field dropped) and REPORTS each normalisation with the row id in the boot log and in
- * `meta.signingsFollowUpsCutover.notes`; nothing else is coerced.
+ * Every field is a typed column with its vocabulary and length CHECKs, and a record the columns cannot hold is refused
+ * with its id (at a route: 400, the field named). The typers still normalise a few gaps and report each in `notes`
+ * (a signing without `method` → LEGACY_RECORDED, a missing `rev` or `policyVersion` → 1, the three dead signing fields
+ * and any unknown field dropped); nothing else is coerced.
  *
- * The first domain with EXPLICIT WRITES: every change is a repository operation that writes its rows at once — joined
- * into the open unit of work through the store's participant API, in a transaction of its own outside one — and
- * returns the record read back from the tables. Since §4.3 step 2 the READS are SQL too: there is no mirror and no
- * db.* view (reading db.signingPackages, db.signings, db.followUps or db.outcomeReports throws); callers use the
- * repository's queries, which hand out fresh, deep-frozen records, so an in-place edit throws.
- *
- * Tables (file 02): signing_packages, signing_revisions, signing_documents, signing_revision_parties, signing_history;
- * signings, signing_parties; follow_ups, outcome_reports, outcome_report_confirmations — ten definitions; the design
- * note counted nine before `signing_parties` was separated from `signings`. The package `keys` are rows of the ONE
- * shared `idempotency_keys` table, owner `signing_packages` (created by 0018). `completion_signing_id`
- * (package → signing) and `signing_package_id` (signing → package) form a cycle, so the package side is DEFERRABLE
- * INITIALLY DEFERRED with NO ACTION (a RESTRICT would fire at once even on a deferred key): checked at COMMIT, which
- * lets the completion unit write the signing row and then the package, and a snapshot remove the pair in one save.
+ * The package `keys` are rows of the shared `idempotency_keys` table, owner `signing_packages` (created by 0018).
+ * `completion_signing_id` (package → signing) and `signing_package_id` (signing → package) form a cycle, so the
+ * package side is DEFERRABLE INITIALLY DEFERRED with NO ACTION (a RESTRICT would fire at once even on a deferred key):
+ * checked at COMMIT, which lets the completion unit write the signing row and then the package.
  *
  * References: `org_id` → orgs, `case_id` → recruitment_cases, `offer_id` → recruitment_offers, the staff ids →
- * org_users (RESTRICT, as drafted). `offer_revision_id` stays a plain indexed column checked in code (offer_revisions.id
- * became the primary key when S8c moved to typed tables, migration.md §4.3; turning this into a real key is a later change). Player ids: NO key, tolerant and counted —
- * Q7a/Q8a/Q8c-a applied a fourth time, not re-asked. Guardian and party ids: polymorphic, no key.
+ * org_users (RESTRICT). `offer_revision_id` is a plain indexed column checked in code (it could become a real key to
+ * offer_revisions.id). Player ids: no key, tolerant and counted (Q7a/Q8a/Q8c-a in docs/decisions.md). Guardian and
+ * party ids: polymorphic, no key.
  */
 import { isPlainObject, ids } from './recruitment.mjs';
 import { pageOf } from '../domains/platform/paging.mjs';
@@ -36,7 +24,7 @@ import { transaction, migrationApplied, childRowsOf } from './database.mjs';
 export const SIGNINGS_FOLLOWUPS_MIGRATION = '0018_signings_follow_ups';
 export const SIGNINGS_FOLLOWUPS_COLLECTIONS = Object.freeze(['signingPackages', 'signings', 'followUps', 'outcomeReports']);
 export const SIGNINGS_FOLLOWUPS_TABLES = Object.freeze(['signing_packages', 'signing_revisions', 'signing_documents', 'signing_revision_parties', 'signing_history', 'signings', 'signing_parties', 'follow_ups', 'outcome_reports', 'outcome_report_confirmations']);
-/** The owner tables of the shared idempotency_keys table (created by 0018; the earlier steps keep their keys as columns). */
+/** The owner tables of the shared idempotency_keys table (created by 0018; other domains keep their keys as columns). */
 export const S8D_KEY_OWNERS = Object.freeze(['signing_packages']);
 
 export const SIGNING_STORED_STATUSES = Object.freeze(['DRAFT', 'READY', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED', 'VOIDED']);
@@ -50,7 +38,7 @@ export const REGISTRATION_STATUSES = Object.freeze(['registered', 'released', 'l
 export const OUTCOME_STATUSES = Object.freeze(['reported', 'confirmed', 'disputed']);
 export const LIMITS = Object.freeze({ internalNote: 2000, reason: 500, label: 120, signingNote: 400, progression: 200, endReason: 200, outcomeNote: 300 });
 
-// ------------------------------------------------------------------ DDL (typed; the drafted definitions with the by-actor kind/role columns the writers produce)
+// ------------------------------------------------------------------ DDL
 const BY = (p, { user = true, kind = false, role = false } = {}) => [kind ? `  ${(p + '_kind').padEnd(32)} TEXT CHECK (${p}_kind IS NULL OR ${p}_kind IN ('org','player','guardian','admin','system'))` : null, `  ${(p + (user ? '_user_id' : '_id')).padEnd(32)} TEXT${user ? ' REFERENCES org_users(id) ON DELETE RESTRICT' : ''}`, `  ${(p + '_name').padEnd(32)} TEXT`, role ? `  ${(p + '_role').padEnd(32)} TEXT` : null].filter(Boolean).join(',\n');
 export const SIGNINGS_FOLLOWUPS_DDL = `
 CREATE TABLE signing_packages (
@@ -306,7 +294,7 @@ const actorOut = (p, row, { user = true, role = true, kind = true } = {}) => {
 };
 const actorCols = (p, a, { user = true, role = true, kind = true } = {}) => ({ ...(kind ? { [`${p}_kind`]: a?.kind ?? null } : {}), [user ? `${p}_user_id` : `${p}_id`]: a?.id ?? null, [`${p}_name`]: a?.name ?? null, ...(role ? { [`${p}_role`]: a?.role ?? null } : {}) });
 
-// ------------------------------------------------------------------ validation + normalisation (one function per record, used by the routes' writers, the cutover)
+// ------------------------------------------------------------------ validation + normalisation (one function per record, used by the routes' writers)
 
 /** The signing package the writers produce, typed. Returns `{ ok, record, notes }` or `{ ok: false, reason }`; `notes` are the normalisations applied (ids only). */
 export function typeSigningPackage(raw, at = 'signingPackages') {
@@ -565,8 +553,8 @@ function statements(sqlite) {
   };
 }
 /**
- * The statements `decodePackage` and `decodeSigning` read children through, answered for many records at once
- * (§4.3 step 4): each child table read once for the whole list (a package's documents and parties through its
+ * The statements `decodePackage` and `decodeSigning` read children through, answered for many records at once: each
+ * child table read once for the whole list (a package's documents and parties through its
  * revisions) instead of three queries a package plus two a revision. Same rows, same order.
  */
 function batchStatements(sqlite, st, { packageIds = [], signingIds = [] }) {
@@ -644,23 +632,13 @@ export function retainedPlayerReferences(sqlite) {
 }
 
 
-/** The whole domain read back as plain records (`readAllRecords` in index.mjs: the test suites' read-back); null before its migration. */
+/** The whole domain read back as plain records (`readAllRecords` in index.mjs: the test suites' read-back). */
 export const SIGNINGS_FOLLOWUPS_RECORDS = {
   names: SIGNINGS_FOLLOWUPS_COLLECTIONS,
   read(sqlite) { if (!signingsFollowUpsLive(sqlite)) return null; const st = statements(sqlite); const pkgs = st.pkgAll.all(); const sgs = st.signingAll.all(); const bst = batchStatements(sqlite, st, { packageIds: pkgs.map((r) => r.id), signingIds: sgs.map((r) => r.id) }); return { signingPackages: pkgs.map((r) => decodePackage(bst, r)), signings: sgs.map((r) => decodeSigning(bst, r)), followUps: st.fupAll.all().map(decodeFollowUp), outcomeReports: st.outAll.all().map((r) => decodeOutcome(st, r)) }; },
-  /**
-   * The supplied collections typed (refused on junk, ids only; a legacy backup's rows normalised as the cutover
-   * normalises them, logged), the departures — the rows a supplied array no longer lists — removed children first
-   * (a departing row a RETAINED collection still references is refused with ids), BEFORE the S8c departures so a
-   * package can leave with its offer. Returns the plan `write` and `assert` take, or null before the 0018 record.
-   */
-
-  /** The supplied rows upserted (after the offers and cases of the same snapshot are in place). */
-
-
 };
 
-// ------------------------------------------------------------------ the repository (explicit writes; SQL reads)
+// ------------------------------------------------------------------ the repository
 const WRITES = new Set(['insert', 'patch', 'patchRevision', 'addRevision', 'setDocument', 'setParty', 'addKey', 'addHistory', 'redactPlayer', 'record', 'schedule', 'file', 'addConfirmation']);
 const SIGNINGS_FOLLOWUPS_TABLES_OF = [['signingPackages', 'signing_packages'], ['signings', 'signings'], ['followUps', 'follow_ups'], ['outcomeReports', 'outcome_reports']];
 const deepFreeze = (v) => { if (v !== null && typeof v === 'object' && !Object.isFrozen(v)) { Object.freeze(v); for (const k of Object.keys(v)) deepFreeze(v[k]); } return v; };
@@ -671,10 +649,9 @@ const deepFreeze = (v) => { if (v !== null && typeof v === 'object' && !Object.i
  * routes validated; the columns' CHECKs are the last line, and a violation is a bug surfacing as a failed unit
  * (answered as a failure), never as a silently kept value.
  *
- * READS ARE SQL (§4.3 step 2): no mirror and no db.* view. Every query decodes fresh, deep-frozen records (an in-place
- * edit throws), in insertion (rowid) order unless it says otherwise, and runs on the one connection, so a read inside a
- * unit of work sees the unit's own writes. The two lists that grow without limit page by cursor
- * (domains/platform/paging.mjs): `followUps.pageForOrg` (due date, then id) and `signings.pageForOrg` (newest first).
+ * Every query decodes fresh, deep-frozen records (an in-place edit throws), in insertion (rowid) order unless it says
+ * otherwise, and runs on the one connection, so a read inside a unit of work sees the unit's own writes. The two
+ * lists that grow without limit page by cursor (domains/platform/paging.mjs): `followUps.pageForOrg` (due date, then id) and `signings.pageForOrg` (newest first).
  */
 export function createSigningsFollowUpsRepository({ sqlite, unit = null, now = Date.now, log = () => {} }) {
   if (!sqlite) throw new TypeError('the signings/follow-ups repository needs a SQLite connection (node:sqlite)');
@@ -808,7 +785,7 @@ export function createSigningsFollowUpsRepository({ sqlite, unit = null, now = D
     signingPackages, signings, followUps, outcomeReports, outcomeTotalsByOrg,
     /** The queries alone, for the pure projectors and providers that must not write. */
     reads: Object.freeze({ signingPackages: readOnly(signingPackages), signings: readOnly(signings), followUps: readOnly(followUps), outcomeReports: readOnly(outcomeReports) }),
-    /** Check the tables are authoritative (0018 recorded); there is nothing to load. */
+    /** Check migration 0018 is recorded; there is nothing to load. */
     attach() { if (!signingsFollowUpsLive(sqlite)) throw new Error(`the signings/follow-ups repository needs ${SIGNINGS_FOLLOWUPS_MIGRATION} recorded; it never imports an in-memory array`); return { counts: this.counts() }; },
     counts() { return Object.fromEntries(SIGNINGS_FOLLOWUPS_TABLES_OF.map(([n]) => [n, counters[n].get().n])); },
     pending: () => 0,

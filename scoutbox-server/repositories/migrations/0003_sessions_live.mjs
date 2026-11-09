@@ -1,7 +1,6 @@
 /**
- * Sessions become authoritative in their table (S2): rows carry token hashes, never tokens. The table was created
- * by 0002; on a new database it is empty here. The step records the session lifetime the expiries are computed with.
- * REGISTERED in DATA_MIGRATIONS.
+ * Records the session lifetime that session expiries are computed with. Session rows carry token hashes, never
+ * tokens.
  */
 import { SESSIONS_CUTOVER_MIGRATION, DEFAULT_SESSION_TTL_MS } from '../sessions.mjs';
 

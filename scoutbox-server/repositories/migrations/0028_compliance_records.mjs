@@ -1,9 +1,8 @@
 /**
- * The compliance engine's records get their own typed tables (S11b-2): compliance contexts (jurisdictions, parties,
- * representations, resolved facts, history) and their append-only evaluations (reasons, outstanding consents, policy
- * versions, the identity of the inputs); regulatory reviews (subject by kind, reasons, versions, evidence, decision,
- * history); consents (regarding, versions, rule ids, history) and their revocations. REGISTERED in DATA_MIGRATIONS.
- * `up()` is the DDL only: nothing is carried over (no production data; rollback means re-seed).
+ * The compliance engine's records: compliance contexts (jurisdictions, parties, representations, resolved facts,
+ * history) and their append-only evaluations (reasons, outstanding consents, policy versions, the identity of the
+ * inputs); regulatory reviews (subject by kind, reasons, versions, evidence, decision, history); consents (regarding,
+ * versions, rule ids, history) and their revocations.
  */
 import { migrationApplied } from '../database.mjs';
 import { COMPLIANCE_POLICIES_MIGRATION } from '../compliancePolicies.mjs';

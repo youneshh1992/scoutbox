@@ -1,19 +1,18 @@
 /**
- * S12a — the development domain as typed tables (migration `0030_development`; docs/architecture/migration.md §4.5
- * S12; sql/07_development_boxcam_discovery.sql).
+ * Development: objectives, drill-guidance reviews and the Development Hub.
  *
  * Records:
- *   - A development objective (M12 F8): one or two focused objectives grown from feedback a club published, the
+ *   - A development objective: one or two focused objectives grown from feedback a club published, the
  *     player's progress entries, the clubs it is shared with and the reassessments asked of the club. Items, their
  *     exercise references and baseline evidence, progress, shares, reassessments and their outcome evidence are ordered
- *     child rows. `completedAt` is not stored: no route ever set it.
- *   - A drill-guidance review (M12 F6): a named person reviewed the recording guidance of a combine drill. The guidance
+ *     child rows. `completedAt` is not stored: no route sets it.
+ *   - A drill-guidance review: a named person reviewed the recording guidance of a combine drill. The guidance
  *     itself is the same for every drill and lives in code (domains/development/objectives.mjs); a drill with no row is
  *     unreviewed.
- *   - The Development Hub (M21): plans (with the organisations a player shared them with), goals (with an optional
+ *   - The Development Hub: plans (with the organisations a player shared them with), goals (with an optional
  *     Combine target as columns), actions, evidence links (references only) and reviews (with the goal state they saw,
  *     its cited evidence references as rows). `supersededBy` is not stored: it is the review whose `supersedes` names
- *     this one. `shareScopes` are three flags. `originTrialId` is gone: nothing ever set it.
+ *     this one. `shareScopes` are three flags.
  *   - History: every plan, goal, action and review keeps the append-only history `audit()` writes, all in one table
  *     whose rows name their plan (and their goal, action or review), so a plan's timeline is one indexed query. A
  *     detail is typed columns (`from`, `to`, `visibility`, `owner`, `kind`, `protocolId`, `note`), present keys only.
@@ -23,11 +22,11 @@
  * caller's open transaction, or a transaction of its own. An unknown field, a change to a field that never changes, a
  * history entry that changes or goes, and an update from inside its own update are refused.
  *
- * READS are SQL: no mirror. Queries decode fresh, deep-frozen records (in insertion order unless they say otherwise),
- * a list's child rows in one batch. Modules receive them as `developmentReads`.
+ * Queries decode deep-frozen records (in insertion order unless they say otherwise), a list's child rows in one batch.
+ * Modules receive them as `developmentReads`.
  *
  * References. Player, guardian and evidence ids carry no key (tolerant: an account deletion removes the player's
- * evidence and leaves these rows under the old id, as before); nor do a cited record's id (polymorphic), an action's
+ * evidence and leaves these rows under the old id); nor do a cited record's id (polymorphic), an action's
  * assignee or an actor's id. Organisations → orgs and the staff an objective names → org_users are immediate RESTRICT;
  * so are the keys between this domain's tables. Child rows (items, progress, shares, history, snapshots) cascade with
  * their owner, which is never deleted (only an evidence link is, by its route).
@@ -57,11 +56,11 @@ export const DEVELOPMENT_HISTORY_ACTIONS = Object.freeze([
   'action_created', 'action_status_changed', 'action_completed', 'evidence_linked', 'evidence_unlinked',
   'review_submitted', 'review_shared', 'review_superseded',
 ]);
-/** The Combine vocabulary a target freezes (m16/combineShared.mjs COMBINE_PROTOCOLS). */
+/** The Combine vocabulary a target freezes (domains/development/boxcam/combineShared.mjs COMBINE_PROTOCOLS). */
 export const TARGET_METRIC_TYPES = Object.freeze(['count', 'time', 'distance', 'duration', 'set', 'percentage']);
 export const TARGET_DIRECTIONS = Object.freeze(['higher', 'lower']);
 export const TARGET_PRECISIONS = Object.freeze(['integer', 'tenths', 'hundredths', 'centimetres']);
-/** Text limits. The routes shorten over-long objective, progress and outcome text (as they always did); everything else over a limit is refused. */
+/** Text limits. The routes shorten over-long objective, progress and outcome text; everything else over a limit is refused. */
 export const DEVELOPMENT_LIMITS = Object.freeze({
   id: 80, name: 200, objectiveItems: 2, objectiveText: 200, exerciseRefs: 4, exerciseRef: 200, evidenceIds: 50,
   progressNote: 300, outcomeNote: 500, reviewer: 60, detail: 40, metricUnit: 40, protocolTitle: 120,
@@ -539,7 +538,7 @@ function decodeReviews(sqlite, rows) {
 }
 const decodeDrill = (row) => decode(DRILL_SPEC, row);
 
-// ------------------------------------------------------------------ snapshot (fixtures and the persistence batteries)
+// ------------------------------------------------------------------ whole-domain read (the test suites)
 export const developmentLive = (sqlite) => migrationApplied(sqlite, DEVELOPMENT_MIGRATION);
 function readAll(sqlite) {
   const all = (t) => sqlite.prepare(`SELECT * FROM ${t} ORDER BY rowid`).all();
@@ -554,7 +553,7 @@ function readAll(sqlite) {
   };
 }
 
-/** The whole domain read back as plain records (`readAllRecords` in index.mjs: the test suites' read-back); null before its migration. */
+/** The whole domain read back as plain records (`readAllRecords` in index.mjs: the test suites' read-back). */
 export const DEVELOPMENT_RECORDS = {
   names: DEVELOPMENT_COLLECTIONS,
   read(sqlite) { return developmentLive(sqlite) ? readAll(sqlite) : null; },

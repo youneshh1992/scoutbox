@@ -1,7 +1,7 @@
-// M18 demo mirror (org side) — a SELF-CONTAINED Second Look / Nobody Missed /
+// Demo mirror (org side) — a SELF-CONTAINED Second Look / Nobody Missed /
 // Recruitment Briefs fixture.
 //
-// NOTE — circular-import discipline (the exact bug that crashed the M16.1 bundle):
+// NOTE — circular-import discipline (reading a binding across the cycle crashes the bundle):
 // m18Api imports this module, so this module takes only TYPES from m18Api
 // (`import type`, erased at build time). It never reads a runtime binding from
 // m18Api, and it never calls an imported value at module-load time. Every
@@ -834,7 +834,7 @@ export const demoM18: M18Api = {
   // A room reopens ONLY here, and only because a recruiter clicked. Nothing in
   // this module reopens anything on its own.
   reopenRoom: async (_s, id, reasonCodes) => {
-    void reasonCodes; // recorded on the room by M17 in live mode
+    void reasonCodes; // recorded on the room in live mode
     const item = secondLookStore.find((i) => i.id === id);
     if (!item) throw new Error('SECOND_LOOK_NOT_FOUND');
     if (!(SECOND_LOOK_TRANSITIONS[item.status] ?? []).includes('reopened_room')) throw new Error('SECOND_LOOK_TRANSITION_INVALID');

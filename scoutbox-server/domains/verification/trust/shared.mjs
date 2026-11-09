@@ -1,4 +1,4 @@
-// M16.2 — ScoutBox Trust Score: policy + pure deterministic engine.
+// ScoutBox Trust Score: policy + pure deterministic engine.
 //
 // The Trust Score answers ONE question: how strongly is this player's
 // football record supported by trustworthy, current and attributable
@@ -49,7 +49,7 @@ export const POLICY = {
     { id: 'very_strong_evidence', label: 'Very strong evidence', min: 90, max: 100 },
   ],
 
-  // Identity confidence from the M14.1 structured assurance level (never a
+  // Identity confidence from the structured assurance level (never a
   // legacy boolean). A ScoutBox document review is honestly worth less than
   // an authoritative source.
   identity: {
@@ -81,7 +81,7 @@ export const POLICY = {
   relationships: { curve: [0, 5000, 7500, 9000, 10000] },
 
   // Evidence confidence has TWO sub-sources with their own sub-caps, so
-  // neither can max the category alone (§34).
+  // neither can max the category alone.
   evidence: {
     recordsCurve: [0, 4000, 6000, 7500, 8500, 9200, 10000],
     recordsSubCap: 6000,
@@ -116,7 +116,7 @@ export const POLICY = {
 
 export const TRUST_DISCLAIMER = 'ScoutBox Trust Score reflects verification and evidence confidence — not football ability or recruitment suitability.';
 
-// Machine-readable change reasons (§45). No restricted source IDs.
+// Machine-readable change reasons. No restricted source IDs.
 export const TRUST_CHANGE_REASONS = [
   'IDENTITY_CONFIRMED', 'CURRENT_CLUB_CONFIRMED', 'CAREER_RECORD_CONFIRMED',
   'COACH_RELATIONSHIP_CONFIRMED', 'REFERENCE_CONFIRMED', 'BOX_CAM_EVIDENCE_ADDED',
@@ -148,7 +148,7 @@ const levelFor = (coverageBp, policy = POLICY) => {
   return { id: out.id, label: out.label };
 };
 
-/** Canonical de-duplication (§39). The same underlying fact reaches this
+/** Canonical de-duplication. The same underlying fact reaches this
  *  engine through the Passport, the timeline, club history and Box Cam
  *  projections; we score the canonical SOURCE once, never the projection. */
 export function canonicalTrustSources(items) {
@@ -162,7 +162,7 @@ export function canonicalTrustSources(items) {
   return [...seen.values()];
 }
 
-/** Which components apply to THIS player (§28/§61). A minor is never scored
+/** Which components apply to THIS player. A minor is never scored
  *  against evidence categories that cannot legally or architecturally exist
  *  for them — the weight leaves the DENOMINATOR instead of scoring zero. */
 export function eligibleTrustComponents(playerContext = {}, policy = POLICY) {
@@ -184,7 +184,7 @@ const component = (weight, coverageBp, { reasons = [], strengths = [], gaps = []
 });
 
 // ------------------------------------------------------- component scorers
-/** Identity confidence from the structured M14.1 assurance level. */
+/** Identity confidence from the structured assurance level. */
 export function scoreIdentityConfidence({ assurance = null }, policy = POLICY) {
   const w = policy.weights.identity;
   const bp = policy.identity[assurance ?? 'none'] ?? 0;
@@ -209,7 +209,7 @@ export function scoreIdentityConfidence({ assurance = null }, policy = POLICY) {
 }
 
 /** Football-history confidence: attributable-evidence mass over the
- *  canonical club-history rows. Historical facts never decay (§36/§37). */
+ *  canonical club-history rows. Historical facts never decay. */
 export function scoreFootballHistoryConfidence({ rows = [] }, policy = POLICY) {
   const w = policy.weights.footballHistory;
   const canonical = canonicalTrustSources(rows.map((r) => ({
@@ -422,10 +422,9 @@ export function calculateTrustScore(input, policy = POLICY) {
   };
 }
 
-/** Alias matching the milestone's conceptual name. */
 export const buildTrustProfile = calculateTrustScore;
 
-/** Viewer-safe projection (§54/§74–§76). Restricted source data never leaves
+/** Viewer-safe projection. Restricted source data never leaves
  *  through this projection: no source IDs, no guardian identities, no
  *  assessment content, no T&S reasons, no verification evidence. */
 export function safeTrustProjection(profile, viewer, { publicAllowed = false } = {}) {
@@ -456,7 +455,7 @@ export function safeTrustProjection(profile, viewer, { publicAllowed = false } =
   }
 }
 
-/** Compact batch summary for player lists (§53) — no N+1 passport builds. */
+/** Compact batch summary for player lists — no N+1 passport builds. */
 export function trustSummary(profile) {
   return {
     score: profile.score, band: profile.band, bandLabel: profile.bandLabel,
@@ -465,7 +464,7 @@ export function trustSummary(profile) {
   };
 }
 
-/** Deterministic reason codes for a score change (§45/§68). Never exposes a
+/** Deterministic reason codes for a score change. Never exposes a
  *  restricted source ID — only what kind of evidence changed. */
 export function trustChangeReasons(before, after) {
   const out = [];
@@ -486,7 +485,7 @@ export function trustChangeReasons(before, after) {
   return out;
 }
 
-/** Snapshot DTO for future Recruitment Rooms (§67) — score AT decision time
+/** Snapshot DTO for Recruitment Rooms — score AT decision time
  *  with the policy version and component summary that produced it. */
 export function trustSnapshot(profile, { at = Date.now() } = {}) {
   return {

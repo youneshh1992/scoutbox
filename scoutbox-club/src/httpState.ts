@@ -1,9 +1,5 @@
-// M18.2 — one reading of an HTTP failure for every screen.
-//
-// Before this, each screen mapped a handful of codes it knew about and fell
-// back to the server's message for everything else, so a 429 read one way in
-// Rooms and another in Briefs, a 5xx sometimes showed internal wording, and
-// nothing anywhere honoured Retry-After. This module turns an ApiError into
+// One reading of an HTTP failure for every screen, so a 429 or a 5xx reads
+// the same everywhere and Retry-After is honoured. This module turns an ApiError into
 // the one thing a screen needs: what KIND of failure it is, what to say, and
 // whether "Try again" is a sensible offer.
 //

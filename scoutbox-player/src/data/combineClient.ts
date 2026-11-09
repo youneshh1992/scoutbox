@@ -1,4 +1,4 @@
-// M16.1 — At-Home Combine: standardized, measurable tests recorded live with
+// At-Home Combine: standardized, measurable tests recorded live with
 // Box Cam. This is a MEASUREMENT LAYER over Box Cam, not a second camera: each
 // Combine Attempt binds a server-minted Box Cam session, and the measured
 // value, the Combine state ('combine_verified' | 'partially_measured' | …) and

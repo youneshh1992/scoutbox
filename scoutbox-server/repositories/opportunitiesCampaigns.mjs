@@ -1,22 +1,19 @@
 /**
- * S9d — the opportunity board, applications, assessment campaigns and players' private suitability preferences as
- * typed tables (migration `0022_opportunities_campaigns`; docs/architecture/migration.md §4.3 "The pattern", §4.5 S9;
- * sql/04_scouting_assessment.sql). They used to be the blob collections db.opportunities, db.applications,
- * db.campaigns, db.campaignSubmissions and db.playerPrefs; each of those names now throws, naming this repository.
+ * The opportunity board, applications, assessment campaigns and players' private suitability preferences.
  *
- * WRITES are explicit and typed whole; a record the columns cannot hold is refused with its id (the routes check
- * first and answer 400). Each joins the open unit of work, the caller's transaction, or a transaction of its own.
+ * Writes are typed whole; a record the columns cannot hold is refused with its id (the routes check first and answer
+ * 400). Each joins the open unit of work, the caller's transaction, or a transaction of its own.
  *   opportunities.create / update(id, fn)   — fn edits a plain copy (close; the structured requirements)
  *   applications.create / update(id, fn)    — withdraw, outcome, the reminder marker, the approved suitability summary
  *   campaigns.create
  *   submissions.create / update(id, fn)     — one submission per campaign and player; its attempts are child rows
  *   preferences.save(record)                — one row per player, written only when the player or guardian saves
  *
- * READS are SQL and return fresh deep-frozen records; there is no mirror. Modules receive them through
- * `scoutingReads` (opportunities, applications, campaigns, campaignSubmissions, playerPrefs).
+ * Reads return deep-frozen records. Modules receive them through `scoutingReads` (opportunities, applications,
+ * campaigns, campaignSubmissions, playerPrefs).
  *
- * References. Player ids have NO foreign key (tolerant, like recruitment and S9a–c: an application outlives the
- * account, as it always has). org_id → orgs and the staff ids → org_users are RESTRICT. An application's opportunity and
+ * References. Player ids have NO foreign key (tolerant, like recruitment and the rest of scouting: an application
+ * outlives the account). org_id → orgs and the staff ids → org_users are RESTRICT. An application's opportunity and
  * a submission's campaign are RESTRICT keys inside the domain; owned children cascade with their owner.
  *
  * Preferences are PRIVATE to the player (the guardian for a minor). No organisation-facing read exists here: the only
@@ -56,7 +53,7 @@ const ISSUE_CODE = new Map(Object.entries(FILE_CHECK_ISSUES).map(([code, text]) 
 export const SLOT_DAYS = Object.freeze(['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']);
 export const TRANSPORTS = Object.freeze(['own', 'public', 'lift_needed']);
 export const RELOCATIONS = Object.freeze(['yes', 'no', 'discuss']);
-/** Limits: text over these is shortened by the routes (as it always was); lists over them are refused. */
+/** Limits: text over these is shortened by the routes; lists over them are refused. */
 export const OPPORTUNITIES_CAMPAIGNS_LIMITS = Object.freeze({
   title: 120, team: 60, ageGroup: 20, role: 60, description: 500, schedule: 200, requirement: 120, requirements: 6,
   trainingSlots: 10, tag: 40, tags: 8, accommodation: 80, accommodations: 8, note: 300, outcomeNote: 300,
@@ -689,7 +686,7 @@ function readAll(sqlite) {
   };
 }
 
-/** The whole domain read back as plain records (`readAllRecords` in index.mjs: the test suites' read-back); null before its migration. */
+/** The whole domain read back as plain records (`readAllRecords` in index.mjs: the test suites' read-back). */
 export const OPPORTUNITIES_CAMPAIGNS_RECORDS = {
   names: OPPORTUNITIES_CAMPAIGNS_COLLECTIONS,
   read(sqlite) { return opportunitiesCampaignsLive(sqlite) ? readAll(sqlite) : null; },

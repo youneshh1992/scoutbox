@@ -1,5 +1,5 @@
 import { GuidanceNote } from './InformationRows';
-// M21 — Development Hub, player and guardian surface.
+// Development Hub, player and guardian surface.
 //
 // Six sections: Overview, Goals, Actions, Evidence, Reviews, History. Every
 // figure on the screen arrives derived from the server; nothing here computes
@@ -34,7 +34,7 @@ const inputStyle = (colors: Palette) => ({
   paddingHorizontal: 10, paddingVertical: 8, fontSize: 13, borderWidth: 1, borderColor: colors.line,
 } as const);
 
-/** State is never colour alone: every pill carries its word (§115). */
+/** State is never colour alone: every pill carries its word. */
 const GOAL_TONE: Record<string, 'green' | 'blue' | 'gold' | 'red' | 'default'> = {
   achieved: 'green', in_progress: 'blue', blocked: 'gold', stopped: 'default', not_started: 'default',
 };
@@ -321,7 +321,7 @@ export function DevelopmentHubSection({ actor }: { actor: DevActor }) {
   const [view, reloadPlan, err] = useLoad<DevelopmentPlanView | null>(
     async () => (planId ? m21.plan(actor, planId) : null), [actor.id, planId],
   );
-  // M24F.4 — the root is four rows; each opens its own page-local detail.
+  // The root is four rows; each opens its own page-local detail.
   const [page, setPage] = useState<'goals' | 'feedback' | 'progress' | 'history' | null>(null);
   const [reflection, setReflection] = useState('');
   const [newGoal, setNewGoal] = useState('');
@@ -534,7 +534,7 @@ export function DevelopmentHubSection({ actor }: { actor: DevActor }) {
       <ListRow label={pt('devProgress')} value={pt(s.activeGoals === 1 ? 'devActiveGoal' : 'devActiveGoals').replace('{n}', String(s.activeGoals))} onPress={() => setPage('progress')} testID="dev-progress" />
       <ListRow label={pt('devHistory')} value={pt('devEntries').replace('{n}', String(view.timeline.length))} onPress={() => setPage('history')} testID="dev-history" />
       <View style={{ marginTop: 10 }}>
-        {/* M24F.5 — one way in to every explanation: the plan's limits and what its counts are. */}
+        {/* One way in to every explanation: the plan's limits and what its counts are. */}
         <Disclosure label="About this plan" testID="dev-about"><GuidanceNote title="Limits" icon="info" size={12}>{view.limitation}</GuidanceNote><GuidanceNote title="Not included" icon="eye-off" size={12}>{view.neverBuilt.note}</GuidanceNote><GuidanceNote size={12}>{s.note}</GuidanceNote>{cat ? <GuidanceNote title="Reminders" icon="bell" size={12}>{cat.reminders.note}</GuidanceNote> : null}</Disclosure>
       </View>
     </View>

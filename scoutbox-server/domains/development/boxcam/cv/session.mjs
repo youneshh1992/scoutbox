@@ -1,4 +1,4 @@
-// M22 — observation session runtime: creation, reset, isolation, cleanup.
+// Observation session runtime: creation, reset, isolation, cleanup.
 //
 // The rule this file exists to enforce:
 //
@@ -12,13 +12,13 @@
 //      object", and it is not enough: a runtime that pools or recycles
 //      tracker instances silently defeats it. So the reset contract is
 //      explicit, single-entry, and tested by comparing a RESET instance
-//      against a FRESH one field by field (§3, §5).
+//      against a FRESH one field by field.
 //
 //   2. RESOURCE LEAK. A session that is cancelled, expires or whose client
 //      vanishes must release everything it holds, and releasing twice must
-//      be harmless (§11–§14).
+//      be harmless.
 //
-// Runtime state is keyed by session id ONLY (§7). Never by player, protocol
+// Runtime state is keyed by session id ONLY. Never by player, protocol
 // or organisation — one player may legitimately have two sessions open, and
 // keying by anything coarser silently merges them.
 
@@ -32,7 +32,7 @@ import { CV_ENGINE_VERSION, BOX_CAM_CV_POLICY_VERSION } from './policy.mjs';
  * compares a reset instance against a fresh one using these keys.
  *
  * Adding a mutable field to ObservationRun without adding it here makes
- * `assertResetStateEqualsFreshState()` fail — which is the point (§5).
+ * `assertResetStateEqualsFreshState()` fail — which is the point.
  */
 export const MUTABLE_RUN_KEYS = Object.freeze([
   'detections', 'prev', 'seenHashes', 'duplicates', 'framesSeen',
@@ -43,7 +43,7 @@ export const MUTABLE_RUN_KEYS = Object.freeze([
 export const PERSISTENT_RUN_KEYS = Object.freeze(['eventKind']);
 
 /**
- * THE reset contract (§4). One function, not scattered assignments.
+ * THE reset contract. One function, not scattered assignments.
  *
  * Restores every mutable field to its canonical initial value while leaving
  * configuration alone, so a recycled instance is indistinguishable from a
@@ -110,7 +110,7 @@ class SessionRuntime {
   }
 
   /**
-   * Release everything. Idempotent by construction (§14): a second call
+   * Release everything. Idempotent by construction: a second call
    * finds the fields already empty and changes nothing, and must not throw,
    * double-resolve or corrupt a counter.
    */
@@ -140,8 +140,8 @@ class SessionRuntime {
 /**
  * The registry.
  *
- * `pool` exists so the reuse hazard can be TESTED rather than assumed away
- * (§3). When pooling is enabled, finished runs are recycled through
+ * `pool` exists so the reuse hazard can be TESTED rather than assumed away.
+ * When pooling is enabled, finished runs are recycled through
  * `resetRun()` instead of discarded — which is exactly the arrangement that
  * would leak state if the reset contract were incomplete.
  */
@@ -155,7 +155,7 @@ export class ObservationSessions {
     this.stats = { created: 0, finalized: 0, cancelled: 0, expired: 0, disconnected: 0, pooledReuses: 0 };
   }
 
-  /** §7/§8 — keyed by session id only. */
+  /** Keyed by session id only. */
   create({ sessionId, eventKind, nowMs = Date.now() }) {
     if (this.sessions.has(sessionId)) {
       throw new Error(`session ${sessionId} already exists`);
@@ -181,7 +181,7 @@ export class ObservationSessions {
   }
 
   /**
-   * §9 — an id that is not currently live is simply not found. There is no
+   * An id that is not currently live is simply not found. There is no
    * path that resurrects a disposed runtime, and none that attaches a frame
    * to a session other than the one named.
    */
@@ -214,7 +214,7 @@ export class ObservationSessions {
   expire(sessionId) { return this.#end(sessionId, 'expired'); }
   disconnect(sessionId) { return this.#end(sessionId, 'disconnected'); }
 
-  /** §12 — sweep whatever has outlived its TTL. No stale object lingers. */
+  /** Sweep whatever has outlived its TTL. No stale object lingers. */
   sweep(nowMs = Date.now()) {
     let swept = 0;
     for (const [id, rt] of this.sessions) {
@@ -229,10 +229,10 @@ export class ObservationSessions {
   #end(sessionId, state) {
     const rt = this.sessions.get(sessionId);
     if (!rt) return { ok: false, error: 'SESSION_NOT_FOUND' };
-    // §14: ending twice is harmless and reports that nothing more was done.
+    // Ending twice is harmless and reports that nothing more was done.
     if (rt.disposed) return { ok: true, alreadyClean: true };
     rt.state = state;
-    // A cancelled, expired or disconnected attempt mints NO result (§47).
+    // A cancelled, expired or disconnected attempt mints NO result.
     rt.result = null;
     this.stats[state] += 1;
     this.#release(rt);

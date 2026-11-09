@@ -1,5 +1,5 @@
 import { GuidanceNote } from './InformationRows';
-// M16 — Box Training, the player/guardian Box Cam surface.
+// Box Training, the player/guardian Box Cam surface.
 //   Train. Record. Prove. — Don't just say you trained. Box it.
 //
 // The live capture runner drives the server's session lifecycle (create →
@@ -237,8 +237,7 @@ function SessionDetail({ s, onBack }: { s: BoxSession; onBack: () => void }) {
 
 export function BoxTrainingSection({ actor, isMinor, childName }: { actor: BoxActor; isMinor?: boolean; childName?: string }) {
   const colors = useColors();
-  // M22 §55 — the live server-side CV path, alongside the existing M16
-  // aggregate-event path. Only players run it: the provider session binds to
+  // The live server-side CV path, alongside the aggregate-event path. Only players run it: the provider session binds to
   // the nonce of a session the ACTOR owns, and a guardian's session is not
   // theirs to stream frames from.
   const key = actor.kind === 'guardian' ? actor.childId : actor.id;
@@ -261,7 +260,7 @@ export function BoxTrainingSection({ actor, isMinor, childName }: { actor: BoxAc
    * Open a live CV attempt: mint a Box Cam session bound to production_cv,
    * pass the server's liveness challenge, then hand the session and its nonce
    * to the CV surface. The nonce never leaves this flow and is never minted
-   * here — the server owns it (§14).
+   * here — the server owns it.
    */
   async function startCv() {
     if (actor.kind !== 'player') return;
@@ -290,7 +289,7 @@ export function BoxTrainingSection({ actor, isMinor, childName }: { actor: BoxAc
     setCapture({ drill, target, assignmentId, challengeEntryId });
   };
 
-  // M24F.4 — the root is session-led: the latest session as the hero, one
+  // The root is session-led: the latest session as the hero, one
   // row naming it with its day, the one primary action, the recent sessions
   // as rows (title · day · state word), and two rows that open everything
   // else — how Box Cam works (setup, drill, checks) and the training record

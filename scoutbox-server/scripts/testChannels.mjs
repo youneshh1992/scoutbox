@@ -1,5 +1,4 @@
-// Message threads as typed tables with explicit writes (repositories/channels.mjs, migration 0012; explicit since
-// S14c): the schema (the request, organisation and staff-sender keys, the sender typed by kind, the length CHECKs,
+// Message threads as typed tables with explicit writes (repositories/channels.mjs, migration 0012): the schema (the request, organisation and staff-sender keys, the sender typed by kind, the length CHECKs,
 // the retry id unique per thread and sender, the cascades); the repository's writes (open, appendMessage, markRead,
 // deleteForPlayer: typed input, unknown fields and wrong types refused by field and id, references checked) and its
 // SQL reads (fresh frozen records, the organisation's and the admin pages most recently active first, the filters,

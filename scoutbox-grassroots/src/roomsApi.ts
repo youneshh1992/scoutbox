@@ -1,4 +1,4 @@
-// M17 typed client (org side): the Recruitment Room.
+// Typed client (org side): the Recruitment Room.
 //
 // What a Room IS: the CLUB's private decision layer over one player — what we
 // think, what we have reviewed, what we are waiting on, and what we decided.
@@ -273,7 +273,7 @@ export interface Room {
   roomId: string;
   orgId: string;
   playerId: string;
-  /** Mutation revision — the optimistic-concurrency token (M18.1). */
+  /** Mutation revision — the optimistic-concurrency token. */
   rev?: number;
   revAt?: number | null;
   revBy?: string | null;
@@ -335,7 +335,7 @@ export type CreateRoomResult =
   | { ok: false; error: 'ROOM_EXISTS'; existingRoomId: string; status: string };
 
 export interface PatchRoomInput {
-  /** The room `rev` this edit was composed against (M18.1). */
+  /** The room `rev` this edit was composed against. */
   expectedRev?: number;
   priority?: string;
   tags?: string[];
@@ -346,7 +346,7 @@ export interface PatchRoomInput {
 }
 
 
-// ------------------------------------------------------- M23 P3 — Contact
+// ------------------------------------------------------- Contact
 // A Contact is the club's INTERNAL record of one communication process. A
 // draft never leaves the organisation; only a sent message or a recorded
 // external contact is a contact, and only that moves the case to Contacted.
@@ -366,7 +366,7 @@ export interface ContactRecord {
   id: string;
   caseId: string;
   playerId: string;
-  /** M23 P5.6E — what the club asked for, and what was actually routed. */
+  /** What the club asked for, and what was actually routed. */
   contactMode?: 'player_only' | 'both';
   routedToAgent?: boolean;
   routedAt?: number | null;
@@ -405,7 +405,7 @@ export interface ContactRecord {
   policyVersion: number;
 }
 
-/** M23 P5.6E §38 — the club's readiness view for the transaction handoff. */
+/** The club's readiness view for the transaction handoff. */
 export interface HandoffView {
   id: string;
   status: 'invited' | 'accepted' | 'withdrawn' | 'expired' | string;
@@ -436,7 +436,7 @@ export interface ContactRouting {
   minor: boolean | null;
   reason?: string;
   /**
-   * M23 P5.6E §21. `mode` is what the SERVER decided, not what this screen
+   * `mode` is what the SERVER decided, not what this screen
    * asked for; `agentParty` says whether the client's own agent is a party;
    * `agentRefusal` names the rule that refused when the club asked and the
    * answer was no. A code, never a person and never a reason in prose.
@@ -462,7 +462,7 @@ export interface ContactList {
 
 export type ContactCaseMove = { from: string; to: string } | { unchanged: true; status: string };
 
-// ------------------------------------------------------ M23 P4B — Trial
+// ------------------------------------------------------ Trial
 // The Trial is the club's OPERATIONAL record of one trial: invitation (a
 // request row), acceptance, a confirmed schedule of sessions, per-session
 // attendance, explicit completion, Box Cam evidence by reference and the
@@ -531,8 +531,8 @@ export interface TrialDetail { trial: TrialClubView; evidence: TrialEvidenceView
 export interface TrialSessionInput { id?: string; kind?: string; startsAt: number; endsAt: number; venue: { name: string; town?: string | null; address?: string | null }; instructions?: string | null }
 export type TrialCaseMove = { from: string; to: string } | { unchanged: true; status: string; reason?: string | null };
 
-// ---- M23 P5 — the formal recruitment decision. The same append-only decision
-// memory M17 owns, with an outcome; a draft that is visibly not a decision.
+// ---- the formal recruitment decision. The same append-only decision
+// memory the Room owns, with an outcome; a draft that is visibly not a decision.
 export type DecisionOutcome = 'progress' | 'hold' | 'reject';
 export type DecisionEvidenceRefKind = 'assessment' | 'trial' | 'box_cam_session' | 'passport_evidence';
 export interface DecisionEvidenceRef { kind: DecisionEvidenceRefKind; id: string; meta?: Record<string, unknown> | null }
@@ -610,7 +610,7 @@ export interface DecisionFinalizeInput { expectedRev: number; clientKey?: string
 export interface DecisionFinalizeResult { decision: FormalDecision; lifecycle: DecisionLifecycleEffect | null; case?: { from: string; to: string } | { unchanged: true; status: string }; rev?: number; idempotent?: boolean }
 
 
-// ---- M23 P6 — the canonical Offer. A club's proposal, issued as an exact,
+// ---- the canonical Offer. A club's proposal, issued as an exact,
 // immutable revision; the recipient's own acceptance or decline; never a
 // signing. The club view carries the internal note; nothing here carries the
 // decision's rationale or an assessment.
@@ -644,7 +644,7 @@ export interface OfferDraftInput { terms?: Partial<OfferTerms>; recipientMessage
 export interface OfferHistoryItem { id: string; at: number; action: string; by: OfferActor | null; revisionId: string | null }
 export type OfferCaseMove = { from: string; to: string } | { unchanged: true; status: string };
 
-// ---- M23 P7 — Signing & Contract Completion. The workflow record over an
+// ---- Signing & Contract Completion. The workflow record over an
 // ACCEPTED Offer revision: immutable signing revisions (document digest,
 // required parties, contract days), party completion evidence, one completion.
 export type SigningStatus = 'DRAFT' | 'READY' | 'IN_PROGRESS' | 'COMPLETED' | 'CANCELLED' | 'VOIDED' | 'EXPIRED' | 'SUPERSEDED';
@@ -673,7 +673,7 @@ export interface SigningHistoryItem { id: string; at: number; action: string; by
 export interface SigningDocumentFile { document: SigningDocumentView; file: { mime: string; base64: string } | null }
 export interface SigningActInput { expectedRev: number; clientKey?: string; reason?: string }
 
-// ---------------------------------------------------------------- M23 P8 journey
+// ---------------------------------------------------------------- journey
 // The server-derived journey block (domains/recruitment/lifecycle/journeyModel.mjs). The client renders
 // it and never computes a stage or a next action.
 export type JourneyStage = 'watching' | 'review' | 'contact' | 'trial' | 'assessment' | 'decision' | 'offer' | 'acceptance' | 'signing' | 'signed' | 'paused' | 'ended';
@@ -685,10 +685,10 @@ export interface JourneyHistoryEntry { kind: string; at: number; by: string | nu
 export interface RoomJourney { ok: true; journey: JourneyBlock | null; lifecycle?: { currentStage: string; allowedNext: string[]; terminal: boolean; reopenable: boolean }; nextActions?: string[]; history: { entries: JourneyHistoryEntry[]; total: number }; generatedAt: number }
 
 export interface RoomsApi {
-  // M23 P8 — the journey projection and the semantic lifecycle action.
+  // The journey projection and the semantic lifecycle action.
   journey(s: Session, roomId: string): Promise<RoomJourney>;
   lifecycle(s: Session, roomId: string, input: { action: string; reasonCodes?: string[]; expectedRev?: number; clientKey?: string }): Promise<{ ok?: boolean; from?: string; to?: string; rev?: number; idempotent?: boolean }>;
-  // M23 P7 — the signing workflow. Page-local to the Room's Signing tab.
+  // The signing workflow. Page-local to the Room's Signing tab.
   signing(s: Session, roomId: string): Promise<SigningSurface>;
   startSigning(s: Session, offerId: string, input: { clientKey?: string; contract?: { startDate?: string | null; endDate?: string | null }; internalNote?: string | null; expiresAt?: string | number | null }): Promise<{ signing: SigningClubView; idempotent?: boolean }>;
   signingPackage(s: Session, signingId: string): Promise<{ signing: SigningClubView; integrity: string[] }>;
@@ -722,18 +722,18 @@ export interface RoomsApi {
   snapshots(s: Session, roomId: string): Promise<{ items: RoomSnapshot[] }>;
   reviewEvidence(s: Session, roomId: string, evidenceId: string, input: { state: string; note?: string | null }): Promise<{ review: { evidenceId: string; state: string; note: string | null; by: string | null; at: number }; note: string }>;
   assignAssessment(s: Session, roomId: string, input: { userId: string; kind?: string; dueAt?: string | null }): Promise<{ assignment: { id: string; userId: string; name: string; task: string; dueAt: string | null; status: string; createdAt: number } }>;
-  /** Bridges to the M13 engine. There is deliberately NO free-text field. */
+  /** Bridges to the evidence-gap engine. There is deliberately NO free-text field. */
   requestEvidence(s: Session, roomId: string, suggestionId: string): Promise<{ suggestion: RoomMissingEvidence; routedTo: string; note: string }>;
   requestCombine(s: Session, roomId: string, input: { protocolIds: string[]; title?: string | null; deadline?: string | null; instructions?: string | null }): Promise<{ request: RoomCombineRequest }>;
   link(s: Session, roomId: string, input: { trialId?: string; signingId?: string; requestId?: string }): Promise<{ links: Room['links'] }>;
-  // M23 P3 — Contact. Page-local to the Room; there is no top-level surface.
+  // Contact. Page-local to the Room; there is no top-level surface.
   contacts(s: Session, roomId: string): Promise<ContactList>;
   createContact(s: Session, roomId: string, input: { subject?: string | null; body: string; contactMode?: 'player_only' | 'both'; clientKey?: string }): Promise<{ contact: ContactRecord; routing: ContactRouting }>;
   patchContact(s: Session, roomId: string, contactId: string, input: { subject?: string | null; body?: string; contactMode?: 'player_only' | 'both'; expectedRev: number }): Promise<{ contact: ContactRecord; routing: ContactRouting }>;
   sendContact(s: Session, roomId: string, contactId: string, input: { expectedRev: number; clientKey?: string }): Promise<{ contact: ContactRecord; delivered: boolean; routing?: ContactRouting; case?: ContactCaseMove; idempotent?: boolean }>;
   cancelContact(s: Session, roomId: string, contactId: string, input: { expectedRev: number }): Promise<{ contact: ContactRecord }>;
   recordExternalContact(s: Session, roomId: string, input: { channel: string; occurredAt: number | string; summary?: string | null; recipientType: 'player' | 'guardian'; clientKey?: string }): Promise<{ contact: ContactRecord; case?: ContactCaseMove; idempotent?: boolean }>;
-  // M23 P4B — Trial. Page-local to the Room, plus the existing Trials & Reports list.
+  // Trial. Page-local to the Room, plus the existing Trials & Reports list.
   trials(s: Session, roomId: string): Promise<TrialList>;
   trial(s: Session, roomId: string, trialId: string): Promise<TrialDetail>;
   inviteTrial(s: Session, roomId: string, input: { timezone: string; venue: { name: string; town?: string | null; address?: string | null }; message: string; instructions?: string | null; slots: { startsAt: number; endsAt: number; kind?: string }[]; clientKey?: string }): Promise<{ invitation: TrialInvitationView; routing: ContactRouting; case: TrialCaseMove; idempotent?: boolean }>;
@@ -744,9 +744,9 @@ export interface RoomsApi {
   trialEvidenceCandidates(s: Session, roomId: string, trialId: string): Promise<{ items: TrialEvidenceCandidate[]; consent: boolean; reason: string | null }>;
   linkTrialEvidence(s: Session, roomId: string, trialId: string, sessionId: string, input: { boxSessionId: string; expectedRev: number; clientKey?: string }): Promise<{ trial: TrialClubView; evidence: TrialEvidenceView[]; idempotent?: boolean }>;
   unlinkTrialEvidence(s: Session, roomId: string, trialId: string, evidenceId: string, input: { expectedRev: number }): Promise<{ trial: TrialClubView; evidence: TrialEvidenceView[]; idempotent?: boolean }>;
-  // M23 P5 — formal decision.
+  // Formal decision.
   decision(s: Session, roomId: string): Promise<DecisionSurface>;
-  // ---- M23 P5.6E: the P5 decision → transaction handoff (§32–§38).
+  // ---- the formal decision → transaction handoff.
   handoff(s: Session, roomId: string): Promise<HandoffSurface>;
   inviteHandoff(s: Session, roomId: string, input: { clientKey?: string }): Promise<{ handoff: HandoffView; idempotent?: boolean; note?: string }>;
   withdrawHandoff(s: Session, roomId: string): Promise<{ handoff: HandoffView; idempotent?: boolean }>;
@@ -754,7 +754,7 @@ export interface RoomsApi {
   updateDecisionDraft(s: Session, roomId: string, input: DecisionDraftInput & { expectedRev: number }): Promise<{ draft: DecisionDraft }>;
   discardDecisionDraft(s: Session, roomId: string, expectedRev: number): Promise<{ draft: null; discarded: { id: string } }>;
   finalizeDecision(s: Session, roomId: string, input: DecisionFinalizeInput): Promise<DecisionFinalizeResult>;
-  // M23 P6 — the canonical Offer. Page-local to the Room's Offer tab.
+  // The canonical Offer. Page-local to the Room's Offer tab.
   offers(s: Session, roomId: string): Promise<OfferSurface>;
   createOffer(s: Session, roomId: string, input: OfferDraftInput): Promise<{ offer: OfferClubView; idempotent?: boolean }>;
   offer(s: Session, offerId: string): Promise<{ offer: OfferClubView }>;
@@ -797,10 +797,10 @@ export const httpRooms: RoomsApi = {
     return { ok: true, room: body.room as Room, adoptedExistingCase: !!body.adoptedExistingCase };
   },
   get: async (s, roomId) => (await req<{ room: Room }>(`/org/rooms/${roomId}`, { headers: H(s) })).room,
-  // M23 P8
+  // journey
   journey: (s, roomId) => req(`/org/rooms/${roomId}/journey?limit=200`, { headers: H(s) }),
   lifecycle: (s, roomId, input) => req(`/org/rooms/${roomId}/lifecycle`, { method: 'POST', headers: H(s), body: JSON.stringify(input) }),
-  // M23 P7 — the signing workflow.
+  // The signing workflow.
   signing: (s, roomId) => req(`/org/rooms/${roomId}/signing`, { headers: H(s) }),
   startSigning: (s, offerId, input) => req(`/org/offers/${offerId}/signing`, { method: 'POST', headers: H(s), body: JSON.stringify(input) }),
   signingPackage: (s, id) => req(`/org/signings/${id}`, { headers: H(s) }),
@@ -836,7 +836,7 @@ export const httpRooms: RoomsApi = {
   createContact: (s, roomId, input) => req(`/org/rooms/${roomId}/contacts`, { method: 'POST', headers: H(s), body: JSON.stringify(input) }),
   patchContact: (s, roomId, contactId, input) => req(`/org/rooms/${roomId}/contacts/${contactId}`, { method: 'PATCH', headers: H(s), body: JSON.stringify(input) }),
   sendContact: (s, roomId, contactId, input) => req(`/org/rooms/${roomId}/contacts/${contactId}/send`, { method: 'POST', headers: H(s), body: JSON.stringify(input) }),
-  // ---- M23 P5.6E
+  // ---- transaction handoff
   handoff: (s, roomId) => req(`/org/rooms/${roomId}/transaction-handoff`, { headers: H(s) }),
   inviteHandoff: (s, roomId, input) => req(`/org/rooms/${roomId}/transaction-handoff`, { method: 'POST', headers: H(s), body: JSON.stringify(input) }),
   withdrawHandoff: (s, roomId) => req(`/org/rooms/${roomId}/transaction-handoff/withdraw`, { method: 'POST', headers: H(s), body: '{}' }),
@@ -857,7 +857,7 @@ export const httpRooms: RoomsApi = {
   updateDecisionDraft: (s, roomId, input) => req(`/org/rooms/${roomId}/decision/draft`, { method: 'PATCH', headers: H(s), body: JSON.stringify(input) }),
   discardDecisionDraft: (s, roomId, expectedRev) => req(`/org/rooms/${roomId}/decision/draft`, { method: 'DELETE', headers: H(s), body: JSON.stringify({ expectedRev }) }),
   finalizeDecision: (s, roomId, input) => req(`/org/rooms/${roomId}/decision/finalize`, { method: 'POST', headers: H(s), body: JSON.stringify(input) }),
-  // ---- M23 P6
+  // ---- Offers
   offers: (s, roomId) => req(`/org/rooms/${roomId}/offers`, { headers: H(s) }),
   createOffer: (s, roomId, input) => req(`/org/rooms/${roomId}/offers`, { method: 'POST', headers: H(s), body: JSON.stringify(input) }),
   offer: (s, offerId) => req(`/org/offers/${offerId}`, { headers: H(s) }),

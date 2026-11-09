@@ -1,5 +1,5 @@
 import { RecordFacts, DetailItems, sentenceCase } from './RecordDetails';
-// M18 org screens — Second Look, Nobody Missed, Recruitment Briefs.
+// Org screens — Second Look, Nobody Missed, Recruitment Briefs.
 //
 // Three rules this file keeps visible at all times:
 //
@@ -156,10 +156,9 @@ const SL_TABS: [SlTab, string][] = [
 const isEvidenceChanged = (i: SecondLookItem) => i.kind === 'evidence_removed';
 
 /**
- * A failed load has to offer a way out. Every one of these panels used to
- * render the message and stop: the only recovery from a dropped connection was
- * to navigate away and come back, which is not something a user has any reason
- * to guess. `role="alert"` also gets the failure announced, which a plain
+ * A failed load has to offer a way out: a panel that renders the message and
+ * stops leaves navigating away and back as the only recovery from a dropped
+ * connection, which is not something a user has any reason to guess. `role="alert"` also gets the failure announced, which a plain
  * <div> appearing mid-page does not.
  */
 function LoadError({ message, onRetry }: { message: string; onRetry?: () => void }) {
@@ -212,7 +211,7 @@ export function SecondLookScreen({ session, tick, notify, openPlayer }: M18Scree
 
   return (
     <div>
-      {/* M24F.5 — the governing sentence once, as a quiet statement (it is not an error); the intro and the closing repeat are gone. */}
+      {/* The governing sentence once, as a quiet statement (it is not an error), with no intro or closing repeat. */}
       <div className="notice" style={{ marginBottom: 12, fontSize: 12.5 }} data-sl-disclaimer="true">
         {data?.disclaimer ?? t('m18.sl.disclaimer')}
       </div>
@@ -517,7 +516,7 @@ function ReviewChangesView({ session, item, onBack }: { session: Session; item: 
 
 // ========================================================== NOBODY MISSED
 //
-// M24F.4 — a coverage tool, not a report. The root is the three counts, a
+// A coverage tool, not a report. The root is the three counts, a
 // ring drawn from the same canonical numbers, and compact player rows
 // grouped by their state. Every reason, the evidence confidence, the last
 // evidence and the actions open behind the row. The one sentence that must
@@ -551,7 +550,7 @@ export function NobodyMissedScreen({
     if (!briefId) return;
     let live = true;
     setErr(null);
-    // The candidates page by cursor (S14j): this reads the first page; a "load more" (nextCursor) is needed.
+    // The candidates page by cursor: this reads the first page; a "load more" (nextCursor) is needed.
     m18.nobodyMissed(session, { briefId, sort })
       .then((d) => { if (live) setData(d); })
       .catch((e) => { if (live) { setErr(errMessage(e)); setData(null); } });
@@ -621,7 +620,7 @@ export function NobodyMissedScreen({
           )}
 
           <div className="section" aria-label={t('m18.nm.listLabel')}>
-            {/* M24F.5 — the groups below name themselves with their counts; no second heading above them. */}
+            {/* The groups below name themselves with their counts; no second heading above them. */}
             {!data.live && <div className="notice block">{data.note}</div>}
             {data.live && data.items.length === 0 && <div className="dim">{t('m18.nm.empty')}</div>}
             {groups.map((g) => (
@@ -1010,9 +1009,9 @@ function BriefDetail({ session, tick, notify, briefId, onCloseBrief }: BriefsScr
             if (out.ok) { notify(t('m18.br.saved')); setEditing(false); setBump((b) => b + 1); }
             return out;
           }}
-          // M18.2 — closing the editor re-reads the brief. "Reload latest" on a
-          // conflict goes through here, and a detail view that kept showing the
-          // pre-conflict title after "Reload latest" was found by m182Live J1.
+          // Closing the editor re-reads the brief. "Reload latest" on a
+          // conflict goes through here, so the detail view never keeps showing
+          // the pre-conflict title after "Reload latest".
           onCancel={() => { setEditing(false); setBump((b) => b + 1); }}
         />
       )}
@@ -1044,7 +1043,7 @@ function BriefForm({
   const [busy, setBusy] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<{ field: string; error: string }[]>([]);
   const [message, setMessage] = useState<string | null>(null);
-  // M18.2 — a conflict keeps the draft. `savedRef` is the last state the
+  // A conflict keeps the draft. `savedRef` is the last state the
   // server accepted (or the initial one), so "dirty" is a real comparison and
   // a successful save clears it without a second flag to forget.
   const [conflict, setConflict] = useState<Conflict | null>(null);

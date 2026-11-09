@@ -1,4 +1,4 @@
-// M16.1 typed client (org side): the At-Home Combine panel. A verified,
+// Typed client (org side): the At-Home Combine panel. A verified,
 // non-agency org requests standardized Combine tests from players it can
 // already see (no new access is granted), and reads their Combine Verified
 // RESULTS — never raw home footage, DOB, notes or integrity internals. The
@@ -41,7 +41,7 @@ export interface CompareMatrix {
 export interface CombineApi {
   standardProtocols(): StandardProtocol[];
   createRequest(s: Session, input: { title?: string; protocolIds: string[]; playerId?: string; playerIds?: string[]; deadline?: string; instructions?: string }): Promise<{ requests: CombineRequestRow[]; skipped: { playerId: string; reason: string }[] }>;
-  /** The first page, newest first (S12b: the list pages by cursor). A "load more" that follows `nextCursor` is still needed. */
+  /** The first page, newest first (the list pages by cursor). A "load more" that follows `nextCursor` is still needed. */
   requests(s: Session, playerId?: string): Promise<CombineRequestRow[]>;
   cancelRequest(s: Session, id: string): Promise<{ request: CombineRequestRow }>;
   player(s: Session, playerId: string): Promise<PlayerCombine>;

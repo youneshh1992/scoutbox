@@ -124,7 +124,7 @@ export class ClientError extends Error {
 }
 
 /**
- * PRE-M24 (PM-5): the server's answer when a session no longer exists
+ * The server's answer when a session no longer exists
  * (expired, revoked, the account removed). The app ends the stored identity on
  * it instead of treating it as a transient failure and staying "signed in"
  * with every request refused.
@@ -240,7 +240,7 @@ export interface GuardianDigest {
   note: string;
 }
 
-/** M23 P8 — the current, authorized resource a notification points to, resolved by the server at read time. */
+/** The current, authorized resource a notification points to, resolved by the server at read time. */
 export type NotificationTarget =
   | { kind: 'inbox'; requestId: string }
   | { kind: 'trial'; trialId: string }
@@ -285,13 +285,13 @@ export interface PlayerClient {
   /** Real sessions: login mints a bearer token the client holds internally.
    *  Passwordless demo seeds log in without one; new accounts require theirs. */
   login(playerId: string, password?: string): Promise<{ playerId: string; name: string }>;
-  /** PRE-M24 (PM-4): revoke this account's session on the server and forget its token here. Optional: the demo client holds none. */
+  /** Revoke this account's session on the server and forget its token here. Optional: the demo client holds none. */
   logout?(accountId: string): Promise<void>;
   /** Child device pairing: exchange the guardian's code for the child login. */
   pair(code: string): Promise<{ playerId: string; name: string }>;
   getMe(playerId: string): Promise<Me>;
   getInbox(playerId: string): Promise<(InboxRequest | ChildInboxItem)[]>;
-  /** M23 P3: `message` is an optional short reply carried with the answer to a contact request. */
+  /** `message` is an optional short reply carried with the answer to a contact request. */
   respond(playerId: string, requestId: string, accept: boolean, chosenSlot?: string, message?: string): Promise<void>;
   setAcademyPlus(playerId: string, enabled: boolean): Promise<void>;
   /** dataUrl carries the actual video file when provided (web picker);

@@ -1,4 +1,4 @@
-// F12 — Enterprise onboarding, recovery, and service reliability.
+// Enterprise onboarding, recovery, and service reliability.
 // Honesty contract for this module:
 //  * SSO ships with a LOCAL TEST identity provider (in-process, HMAC-signed
 //    tokens, enabled only where dev logins are). No corporate IdP is
@@ -29,7 +29,7 @@ export const metrics = {
   failedUploads: 0,
   deliveryFailures: 0, jobRuns: 0, sseConnects: 0,
 };
-// Mutable hook: domains/insight/insight.mjs (F4) plugs exposure capture in here so profile
+// Mutable hook: domains/insight/insight.mjs plugs exposure capture in here so profile
 // and passport reads become funnel events without touching older handlers.
 export const exposureHook = { fn: null };
 export function requestInstrumentation() {
@@ -79,8 +79,8 @@ export function registerEnterprise(ctx) {
   const DEV = devLoginsEnabled();
 
   // ================================================== A. org onboarding
-  // S13b: staff invites are rows of org_invites (repositories/enterprise.mjs). The emailed code is stored only as its
-  // sha-256; a response is built from an allowlist and never carries the hash.
+  // Staff invites (org_invites, repositories/enterprise.mjs): the emailed code is stored only as its sha-256, and no
+  // response carries the hash.
   const inviteView = (i) => ({
     id: i.id, orgId: i.orgId, email: i.email, name: i.name, role: i.role, status: i.status, invitedBy: i.invitedBy,
     createdAt: i.createdAt, expiresAt: i.expiresAt, acceptedAt: i.acceptedAt, revokedAt: i.revokedAt, userId: i.userId,
@@ -94,7 +94,7 @@ export function registerEnterprise(ctx) {
     const { email, name, role } = req.body ?? {};
     if (typeof email !== 'string' || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return res.status(400).json({ error: 'EMAIL_INVALID' }); // a string only: RegExp.test would coerce an array
     if (email.length > L.email) return res.status(400).json({ error: 'EMAIL_INVALID', message: `An e-mail address has at most ${L.email} characters.` });
-    if (typeof name !== 'string' || !name.trim()) return res.status(400).json({ error: 'NAME_REQUIRED' }); // PRE-M24 (PM-10)
+    if (typeof name !== 'string' || !name.trim()) return res.status(400).json({ error: 'NAME_REQUIRED' });
     if (name.trim().length > L.inviteName) return fieldInvalid(res, 'name', `name is at most ${L.inviteName} characters.`);
     if (!(role === undefined || role === null || (typeof role === 'string' && role.trim() && role.trim().length <= L.role))) return fieldInvalid(res, 'role', `role is text of 1 to ${L.role} characters.`);
     if (users.activeByEmail(req.org.id, email)) {
@@ -108,7 +108,7 @@ export function registerEnterprise(ctx) {
       expiresAt: at + 7 * 86_400_000, acceptedAt: null, revokedAt: null, userId: null,
     });
     // A rejected send (a refused record, a failed provider call) is observed here: logged by id, never an unhandled
-    // rejection ending the process; the invite stands as it always did (review of 40aa05c, F2).
+    // rejection ending the process; the invite stands.
     mailer.send({ to: email, subject: `${req.org.name} invited you to ScoutBox`, text: `Hi ${inv.name},\n\n${req.orgUser.name} invited you to join ${req.org.name} on ScoutBox as ${inv.role}.\n\nAccept with invite code: ${code}\n\nThe code expires in 7 days.` }).catch((err) => console.error(`staff invite ${inv.id}: the mail was not recorded or sent (${err?.code ?? err?.message ?? err})`));
     res.status(201).json({ invite: inviteView(inv), note: 'The invite code went to their email (dev outbox in this environment).' });
   });
@@ -141,7 +141,7 @@ export function registerEnterprise(ctx) {
     if (name.length > STAFF_LIMITS.name) return fieldInvalid(res, 'scoutName', `scoutName is at most ${STAFF_LIMITS.name} characters.`);
     // One unit: the account (bound, restored or created), its e-mail, the accepted invite and the session.
     // Staff sign in by name, so a name belongs to one account of the organisation (removed accounts included):
-    // the invited name's account is bound when current and restored when removed (Founder, S14f), with the
+    // the invited name's account is bound when current and restored when removed (product decision), with the
     // invite's role; any other name already taken is refused.
     let out;
     try {
@@ -247,7 +247,7 @@ export function registerEnterprise(ctx) {
   });
 
   // Session/device management (own sessions only).
-  // S2: sessions are table-backed and hold token hashes; "current" is decided
+  // Sessions hold token hashes; "current" is decided
   // by hashing the presented bearer token, never by comparing stored tokens.
   orgRouter.get('/sessions', (req, res) => {
     const mine = sessions.listOrgUser(req.orgUser.id);
@@ -280,13 +280,13 @@ export function registerEnterprise(ctx) {
       return res.status(400).json({ error: 'IDP_UNAVAILABLE', message: 'Only the local test IdP exists in this environment. A real provider needs its issuer URL, client id and secret configured on the server.' });
     }
     if (!DEV) return res.status(403).json({ error: 'TEST_IDP_DEV_ONLY' });
-    // S13b: one row per organisation (sso_configs), created on the first configuration and replaced after.
+    // One row per organisation (sso_configs), created on the first configuration and replaced after.
     const cfg = enterprise.sso.configure({ id: enterpriseReads.sso.forOrg(req.org.id) ? null : nextId('sso'), orgId: req.org.id, issuer, clientId: `scoutbox-${req.org.id}`, at: Date.now() });
     res.json({ config: cfg });
   });
 
   // The local test IdP signs its codes with TEST_IDP_SECRET. There is no
-  // fallback value any more: with the variable unset a fresh random secret is
+  // fallback value: with the variable unset a fresh random secret is
   // drawn at boot, so a code minted against a publicly known string never
   // verifies anywhere. The callback below is also refused outside
   // development, because the test IdP is the only issuer that exists.
@@ -316,7 +316,7 @@ export function registerEnterprise(ctx) {
     const org = byId.org(req.body?.orgId);
     const cfg = org && enterpriseReads.sso.forOrg(org.id);
     if (!cfg) return res.status(404).json({ error: 'SSO_NOT_CONFIGURED', message: 'This organisation has no identity provider configured.' });
-    // S13b: the state and the nonce go to the browser; the row keeps only their hashes (sso_states).
+    // The state and the nonce go to the browser; the row keeps only their hashes (sso_states).
     const state = crypto.randomBytes(16).toString('hex');
     const nonce = crypto.randomBytes(16).toString('hex');
     const at = Date.now();
@@ -390,17 +390,16 @@ export function registerEnterprise(ctx) {
     res.json(scoped);
   });
 
-  // S13b: tickets, their references and replies, and the access grants with their logs are rows
-  // (repositories/enterprise.mjs). A reference is a case or an import of the organisation, by id; nothing is copied.
+  // A ticket's reference is a case or an import of the organisation, by id; nothing is copied.
   orgRouter.post('/support', (req, res) => {
     const { subject, body, refs } = req.body ?? {};
-    if (typeof subject !== 'string' || !subject.trim()) return res.status(400).json({ error: 'SUBJECT_REQUIRED' }); // PRE-M24 (PM-10)
+    if (typeof subject !== 'string' || !subject.trim()) return res.status(400).json({ error: 'SUBJECT_REQUIRED' });
     if (body != null && typeof body !== 'string') return res.status(400).json({ error: 'FIELD_INVALID', field: 'body' });
     const r = typeRefs(refs ?? [], 'refs');
     if (!r.ok) return fieldInvalid(res, r.field ?? 'refs', `${r.reason}. A reference is { kind: 'case' | 'import', id }, at most ${L.refs}.`);
     const t = enterprise.tickets.create({
       id: nextId('tkt'), orgId: req.org.id, byUserId: req.orgUser.id, byName: req.orgUser.name ?? null,
-      // Free text: over-long text is shortened, as before.
+      // Free text: over-long text is shortened.
       subject: subject.slice(0, L.subject), body: (body ?? '').slice(0, L.body),
       refs: r.value, status: 'open', replies: [], createdAt: Date.now(),
     });
@@ -494,11 +493,9 @@ export function registerEnterprise(ctx) {
     const stamp = new Date().toISOString().replace(/[:.]/g, '-');
     const dir = path.join(DATA_DIR, 'backups', stamp);
     // 1. A consistent copy of the database (store.copyTo, VACUUM INTO): every
-    //    table as committed. A restore is "copy this
-    //    directory into a NEW, empty DATA_DIR and boot". Flushed first, so the
-    //    copy holds every pending edit and the media queue is judged against
-    //    every live reference.
-    // The ownership invariant (review of 4ef9345): a queued removal that names a
+    //    table as committed. A restore is "copy this directory into a NEW,
+    //    empty DATA_DIR and boot".
+    // The ownership invariant: a queued removal that names a
     // clip a live player still carries is a conflict to resolve, not a file to
     // leave out of the backup as if it had been backed up. Refused before any
     // directory exists; ids only, never a record.
@@ -516,7 +513,7 @@ export function registerEnterprise(ctx) {
       fs.mkdirSync(dir, { recursive: true });
       const databasePath = path.join(dir, 'scoutbox.db');
       // The media-removal queue is read ONCE here: the copy carries it, and it
-      // decides which files are left out below (review of 9656a4b, finding 2).
+      // decides which files are left out below.
       const queuedIds = new Set(mediaDeletions.pending().map((r) => r.media_id));
       backupDatabase(databasePath);
       // 2. Media files — except those whose removal is queued: a backup never
@@ -587,7 +584,7 @@ export function registerEnterprise(ctx) {
   });
 
   // ================================================== E. reliability
-  // M18.2: the schema version (the latest table migration) is on the health check so an operator can see which
+  // The schema version (the latest table migration) is on the health check so an operator can see which
   // schema this instance is running without reading the database.
   app.get('/healthz', (_req, res) => res.json({
     ok: true,
@@ -596,7 +593,7 @@ export function registerEnterprise(ctx) {
   }));
 
   app.get('/readyz', (_req, res) => {
-    // Ready = the database writable (the staged repositories flush) + data loaded.
+    // Ready = the database answers a read.
     try {
       res.json({ ready: true, players: players.count() });
     } catch (err) {
@@ -610,7 +607,7 @@ export function registerEnterprise(ctx) {
       deliveryFailures: safetyAudit.opsEvents.count('delivery_failed'),
       webhookFailures: safetyAudit.opsEvents.count('webhook_failed'),
       dispatchBacklog: dispatches.backlogCount(), // queued or retrying (a COUNT on the dispatches table)
-      webhookBacklog: ctx.integrationReads.deliveries.backlogCount(), // S13a: queued or retrying, counted in SQL
+      webhookBacklog: ctx.integrationReads.deliveries.backlogCount(), // queued or retrying
       opsEvents: safetyAudit.opsEvents.newest(50).map((e) => ({ id: e.id, at: e.at, kind: e.kind, detail: e.detail })),
       note: 'Counters cover this process since boot. Local development metrics — not a production SLA measurement.',
     });

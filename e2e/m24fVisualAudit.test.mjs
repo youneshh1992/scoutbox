@@ -1,21 +1,19 @@
-// M24F — static visual-quality gates. No browser: the source tree itself is
+// Static visual-quality gates. No browser: the source tree itself is
 // the evidence. Run: node m24fVisualAudit.test.mjs (from e2e/).
 //
 //  1. zero hardcoded product emoji (Unicode Extended_Pictographic) in the
 //     five applications' UI source, translations, demo fixtures and the
 //     design system — comments stripped, user-generated content untouched;
 //  2. Inter remains the UI face: tokens, platform rule, the Player faces;
-//     the only other faces are the wordmark (Albert Sans) and the word
-//     "Grassroots" (Instrument Serif);
-//  3. Grassroots DARK tokens unchanged (tokens.css declares only the
-//     workspace green for dark, the light block is the Sage palette);
-//  4. no pitch-line / turf background implementation remains;
-//  5. the grass photograph is gone (reverted with the Grassroots scheme)
-//     unauthenticated entry composition;
+//     the only other face is the wordmark (Albert Sans); no editorial serif;
+//  3. Grassroots tokens: the LIGHT workspace palette, and the DARK tokens
+//     unchanged against the frozen fixture;
+//  4. the turf grain and pitch markings stand behind the DARK workspace only;
+//  5. the grass photograph is gone from the entry composition;
 //  6. the Agent entry is fixed LIGHT and ignores data-theme;
 //  7. the Player bottom navigation has at most five destinations;
-//  8. the entry page is still the scroll container (M24E) and every
-//     application still carries its exits (M24E).
+//  8. the entry page is still the scroll container and every
+//     application still carries its exits.
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -48,7 +46,7 @@ function scan(p) {
 for (const r of PRODUCT_ROOTS) { const p = path.join(ROOT, r); if (fs.statSync(p).isDirectory()) walk(p); else scan(p); }
 ok(hits.length === 0, `emoji gate: 0 hardcoded product emoji in UI source (found ${hits.length}${hits.length ? ': ' + hits.slice(0, 5).join(' | ') : ''})`);
 
-// M24F.1 — a pictograph built at runtime (the old profile's country flag was
+// A pictograph built at runtime (e.g. a country flag from
 // String.fromCodePoint over regional-indicator code points) is an emoji the
 // literal scan cannot see; forbid the construction in product UI source.
 {
@@ -74,13 +72,13 @@ const playerText = read('scoutbox-player/src/components/Text.tsx');
 ok(/-apple-system, BlinkMacSystemFont, system-ui/.test(playerText) && /fontFamily: UI_FONT/.test(playerText) && !/Inter-VariableFont/.test(playerText), 'Player: system UI typography, with no bundled Apple font');
 ok(!fs.existsSync(path.join(ROOT, 'design-system/fonts/InstrumentSerif-OFL.txt')) && !/Instrument Serif/.test(fontsCss) && !/--sb-font-grass/.test(tokens + platform), 'no editorial serif: "Grassroots" is set in Inter like every other word (the M24F serif was reverted at the Founder\'s direction)');
 
-// ------------------------------------------------------------ 3. Grassroots tokens (the M24E scheme, restored)
+// ------------------------------------------------------------ 3. Grassroots tokens
 const grassBlock = tokens.match(/:root\[data-app="grass"\] \{([\s\S]*?)\n\}/);
 const darkBlock = tokens.match(/:root\[data-app="grass"\]\[data-theme="dark"\] \{([\s\S]*?)\n\}/);
-// M24F.2 — the Grassroots LIGHT workspace follows the Founder's dashboard
+// The Grassroots LIGHT workspace follows the Founder's dashboard
 // reference: cool canvas, deep navy sidebar, white surfaces, the ScoutBox
-// green for the primary action. The base grass block keeps the M24E turf
-// tokens (they drive the DARK theme, which is unchanged).
+// green for the primary action. The base grass block keeps the turf
+// tokens (they drive the DARK theme).
 const grassLight = tokens.match(/:root\[data-app="grass"\]:not\(\[data-theme="dark"\]\) \{([\s\S]*?)\n\}/);
 ok(!!grassLight && /--sb-workspace: #f7f9fc/.test(grassLight[1]) && /--sb-surface: #063856/.test(grassLight[1]) && /--sb-white: #ffffff/.test(grassLight[1]) && /--sb-green: #33ee7c/.test(grassLight[1]) && /--sb-ink: #0b1c2d/.test(grassLight[1]), 'Grassroots light (M24F.2): cool canvas #F7F9FC, navy sidebar #063856, white surfaces, ScoutBox green #33EE7C, ink #0B1C2D');
 ok(!!grassBlock && /--grass-line: rgba\(255, 255, 255, 0\.52\)/.test(grassBlock[1]) && /--grass-grain/.test(grassBlock[1]) && /--grass-band/.test(grassBlock[1]), 'Grassroots base block: the M24E turf tokens remain for the dark workspace');
@@ -89,12 +87,12 @@ ok(!!darkBlock && /--sb-workspace: #252e26/.test(darkBlock[1]) && /--grass-line:
 const frozen = JSON.parse(read('e2e/fixtures/m24e-grassroots-dark-tokens.json'));
 ok(frozen.tokens['--sb-workspace'] === '#252e26' && frozen.computed.content.bg === 'rgb(37, 46, 38)' && frozen.computed.sidebar.bg === 'rgb(18, 20, 21)', 'the frozen M24E dark values are on file for the live comparison (workspace #252e26, sidebar #121415)');
 
-// ------------------------------------------------------------ 4. the Grassroots turf and pitch (M24E, restored)
-// M24F.2 — the turf grain and pitch markings are DARK-only; the light
+// ------------------------------------------------------------ 4. the Grassroots turf and pitch
+// The turf grain and pitch markings are DARK-only; the light
 // workspace is a plain cool canvas (no pitch lines, no photograph).
 ok(/:root\[data-app="grass"\]\[data-theme="dark"\] \.content \{[^}]*--grass-grain/.test(platform) && /:root\[data-app="grass"\]\[data-theme="dark"\] \.content::before \{/.test(platform) && /:root\[data-app="grass"\]\[data-theme="dark"\] \.content::after \{/.test(platform), 'the Grassroots turf grain and pitch markings stand behind the DARK workspace only (M24E dark unchanged)');
 ok(!/:root\[data-app="grass"\] \.content \{[^}]*--grass-grain/.test(platform) && !/:root\[data-app="grass"\] \.content::before \{/.test(platform), 'the Grassroots LIGHT workspace carries no turf grain and no pitch markings (M24F.2)');
-// The Founder's direction after M24F.2: the entry introduction is the M24E green panel again — no photograph, no centre circle.
+// The Founder's direction: the entry introduction is the green panel — no photograph, no centre circle.
 ok(/:root\[data-app="grass"\] \.auth-promo \{[^}]*background-color: var\(--auth-promo\)[^}]*repeating-linear-gradient\(103deg/.test(platform), 'the Grassroots entry introduction is the M24E green panel (restored at the Founder\'s direction)');
 const grassCss = read('scoutbox-grassroots/src/styles.css');
 ok(!/auth-promo/.test(grassCss) && !/radial-gradient\(circle at 50% 52%/.test(grassCss), 'the Grassroots stylesheet carries no photograph and no centre-circle rule');
@@ -112,7 +110,7 @@ function walkRefs(d) {
   }
 }
 for (const r of ['scoutbox-club', 'scoutbox-grassroots', 'scoutbox-agent', 'scoutbox-admin', 'scoutbox-player', 'design-system', 'e2e']) walkRefs(path.join(ROOT, r));
-// M24F.2 — the photograph is permitted in ONE place: the Grassroots entry's
+// The photograph is permitted in ONE place: the Grassroots entry's
 // left panel. It is on disk with its licence, referenced by the Grassroots
 // stylesheet alone (so no other bundle carries its bytes), and never by the
 // shared platform.css, the tokens or any other application.
@@ -136,7 +134,7 @@ ok(visible <= 5 && visible > 0, `Player bottom navigation: ${visible} destinatio
 ok(!PICTO.test(stripComments(tabsLayout, '_layout.tsx')), 'Player bottom navigation: icons, no emoji');
 ok(!/backgroundColor: focused \? colors\.tabActiveBg/.test(tabsLayout), 'Player bottom navigation: no filled tile behind the active destination');
 
-// ------------------------------------------------------------ 8. M24E invariants
+// ------------------------------------------------------------ 8. entry and theme invariants
 ok(/\.login\.auth-page \{[\s\S]*height: 100dvh; overflow-y: auto/.test(platform), 'the entry page is still the scroll container (M24E)');
 ok(/\.auth-card \{ margin: auto 0; flex-shrink: 0; \}/.test(platform), 'the entry card still centres by auto margins (M24E)');
 for (const [app, file, needle] of [['Pro', 'scoutbox-club/src/App.tsx', 'data-testid="sign-out"'], ['Grassroots', 'scoutbox-grassroots/src/App.tsx', 'data-testid="sign-out"'], ['Agent', 'scoutbox-agent/src/App.tsx', 'data-testid="sign-out"'], ['Trust & Safety', 'scoutbox-admin/src/App.tsx', 'data-testid="sign-out"'], ['Player (You)', 'scoutbox-player/src/app/(tabs)/you.tsx', 'testID="sign-out"'], ['Player (Guardian)', 'scoutbox-player/src/app/guardian.tsx', 'testID="sign-out"']]) {

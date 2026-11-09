@@ -1,4 +1,4 @@
-// M16.2 typed client (org side): the ScoutBox Trust Score.
+// Typed client (org side): the ScoutBox Trust Score.
 //
 // What the score IS: how strongly a player's football record is supported by
 // trustworthy, current, attributable evidence. What it is NOT: ability,

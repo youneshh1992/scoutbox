@@ -1,6 +1,6 @@
-// M17 demo mirror (org side) — a SELF-CONTAINED Recruitment Room fixture.
+// Demo mirror (org side) — a SELF-CONTAINED Recruitment Room fixture.
 //
-// NOTE — circular-import discipline (the exact bug that crashed the M16.1 bundle):
+// NOTE — circular-import discipline (reading a binding across the cycle crashes the bundle):
 // roomsApi imports this module, so this module takes only TYPES from roomsApi
 // (`import type`, erased at build time). It never reads a runtime binding from
 // roomsApi, and it never calls an imported value at module-load time. Every
@@ -59,7 +59,7 @@ const COACH_COPY = 'Confirmed by a coach whose club affiliation was verified whe
 const STATUS_LABELS: Record<string, string> = {
   watching: 'Watching', under_review: 'Under review', shortlisted: 'Shortlisted',
   priority: 'Priority', trial_requested: 'Trial requested', trial_scheduled: 'Trial scheduled',
-  // M23 — the two contact states, mirrored from the server.
+  // The two contact states, mirrored from the server.
   contact_planned: 'Contact planned', contacted: 'Contacted',
   trial_completed: 'Trial completed', offer_consideration: 'Offer consideration',
   offer_made: 'Offer made', signed: 'Signed', withdrawn: 'Withdrawn',
@@ -71,7 +71,7 @@ const OPEN_STATUSES = ALL_STATUSES.filter((s) => !['signed', 'withdrawn', 'archi
 const TRANSITIONS: Record<string, string[]> = {
   watching: ['under_review', 'shortlisted', 'contact_planned', 'withdrawn', 'archived'],
   under_review: ['watching', 'shortlisted', 'priority', 'contact_planned', 'trial_requested', 'withdrawn', 'archived'],
-  // M23 — the two contact states. `contacted` is reached only by a real contact (see the Contact methods), never by the status picker.
+  // The two contact states. `contacted` is reached only by a real contact (see the Contact methods), never by the status picker.
   contact_planned: ['under_review', 'shortlisted', 'priority', 'withdrawn', 'archived'],
   contacted: ['shortlisted', 'priority', 'trial_requested', 'offer_consideration', 'under_review', 'withdrawn', 'archived'],
   shortlisted: ['under_review', 'priority', 'contact_planned', 'trial_requested', 'offer_consideration', 'withdrawn', 'archived'],
@@ -435,7 +435,7 @@ const activityStore: (RoomActivityItem & { roomId: string })[] = [
 // -------------------------------------------------------------- derivation
 const find = (roomId: string) => roomStore.find((r) => r.roomId === roomId) ?? null;
 
-// ------------------------------------------------------ M23 P3 — Contact
+// ------------------------------------------------------ Contact
 // Same rules as the server: a draft is internal and moves nothing; a send is
 // delivered into the recipient's Inbox and moves the case contact_planned →
 // contacted through the same status log; a failed attempt keeps the draft; a
@@ -658,7 +658,7 @@ const delay = <T,>(v: T): Promise<T> => new Promise((res) => setTimeout(() => re
 
 // ------------------------------------------------------------------- api
 
-// ------------------------------------------------------ M23 P4B — Trial
+// ------------------------------------------------------ Trial
 // The demo mirrors the server's truth model: an invitation is a request, a
 // trial exists only once the (simulated) recipient accepts, attendance is
 // recorded per session after it starts, completion is an explicit act behind
@@ -740,7 +740,7 @@ const EVIDENCE_CANDIDATES: TrialEvidenceCandidate[] = [
 ];
 
 
-// ---- M23 P5 — formal decision (demo). One draft per room; formal rows join
+// ---- formal decision (demo). One draft per room; formal rows join
 // the same legacy decision memory (appendDecision) so History shows one chain.
 const OUTCOME_MAP: Record<DecisionOutcome, { recommendation: string; to: string; label: string }> = {
   progress: { recommendation: 'offer', to: 'offer_consideration', label: 'Progress to offer consideration' },
@@ -796,7 +796,7 @@ const validateDecisionContent = (input: { outcome?: DecisionOutcome | null; reas
 };
 
 
-// ---- M23 P6 — the canonical Offer (demo). One live Offer per room; issued
+// ---- the canonical Offer (demo). One live Offer per room; issued
 // revisions are immutable; the recipient's answer is simulated by the demo
 // clock only through the explicit demo helpers — never typed by the club.
 interface DemoOffer extends OfferClubView { keys: { create: { key: string; fp: string } | null; issue: { key: string; revisionId: string }[]; withdraw: { key: string; revisionId: string }[]; revise: { key: string; revisionId: string }[] }; history: OfferHistoryItem[] }
@@ -881,7 +881,7 @@ const moveRoomForOffer = (r: DemoRoom, to: string, trigger: string) => {
   return { applied: true, action: trigger, from, to, at: Date.now() };
 };
 
-/** M23 P8 — the demo has no server to derive a journey; the strip hides itself. A lifecycle action maps to the demo status move. */
+/** The demo has no server to derive a journey; the strip hides itself. A lifecycle action maps to the demo status move. */
 const DEMO_LIFECYCLE_TO: Record<string, string> = { startReview: 'under_review', planContact: 'contact_planned', shortlist: 'shortlisted', prioritise: 'priority', considerOffer: 'offer_consideration', holdCase: 'on_hold', resumeCase: 'under_review', rejectCase: 'archived', withdrawCase: 'withdrawn', closeCase: 'closed', reopenCase: 'under_review' };
 const demoNoSigning = () => { throw offerApiErr(503, 'SIGNING_NOT_FOUND', 'Signing is not part of the grassroots demo.'); };
 export const demoRooms: RoomsApi = {
@@ -1207,7 +1207,7 @@ export const demoRooms: RoomsApi = {
     return delay({ links: { ...r.links } });
   },
 
-  // ---- M23 P3 — Contact
+  // ---- Contact
   contacts: async (_s, roomId) => {
     const r = find(roomId);
     if (!r) throw new Error('ROOM_NOT_FOUND');
@@ -1490,11 +1490,11 @@ export const demoRooms: RoomsApi = {
     bumpTrial(tr, now);
     return delay({ trial: trialView(tr), evidence: evidenceView(tr) });
   },
-  // ---- M23 P5 formal decision
-  // ---- M23 P5.6E. Synthetic: the demo case has no finalised decision to
+  // ---- formal decision
+  // ---- transaction handoff. Synthetic: the demo case has no finalised decision to
   // progress, so the handoff is honestly unavailable and says which rule refused.
   // A demo that offered the button would teach that a decision is enough, which
-  // is the one thing §33 forbids.
+  // is exactly the wrong lesson.
   handoff: async (_s, roomId) => delay({
     handoff: null,
     available: false,
@@ -1625,7 +1625,7 @@ export const demoRooms: RoomsApi = {
     bumpTrial(tr, now);
     return delay({ trial: trialView(tr), evidence: evidenceView(tr) });
   },
-  // ---- M23 P6 — the canonical Offer (demo)
+  // ---- the canonical Offer (demo)
   offers: async (_s, roomId) => { const r = find(roomId); if (!r) throw offerApiErr(404, 'ROOM_NOT_FOUND', 'No such room.'); return delay(offerSurfaceOf(r)); },
   createOffer: async (_s, roomId, input) => {
     const r = find(roomId); if (!r) throw offerApiErr(404, 'ROOM_NOT_FOUND', 'No such room.');

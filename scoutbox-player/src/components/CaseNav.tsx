@@ -1,4 +1,4 @@
-// M24B — the player's category control: one row of pills that scrolls
+// The player's category control: one row of pills that scrolls
 // sideways, the current one heavier and marked with a dot (never colour
 // alone), every target at least 44px tall. The subcategories below it are
 // the existing `PageTabs` underline tabs. The current category is scrolled

@@ -1,17 +1,17 @@
-// M15-Nav / P2.5 — navigation UI. All structure comes from nav.ts; nothing
+// Navigation UI. All structure comes from nav.ts; nothing
 // here keeps its own list of destinations. Visibility filtering is
 // convenience — the server stays authoritative for every route.
 //
-// P2.5 changed the shape, not the rules:
+// The shape:
 //   • the sidebar is an ACCORDION — the active section is expanded and lists
 //     its children, arranged by group; other sections toggle with a chevron
 //     for the session (nothing persisted: there is nothing worth remembering);
 //   • the collapsed 64px rail opens a keyboard-operable FLYOUT per section;
-//   • the page tab strip is gone from the desktop — it was a second navigation
-//     bar carrying destinations. At phone width, where the sidebar is a
+//   • there is no page tab strip on the desktop (it would be a second
+//     navigation bar carrying destinations). At phone width, where the sidebar is a
 //     drawer, `SecondaryNav` lists only the active GROUP's siblings (≤ 6);
 //   • the top bar is one row: the page `<h1>`, a live-state dot, the bell and
-//     Report / Block. Organisation badges moved to the account block, where
+//     Report / Block. Organisation badges sit in the account block, where
 //     the organisation is named.
 // Pro uses workspace tiles and a focused page index. The collapsed rail
 // retains the shared navigation model and keyboard-operable flyouts.
@@ -34,7 +34,7 @@ export interface OrgBlock { initials: string; name: string; line?: string }
 
 /** ≤ 900px: the sidebar is a drawer. Tapping a multi-page section there
  *  expands it (the pages are the point of opening a drawer) rather than
- *  navigating away and closing it. Desktop behaviour is unchanged. */
+ *  navigating away and closing it. */
 function useIsPhoneShell(): boolean {
   const [phone, setPhone] = useState(() => typeof window !== 'undefined' && window.matchMedia('(max-width: 900px)').matches);
   useEffect(() => {
@@ -78,7 +78,7 @@ export function Sidebar({
   // Any navigation re-opens the destination's section — including a page
   // inside a section the person had folded, so the active page is never
   // hidden in a closed accordion.
-  // M24D — and only that section: arriving somewhere folds the sections the
+  // And only that section: arriving somewhere folds the sections the
   // person had opened on the way, so the sidebar shows one expanded section
   // (its one open group) rather than everything they passed through.
   useEffect(() => {
@@ -105,7 +105,7 @@ export function Sidebar({
     <>
       {drawerOpen && <div className="drawer-veil nav-drawer-veil" onClick={onCloseDrawer} />}
       <nav ref={navRef} id="app-sidebar" className={`sidebar ${collapsed ? 'collapsed' : ''} ${drawerOpen ? 'drawer-open' : ''}`} aria-label="Main navigation">
-        {/* M24A — the reference wordmark: one ink, a green square, the edition beside it. */}
+        {/* The reference wordmark: one ink, a green square, the edition beside it. */}
         <div className="brand" title={`ScoutBox ${brand.long}`}>
           {collapsed ? <span className="wordmark" aria-label={`ScoutBox ${brand.long}`}>S</span> : <ProBrand/>}
         </div>
@@ -209,7 +209,7 @@ function SectionRow({ section: s, active, activeItemId, expanded, onToggle, coll
     if (flyoutOpen) flyRef.current?.querySelector<HTMLButtonElement>('button[role="menuitem"]')?.focus();
   }, [flyoutOpen]);
 
-  // M24D — the groups inside an expanded section are an accordion of their
+  // The groups inside an expanded section are an accordion of their
   // own: ONE group open at a time, the group holding the current page by
   // default (the first group when the current page is elsewhere), so the
   // sidebar never lists every page of Recruitment at once. The person may open
@@ -335,9 +335,9 @@ function SectionRow({ section: s, active, activeItemId, expanded, onToggle, coll
 }
 
 // ------------------------------------------------------------- SecondaryNav
-// P2.5: phone width only (CSS hides it above 900px, where the sidebar lists
+// Phone width only (CSS hides it above 900px, where the sidebar lists
 // the same pages). It shows the active GROUP's siblings — never the whole
-// section. P2.5 closure: a group longer than one row shows its primary pages
+// section. A group longer than one row shows its primary pages
 // and puts the rest behind an explicit "More" menu (`stripLayout`), so no
 // page is discoverable only by scrolling a clipped strip. When the current
 // page sits in the menu, the More control carries its name and the active
@@ -439,10 +439,10 @@ export function SecondaryNav({ section, activeItemId, onNavigate }: {
 
 // ------------------------------------------------------------------ TopBar
 /**
- * One row. The page title is the page's `<h1>` (§47); the crumb inside it is
+ * One row. The page title is the page's `<h1>`; the crumb inside it is
  * the owning section, muted. Live state is a dot while healthy and a red
  * pill while reconnecting — the one state a user must act on. Report / Block
- * is never hidden (§33): under 640px it shrinks to its glyph with the same
+ * is never hidden: under 640px it shrinks to its glyph with the same
  * accessible name.
  */
 export function TopBar({ title, crumb, edition, live, unread, bellOpen, drawerOpen = false, theme, onToggleTheme, onOpenPalette, onToggleBell, onReport, onOpenDrawer }: {
@@ -454,9 +454,9 @@ export function TopBar({ title, crumb, edition, live, unread, bellOpen, drawerOp
   const isMac = typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform ?? '');
   return (
     <header className="topbar">
-      {/* PRE-M24 (PM-7): the menu button says whether the drawer is open */}
+      {/* The menu button says whether the drawer is open */}
       <button className="nav-hamburger" aria-label={t('navsec.openMenu')} aria-expanded={drawerOpen} aria-controls="app-sidebar" onClick={onOpenDrawer}><Icon name="menu" /></button>
-      {/* M24A — the reference breadcrumb: edition / section / page. The page
+      {/* The reference breadcrumb: edition / section / page. The page
           name stays the document's <h1>; the parts before it are its path. */}
       <div className="p-breadcrumb">
         {edition && <span className="crumb crumb-edition" aria-hidden="true">{edition}<span className="crumb-sep"> / </span></span>}
@@ -491,12 +491,11 @@ export function TopBar({ title, crumb, edition, live, unread, bellOpen, drawerOp
   );
 }
 
-/** The organisation's standing badges — moved out of the top bar, where they
- *  repeated on every page, to the account block, where the organisation is
- *  named. Same pills, same wording. */
+/** The organisation's standing badges, in the account block where the
+ *  organisation is named (in the top bar they would repeat on every page). */
 export function OrgChips({ org }: { org: { type: string; trustedPartner?: boolean; safeguardingCertified?: boolean; verified?: boolean } }) {
-  // M24D — one quiet line of standing, not a row of badges: the same facts, as text.
-  // M24F — presentation casing: "Club · Verified · Safeguarding Certified"; the data values stay as they are.
+  // One quiet line of standing, not a row of badges: the same facts, as text.
+  // Presentation casing: "Club · Verified · Safeguarding Certified"; the data values stay as they are.
   const facts = [
     org.type === 'club' ? 'Club' : org.type === 'academy' ? 'Academy' : org.type.charAt(0).toUpperCase() + org.type.slice(1),
     org.type === 'club' ? (org.verified ? 'Verified' : 'Verification Pending · U18 hidden') : null,

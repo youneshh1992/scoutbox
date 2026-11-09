@@ -1,9 +1,8 @@
 /**
- * M23 P5.6D — the transaction domain error contract. ONE table, no default
+ * The transaction domain error contract. ONE table, no default
  * branch, a public-field allowlist.
  *
- * The refusals this table exists to keep indistinguishable (§78, adversarial
- * 4–6, 23): a transaction that does not exist, one belonging to another agency,
+ * The refusals this table exists to keep indistinguishable: a transaction that does not exist, one belonging to another agency,
  * one belonging to another club, and one belonging to another player all answer
  * `TRANSACTION_NOT_FOUND` with the same body. Naming a party who does not
  * exist, who is a minor, who is invisible to the caller's organisation or who
@@ -37,11 +36,10 @@ export const M26_ERROR_HTTP = table({
   DOCUMENT_VISIBILITY_NOT_PERMITTED: 403,
   SIGNATORY_REQUIRED: 403,
   AGENT_VERIFICATION_REQUIRED: 403,
-  // P5.6E — the facet gate this module already calls (`compliance.facetGateProblem`)
-  // can answer with any of P5.6C's objective licence refusals, not just
-  // AGENT_VERIFICATION_REQUIRED. Declaring only one of them meant a lapsed
-  // licence reached a caller as a 500 about OUR state, when it is a plain,
-  // nameable 403 about theirs. All of them are declared here for that reason.
+  // The facet gate this module calls (`compliance.facetGateProblem`) can answer
+  // with any of the compliance domain's objective licence refusals, not just
+  // AGENT_VERIFICATION_REQUIRED. Each must be declared here, or a lapsed licence
+  // would reach the caller as a 500 about OUR state instead of a 403 about theirs.
   AGENT_LICENCE_INACTIVE: 403,
   AGENT_VERIFICATION_STALE: 403,
   AGENT_NATIONAL_REGISTRATION_REQUIRED: 403,
@@ -61,11 +59,11 @@ export const M26_ERROR_HTTP = table({
   // ---- 409: the record is not where the caller thought it was.
   TRANSACTION_VERSION_CONFLICT: 409,
   TRANSACTION_IDEMPOTENCY_CONFLICT: 409,
-  // M23 P5.6E §37. The request is fine; a live transaction already covers this
+  // The request is fine; a live transaction already covers this
   // individual, this type and these clubs. 409, because there is nothing in the
   // request to fix — the caller continues in the one that exists, or ends it.
   TRANSACTION_DUPLICATE_CONTEXT: 409,
-  // M23 P5.6E §32/§36. A transaction that cites a recruitment case must be
+  // A transaction that cites a recruitment case must be
   // answering that club's own invitation. These four are 409: the citation is
   // well-formed and the caller is permitted, but the invitation is not there,
   // not open, not about this client, or not addressed to this agency.

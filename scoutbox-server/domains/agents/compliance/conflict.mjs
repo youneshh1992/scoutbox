@@ -1,9 +1,7 @@
 /**
- * M23 P5.6C — the Conflict-of-Interest Engine (pure, deterministic).
- *
- * Implements M23_P56A_CONFLICT_ENGINE_CONTRACT.md. Everything it reads is
- * passed in; it never touches `db`. Given the same inputs, policy set and
- * clock it returns the same result and the same `inputHash`.
+ * The Conflict-of-Interest Engine (pure, deterministic). Everything it reads
+ * is passed in. Given the same inputs, policy set and clock it returns the
+ * same result and the same `inputHash`.
  *
  * It evaluates the LICENSED INDIVIDUAL (plus connected agents), never the
  * agency organisation. It applies encoded rule entries with their operative
@@ -62,16 +60,15 @@ export const inputHashOf = (inputs) => createHash('sha256').update(canonicalJson
  * granted IN ADVANCE of the agent's first act for the other party, was granted
  * by the party itself (or its recorded signatory), names a policy version in
  * which the deciding rule was ACTIVE, and — for England — carries the full
- * particulars and the legal-advice offer (contract §4.3).
+ * particulars and the legal-advice offer.
  */
 export function consentSufficiency(consent, { partyRole, agentUserId, contextId, firstActAt = null, requireParticulars = false, activePolicyIds = [] }) {
   if (!consent) return { ok: false, reasonCode: 'CONSENT_MISSING' };
   if (consent.kind !== 'dual_representation') return { ok: false, reasonCode: 'CONSENT_MISSING' };
   // A revocation is a fact in its own right (the ledger derives status 'revoked'): it is reported before anything else.
   if (consent.revokedAt != null || consent.status === 'revoked') return { ok: false, reasonCode: 'CONSENT_REVOKED' };
-  // M23 P5.7: a grant is dated by a READABLE instant. `typeof NaN === 'number'`
-  // let an undated grant through and then passed the in-advance test below
-  // (`NaN > firstActAt` is false).
+  // A grant is dated by a READABLE instant: `typeof NaN === 'number'`, and an
+  // undated grant would pass the in-advance test below (`NaN > firstActAt` is false).
   if (consent.status !== 'granted' || readInstant(consent.grantedAt) === null) return { ok: false, reasonCode: consent.status === 'declined' ? 'CONSENT_DECLINED' : 'CONSENT_MISSING' };
   if (consent.contextId !== contextId) return { ok: false, reasonCode: 'CONSENT_WRONG_CONTEXT' };
   if (consent.agentUserId !== agentUserId) return { ok: false, reasonCode: 'CONSENT_WRONG_AGENT' };
@@ -100,7 +97,7 @@ const reason = (code, entry, extra = {}) => ({
 });
 
 /**
- * @param {object} input  see the contract §1. Minimal:
+ * @param {object} input  Minimal:
  *   transaction: { id, type, jurisdictions: [{ memberAssociation, role }], parties: [{ partyRole, subjectKind, subjectId, isMinor?, removed? }],
  *                  representations: [{ agentUserId, partyRole, agreementId, declaredOnly, status, firstActAt }], otherServices: [] }
  *   agents: { [agentUserId]: { licenceState, connectedAgentUserIds: [] } }
@@ -160,7 +157,8 @@ export function evaluateConflict(input) {
       if (f.rule?.overrides?.some((o) => o.jurisdiction === national && o.scope === 'national')) reasons.push({ ...reason('NATIONAL_RULE_APPLIES', f), ruleStatus: 'JURISDICTION_OVERRIDE', overrideRuleId: f.rule.overrides.find((o) => o.jurisdiction === national).overrideRuleId });
     }
   }
-  // A mixed case: a national transaction whose parties span more than one MA is not national. Contract L-18.
+  // A mixed case: a national transaction whose parties span more than one MA is not national (legal-review item L-18,
+  // docs/product/agents.md).
   if (scope === 'international' && memberAssociations.filter((m) => m !== 'INT').length > 1) {
     const nationalOnes = memberAssociations.filter((m) => m !== 'INT');
     const anyActiveNational = nationalOnes.some((m) => { const p = policySet.find((x) => x.jurisdiction === m); return p && Object.values(p.rules).some((r) => r.params?.permittedMultiple && r.ruleStatus === 'ACTIVE'); });
@@ -254,7 +252,7 @@ export function evaluateConflict(input) {
 const MISSING_EVIDENCE_CODES = Object.freeze(['POLICY_NOT_ENCODED', 'SCOPE_UNRESOLVED', 'TYPE_UNKNOWN', 'PARTY_REMOVED', 'MINOR_PARTY', 'REPRESENTATION_UNVERIFIED', 'AGENT_STATE_INVALID', 'INSUFFICIENT_DATA']);
 const missingEvidenceOf = (reasons) => reasons.filter((r) => MISSING_EVIDENCE_CODES.includes(r.code)).map((r) => r.code);
 /**
- * S11b-2: the parts of a result that are functions of the stored ones (an evaluation row keeps its outcome, reasons,
+ * The parts of a result that are functions of the stored ones (an evaluation row keeps its outcome, reasons,
  * outstanding consents, versions, instant and input hash; these are worked out on read).
  */
 export function derivedOfEvaluation({ outcome, reasons, consentsOutstanding }) {
@@ -275,7 +273,7 @@ function requiredActionsFor(outcome, reasons, consentsOutstanding) {
   return out;
 }
 
-/** What may be shown to a party other than the evaluated agent: outcome and codes, never the other side's agents (privacy matrix row 14). */
+/** What may be shown to a party other than the evaluated agent: outcome and codes, never the other side's agents. */
 export function conflictSummaryForParty(result) {
   if (!result) return null;
   return { outcome: result.outcome, reasonCodes: [...new Set((result.reasons ?? []).map((r) => r.code))], policyVersions: result.policyVersions ?? [], evaluatedAt: result.evaluatedAt ?? null };

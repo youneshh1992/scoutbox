@@ -1,11 +1,11 @@
-// M23 P5 acceptance suite — the formal recruitment decision.
+// Acceptance suite — the formal recruitment decision.
 //
-// The governing principle this suite exists to enforce (mandate §1):
+// The governing principle this suite exists to enforce:
 //
 //   evidence ≠ observation ≠ assessment ≠ discussion ≠ decision ≠ offer ≠ signing
 //
 // A formal decision is a human act, typed by a room lead, recorded in the
-// SAME decision memory M17 created, moving the case through the ONE
+// SAME decision memory as the advisory recommendations, moving the case through the ONE
 // lifecycle writer, ending at the internal boundary `offer_consideration`.
 // Nothing here infers an outcome from evidence; nothing here creates an
 // offer; nothing here tells the player anything.
@@ -23,7 +23,7 @@
 //   K  expectedRev matrix, idempotency, supersession rules
 //   X  content — prototype keys, invalid types, XSS, limits, taxonomies
 //   B  a blocked family — progress refused, hold and reject allowed
-//   C  the concurrency matrix (§92)
+//   C  the concurrency matrix
 //   F  honest transport failure — nothing half-written
 //   I  sentinels across every surface that is not the room
 //   N  events, audit, journey, analytics
@@ -48,9 +48,9 @@ import { EVIDENCE_KINDS } from '../../domains/recruitment/lifecycle/evidence.mjs
 import { canTransitionRecruitmentCase, LIFECYCLE_ACTIONS } from '../../domains/recruitment/lifecycle/lifecycle.mjs';
 import { readFileSync } from 'node:fs';
 import { pickPort } from '../../scripts/testPort.mjs';
-import { createEvidenceProvider, resolveEvidenceRefs } from '../../scripts/recruitmentReadsFixture.mjs'; // §4.3 step 2: the recruitment queries over the plain arrays
+import { createEvidenceProvider, resolveEvidenceRefs } from '../../scripts/recruitmentReadsFixture.mjs'; // the recruitment queries over plain arrays
 
-const PORT = pickPort(6400, 200, [0]); // TH-6: never a fetch-blocked port
+const PORT = pickPort(6400, 200, [0]); // never a fetch-blocked port
 const BASE = `http://localhost:${PORT}`;
 const DATA_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-m23d-'));
 const SERVER = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'server.mjs');
@@ -91,7 +91,7 @@ section('U — vocabulary and validation: three outcomes, one taxonomy, nothing 
   ok(validateDecisionReasons(['tactical_fit', 'Position_Need']).codes.join() === 'tactical_fit,position_need', 'U7 decision reasons come from the M17 taxonomy, normalised');
   neg(validateDecisionReasons([], { outcome: 'reject' }).error === 'DECISION_REASON_INVALID', 'U8 a rejection with no reason is refused');
   ok(validateDecisionReasons([], { outcome: 'hold' }).ok && validateDecisionReasons(undefined, { outcome: 'progress' }).ok, 'U8b hold and progress may carry none');
-  for (const bad of ['rejected', 'on_hold', 'club_decision', 'trial_completed', 'case_closed']) neg(validateDecisionReasons([bad]).error === 'DECISION_REASON_INVALID', `U9 the LIFECYCLE reason "${bad}" is not a decision reason (two taxonomies, P2 B4)`);
+  for (const bad of ['rejected', 'on_hold', 'club_decision', 'trial_completed', 'case_closed']) neg(validateDecisionReasons([bad]).error === 'DECISION_REASON_INVALID', `U9 the LIFECYCLE reason "${bad}" is not a decision reason (two taxonomies)`);
   for (const bad of PROHIBITED_REASON_CODES.slice(0, 6)) neg(validateDecisionReasons([bad]).error === 'DECISION_REASON_INVALID', `U10 the prohibited reason "${bad}" is refused`);
   for (const bad of PROTO_KEYS) neg(validateDecisionReasons([bad]).error === 'DECISION_REASON_INVALID', `U11 "${bad}" is not a reason code`);
   for (const bad of [{}, 'tactical_fit', 1, true, [1], [{}], [{ toString: 1 }], [null, 2]]) neg(validateDecisionReasons(bad).error === 'DECISION_REASON_INVALID', `U12 ${JSON.stringify(bad)} is not a list of reason codes`);
@@ -130,7 +130,7 @@ section('U — references resolve against THIS case only; metadata is minimal');
   const providers = { sim: { testOnly: true }, real: {} };
   const good = resolveEvidenceRefs([{ kind: 'assessment', id: 'a-ok' }, { kind: 'trial', id: 't-ok' }, { kind: 'box_cam_session', id: 'bx-1' }, { kind: 'passport_evidence', id: 'ev-ok' }], { db, kase, providers });
   ok(good.ok && good.refs.length === 4 && good.refs[1].meta.workflowState === 'completed' && good.refs[2].meta.verificationState === 'verified' && good.refs[3].meta.provenance === 'verified', 'U23 this case\'s own records resolve, with state-level metadata');
-  neg(!has(good.refs, 'PRIVATE') && !has(good.refs, '99') && !has(good.refs, 'score') && !has(good.refs, 'rating'), 'U24 the stored reference carries no rating, no note, no Box Cam result — ids and states only (§51)');
+  neg(!has(good.refs, 'PRIVATE') && !has(good.refs, '99') && !has(good.refs, 'score') && !has(good.refs, 'rating'), 'U24 the stored reference carries no rating, no note, no Box Cam result — ids and states only');
   const cases = [
     [{ kind: 'assessment', id: 'a-other-org' }, 'DECISION_CASE_MISMATCH', 'another organisation\'s assessment'],
     [{ kind: 'assessment', id: 'a-other-player' }, 'DECISION_CASE_MISMATCH', 'another player\'s assessment'],
@@ -181,7 +181,7 @@ section('U — chain, integrity, summaries, views');
 section('P — policy: error bands, rate policies, events, permissions, the ONE widening, no new states');
 {
   const codes = Object.keys(M23_ERROR_HTTP).filter((c) => c.startsWith('DECISION_'));
-  ok(codes.length >= 18, `P1 ${codes.length} DECISION_* codes are in the M23 error table (DECISION_STORE_MISSING left with the db collection, §4.3 step 2)`);
+  ok(codes.length >= 18, `P1 ${codes.length} DECISION_* codes are in the M23 error table`);
   const band = (c) => M23_ERROR_HTTP[c];
   ok(['DECISION_OUTCOME_INVALID', 'DECISION_REASON_INVALID', 'DECISION_CONTENT_INVALID', 'DECISION_EVIDENCE_INVALID', 'DECISION_CASE_MISMATCH', 'DECISION_CLIENT_KEY_INVALID', 'DECISION_REV_REQUIRED'].every((c) => band(c) === 400), 'P2 validation codes are 400');
   ok(band('DECISION_NOT_PERMITTED') === 403 && band('DECISION_BLOCKED') === 403 && band('DECISION_NOT_FOUND') === 404, 'P3 permission 403, not-found 404');
@@ -287,7 +287,7 @@ async function assess(token, playerId, verdict, note = 'Solid.', context) {
   if (sub.status !== 200) throw new Error(`assessment submit: ${sub.status} ${JSON.stringify(sub.body)}`);
   return id;
 }
-/** The whole P4B adult trial: invite → accept → attend → complete, with the clock. */
+/** The whole adult trial: invite → accept → attend → complete, with the clock. */
 async function completedTrial(RID, playerToken, base) {
   const inv = await j('POST', `/org/rooms/${RID}/trials`, { timezone: 'Europe/London', venue: { name: 'Eastport Dome', town: 'Eastport', address: 'Gate B, Dome Road' }, message: 'Come and train with the U23s.', slots: [{ startsAt: base + 2 * H, endsAt: base + 4 * H, kind: 'training' }] }, maria.token, at(base));
   if (inv.status !== 201) throw new Error(`invite: ${inv.status} ${JSON.stringify(inv.body)}`);
@@ -318,7 +318,7 @@ const J = {};
   neg(avail.progress.possible === false && avail.progress.reason === 'transition', 'J2b progress is NOT possible from under_review — the lifecycle edge does not exist, and the decision does not invent it');
   const byHand = await lifecycle(J.RID, 'considerOffer');
   neg(expect(byHand, 409, 'LIFECYCLE_TRANSITION_INVALID'), 'J3 moving to offer_consideration BY HAND from under_review is refused');
-  // An advisory M17 recommendation first — the two kinds share one chain.
+  // An advisory (legacy-route) recommendation first — the two kinds share one chain.
   const adv = await j('POST', `/org/rooms/${J.RID}/decisions`, { recommendation: 'trial', reasonCodes: ['trial_needed'], note: S_ROOM, expectedRev: await caseRev(J.RID) }, maria.token);
   ok(adv.status === 201 || adv.status === 200, 'J4 a scout records an advisory recommendation ("trial") through the M17 route, with a club-private note');
   J.ADV = adv.body.decision.id;
@@ -329,7 +329,7 @@ const J = {};
   J.TID = tr.TID;
   ok(await stage(J.RID) === 'trial_completed', 'J6 the trial completed and the case is at trial_completed (P4B, untouched)');
   const byHand2 = await lifecycle(J.RID, 'considerOffer');
-  neg(expect(byHand2, 422, 'LIFECYCLE_EVIDENCE_REQUIRED') && byHand2.body.requires === 'decision_progress', 'J7 from trial_completed the edge exists, but moving BY HAND is refused: a finalized progress decision is the evidence (§56)');
+  neg(expect(byHand2, 422, 'LIFECYCLE_EVIDENCE_REQUIRED') && byHand2.body.requires === 'decision_progress', 'J7 from trial_completed the edge exists, but moving BY HAND is refused: a finalized progress decision is the evidence');
   neg(await stage(J.RID) === 'trial_completed', 'J7b and the case did not move');
   J.A1 = await assess(maria.token, 'pl-adeyemi', 'sign', S_ASSESS, { trialId: J.TID });
   J.A2 = await assess(tom.token, 'pl-adeyemi', 'monitor', 'Needs another look.');
@@ -677,7 +677,7 @@ section('B — a blocked family: progress is refused, a hold or a rejection may 
 }
 
 // ============================================================ C — concurrency
-section('C — the concurrency matrix (§92): one truth per case, whatever the order');
+section('C — the concurrency matrix: one truth per case, whatever the order');
 {
   const consistent = async (RID) => {
     const s = (await surface(RID)).body;
@@ -860,7 +860,7 @@ section('T — the subject removed their account: no new decision about a person
     neg(expect(await draft(gone, { outcome: 'hold' }), 409, 'DECISION_SUBJECT_REMOVED'), 'T2 opening a draft is refused as SUBJECT_REMOVED');
     const cur = (await surface(gone)).body;
     ok(cur.current === null || cur.current.kind === 'formal', 'T3 whatever was decided before the removal stays on record');
-    // §175: the decision record must not resurrect the removed player's PII.
+    // The decision record must not resurrect the removed player's PII.
     const leaverName = J.LEAVER_NAME;
     const jrGone = await journey(gone);
     const orgN = await notifs('/org/notifications', maria.token);

@@ -1,10 +1,8 @@
-// M12 F6 drill guidance and F8 development objectives (feedback → objectives → reassessment), moved out of
-// domains/scouting/journeys.mjs in S12a (docs/architecture/migration.md §4.4).
+// Drill guidance and development objectives (feedback → objectives → reassessment).
 //
-// S12a: objectives and drill reviews are rows of the development repository (repositories/development.mjs), written
-// by explicit operations inside a unit of work and read through SQL (developmentReads). Junk is refused with the field
-// named (400 FIELD_INVALID, EVIDENCE_INVALID, DATE_INVALID) where the old code coerced it or dropped it silently;
-// over-long objective, progress and outcome text is still shortened.
+// Objectives and drill reviews are rows of the development repository (repositories/development.mjs). Junk is
+// refused with the field named (400 FIELD_INVALID, EVIDENCE_INVALID, DATE_INVALID); over-long objective, progress
+// and outcome text is shortened.
 import { DEVELOPMENT_LIMITS as DL } from '../../repositories/development.mjs';
 import { parseDate } from './hub/shared.mjs';
 
@@ -53,7 +51,7 @@ export function registerObjectives(ctx) {
     return [...list];
   };
 
-  // Drill library guidance (F6): recording instructions + review status for
+  // Drill library guidance: recording instructions + review status for
   // the existing combine drills. Nothing is "professionally validated" unless
   // a named reviewer actually reviewed it — drills start unreviewed.
   const guidanceOf = (drillId, review) => ({
@@ -81,7 +79,7 @@ export function registerObjectives(ctx) {
     res.json({ guidance: guidanceOf(drill.id, review) });
   });
 
-  // ================================================================== F8
+  // ======================================================== objectives
   // Feedback → objectives → reassessment. Private assessments never leak
   // into objectives; only the published feedback record can seed one, and
   // sharing progress back is the player's (or guardian's) explicit choice.

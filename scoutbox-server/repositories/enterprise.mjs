@@ -1,21 +1,19 @@
 /**
- * S13b — enterprise as typed tables (migration `0035_enterprise`; docs/architecture/migration.md §4.5 S13;
- * sql/08_operations_integrations.sql).
+ * Enterprise: staff invites, SSO, support tickets and support access grants.
  *
  * Records:
- *   - A staff invite (F12): the emailed code is stored only as its sha-256 (`tokenHash`); the public accept looks the
+ *   - A staff invite: the emailed code is stored only as its sha-256 (`tokenHash`); the public accept looks the
  *     code up by its hash. Pending → accepted (naming the staff account it bound) | revoked | expired (written when an
  *     expired code is presented).
- *   - An SSO configuration (F12): at most one per organisation; only the local test identity provider can be named.
- *   - An SSO sign-in state (F12): the state and the nonce handed to the browser are stored only as hashes; single use.
- *   - A support ticket (F12): the records it references are ordered rows (`case` or `import`, by id, nothing copied);
+ *   - An SSO configuration: at most one per organisation; only the local test identity provider can be named.
+ *   - An SSO sign-in state: the state and the nonce handed to the browser are stored only as hashes; single use.
+ *   - A support ticket: the records it references are ordered rows (`case` or `import`, by id, nothing copied);
  *     Trust & Safety replies are ordered rows.
- *   - A support access grant (F12): requested by Trust & Safety, approved by a lead of the organisation for a number
+ *   - A support access grant: requested by Trust & Safety, approved by a lead of the organisation for a number
  *     of hours; every read under it is an ordered access-log row.
  *
- * WRITES are explicit operations; every write joins the open unit of work, the caller's transaction or its own.
- * READS are SQL: no mirror. Fresh, deep-frozen records; lists decode child rows in one batch. Modules receive the
- * queries as `enterpriseReads`.
+ * Every write joins the open unit of work, the caller's transaction or its own. Records are deep-frozen; lists decode
+ * child rows in one batch. Modules receive the queries as `enterpriseReads`.
  *
  * References. Organisations and the staff named are RESTRICT keys; so are the keys inside the domain (a grant's
  * ticket). Child rows cascade with their owner, except the access log, which is audit and RESTRICT.
@@ -246,7 +244,7 @@ function decodeGrants(sqlite, rows) {
   return rows.map((row) => ({ ...decode(GRANT_SPEC, row), accessLog: log.all(row.id).map((a) => ({ at: a.at, what: a.what })) }));
 }
 
-// ------------------------------------------------------------------ snapshot (fixtures and the persistence batteries)
+// ------------------------------------------------------------------ whole-domain read (the test suites)
 export const enterpriseLive = (sqlite) => migrationApplied(sqlite, ENTERPRISE_MIGRATION);
 function readAll(sqlite) {
   const all = (t) => sqlite.prepare(`SELECT * FROM ${t} ORDER BY rowid`).all();
@@ -258,7 +256,7 @@ function readAll(sqlite) {
     supportAccessGrants: decodeGrants(sqlite, all('support_access_grants')),
   };
 }
-/** The whole domain read back as plain records (`readAllRecords` in index.mjs: the test suites' read-back); null before its migration. */
+/** The whole domain read back as plain records (`readAllRecords` in index.mjs: the test suites' read-back). */
 export const ENTERPRISE_RECORDS = {
   names: ENTERPRISE_COLLECTIONS,
   read(sqlite) { return enterpriseLive(sqlite) ? readAll(sqlite) : null; },

@@ -1,4 +1,4 @@
-// M23 P8.1 LIVE — the hardened journey through the real Pro workspace, the
+// Live: the hardened journey through the real Pro workspace, the
 // real player app and the real agent app against a real server. The
 // exhaustive invariants live in
 // scoutbox-server/e2e/recruitment/journeyAdversarial.mjs; this suite
@@ -15,7 +15,7 @@
 //                        control closes by the server's `acceptsContact`
 //   L3  ENDS WHILE OPEN  the case is withdrawn under an open tab: the act
 //                        disappears (event); a cut-off tab catches up on
-//                        `pageshow` (the P8.1 app-level re-read)
+//                        `pageshow` (the app-level re-read)
 //   L4  ROLE LOSS        a presented package; Maria's role drops while her tab
 //                        is open; `pageshow` alone withdraws the act
 //   L5  OLD ROOM LINK    a colleague's Room link opened after the room was
@@ -25,7 +25,7 @@
 //                        accept control exists
 //   L7  AGENT REVOKED    Ana's client page shows the shared stage; the player
 //                        ends the representation; `pageshow` empties the line;
-//                        her bell row for the Offer offers no Open (D-P81-14)
+//                        her bell row for the Offer offers no Open
 //   L8  SECOND CASE      a second Room for a player whose case ended:
 //                        watching, no inherited stage or milestone; the
 //                        player's Opportunities shows no line for it
@@ -132,7 +132,7 @@ const bodyText = (page) => page.locator('body').innerText();
 async function waitText(page, re, ms = 15000) { for (let i = 0; i < ms / 250; i++) { if (re.test(await bodyText(page).catch(() => ''))) return true; await sleep(250); } return false; }
 async function waitAttr(loc, attr, re, ms = 15000) { for (let i = 0; i < ms / 250; i++) { const v = await loc.getAttribute(attr, { timeout: 1000 }).catch(() => null); if (v && re.test(v)) return v; await sleep(250); } return null; }
 async function waitCount(loc, n, ms = 15000) { for (let i = 0; i < ms / 250; i++) { if ((await loc.count().catch(() => -1)) === n) return true; await sleep(250); } return false; }
-/** The P8.1 app-level re-read: a tab coming back from the bfcache or a hidden state re-fetches everything. */
+/** The app-level re-read: a tab coming back from the bfcache or a hidden state re-fetches everything. */
 const pageshow = (page) => page.evaluate(() => { window.dispatchEvent(new Event('pageshow')); });
 
 // --------------------------------------------------------------- club helpers

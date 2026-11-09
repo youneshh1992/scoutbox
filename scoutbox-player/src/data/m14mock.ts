@@ -1,4 +1,4 @@
-// M14 demo mirror for the player app. Honesty rules match the live server:
+// Demo mirror for the player app. Honesty rules match the live server:
 // club badges name the verified fact and its provenance; one reference shows
 // the "verified when submitted" wording for a coach who has since moved on.
 import type { PlayerM14, OrgVerProfile, PlayerReference } from './m14client';

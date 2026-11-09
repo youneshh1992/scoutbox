@@ -1,10 +1,10 @@
-// M21 — Development Hub, player/guardian data surface.
+// Development Hub, player/guardian data surface.
 //
 // The server builds the whole plan projection: statuses, due states, target
 // states, evidence availability and completion counts all arrive derived. This
 // client sends intent and renders what comes back. It never computes a
 // percentage, never decides whether a target is met, and never marks evidence
-// verified — those are the four things §93 puts firmly on the server, and a
+// verified — those are the four things that belong firmly to the server, and a
 // client that recomputed any of them would eventually disagree with it.
 //
 // There is no Development Score in these types. There is no field one could be
@@ -179,7 +179,7 @@ const withChild = (a: DevActor, body: Record<string, unknown>) =>
 export interface PlayerM21 {
   catalogue(a: DevActor): Promise<DevelopmentCatalogue>;
   linkable(a: DevActor): Promise<{ items: LinkableEvidence[]; note: string }>;
-  /** The first page (newest change first); `nextCursor` continues it (S12a). */
+  /** The first page (newest change first); `nextCursor` continues it. */
   plans(a: DevActor): Promise<{ items: PlanListItem[]; total: number; nextCursor: string | null; note: string }>;
   plan(a: DevActor, id: string): Promise<DevelopmentPlanView>;
   createPlan(a: DevActor, body: Record<string, unknown>): Promise<DevelopmentPlanView>;

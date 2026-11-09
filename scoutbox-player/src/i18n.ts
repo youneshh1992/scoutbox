@@ -1,9 +1,9 @@
-// Player-app EN/FR catalogue for the M12 surfaces (F12D). French is
+// Player-app EN/FR catalogue. French is
 // machine-translated and labelled as such where the language is chosen;
 // the English originals live here permanently. Web builds persist the
 // choice; native storage would use AsyncStorage behind the same helper.
 const en = {
-  // ---- M23 P5.6C agent consent (multiple representation)
+  // ---- agent consent (multiple representation)
   m25title: 'Agent consent', m25aboutConsent: 'About this consent', m25intro: 'An agent who would act for more than one side of the same transaction needs your written consent first. You may decline, and declining changes nothing else about your relationship.',
   m25pending: 'Awaiting your answer', m25granted: 'You consented', m25declined: 'You declined', m25revoked: 'You revoked your consent',
   m25agency: 'Agency', m25licence: 'FIFA licence in ScoutBox', m25transaction: 'Transaction', m25alsoActingFor: 'They would also act for',
@@ -20,7 +20,7 @@ const en = {
   m25declinedNote: 'You declined this request. The agent would have to ask again for a new transaction.',
   m25revokedNote: 'You revoked this consent. The earlier consent stays in the record; it is not erased.',
   m25failed: 'That did not go through. Nothing was changed.', m25conflict: 'This changed since you loaded it. Reload and try again.',
-  // ---- M23 P5.6B My Agent
+  // ---- My Agent
   m24title: 'My Agent', m24intro: 'Nothing is active until you confirm it. You can end an active relationship at any time; the record stays in your history.',
   m24none: 'No agent has asked to represent you.', m24minor: 'Agent representation is not available for under-18 accounts in ScoutBox.',
   m24pending: 'Awaiting your answer', m24active: 'Active', m24declined: 'Declined', m24expired: 'Expired', m24disputed: 'Disputed', m24ended: 'Ended',
@@ -28,7 +28,7 @@ const en = {
   m24confirmed: 'Confirmed — active from now until the end date.', m24declinedMsg: 'Declined. The agent cannot ask again for 30 days.',
   m24endedMsg: 'Ended. Their access stops now; the record stays.', m24disputedMsg: 'Disputed. Their access is suspended. Attributed Trust & Safety review is not yet available in this build, so this cannot be resolved here yet.',
   m24share: 'Share status with the agency\u2019s staff', m24unshare: 'Stop sharing status with agency staff', m24shareNote: 'Sharing shows agency staff only that a relationship exists and its status — never your profile.',
-  // M23 P5.6E — what an agent may see, and what they have shared with you.
+  // What an agent may see, and what they have shared with you.
   m27dTitle: 'What this agent can see', m27dIntro: 'Three separate choices. Each one starts off, and confirming a relationship turns none of them on. You can turn any of them off again at any time.',
   m27dOn: 'On', m27dOff: 'Off', m27dTurnOn: 'Turn on', m27dTurnOff: 'Turn off',
   m27dPresence: 'Clubs may see that this agent represents you', m27dPresenceHelp: 'A club looking at your profile sees your agent\u2019s name, their agency, and whether ScoutBox has verified their licence. Never your agreement and never a fee.',
@@ -113,7 +113,7 @@ const en = {
   m15prov_scoutbox_reviewed: 'ScoutBox reviewed', m15prov_verified_coach_confirmed: 'Verified by coach',
   m15prov_verified_club_confirmed: 'Verified by club', m15prov_authoritative_registry: 'Registry verified',
   m15prov_box_cam_observed: 'Box Cam observed', m15prov_unknown: 'Source not classified',
-  // M24F.3 — the Passport root, one line each
+  // The Passport root, one line each
   m15verifiedRecord: 'Verified evidence record', m15currentClub: 'Current club', m15availability: 'Availability', m15evidence: 'Evidence',
   m15coverageWord: '{cov} coverage', m15conflictShort: 'Club record needs review', m15conflictLine: 'Current club differs from your submitted record',
   m15viewEvidence: 'View evidence', m15showAll: 'Show all {n}', m15source: 'Source', m15addAchievement: 'Add an achievement', m15about: 'About Passport',
@@ -150,7 +150,7 @@ const en = {
   m16state_verified: 'Box Cam Verified', m16state_partially_verified: 'Partially verified', m16state_unable_to_verify: 'Unable to verify', m16state_completed_unverified: 'Recorded, unverified', m16state_cancelled: 'Cancelled', m16state_invalidated: 'Invalidated',
   m16astate_assigned: 'Assigned', m16astate_accepted: 'Accepted', m16astate_scheduled: 'Scheduled', m16astate_in_progress: 'In progress', m16astate_completed: 'Completed', m16astate_partially_completed: 'Partially completed', m16astate_missed: 'Not done yet', m16astate_cancelled: 'Cancelled', m16astate_superseded: 'Updated',
   m16lastResult: 'Last result', m16accept: 'Accept',
-  // M16.1 — At-Home Combine
+  // At-Home Combine
   cmbTitle: 'At-Home Combine', cmbTagline: 'Record it. Prove it.', cmbSub: 'Real numbers. Real evidence. From anywhere.', cmbPoweredBy: 'Powered by Box Cam',
   cmbMyCombine: 'My Combine', cmbPersonalBests: 'Personal bests', cmbViewCard: 'View Combine Card', cmbHideCard: 'Hide Combine Card', cmbCombineCard: 'Combine Card',
   cmbNoResults: 'No verified result', cmbClubRequests: 'Club Combine', cmbRequestFrom: 'from', cmbDeadline: 'Deadline',
@@ -174,7 +174,7 @@ const en = {
   cmbClose: 'Close', cmbRetry: 'Retry', cmbLimitReached: 'You’ve used your verified attempts for this Combine. Practice attempts remain available.',
   cmbNoCamera: 'A Combine Attempt needs a camera. This device or browser cannot provide a live capture.', cmbCameraDenied: 'Camera permission is needed for a Combine Verified attempt.',
   cmbDone: 'Done',
-  // M16.2 — ScoutBox Trust Score. Evidence confidence only: never ability,
+  // ScoutBox Trust Score. Evidence confidence only: never ability,
   // talent, character or recruitment suitability. A low score means limited
   // evidence, and every missing item is phrased as an evidence gap.
   trsTitle: 'ScoutBox Trust Score', trsProfile: 'Trust Profile',
@@ -192,7 +192,7 @@ const en = {
   trsCombineSeparate: 'This is evidence confidence across your whole football record. It is not a Combine measurement and it is not a result on this card.',
   trsCombineVerifiedLine: 'This verified result can strengthen your Trust Profile because ScoutBox measured it using a standardized protocol.',
 
-  // ---------------------------------------------------------------- M21
+  // ---------------------------------------------------------------- Development Hub (m21*)
   // Development Hub. Note what is missing: there is no key for a progress
   // percentage, an overall figure or a rating, because no screen renders one.
   m21title: 'Development', m21goals: 'My goals', m21reviews: 'Reviews',
@@ -238,7 +238,7 @@ const en = {
   m21rev_player_reflection: 'Player reflection', m21rev_guardian_reflection: 'Guardian reflection',
   m21rev_coach_review: 'Coach review',
 
-  // ---------------------------------------------------------------- M22
+  // ---------------------------------------------------------------- Box Cam CV (m22*)
   // Box Cam CV. Two facts must land together: observation is available, and
   // Combine verification is not yet. The second is a neutral, explained state
   // and never an error.
@@ -299,9 +299,9 @@ const en = {
   m22reason_INSUFFICIENT_LIGHT: 'There is not enough light.',
   m22reason_UNSUPPORTED_PROTOCOL: 'This activity is not supported yet.',
 
-  // M23 P2.5 — navigation. Tab titles and page tabs were string literals.
-  // M24C — the approved Player screens (Home, Football Passport, Box Cam, Messages).
-  // M24F.4 — Home, Activity, Development, Box Cam, Combine, Passport root labels
+  // Navigation: tab titles and page tabs.
+  // The approved Player screens (Home, Football Passport, Box Cam, Messages).
+  // Home, Activity, Development, Box Cam, Combine, Passport root labels
   homeNext: 'Next', homeRecent: 'Recent', homeViewAllActivity: 'View all activity', homeJoined: 'Joined {when}', homeClubsWithinReach: 'Clubs within reach', homeClubsWithinOne: '1 club within 50 km', homeClubsWithinMany: '{n} clubs within 50 km', homeNoActivity: 'No activity yet.', homeNothingNext: 'Nothing waiting on you', homeExploreClubs: 'Explore clubs',
   activityTitle: 'Activity', activityToday: 'Today', activityThisWeek: 'This week', activityEarlier: 'Earlier', activityThisWeekDigest: 'This week',
   devCurrentFocus: 'Current focus', devLatestFeedback: 'Latest feedback', devProgress: 'Progress', devActiveGoal: '1 active goal', devActiveGoals: '{n} active goals', devHistory: 'History', devEntries: '{n} entries', devNone: 'None yet', devGoalsTitle: 'Goals', devBack: 'Development',
@@ -323,7 +323,7 @@ const en = {
   chatAccepted: 'Accepted conversation · Report or block anytime', chatToday: 'Today', chatRead: 'Read', chatSent: 'Sent', chatYou: 'You', chatWrite: 'Message…', chatSend: 'Send',
     chatAttach: 'Attach a clip', chatOpen: 'Open', chatBack: 'Back', chatMessages: 'messages', chatTyping: 'is typing…', chatSayHello: 'The thread is open — say hello.', chatNotDelivered: 'not delivered', chatRetry: 'Retry', chatSending: 'sending…', chatModerated: 'on-platform, moderated, logged',
   tabHome: 'Home', tabFootball: 'Football', tabOpportunities: 'Explore', tabInbox: 'Messages', tabUpdates: 'Updates', tabYou: 'You',
-  // M24F.3 — the conversation-first Inbox
+  // The conversation-first Inbox
   chatSafetyLine: 'On-platform · moderated', chatClip: 'Sent a clip', chatReport: 'Sent a trial report',
   inboxShortcuts: 'Conversation shortcuts', inboxYourProfile: 'Your profile', inboxSearch: 'Search conversations', inboxCloseSearch: 'Close search', inboxClearSearch: 'Clear search', inboxFilter: 'Filter conversations', inboxNoMatches: 'No matching conversations',
   inboxAll: 'All', inboxUnread: 'Unread', inboxRequests: 'Requests',
@@ -357,7 +357,7 @@ const en = {
   addEvidence: '+ Add evidence', back: 'Back', sectionsOf: 'Sections of this page',
   footballHint: 'Your football record — what clubs see, and what you are working on.',
   opportunitiesHint: 'Everything you can pursue, and everything a club has offered you.',
-  // M24B — the recruitment experience as category → subcategory.
+  // The recruitment experience as category → subcategory.
   caseAreas: 'Areas of your recruitment', catJourney: 'My journey', catContact: 'Club contact', catTrial: 'Trial', catOffer: 'Offer', catSigning: 'Signing', catBoard: 'Board',
   subOverview: 'Overview', subStage: 'Current stage', subTasks: 'Tasks', subActivity: 'Activity', subMessages: 'Messages', subContact: 'Contact', subInvitation: 'Invitation', subSchedule: 'Schedule', subDetails: 'Details', subOffer: 'Offer', subDocuments: 'Documents', subResponse: 'Response', subSigning: 'Signing', subContract: 'Contract', subBoard: 'Open roles', subFit: 'Fit check', subInvites: 'Squad invites', subFollowUps: 'Follow-ups',
   jnNone: 'No club has put anything in front of you yet.', jnSharedTitle: 'Shared with you by this club', jnShared_contact_request: 'contact request', jnShared_trial: 'trial', jnShared_offer: 'Offer', jnShared_signing: 'signing',
@@ -366,14 +366,14 @@ const en = {
   ctxMessagesTitle: 'Messages', ctxMessagesNone: 'No conversation yet. Accept a request in your Inbox and the thread opens there.', ctxMessagesCount: 'messages', ctxMinorMessages: 'Clubs talk to your parent or guardian; the outcome shows in Updates.',
   offerNoDocuments: 'No document on this Offer.', offerAwaitingYou: 'Awaiting your answer — answer it under Offer.', signingNoneYet: 'Nothing to sign right now.', signingContractNone: 'This document names no contract days.',
 
-  // M23 P3 — Contact response (the answer to a club's contact belongs to that contact)
+  // Contact response (the answer to a club's contact belongs to that contact)
   ctReply: 'Your reply (optional)',
   ctReplyHint: 'A short note back to the club — up to 500 characters.',
   ctReplyNote: 'Your reply goes with your answer and is recorded against this contact. No phone numbers, emails or links.',
   ctAccept: 'Accept contact',
   ctAcceptGuardian: 'Accept conversation',
   ctRespondedAccepted: 'You accepted. The club sees your answer on the contact it sent — and can now talk to you here, on-platform.',
-  // M23 P4B — the Trial workflow, family side.
+  // The Trial workflow, family side.
   trialWf: 'Your trials', trialWfHint: 'What has been agreed, session by session. Nothing here is a judgement about you.',
   trialWfState_legacy_accepted: 'Accepted', trialWfState_accepted: 'Accepted — schedule to be confirmed', trialWfState_scheduled: 'Scheduled', trialWfState_completed: 'Completed', trialWfState_cancelled: 'Cancelled',
   trialWfAwaiting: 'The club proposed times — please confirm or decline', trialWfConfirm: 'Confirm the schedule', trialWfDeclineSchedule: 'Decline these times', trialWfCancel: 'Cancel this trial',
@@ -384,7 +384,7 @@ const en = {
   trialSlotPick: 'Pick the date that works — accepting it confirms the trial:', trialSlotPickGuardian: 'Pick the date that works for your family — accepting it confirms the trial:', trialAccepted: 'Trial accepted — the exact address and instructions are now under Opportunities › Your trials.',
   trialAcceptedGuardian: 'Trial accepted — the exact address and instructions are now under Your trials below.',
   ctRespondedDeclined: 'You declined. The club sees only that, and nothing more.',
-  // M23 P6 — the Offer, the recipient's side. Accepting is not a signing.
+  // The Offer, the recipient's side. Accepting is not a signing.
   offersTitle: 'Offers', offersHint: 'A club’s proposal, exactly as it issued it. Read the revision, the expiry and any documents. Accepting or declining is your own act — and accepting is not a signing.',
   offersNone: 'No Offers right now. An Offer appears here when a club issues one to you.',
   offersGuardianHint: 'Offers addressed to you as the guardian appear here. In this build no Offer is issued to a player under the age of majority, so this stays empty.',
@@ -405,10 +405,10 @@ const en = {
   offerAgentShare: 'Share with my agent', offerAgentUnshare: 'Stop sharing with my agent', offerAgentShared: 'Shared with your agent (read-only).', offerAgentShareHint: 'Your agent can read the terms and the status. They cannot answer for you.',
   offerHistory: 'History', offerOlderRevisions: 'Earlier revisions',
   offerKicker: 'Offer', offerViewTerms: 'View terms', offerNotSignature: 'Offer acceptance is not a signature.', offerStatus: 'Status', offerSharing: 'Agent sharing',
-  // M23 P7 — signing
+  // Signing
   signingTitle: 'Signing', signingHint: 'A document a club presented to you for signing, exactly as presented. Confirming records your own signature on that exact document. Nothing is signed until every required party has confirmed and the club completes the signing.',
   signingSt_DRAFT: 'Draft', signingSt_READY: 'Presented — awaiting signatures', signingSt_IN_PROGRESS: 'In progress — some signatures recorded', signingSt_COMPLETED: 'Signing completed', signingSt_CANCELLED: 'Cancelled', signingSt_VOIDED: 'Voided', signingSt_EXPIRED: 'Expired — not completed in time', signingSt_SUPERSEDED: 'Superseded by a newer revision',
-  // M23 P8 — the recipient's journey line per club.
+  // The recipient's journey line per club.
   jnTitle: 'Your recruitment with clubs', jnHint: 'Only what a club has put in front of you — a contact, a trial, an Offer, a signing. Nothing about a club\u2019s internal shortlist ever appears here.', jnClub: 'A club', jnNothingToDo: 'Nothing for you to do right now.', jnLast: 'Latest:',
   jnSt_contacted: 'Contacted you', jnSt_trial_invited: 'Trial invitation', jnSt_trial_scheduled: 'Trial scheduled', jnSt_trial_completed: 'Trial completed', jnSt_offer_received: 'Offer received', jnSt_offer_accepted: 'Offer accepted \u2014 signing pending', jnSt_offer_declined: 'Offer declined', jnSt_signing: 'Signing in progress', jnSt_signed: 'Signed', jnSt_none: 'In touch',
   jnNext_RESPOND_TO_CONTACT: 'Answer the club\u2019s message in your Inbox.', jnNext_RESPOND_TO_TRIAL_INVITATION: 'Answer the trial invitation in your Inbox.', jnNext_CONFIRM_TRIAL_SCHEDULE: 'Confirm or decline the proposed trial schedule.', jnNext_RESPOND_TO_OFFER: 'Read the Offer and give your answer.', jnNext_SIGN: 'Read the presented document and record your signature.', jnNext_NONE: '',
@@ -440,7 +440,7 @@ const en = {
   offerErr_OFFER_RECIPIENT_INVALID: 'This Offer is not yours to answer.', offerErr_OFFER_NOT_FOUND: 'This Offer is not available.', offerErr_OFFER_LIFECYCLE_CONFLICT: 'The club has paused or ended this case; the Offer cannot be answered right now.',
   offerErr_OFFER_INPUT_INVALID: 'Something in the request was not right. Reload and try again.', offerErr_OFFER_NOT_PERMITTED: 'Only an adult client can share an Offer with an agent.', offerErr_RATE_LIMITED: 'Too many attempts. Wait a little and try again.',
   ctGuardianNote: 'This contact was routed to you because the player is under age. The club sees your answer, never your child’s.',
-  // ---- M23 P5.6D transaction workspace (the individual's side)
+  // ---- transaction workspace (the individual's side)
   m26details: 'Details',
   gSec_evidence: 'Evidence passport', gSec_board: 'Opportunity board', gSec_campaigns: 'Club assessment campaigns', gSec_feedback: 'Feedback & objectives', gSec_preferences: 'Suitability preferences', gSec_fit: 'Opportunity fit', gSec_transition: 'Club transition', gSec_references: 'Coach references', gSec_development: 'Development plan', gSec_boxcam: 'Box Cam', gSec_passport: 'Football Passport', gSec_invite: 'Squad invite code',
   m26title: 'My transactions', m26intro: 'A transaction is a shared workspace between you, your agent and the clubs. You see what you are party to and what has been shared with you \u2014 never a club\u2019s private notes, and never a fee.',
@@ -465,7 +465,7 @@ const en = {
   m26action_transaction_terms_recorded: 'Terms recorded', m26action_transaction_message_linked: 'Conversation linked',
 };
 const fr: typeof en = {
-  // ---- M23 P5.6C consentement agent (FR)
+  // ---- consentement agent (FR)
   m25title: 'Consentement \u00e0 l\u2019agent', m25aboutConsent: '\u00c0 propos de ce consentement', m25intro: 'Un agent qui agirait pour plus d\u2019une partie \u00e0 la m\u00eame transaction a d\u2019abord besoin de votre consentement \u00e9crit. Vous pouvez refuser, et un refus ne change rien d\u2019autre \u00e0 votre relation.',
   m25pending: 'En attente de votre r\u00e9ponse', m25granted: 'Vous avez consenti', m25declined: 'Vous avez refus\u00e9', m25revoked: 'Vous avez r\u00e9voqu\u00e9 votre consentement',
   m25agency: 'Agence', m25licence: 'Licence FIFA dans ScoutBox', m25transaction: 'Transaction', m25alsoActingFor: 'Il agirait aussi pour',
@@ -482,7 +482,7 @@ const fr: typeof en = {
   m25declinedNote: 'Vous avez refus\u00e9 cette demande. L\u2019agent devrait redemander pour une nouvelle transaction.',
   m25revokedNote: 'Vous avez r\u00e9voqu\u00e9 ce consentement. Le consentement ant\u00e9rieur reste dans le registre ; il n\u2019est pas effac\u00e9.',
   m25failed: 'Cela n\u2019a pas abouti. Rien n\u2019a \u00e9t\u00e9 modifi\u00e9.', m25conflict: 'Cela a chang\u00e9 depuis le chargement. Rechargez et r\u00e9essayez.',
-  // ---- M23 P5.6B Mon agent (FR)
+  // ---- Mon agent (FR)
   m24title: 'Mon agent', m24intro: 'Rien n\u2019est actif tant que vous ne l\u2019avez pas confirm\u00e9. Vous pouvez mettre fin \u00e0 une relation active \u00e0 tout moment ; l\u2019enregistrement reste dans votre historique.',
   m24none: 'Aucun agent n\u2019a demand\u00e9 \u00e0 vous repr\u00e9senter.', m24minor: 'La repr\u00e9sentation par un agent n\u2019est pas disponible pour les comptes de moins de 18 ans dans ScoutBox.',
   m24pending: 'En attente de votre r\u00e9ponse', m24active: 'Active', m24declined: 'Refus\u00e9e', m24expired: 'Expir\u00e9e', m24disputed: 'Contest\u00e9e', m24ended: 'Termin\u00e9e',
@@ -490,7 +490,7 @@ const fr: typeof en = {
   m24confirmed: 'Confirm\u00e9e \u2014 active d\u00e8s maintenant jusqu\u2019\u00e0 la date de fin.', m24declinedMsg: 'Refus\u00e9e. L\u2019agent ne peut pas redemander pendant 30 jours.',
   m24endedMsg: 'Termin\u00e9e. Son acc\u00e8s s\u2019arr\u00eate maintenant ; l\u2019enregistrement reste.', m24disputedMsg: 'Contest\u00e9e. Son acc\u00e8s est suspendu. La revue attribu\u00e9e par Trust & Safety n\u2019est pas encore disponible dans cette version ; cela ne peut donc pas encore \u00eatre r\u00e9solu ici.',
   m24share: 'Partager le statut avec le personnel de l\u2019agence', m24unshare: 'Ne plus partager le statut avec le personnel de l\u2019agence', m24shareNote: 'Le partage montre au personnel de l\u2019agence seulement qu\u2019une relation existe et son statut \u2014 jamais votre profil.',
-  // M23 P5.6E
+  // What an agent may see (FR)
   m27dTitle: 'Ce que cet agent peut voir', m27dIntro: 'Trois choix distincts. Chacun commence d\u00e9sactiv\u00e9, et confirmer une relation n\u2019en active aucun. Vous pouvez d\u00e9sactiver n\u2019importe lequel \u00e0 tout moment.',
   m27dOn: 'Activ\u00e9', m27dOff: 'D\u00e9sactiv\u00e9', m27dTurnOn: 'Activer', m27dTurnOff: 'D\u00e9sactiver',
   m27dPresence: 'Les clubs peuvent voir que cet agent vous repr\u00e9sente', m27dPresenceHelp: 'Un club qui consulte votre profil voit le nom de votre agent, son agence et si ScoutBox a v\u00e9rifi\u00e9 sa licence. Jamais votre accord et jamais d\u2019honoraires.',
@@ -611,7 +611,7 @@ const fr: typeof en = {
   m16state_verified: 'V\u00e9rifi\u00e9 Box Cam', m16state_partially_verified: 'Partiellement v\u00e9rifi\u00e9', m16state_unable_to_verify: 'V\u00e9rification impossible', m16state_completed_unverified: 'Enregistr\u00e9, non v\u00e9rifi\u00e9', m16state_cancelled: 'Annul\u00e9', m16state_invalidated: 'Invalid\u00e9',
   m16astate_assigned: 'Assign\u00e9', m16astate_accepted: 'Accept\u00e9', m16astate_scheduled: 'Planifi\u00e9', m16astate_in_progress: 'En cours', m16astate_completed: 'Termin\u00e9', m16astate_partially_completed: 'Partiellement termin\u00e9', m16astate_missed: 'Pas encore fait', m16astate_cancelled: 'Annul\u00e9', m16astate_superseded: 'Mis \u00e0 jour',
   m16lastResult: 'Dernier r\u00e9sultat', m16accept: 'Accepter',
-  // M16.1 \u2014 At-Home Combine
+  // At-Home Combine
   cmbTitle: 'At-Home Combine', cmbTagline: 'Record it. Prove it.', cmbSub: 'Des chiffres r\u00e9els. Des preuves r\u00e9elles. De partout.', cmbPoweredBy: 'Propuls\u00e9 par Box Cam',
   cmbMyCombine: 'Mon Combine', cmbPersonalBests: 'Records personnels', cmbViewCard: 'Voir la Combine Card', cmbHideCard: 'Masquer la Combine Card', cmbCombineCard: 'Combine Card',
   cmbNoResults: 'Aucun r\u00e9sultat v\u00e9rifi\u00e9', cmbClubRequests: 'Club Combine', cmbRequestFrom: 'de', cmbDeadline: '\u00c9ch\u00e9ance',
@@ -635,7 +635,7 @@ const fr: typeof en = {
   cmbClose: 'Fermer', cmbRetry: 'R\u00e9essayer', cmbLimitReached: 'Vous avez utilis\u00e9 vos tentatives v\u00e9rifi\u00e9es pour ce Combine. Les tentatives d\u2019entra\u00eenement restent disponibles.',
   cmbNoCamera: 'Un Combine Attempt n\u00e9cessite une cam\u00e9ra. Cet appareil ou navigateur ne permet pas de capture live.', cmbCameraDenied: 'L\u2019autorisation cam\u00e9ra est n\u00e9cessaire pour un Combine Verified.',
   cmbDone: 'Termin\u00e9',
-  // M16.2 \u2014 ScoutBox Trust Score
+  // ScoutBox Trust Score
   trsTitle: 'ScoutBox Trust Score', trsProfile: 'Profil de confiance',
   trsDisclaimer: 'Le ScoutBox Trust Score refl\u00e8te la v\u00e9rification et la confiance dans les preuves \u2014 pas les qualit\u00e9s footballistiques ni l\u2019int\u00e9r\u00eat pour un recrutement.',
   trsWhy: 'Pourquoi ce score\u00a0?', trsHide: 'Masquer', trsLoading: 'Chargement de votre Trust Profile\u2026',
@@ -651,7 +651,7 @@ const fr: typeof en = {
   trsCombineSeparate: 'Il s\u2019agit de la confiance dans les preuves de tout votre dossier football. Ce n\u2019est pas une mesure Combine ni un r\u00e9sultat de cette carte.',
   trsCombineVerifiedLine: 'Ce r\u00e9sultat v\u00e9rifi\u00e9 peut renforcer votre Trust Profile parce que ScoutBox l\u2019a mesur\u00e9 avec un protocole standardis\u00e9.',
 
-  // ---------------------------------------------------------------- M21
+  // ---------------------------------------------------------------- Development Hub (m21*)
   m21title: 'D\u00e9veloppement', m21goals: 'Mes objectifs', m21reviews: 'Bilans',
   m21evidence: 'Preuves li\u00e9es', m21linkEvidence: 'Lier une preuve', m21link: 'Lier', m21nothingToLink: 'Rien \u00e0 lier pour l\u2019instant.', m21loading: 'Chargement de votre plan de d\u00e9veloppement\u2026',
   m21loadError: 'Votre plan de d\u00e9veloppement n\u2019a pas pu \u00eatre charg\u00e9.', m21retry: 'R\u00e9essayer',
@@ -694,7 +694,7 @@ const fr: typeof en = {
   m21rev_player_reflection: 'R\u00e9flexion du joueur', m21rev_guardian_reflection: 'R\u00e9flexion du tuteur',
   m21rev_coach_review: 'Bilan d\u2019entra\u00eeneur',
 
-  // ---------------------------------------------------------------- M22
+  // ---------------------------------------------------------------- Box Cam CV (m22*)
   m22startObservation: 'Observation Box Cam (en direct)',
   m22title: 'Observation Box Cam',
   m22whatThisIs: 'Box Cam utilise la vision par ordinateur c\u00f4t\u00e9 serveur pour observer les activit\u00e9s prises en charge.',
@@ -814,7 +814,7 @@ const fr: typeof en = {
   ctxMessagesTitle: 'Messages', ctxMessagesNone: 'Aucune conversation pour l’instant. Acceptez une demande dans votre messagerie et le fil s’y ouvre.', ctxMessagesCount: 'messages', ctxMinorMessages: 'Les clubs parlent à votre parent ou tuteur ; le résultat apparaît dans Mises à jour.',
   offerNoDocuments: 'Aucun document sur cette Offre.', offerAwaitingYou: 'En attente de votre réponse — répondez sous Offre.', signingNoneYet: 'Rien à signer pour l’instant.', signingContractNone: 'Ce document ne nomme aucune date de contrat.',
 
-  // M23 P3 \u2014 R\u00e9ponse \u00e0 un contact
+  // R\u00e9ponse \u00e0 un contact
   ctReply: 'Votre r\u00e9ponse (facultative)',
   ctReplyHint: 'Un court mot pour le club \u2014 500 caract\u00e8res maximum.',
   ctReplyNote: 'Votre r\u00e9ponse accompagne votre d\u00e9cision et est consign\u00e9e sur ce contact. Pas de num\u00e9ro, d\u2019e-mail ni de lien.',
@@ -831,7 +831,7 @@ const fr: typeof en = {
   trialSlotPick: 'Choisissez la date qui convient — l’accepter confirme l’essai :', trialSlotPickGuardian: 'Choisissez la date qui convient à votre famille — l’accepter confirme l’essai :', trialAccepted: 'Essai accepté — l’adresse exacte et les consignes sont maintenant sous Opportunités › Vos essais.',
   trialAcceptedGuardian: 'Essai accepté — l’adresse exacte et les consignes sont maintenant sous Vos essais ci-dessous.',
   ctRespondedDeclined: 'Vous avez refus\u00e9. Le club ne voit que cela, rien de plus.',
-  // M23 P6 — l’Offre, côté destinataire. Accepter n’est pas signer.
+  // L’Offre, côté destinataire. Accepter n’est pas signer.
   offersTitle: 'Offres', offersHint: 'La proposition d’un club, exactement telle qu’il l’a émise. Lisez la révision, l’expiration et les documents. Accepter ou refuser est votre propre acte — et accepter n’est pas signer.',
   offersNone: 'Aucune Offre pour le moment. Une Offre apparaît ici quand un club vous en émet une.',
   offersGuardianHint: 'Les Offres qui vous sont adressées en tant que tuteur apparaissent ici. Dans cette version, aucune Offre n’est émise à un joueur mineur ; cela reste donc vide.',
@@ -852,10 +852,10 @@ const fr: typeof en = {
   offerAgentShare: 'Partager avec mon agent', offerAgentUnshare: 'Ne plus partager avec mon agent', offerAgentShared: 'Partagée avec votre agent (lecture seule).', offerAgentShareHint: 'Votre agent peut lire les conditions et le statut. Il ne peut pas répondre à votre place.',
   offerHistory: 'Historique', offerOlderRevisions: 'Révisions antérieures',
   offerKicker: 'Offre', offerViewTerms: 'Voir les conditions', offerNotSignature: 'Accepter une Offre n’est pas une signature.', offerStatus: 'Statut', offerSharing: 'Partage avec l’agent',
-  // M23 P7 — signature
+  // Signature
   signingTitle: 'Signature', signingHint: 'Un document qu’un club vous a présenté pour signature, tel qu’il a été présenté. Confirmer enregistre votre propre signature sur ce document exact. Rien n’est signé tant que chaque partie requise n’a pas confirmé et que le club n’a pas complété la signature.',
   signingSt_DRAFT: 'Brouillon', signingSt_READY: 'Présentée — en attente des signatures', signingSt_IN_PROGRESS: 'En cours — certaines signatures enregistrées', signingSt_COMPLETED: 'Signature complétée', signingSt_CANCELLED: 'Annulée', signingSt_VOIDED: 'Invalidée', signingSt_EXPIRED: 'Expirée — non complétée à temps', signingSt_SUPERSEDED: 'Remplacée par une révision plus récente',
-  // M23 P8 — la ligne de parcours par club.
+  // La ligne de parcours par club.
   jnTitle: 'Votre recrutement avec les clubs', jnHint: 'Uniquement ce qu\u2019un club vous a présenté — un contact, un essai, une Offre, une signature. Rien de la présélection interne d\u2019un club n\u2019apparaît ici.', jnClub: 'Un club', jnNothingToDo: 'Rien à faire pour l\u2019instant.', jnLast: 'Dernier :',
   jnSt_contacted: 'Vous a contacté', jnSt_trial_invited: 'Invitation à un essai', jnSt_trial_scheduled: 'Essai programmé', jnSt_trial_completed: 'Essai terminé', jnSt_offer_received: 'Offre reçue', jnSt_offer_accepted: 'Offre acceptée \u2014 signature en attente', jnSt_offer_declined: 'Offre refusée', jnSt_signing: 'Signature en cours', jnSt_signed: 'Signé', jnSt_none: 'En contact',
   jnNext_RESPOND_TO_CONTACT: 'Répondez au message du club dans vos Messages.', jnNext_RESPOND_TO_TRIAL_INVITATION: 'Répondez à l\u2019invitation d\u2019essai dans vos Messages.', jnNext_CONFIRM_TRIAL_SCHEDULE: 'Confirmez ou refusez l\u2019horaire d\u2019essai proposé.', jnNext_RESPOND_TO_OFFER: 'Lisez l\u2019Offre et donnez votre réponse.', jnNext_SIGN: 'Lisez le document présenté et enregistrez votre signature.', jnNext_NONE: '',
@@ -887,7 +887,7 @@ const fr: typeof en = {
   offerErr_OFFER_RECIPIENT_INVALID: 'Cette Offre n’est pas à vous d’y répondre.', offerErr_OFFER_NOT_FOUND: 'Cette Offre n’est pas disponible.', offerErr_OFFER_LIFECYCLE_CONFLICT: 'Le club a suspendu ou clos ce dossier ; l’Offre ne peut pas recevoir de réponse pour le moment.',
   offerErr_OFFER_INPUT_INVALID: 'Quelque chose n’allait pas dans la demande. Rechargez et réessayez.', offerErr_OFFER_NOT_PERMITTED: 'Seul un client adulte peut partager une Offre avec un agent.', offerErr_RATE_LIMITED: 'Trop de tentatives. Patientez un peu et réessayez.',
   ctGuardianNote: 'Ce contact vous a \u00e9t\u00e9 adress\u00e9 parce que le joueur est mineur. Le club voit votre r\u00e9ponse, jamais celle de votre enfant.',
-  // ---- M23 P5.6D espace de transaction (c\u00f4t\u00e9 de la personne, FR)
+  // ---- espace de transaction (c\u00f4t\u00e9 de la personne, FR)
   m26details: 'D\u00e9tails',
   gSec_evidence: 'Passeport de preuves', gSec_board: 'Tableau des opportunit\u00e9s', gSec_campaigns: '\u00c9valuations du club', gSec_feedback: 'Retours et objectifs', gSec_preferences: 'Pr\u00e9f\u00e9rences', gSec_fit: 'Ad\u00e9quation', gSec_transition: 'Changement de club', gSec_references: 'R\u00e9f\u00e9rences d\u2019entra\u00eeneurs', gSec_development: 'Plan de d\u00e9veloppement', gSec_boxcam: 'Box Cam', gSec_passport: 'Football Passport', gSec_invite: 'Code d\u2019invitation',
   m26title: 'Mes transactions', m26intro: 'Une transaction est un espace partag\u00e9 entre vous, votre agent et les clubs. Vous voyez ce dont vous \u00eates partie et ce qui vous a \u00e9t\u00e9 partag\u00e9 \u2014 jamais les notes priv\u00e9es d\u2019un club, ni aucune commission.',
@@ -928,7 +928,7 @@ export const pt = (key: keyof typeof en): string => (getPLang() === 'fr' ? fr : 
 export const pFmtDate = (ts: number | string) =>
   new Date(ts).toLocaleDateString(getPLang() === 'fr' ? 'fr-FR' : 'en-GB', { day: 'numeric', month: 'short' });
 
-// Data-saver preference (F12B): user-controlled video loading.
+// Data-saver preference: user-controlled video loading.
 const DS_KEY = 'sb-data-saver';
 export function getDataSaver(): boolean {
   try { return typeof localStorage !== 'undefined' && localStorage.getItem(DS_KEY) === '1'; } catch { return false; }

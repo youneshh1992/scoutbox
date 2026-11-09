@@ -1,4 +1,4 @@
-// M18.2 — destructive actions say what they actually do.
+// Destructive actions say what they actually do.
 //
 // Every action that removes, archives, invalidates or tombstones something
 // goes through here with a CLASS, and the class decides both whether a
@@ -45,13 +45,13 @@ export const DESTRUCTIVE_ACTIONS: Record<string, DestructiveAction> = {
   closeRoom: { titleKey: 'confirm.closeRoom', bodyKey: 'confirm.closeRoomBody', cls: 'archive' },
   deleteComment: { titleKey: 'confirm.deleteComment', bodyKey: 'confirm.deleteCommentBody', cls: 'tombstone' },
   cancelTrial: { titleKey: 'confirm.cancelTrial', bodyKey: 'confirm.cancelTrialBody', cls: 'archive' },
-  // M23 P5 — a formal decision is not destructive, but it is the club's recruitment act and is confirmed like one: the copy says what it records and what it does not (no offer, nothing sent).
+  // A formal decision is not destructive, but it is the club's recruitment act and is confirmed like one: the copy says what it records and what it does not (no offer, nothing sent).
   finalizeDecision: { titleKey: 'confirm.finalizeDecision', bodyKey: 'confirm.finalizeDecisionBody', cls: 'irreversible' },
   discardDecisionDraft: { titleKey: 'confirm.discardDecisionDraft', bodyKey: 'confirm.discardDecisionDraftBody', cls: 'tombstone' },
-  // M23 P6 — issuing an Offer is the club's outward act: an exact revision reaches a person and cannot be edited afterwards; withdrawing closes it.
+  // Issuing an Offer is the club's outward act: an exact revision reaches a person and cannot be edited afterwards; withdrawing closes it.
   issueOffer: { titleKey: 'confirm.issueOffer', bodyKey: 'confirm.issueOfferBody', cls: 'irreversible' },
   withdrawOffer: { titleKey: 'confirm.withdrawOffer', bodyKey: 'confirm.withdrawOfferBody', cls: 'archive' },
-  // M23 P7 — signing acts. Presenting and completing are irreversible facts on the record.
+  // Signing acts. Presenting and completing are irreversible facts on the record.
   presentSigning: { titleKey: 'confirm.presentSigning', bodyKey: 'confirm.presentSigningBody', cls: 'irreversible' },
   clubSignSigning: { titleKey: 'confirm.clubSignSigning', bodyKey: 'confirm.clubSignSigningBody', cls: 'irreversible' },
   completeSigning: { titleKey: 'confirm.completeSigning', bodyKey: 'confirm.completeSigningBody', cls: 'irreversible' },
@@ -65,7 +65,7 @@ export const DESTRUCTIVE_ACTIONS: Record<string, DestructiveAction> = {
   removeStaff: { titleKey: 'confirm.removeStaff', bodyKey: 'confirm.removeStaffBody', cls: 'irreversible' },
   recordSigning: { titleKey: 'confirm.recordSigning', bodyKey: 'confirm.recordSigningBody', cls: 'irreversible' },
   dismissSecondLook: { titleKey: 'confirm.dismissSecondLook', bodyKey: 'confirm.dismissSecondLookBody', cls: 'reversible' },
-  // M19 — archiving a Dynamic Watchlist stops membership being maintained and
+  // Archiving a Dynamic Watchlist stops membership being maintained and
   // is not reopened; pausing only stops the change notifications.
   archiveWatchlist: { titleKey: 'confirm.archiveWatchlist', bodyKey: 'confirm.archiveWatchlistBody', cls: 'archive' },
   pauseWatchlist: { titleKey: 'confirm.pauseWatchlist', bodyKey: 'confirm.pauseWatchlistBody', cls: 'reversible' },

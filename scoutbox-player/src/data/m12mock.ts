@@ -1,4 +1,4 @@
-// Demo mirror of the M12 player/guardian surface (EXPO_PUBLIC_DEMO=1).
+// Demo mirror of the m12client player/guardian surface (EXPO_PUBLIC_DEMO=1).
 // Realistic synthetic fixtures for every feature; in-memory only.
 import type {
   PlayerM12, PassportView, FeedbackItem, ObjectiveRec, BoardItem, ApplicationRec,
@@ -105,7 +105,7 @@ function pack(t: FamilyTrial, forGuardian: boolean): SafetyPack {
 }
 
 
-// ---- M23 P6 — an issued Offer (demo). The club's exact revision; accepting is not a signing.
+// ---- an issued Offer (demo). The club's exact revision; accepting is not a signing.
 const OFFER_LABELS: Record<string, string> = { DRAFT: 'Draft — not issued', ISSUED: 'Issued — awaiting response', ACCEPTED: 'Offer accepted — signing pending', DECLINED: 'Declined by the recipient', WITHDRAWN: 'Withdrawn by the club', EXPIRED: 'Expired', SUPERSEDED: 'Superseded by a later revision' };
 const OFFERS: FamilyOffer[] = [{
   id: 'rof-demo-1', playerId: 'pl-adeyemi', playerName: 'Kola Adeyemi', club: { id: 'org-eastport', name: 'Eastport FC' }, type: 'direct_recruitment', status: 'ISSUED', statusLabel: OFFER_LABELS.ISSUED,
@@ -280,14 +280,14 @@ export const m12mock: PlayerM12 = {
   },
   gSetEmergencyContact: async () => delay(undefined),
   gSafetyPack: (_gid, tid) => delay(pack(TRIALS.find((x) => x.id === tid) ?? TRIALS[0], true)),
-  // ---- M23 P6 — Offers (demo). The minor's guardian route sees none: the pathway is closed in this build.
+  // ---- Offers (demo). The minor's guardian route sees none: the pathway is closed in this build.
   getOffers: () => delay(OFFERS.map((o) => ({ ...o }))),
   getOffer: async (_pid, oid) => { const o = OFFERS.find((x) => x.id === oid); if (!o) throw new Error('OFFER_NOT_FOUND'); return delay({ offer: { ...o }, history: OFFER_HISTORY.slice() }); },
   acceptOffer: (_pid, oid, revisionId) => offerAnswer(oid, revisionId, 'accepted', 'player'),
   declineOffer: (_pid, oid, revisionId) => offerAnswer(oid, revisionId, 'declined', 'player'),
   shareOfferWithAgent: async (_pid, oid, share) => { const o = OFFERS.find((x) => x.id === oid); if (!o) throw new Error('OFFER_NOT_FOUND'); o.agentShared = share; return delay({ offer: { ...o } }); },
   getOfferDocument: async (_pid, _oid, docId) => delay({ document: { id: docId, label: 'Outline of the proposal (PDF)', mime: 'application/pdf', bytes: 9, filename: 'outline.pdf' }, file: { mime: 'application/pdf', base64: 'JVBERi0xLjQK' } }),
-  // M23 P7 — the demo never presents a signing: nothing is signed in a demo, and the section stays quiet.
+  // The demo never presents a signing: nothing is signed in a demo, and the section stays quiet.
   getJourneys: () => delay([]),
   gJourneys: () => delay([]),
   getSignings: () => delay([]),

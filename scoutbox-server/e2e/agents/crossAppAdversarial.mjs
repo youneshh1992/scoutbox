@@ -1,30 +1,7 @@
-// M23 P5.6E FINAL REPAIR PASS — the adversarial audit.
-//
-// The P5.6E acceptance suite proves the integration works and that its own seams
-// hold. This suite is the repair pass's own instrument: it asks the questions the
-// repair mandate asks, across domain boundaries the integration suite does not
-// cross, and it exists so that every "NO" in the final truth block is backed by a
-// command that ran.
-//
-// Groups:
-//   RA  §20  Trust — no non-active relationship is active trust evidence, in
-//            EITHER lane, for every one of the six terminal states
-//   RB  §21  Passport — the agent writes nothing; a legacy row is timeline
-//            history and never the headline; a player's revocation lands
-//   RC  §5   a transaction draft naming an adult who is not a client grants
-//            nothing: not data, not authority, not progression
-//   RD  §7   same-agency privacy across every agency role
-//   RE  §8   minor concealment across every integrated surface, including
-//            counts, errors and autocomplete
-//   RF  §9   stale authority: eleven state changes between render and mutation
-//   RG  §17  boolean / enum / body coercion on every new parser
-//   RH  §18  id, tenant and org-kind forgery
-//   RI  §15  deep links after permission loss
-//   RJ  §16  error privacy — no refusal is an existence oracle
-//   RK  §23  tombstones: deletion of a player, an agent and an agency
-//   RL  §22  counts, totals and pagination as a side channel
-//   RM  §19  the event registry, whole: registered vs emitted, both directions
-//   RN  §24  demo and dev boundaries
+// Agent cross-app adversarial audit. agents/crossApp.mjs proves the integration
+// works and its own seams hold; this battery attacks across the domain boundaries
+// that suite does not cross (Trust, Passport, transactions, minors, tombstones,
+// the event registry, demo/dev boundaries).
 //
 // No assertion is `status !== 200`. Every refusal names its status and its code.
 
@@ -111,8 +88,8 @@ let REV = CONF.body?.relationship?.rev;
 ok(!!REL && CONF.status === 200 && !!REV, `fixture: a licensed agent, five agency roles, two clubs, a confirmed mandate (${REL})`);
 const setD = async (patch) => { const r = await j('PATCH', `/player/agent/relationships/${REL}/sharing`, { disclosure: patch, expectedRev: REV }, kola.token); if (r.status === 200) REV = r.body.relationship.rev; return r; };
 
-// ===================================================== RA — §20 Trust evidence
-section('RA/§20 — no non-active relationship is active Trust evidence, in either lane');
+// ===================================================== RA — Trust evidence
+section('RA — no non-active relationship is active Trust evidence, in either lane');
 {
   // The club's canonical reader is the batch summary; the component-level
   // derivation is Trust & Safety's. Both are used, for what each is for.
@@ -158,17 +135,17 @@ section('RA/§20 — no non-active relationship is active Trust evidence, in eit
     neg((after?.detail?.distinct ?? 0) === (base?.detail?.distinct ?? 0), `RA6 ${label}: contributes nothing to Trust (${base?.detail?.distinct} → ${after?.detail?.distinct})`);
   }
 
-  // The legacy lane is gone (S11a): Trust has no second relationship source to get wrong.
+  // Trust has no second (legacy) relationship source to get wrong.
   const trustSrc = readFileSync(path.join(ROOT, 'scoutbox-server', 'domains', 'verification', 'trust', 'trust.mjs'), 'utf8');
-  neg(!/db\.representations\b/.test(trustSrc), 'RA7 Trust reads no legacy representation lane (removed in S11a)');
+  neg(!/db\.representations\b/.test(trustSrc), 'RA7 Trust reads no legacy representation lane');
   // Its one source counts an agreement only through agreementInForce (confirmed, active, term covering now, a NAMED
   // individual), the access predicate's own rule.
   ok(/agreementInForce\(a, now\)/.test(trustSrc), 'RA8 its one relationship source requires confirmedAt AND an active status (agreementInForce)');
   ok(!agreementInForce({ id: 'x', agentUserId: null, status: 'active', confirmedAt: 1, startAt: 1, endAt: null }, 2), 'RA9 and a NAMED individual: a row naming nobody counts for nothing');
 }
 
-// ================================================ RB — §21 Passport / evidence
-section('RB/§21 — the Passport: the agent reads, and writes nothing');
+// ================================================ RB — Passport / evidence
+section('RB — the Passport: the agent reads, and writes nothing');
 {
   const pp = await j('GET', '/org/players/pl-adeyemi/football-passport', undefined, maria.token);
   ok(pp.status === 200, 'RB1 the club reads the canonical Passport');
@@ -176,7 +153,7 @@ section('RB/§21 — the Passport: the agent reads, and writes nothing');
   neg(expect(collect('RB write post', await j('POST', '/org/players/pl-adeyemi/football-passport', { position: 'ST' }, ana.token)), 404, null), 'RB3 nor with a different verb');
   neg(expect(collect('RB provenance', await j('PATCH', '/org/players/pl-adeyemi/football-passport/provenance', { verified: true }, ana.token)), 404, null), 'RB4 nor its provenance');
   neg(expect(collect('RB trust write', await j('POST', '/org/players/pl-adeyemi/trust-profile', { score: 99 }, ana.token)), 404, null), 'RB5 nor the Trust Score');
-  // The Passport headline comes from the canonical lane alone (P5.6E E-2; the legacy lane was removed in S11a).
+  // The Passport headline comes from the canonical lane alone.
   const src = readFileSync(path.join(ROOT, 'scoutbox-server', 'domains', 'verification', 'passport', 'passport.mjs'), 'utf8');
   neg(!/db\.representations\b/.test(src), 'RB6 the Passport reads no legacy representation rows');
   const shared = readFileSync(path.join(ROOT, 'scoutbox-server', 'domains', 'verification', 'passport', 'shared.mjs'), 'utf8');
@@ -189,14 +166,14 @@ section('RB/§21 — the Passport: the agent reads, and writes nothing');
   neg(expect(collect('RB revoked', await j('GET', `/org/agent/clients/${REL}/trials`, undefined, ana.token)), 403, 'DISCLOSURE_WITHHELD'), 'RB9 and the player\'s revocation closes it on the very next read');
 }
 
-// ======================= RC — §5 a draft naming a non-client adult grants nothing
-section('RC/§5 — a transaction draft naming an adult who is not a client');
+// ======================= RC — a draft naming a non-client adult grants nothing
+section('RC — a transaction draft naming an adult who is not a client');
 {
   const SX = (await j('POST', '/org/agent/transactions', {
     type: 'employment_contract', jurisdictions: ['ENG'], clientKey: key(),
     parties: [{ partyRole: 'individual', subjectKind: 'player', subjectId: 'pl-carvalho' }],
   }, ana.token)).body?.transaction?.id;
-  ok(!!SX, `RC1 P5.6D opens the draft — naming a party is not claiming to represent them (${SX})`);
+  ok(!!SX, `RC1 the draft opens — naming a party is not claiming to represent them (${SX})`);
   // 1. No private player data.
   const detail = await j('GET', `/org/agent/transactions/${SX}`, undefined, ana.token);
   const dtxt = JSON.stringify(detail.body ?? {});
@@ -219,7 +196,7 @@ section('RC/§5 — a transaction draft naming an adult who is not a client');
   neg(expect(collect('RC confirm', await j('POST', `/org/agent/transactions/${SX}/status`, { to: 'PARTIES_CONFIRMED', clientKey: key() }, ana.token)), 422, 'TRANSACTION_PARTIES_NOT_CONFIRMED'), 'RC6 and it cannot progress: the person named confirms for themselves, and naming is not confirming');
   neg(expect(collect('RC active', await j('POST', `/org/agent/transactions/${SX}/status`, { to: 'ACTIVE', clientKey: key() }, ana.token)), 409, 'TRANSACTION_TRANSITION_NOT_ALLOWED'), 'RC7 nor jump straight to ACTIVE');
   // 6. No regulated action.
-  neg(expect(collect('RC terms', await j('POST', `/org/agent/transactions/${SX}/terms`, { summary: 'anything' }, ana.token)), 200, null) === false, 'RC8 (terms are data on a draft by P5.6D design — recorded, never validated, never an offer)');
+  neg(expect(collect('RC terms', await j('POST', `/org/agent/transactions/${SX}/terms`, { summary: 'anything' }, ana.token)), 200, null) === false, 'RC8 (terms are data on a draft by design — recorded, never validated, never an offer)');
   // 7. The notification the person receives names no confidential thing.
   const theirs = (await j('GET', '/player/notifications', undefined, (await playerLogin('pl-carvalho')).token)).body;
   const ntxt = JSON.stringify(theirs ?? {});
@@ -227,8 +204,8 @@ section('RC/§5 — a transaction draft naming an adult who is not a client');
   neg(/Confirm your participation/i.test(ntxt) ? true : true, 'RC10 (the notification says what it is: confirm or ignore, and confirming agrees to nothing)');
 }
 
-// =========================================== RD — §7 same-agency privacy, by role
-section('RD/§7 — same-agency membership alone grants nothing, for any role');
+// =========================================== RD — same-agency privacy, by role
+section('RD — same-agency membership alone grants nothing, for any role');
 {
   const resources = [
     ['client detail', 'GET', `/org/agent/clients/${REL}`],
@@ -260,8 +237,8 @@ section('RD/§7 — same-agency membership alone grants nothing, for any role');
   neg(beaR.status === zedR.status || (beaR.body?.items ?? []).length === (zedR.body?.items ?? []).length, 'RD-shape a colleague and a stranger get answers of the same shape — membership is not a signal');
 }
 
-// ================================================= RE — §8 minor concealment
-section('RE/§8 — a minor stays concealed on every integrated surface');
+// ================================================= RE — minor concealment
+section('RE — a minor stays concealed on every integrated surface');
 {
   const probes = [
     ['agent client request', 'POST', '/org/agent/clients/request', { playerId: 'pl-guni', scope: ['employment'], jurisdiction: 'ENG' }],
@@ -287,8 +264,8 @@ section('RE/§8 — a minor stays concealed on every integrated surface');
   neg(minorRels.body?.minor === true && (minorRels.body?.items ?? []).length === 0, 'RE-own2 and its relationships surface says plainly that representation is not available to it');
 }
 
-// ================================================== RF — §9 stale authority
-section('RF/§9 — authority is re-derived at mutation time, not read from the page');
+// ================================================== RF — stale authority
+section('RF — authority is re-derived at mutation time, not read from the page');
 {
   const theo = await playerLogin('pl-martin');
   const mk = async () => {
@@ -339,8 +316,8 @@ section('RF/§9 — authority is re-derived at mutation time, not read from the 
   } else neg(true, 'RF9 (no team row to end in this fixture)');
 }
 
-// ============================================ RG — §17 coercion on new parsers
-section('RG/§17 — no security or privacy decision is made by JS truthiness');
+// ============================================ RG — coercion on new parsers
+section('RG — no security or privacy decision is made by JS truthiness');
 {
   const bad = ['false', '0', 'true', 1, 0, [], {}, null, 'yes', 'no', 'TRUE'];
   for (const v of bad) {
@@ -351,7 +328,7 @@ section('RG/§17 — no security or privacy decision is made by JS truthiness');
   ok(after.disclosure.clubPresence === true, 'RG2 and after eleven malformed attempts the stored choice is exactly what the client last set it to');
   // shareWithAgencyStaff uses the same boolean discipline.
   const sw = await j('PATCH', `/player/agent/relationships/${REL}/sharing`, { shareWithAgencyStaff: 'true', expectedRev: REV }, kola.token);
-  if (sw.status === 200) { REV = sw.body.relationship.rev; neg(sw.body.relationship.shareWithAgencyStaff === false, 'RG3 shareWithAgencyStaff treats only a real true as a yes (P5.6B contract: === true)'); }
+  if (sw.status === 200) { REV = sw.body.relationship.rev; neg(sw.body.relationship.shareWithAgencyStaff === false, 'RG3 shareWithAgencyStaff treats only a real true as a yes (contract: === true)'); }
   else neg(expect(collect('RG sw', sw), 400, 'REPRESENTATION_INPUT_INVALID'), 'RG3 shareWithAgencyStaff refuses a non-boolean');
   // The contact mode enum.
   for (const v of ['agent_only', 'AGENT_ONLY', 'both ', 1, true, null, ['both']]) {
@@ -365,8 +342,8 @@ section('RG/§17 — no security or privacy decision is made by JS truthiness');
   }
 }
 
-// ================================================== RH — §18 forgery sweep
-section('RH/§18 — the server derives authority; the body never supplies it');
+// ================================================== RH — forgery sweep
+section('RH — the server derives authority; the body never supplies it');
 {
   // Forge every authority-bearing field on the one write that has the most.
   const forged = await j('POST', '/org/agent/clients/request', {
@@ -383,7 +360,7 @@ section('RH/§18 — the server derives authority; the body never supplies it');
     neg(r.rev === 1, 'RH4 a forged rev is ignored');
     neg(Object.values(r.disclosure ?? {}).every((v) => v === false), 'RH5 and forged disclosures are all still OFF — they are the client\'s to set, not the requester\'s');
   } else neg(forged.status >= 400, `RH1 (the request was refused outright: ${forged.body?.error})`);
-  // Cross-tenant ids on every P5.6E route.
+  // Cross-tenant ids on every cross-app route.
   const foreign = [
     ['GET', `/org/agent/clients/${REL}/contacts`, bea],
     ['GET', `/org/agent/clients/${REL}/trials`, bea],
@@ -401,7 +378,7 @@ section('RH/§18 — the server derives authority; the body never supplies it');
 }
 
 // ========================================== RI/RJ — deep links and error privacy
-section('RI/§15 + RJ/§16 — a deep link carries no authority, and no refusal is an oracle');
+section('RI + RJ — a deep link carries no authority, and no refusal is an oracle');
 {
   // A notification deep link after the relationship ends.
   const notifs = (await j('GET', '/org/agent/inbox', undefined, ana.token)).body?.notifications ?? [];
@@ -417,8 +394,8 @@ section('RI/§15 + RJ/§16 — a deep link carries no authority, and no refusal 
   neg(offery.length === 0, `RJ4 and none mentions a fee, a commission, a salary or a signing (${offery.map((l) => l.label).join(', ')})`);
 }
 
-// ==================================================== RK — §23 tombstones
-section('RK/§23 — deletion leaves ids and takes the person');
+// ==================================================== RK — tombstones
+section('RK — deletion leaves ids and takes the person');
 {
   const elias = await playerLogin('pl-nowak');
   const rq = await j('POST', '/org/agent/clients/request', { playerId: 'pl-nowak', scope: ['employment'], jurisdiction: 'ENG' }, ana.token);
@@ -444,8 +421,8 @@ section('RK/§23 — deletion leaves ids and takes the person');
   } else neg(rq.status >= 400, `RK1 (no relationship could be requested: ${rq.body?.error})`);
 }
 
-// ================================================= RL — §22 counts as a channel
-section('RL/§22 — a count, a total and a cursor reveal nothing a projection withheld');
+// ================================================= RL — counts as a channel
+section('RL — a count, a total and a cursor reveal nothing a projection withheld');
 {
   const mine = await j('GET', '/org/agent/clients', undefined, ana.token);
   const theirs = await j('GET', '/org/agent/clients', undefined, bea.token);
@@ -465,8 +442,8 @@ section('RL/§22 — a count, a total and a cursor reveal nothing a projection w
   neg(!/pl-guni/.test(JSON.stringify(mine.body ?? {})), 'RL3 and no list the agent can read counts a minor among its rows');
 }
 
-// ============================================ RM — §19 the event registry, whole
-section('RM/§19 — the event registry against what the server actually emits');
+// ============================================ RM — the event registry, whole
+section('RM — the event registry against what the server actually emits');
 {
   // The registry's OWN predicate is used, not a regex reimplementation of it:
   // several events are declared through a `ping()` helper or by assignment, and
@@ -480,14 +457,14 @@ section('RM/§19 — the event registry against what the server actually emits')
   neg(undeclared.length === 0, `RM2 every emitted event is registered — an event nobody declared is an event nobody reviewed (${undeclared.join(', ') || 'none'})`);
 
   // The other direction: a registered event that nothing emits is dead weight in
-  // a privacy contract. Reported as a fact rather than a failure, because M18.2
-  // deliberately registers some events for surfaces that emit them from a module
+  // a privacy contract. Reported as a fact rather than a failure, because some
+  // events are deliberately registered for surfaces that emit them from a module
   // rather than through the server's own literal list.
   const literalBroadcasts = new Set([...serverSrc.matchAll(/broadcast\('([a-z0-9_]+)'/g)].map((m) => m[1]));
   const registeredNames = Object.keys(EVENT_REGISTRY);
   ok(registeredNames.length > 0 && literalBroadcasts.size > 0, `RM3 the registry holds ${registeredNames.length} events; server.mjs itself broadcasts ${literalBroadcasts.size} of them literally, the rest from their own modules`);
 
-  // The five P5.6E names, and their payload allowlists read from the registry.
+  // The five cross-app event names, and their payload allowlists read from the registry.
   const p56e = ['representation_disclosure_changed', 'contact_agent_routed', 'agent_opportunity_shared', 'transaction_handoff_invited', 'transaction_handoff_withdrawn'];
   const sentinel = /name|dob|birth|email|phone|note|body|text|address|password|token|outcome|reason|score|rating/i;
   for (const n of p56e) {
@@ -506,8 +483,8 @@ section('RM/§19 — the event registry against what the server actually emits')
   neg(problems.length === 0, `RM10 and the production registry contract reports no problems at all (${problems.join(' | ') || 'none'})`);
 }
 
-// ================================================= RN — §24 demo / dev boundaries
-section('RN/§24 — demo and dev cannot masquerade as regulator truth');
+// ================================================= RN — demo / dev boundaries
+section('RN — demo and dev cannot masquerade as regulator truth');
 {
   const demo = readFileSync(path.join(ROOT, 'scoutbox-agent', 'src', 'agentDemo.ts'), 'utf8');
   neg(!/pl-guni|minor.*enabled|MINOR_PATHWAY.*true/i.test(demo), 'RN1 the agent demo store implies no enabled minor pathway and carries no minor client');

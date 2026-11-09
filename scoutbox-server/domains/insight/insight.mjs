@@ -1,13 +1,9 @@
-// F4 — Overlooked-player and exposure review.
-// F5 — Scout calibration and decision-quality review.
-// F6 — Missing-evidence assistant (transparent, versioned rule engine).
+// Overlooked-player and exposure review; scout calibration and decision-quality review; the missing-evidence
+// assistant (a transparent, versioned rule engine). Records are rows of repositories/insightCoverage.mjs.
 // Shared honesty rules: no inference of protected characteristics, no public
 // rankings, no pay-for-priority, small aggregates suppressed, absent evidence
 // is NEVER recorded as poor ability, and exposure metrics carry their
 // denominators and windows instead of claims about discrimination.
-//
-// S12d: every record here is a typed row of repositories/insightCoverage.mjs, written by an explicit operation and read
-// through `insightReads`.
 import crypto from 'node:crypto';
 import { exposureHook } from '../enterprise/enterprise.mjs';
 import { parseStrictDateOnly } from '../../temporal.mjs';
@@ -42,11 +38,10 @@ export function registerInsight(ctx) {
   } = ctx;
   if (!insightCoverage || typeof unit !== 'function') throw new TypeError('registerInsight needs the insight and coverage repository and the unit of work');
   const { exposure, reviewLater, suggestions, calibration } = insightCoverage;
-  // §4.3 step 2: the signings are read through SQL (the signings repository's queries).
   const reads = ctx.recruitmentReads;
   if (typeof reads?.signings?.forPlayer !== 'function') throw new TypeError('registerInsight needs recruitmentReads (signings) from the data layer');
 
-  // =========================================================== F4 exposure
+  // ============================================================== exposure
   const dayKey = (ts = Date.now()) => Math.floor(ts / 86_400_000);
   function recordExposure(orgId, playerId, kind) {
     // Dedupe: one event per (org, player, kind, day) — the table's unique key; the id is minted only for a new one.
@@ -58,7 +53,7 @@ export function registerInsight(ctx) {
   ctx.recordExposure = recordExposure;
 
   // Passive capture at the response layer: profile + passport reads become
-  // exposure events without touching the M7–M12 handlers.
+  // exposure events without touching the profile and passport handlers.
   exposureHook.fn = (req, res) => {
     if (!req.org || req.method !== 'GET' || res.statusCode !== 200) return;
     const fullPath = String(req.originalUrl ?? '').split('?')[0];
@@ -114,9 +109,9 @@ export function registerInsight(ctx) {
     const quarters = { Q1: 0, Q2: 0, Q3: 0, Q4: 0 };
     for (const a of assessed) {
       const p = findPlayer(a.playerId);
-      // M23 P5.7 (T-9): the UTC month of a READABLE birth day. `getMonth()`
-      // on a UTC-midnight date read the previous month in any zone west of
-      // Greenwich, so 1 April births counted in Q1 when the server ran in New York.
+      // The UTC month of a READABLE birth day: `getMonth()` on a UTC-midnight
+      // date reads the previous month in any zone west of Greenwich (1 April
+      // births would count in Q1 on a server in New York).
       const day = parseStrictDateOnly(p?.dob);
       if (day.ok) quarters[`Q${Math.floor(new Date(day.t).getUTCMonth() / 3) + 1}`]++;
     }
@@ -182,8 +177,8 @@ export function registerInsight(ctx) {
   orgRouter.get('/discovery-rotation', (req, res) => {
     const week = Math.floor(dayKey() / 7);
     const assessedIds = new Set(ctx.scoutingReads.assessments.forOrg(req.org.id).filter((a) => a.state !== 'draft').map((a) => a.playerId));
-    // S14i: the pool is the query's (the whole visibility rule), read as light rows; the six with the smallest weekly
-    // hash byte win, a tie keeping the creation order (as the stable sort did), and only they are decoded.
+    // The pool is the query's (the whole visibility rule), read as light rows; the six with the smallest weekly hash
+    // byte win, a tie keeping the creation order, and only they are decoded.
     const best = [];
     players.scanLight({ visibleTo: req.org }, (p) => {
       if (assessedIds.has(p.id)) return;
@@ -233,12 +228,12 @@ export function registerInsight(ctx) {
   }
   ctx.insightSweep = insightSweep;
 
-  // ======================================================== F5 calibration
+  // =========================================================== calibration
   const activeStaffOf = (orgId, uid) => byId.user(uid, (u) => u.orgId === orgId && !u.removedAt);
   orgRouter.post('/calibration', (req, res) => {
     if (!requireLead(req, res)) return;
     const b = req.body ?? {};
-    const tmpl = ctx.scoutingReads.templates.currentById(b.templateId); // the current version (it used to be the first, v1)
+    const tmpl = ctx.scoutingReads.templates.currentById(b.templateId); // the current version
     if (!tmpl) return res.status(404).json({ error: 'TEMPLATE_NOT_FOUND' });
     if (b.title !== undefined && b.title !== null && typeof b.title !== 'string') return fieldInvalid(res, 'title', 'title must be text.');
     const title = (typeof b.title === 'string' ? b.title.trim() : '').slice(0, INSIGHT_LIMITS.calibrationTitle) || 'Calibration session';
@@ -385,7 +380,7 @@ export function registerInsight(ctx) {
     });
   });
 
-  // ================================================= F6 missing-evidence
+  // ====================================================== missing evidence
   const RULES_VERSION = 1;
   const RULES = [
     {
@@ -483,9 +478,9 @@ export function registerInsight(ctx) {
   });
 
   /**
-   * Run the rules for one player and record the result as one explicit upsert (S12d; it used to be edited in place on
-   * a read): open suggestions that no longer fire become 'supplied' (the gap closed), new hits become 'suggested', and
-   * an open one is rewritten only when its records or explanation changed. Returns the player's suggestions (views).
+   * Run the rules for one player and record the result as one upsert: open suggestions that no longer fire become
+   * 'supplied' (the gap closed), new hits become 'suggested', and an open one is rewritten only when its records or
+   * explanation changed.
    */
   function computeGaps(org, player) {
     const found = [];
@@ -508,12 +503,12 @@ export function registerInsight(ctx) {
   });
 
   // The one path that turns a deterministic gap into a player-facing ask.
-  // Extracted from the route so a Recruitment Room (M17) raises an evidence
+  // Extracted from the route so a Recruitment Room raises an evidence
   // request through exactly this code — same anti-pestering window, same
   // guardian routing, same whitelisted player-safe wording. Returns a result
   // object rather than writing a response, so both callers share the rules.
   function requestEvidenceGap({ org, suggestionId, playerId = null }) {
-    // `playerId` (M23 P8.1): when the caller acts from a Recruitment Room, the
+    // `playerId`: when the caller acts from a Recruitment Room, the
     // suggestion must be about that room's player; any other player's
     // suggestion reads as not found, the same answer as a fabricated id.
     const found = suggestions.forOrgById(org.id, suggestionId);

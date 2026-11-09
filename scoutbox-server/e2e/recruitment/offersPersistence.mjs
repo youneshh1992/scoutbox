@@ -1,9 +1,9 @@
-// M23 P6 — persistence, restart and corruption audit for the canonical Offer.
+// Persistence, restart and corruption audit for the canonical Offer.
 //
-//   1  no Offer migration beyond the contacts/offers tables (0017): schema 39;
+//   1  no Offer migration beyond the contacts/offers tables (0017);
 //      a file with no Offers boots with an empty store and no migration runs
 //      again — nothing is backfilled and no lifecycle state is reinterpreted
-//      as an Offer (§60–§62)
+//      as an Offer
 //   2  a real journey — DRAFT, ISSUED+ACCEPTED, ISSUED+DECLINED, ISSUED+WITHDRAWN,
 //      SUPERSEDED — survives SIGTERM and a reboot byte-faithfully: revisions,
 //      responses, keys, history, read receipts, case stages; no signing appears
@@ -24,7 +24,7 @@ import { readRecords, writeFixture } from '../../scripts/dataLayerFixture.mjs';
 import { DATA_MIGRATIONS, TABLE_BACKED } from '../../repositories/index.mjs';
 import { offerIntegrity } from '../../domains/recruitment/offers/offer.mjs';
 import { pickPort } from '../../scripts/testPort.mjs';
-const LATEST_SCHEMA = Number(DATA_MIGRATIONS.map((m) => m.id).sort().at(-1).slice(0, 4)); // S14a: the latest table migration's number
+const LATEST_SCHEMA = Number(DATA_MIGRATIONS.map((m) => m.id).sort().at(-1).slice(0, 4)); // the latest table migration's number
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SERVER = path.join(HERE, '..', '..', 'server.mjs');
@@ -68,19 +68,18 @@ async function bootOn(dataDir, port) {
   return { up, j, stop, log: () => log };
 }
 
-const PORT = pickPort(5900, 200, [0]); // TH-6: never a fetch-blocked port
+const PORT = pickPort(5900, 200, [0]); // never a fetch-blocked port
 const T0 = Date.now();
 const at = (ms) => ({ 'x-scoutbox-test-clock': String(ms) });
 const TERMS = { role: 'Central midfielder', squad: 'Under-23s', startDate: '2027-07-01', endDate: '2029-06-30', conditions: 'Subject to a medical.' };
 const S_NOTE = 'PRIVATE_NOTE_PERSISTS_9911';
 
 // ------------------------------------------------------------- 1 — schema
-// 1.1, 1.2, 1.4 and 1.6 rewritten in S14a: they described the blob's schema numbers and the store contract.
 const ledger = (dir) => { const st = new DatabaseSync(path.join(dir, 'scoutbox.db'), { readOnly: true }); try { return JSON.stringify(st.prepare('SELECT id, applied_at FROM data_migrations ORDER BY id').all()); } finally { st.close(); } };
-section('1 — no Offer migration of its own: schema 39, the offers are their tables, a file with none boots empty');
+section('1 — no Offer migration of its own: the latest schema, the offers are their tables, a file with none boots empty');
 {
   ok(DATA_MIGRATIONS.length === LATEST_SCHEMA && DATA_MIGRATIONS.filter((m) => /offer/i.test(m.id)).map((m) => m.id).join() === '0017_recruitment_contacts_offers', '1.1 every table migration; the only one naming an Offer is 0017 (contacts and offers)');
-  ok(TABLE_BACKED.includes('recruitmentOffers'), '1.2 the offers are their tables, read through SQL (§4.3 step 2)');
+  ok(TABLE_BACKED.includes('recruitmentOffers'), '1.2 the offers are their tables, read through SQL');
   const DIR = mkdtempSync(path.join(tmpdir(), 'sbx-m23op-1-'));
   const s1 = await bootOn(DIR, PORT);
   ok(s1.up, '1.3 a fresh store boots');
@@ -97,7 +96,7 @@ section('1 — no Offer migration of its own: schema 39, the offers are their ta
   const room = await s2.j('POST', '/org/rooms', { playerId: 'pl-adeyemi', sourceContext: 'search' }, maria.token);
   const RID = room.body?.room?.roomId ?? room.body?.existingRoomId;
   const jr = (await s2.j('GET', `/org/rooms/${RID}/journey`, undefined, maria.token)).body;
-  ok(jr.offer?.available === true && jr.offer.records.length === 0, '1.7 the journey reports the store available with no Offers — none was invented from the lifecycle (§62)');
+  ok(jr.offer?.available === true && jr.offer.records.length === 0, '1.7 the journey reports the store available with no Offers — none was invented from the lifecycle');
   const db2 = await s2.stop();
   neg(Array.isArray(db2.recruitmentOffers) && db2.recruitmentOffers.length === 0 && JSON.stringify(db2.recruitmentCases.filter((c) => c.id !== RID).map((c) => [c.id, c.room?.status ?? null])) === casesBefore, '1.8 after the boot: an empty store, and every pre-existing case exactly where it was');
 }
@@ -165,7 +164,7 @@ const R = {};
   const i5 = await issue(R.tan.OID, 1, 'P-issue-tan-1');
   R.tan.R1 = i5.body.offer.currentRevisionId;
   const rv5 = await j('POST', `/org/offers/${R.tan.OID}/revise`, { terms: { ...TERMS, squad: 'First team' }, expiresAt: T0 + 9 * DAY, expectedRev: 2, clientKey: 'P-revise-tan' }, maria.token, at(T0 + H));
-  // The server clock never runs backwards: revision 2 was opened at T0+H, so it is issued at T0+H (P6.1's ordering rule refuses a revision issued before it was created).
+  // The server clock never runs backwards: revision 2 was opened at T0+H, so it is issued at T0+H (the ordering rule refuses a revision issued before it was created).
   const i5b = await j('POST', `/org/offers/${R.tan.OID}/issue`, { expectedRev: 3, clientKey: 'P-issue-tan-2' }, maria.token, at(T0 + H));
   R.tan.R2 = i5b.body.offer.currentRevisionId;
   ok(rv5.status === 201 && i5b.status === 200 && i5b.body.offer.revisions.find((r) => r.id === R.tan.R1).status === 'SUPERSEDED', '2.5 Tanaka: revision 1 superseded by revision 2');
@@ -183,7 +182,7 @@ const R = {};
 
   const db = await s.stop();
   ok(Array.isArray(db.recruitmentOffers) && db.recruitmentOffers.length === 5, '2.7 SIGTERM: the file holds five Offers');
-  neg((db.signings ?? []).every((x) => x.playerId !== 'pl-kim'), '2.8 and no signing for the player who accepted (§83)');
+  neg((db.signings ?? []).every((x) => x.playerId !== 'pl-kim'), '2.8 and no signing for the player who accepted');
   neg(!db.recruitmentCases.some((c) => c.room?.status === 'signed'), '2.9 no case is signed');
   const stored = Object.fromEntries(db.recruitmentOffers.map((o) => [o.id, o]));
   ok(stored[R.kola.OID].status === 'DRAFT' && stored[R.kim.OID].status === 'ACCEPTED' && stored[R.chi.OID].status === 'DECLINED' && stored[R.sven.OID].status === 'WITHDRAWN' && stored[R.tan.OID].status === 'ISSUED', '2.10 stored statuses: DRAFT, ACCEPTED, DECLINED, WITHDRAWN, ISSUED');
@@ -235,7 +234,7 @@ section('3 — after the reboot: identical views, keys replay, immutability and 
 section('4 — a corrupt Offer row is named and refused, never repaired, and never moves a case');
 {
   const db = R.db;
-  // S8c (typed since §4.3): an Offer with no revision is a row the tables cannot hold. Its create REFUSES it, naming the
+  // An Offer with no revision is a row the tables cannot hold. Its create REFUSES it, naming the
   // row, and writes nothing — the directory keeps the five sound rows. An ACCEPTED row with no response is a typed row
   // (every field valid) whose states disagree: it is still planted, and still judged on read.
   const corrupt = { ...structuredClone(db.recruitmentOffers.find((o) => o.id === R.sven.OID)), id: 'rof-corrupt', revisions: [], currentRevisionId: 'rofr-none', status: 'ISSUED' };
@@ -266,8 +265,8 @@ section('4 — a corrupt Offer row is named and refused, never repaired, and nev
   R.db2 = db2;
 }
 
-// ------------------------------------------------- 5 — P6.1 hardening after a restart
-section('5 — P6.1: lazy expiry, temporal corruption, unknown statuses, legacy rows, the latest-revision pointer and the same-agency rule after a restart');
+// ------------------------------------------------- 5 — hardening after a restart
+section('5 — lazy expiry, temporal corruption, unknown statuses, legacy rows, the latest-revision pointer and the same-agency rule after a restart');
 {
   const db = R.db2;
   const fresh = (base, id, patch) => ({ ...structuredClone(base), id, keys: { create: null, issue: [], withdraw: [], revise: [] }, responses: [], readReceipts: [], history: [], ...patch });
@@ -289,11 +288,11 @@ section('5 — P6.1: lazy expiry, temporal corruption, unknown statuses, legacy 
   // c) case/Offer disagreement: an ACCEPTED Offer on a case the lifecycle says declined
   const chiCase = db.recruitmentCases.find((c) => c.id === R.chi.RID);
   const disagree = fresh(issuedRow, 'rof-t8', { status: 'ACCEPTED', currentRevisionId: 'rofr-t8', revisions: [rev({ rid: 't8', status: 'ACCEPTED', respondedAt: T0 + 2 * H, response: { id: 'rsp-t8' } })], responses: [answer('rsp-t8', 'rofr-t8', 'accepted', T0 + 2 * H)] });
-  // d) a legacy row: a case at offer_made with no Offer row at all (a pre-P6 lifecycle written by the legacy status writer)
+  // d) a legacy row: a case at offer_made with no Offer row at all (a lifecycle written by the legacy status writer)
   const legacyCase = db.recruitmentCases.find((c) => c.id === R.kim.RID);
   void legacyCase;
   const martinCase = { ...structuredClone(svenCase), id: 'case-legacy-made', playerId: 'pl-martin', room: { ...structuredClone(svenCase.room), status: 'offer_made' }, history: [], decisionDraft: null, transactionHandoff: null };
-  // S8c (typed since §4.3): an unknown Offer status, an unknown revision status and a revision number below 1 are
+  // An unknown Offer status, an unknown revision status and a revision number below 1 are
   // values the columns cannot hold — each create is REFUSED, naming the row, and the directory is unchanged. The other
   // planted rows are typed rows whose values disagree (time order, bounds, pointers, the case): judged on read.
   const storedNow = JSON.stringify(readRecords(DIR).recruitmentOffers);
@@ -366,10 +365,8 @@ section('5 — P6.1: lazy expiry, temporal corruption, unknown statuses, legacy 
   ok((await s2.j('GET', `/org/agent/clients/${REP}/offers`, undefined, ana2.token, at(Date.now()))).body.items?.length === 1, '5.20 the share survived the restart for Ana');
   neg((await s2.j('GET', `/org/agent/clients/${REP}/offers`, undefined, bea2.token, at(Date.now()))).status === 404, '5.21 and Bea still gets NOT FOUND after the restart');
   const db4 = await s2.stop();
-  // S8c (migration 0017): the offers are read from the tables, and a record read from the tables carries its keys in the
-  // stored shape's order (every key and value identical — the documented table-read property, as m23DecisionPersistence
-  // compares since S8b). The comparison is therefore key-order-insensitive; the ids, every value, the list order of the
-  // planted rows and their presence are still compared, so "repaired, reordered or dropped" is still what it asserts.
+  // A record read from the tables need not keep its keys in the order they were planted, so the comparison is
+  // key-order-insensitive; the ids, every value, the list order of the planted rows and their presence are compared.
   const canon = (v) => (Array.isArray(v) ? v.map(canon) : v && typeof v === 'object' ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, canon(v[k])])) : v);
   const planted = (rows) => JSON.stringify(canon(rows.filter((o) => /^rof-(lazy|t\d)$/.test(o.id))));
   neg(planted(db4.recruitmentOffers) === planted(db3.recruitmentOffers) && planted(db4.recruitmentOffers) === planted(JSON.parse(rowsBefore)), '5.22 none of the planted rows was repaired, reordered or dropped by two boots and two stops (every key and value compared, key order aside)');

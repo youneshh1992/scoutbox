@@ -1,4 +1,4 @@
-// M24B — the player's recruitment experience as CATEGORY → SUBCATEGORY.
+// The player's recruitment experience as CATEGORY → SUBCATEGORY.
 //
 // Plain data, no React Native imports: e2e/caseNav.test.mjs bundles this file
 // and asserts the same rules as for the portals (every category ≤ 5
@@ -19,7 +19,7 @@ export interface PlayerCaseLocation { category: string; sub: string }
 
 export const PLAYER_NAV: PlayerCaseNav = {
   id: 'player',
-  // M24D — five categories, none wider than three pages. The Board (open
+  // Five categories, none wider than three pages. The Board (open
   // roles, fit, squad invites, follow-ups) is one page of the journey, and
   // the former Current stage / Tasks pages are part of the Overview.
   categories: [
@@ -65,8 +65,8 @@ export const PLAYER_NAV: PlayerCaseNav = {
   ],
 };
 
-/** M24D — links written before the Board became a page of the journey, and
- *  before Current stage and Tasks folded into the Overview, still land. */
+/** Older links to the Board and to Current stage / Tasks as separate pages
+ *  still land: the Board is a page of the journey; the others are the Overview. */
 export const PLAYER_LEGACY_SUBS: Readonly<Record<string, string>> = {
   stage: 'overview', tasks: 'overview',
   'board-open': 'board', 'board-fit': 'board', 'board-invites': 'board', 'board-followups': 'board',

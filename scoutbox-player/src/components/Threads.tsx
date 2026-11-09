@@ -3,7 +3,7 @@
 // and children never appear here at all. Read receipts, typing indicators and
 // clip attachments included.
 //
-// M24F.3 — conversation-first. The list is one PreviewRow per thread (name,
+// Conversation-first. The list is one PreviewRow per thread (name,
 // one-line preview, time, unread dot); the open thread is a clean header,
 // the stream and a composer. Nothing repeats the identity on every bubble.
 
@@ -45,10 +45,10 @@ export function Threads({ channels, onSend, onOpen, onTyping, attachableClips, e
   emptyText: string;
   /** Identity for the scoped live stream (typing pings). */
   auth?: { kind: 'player' | 'guardian'; id: string };
-  /** M24F.3 — the open thread may be controlled by the screen (the Inbox opens a thread from its own list). */
+  /** The open thread may be controlled by the screen (the Inbox opens a thread from its own list). */
   openChannelId?: string | null;
   onOpenChange?: (id: string | null) => void;
-  /** M24F.3 — a special object at the head of an open thread (the trial invitation card). */
+  /** A special object at the head of an open thread (the trial invitation card). */
   headerExtra?: (c: Channel) => ReactNode;
 }) {
   const [showClips, setShowClips] = useState(false);

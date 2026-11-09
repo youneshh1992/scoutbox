@@ -1,9 +1,7 @@
 /**
- * Insight and coverage get their own typed tables (S12d): exposure events, review-later deferrals, evidence suggestions
- * (cited records as rows), calibration sessions (participants, blind submissions, ratings and notes as rows; the rubric
- * is the pinned template version), fixtures, coverage plans and coverage assignments (targets and warnings as rows).
- * REGISTERED in DATA_MIGRATIONS. `up()` is the DDL only: nothing is carried over (no production data; rollback means
- * re-seed).
+ * Insight and coverage: exposure events, review-later deferrals, evidence suggestions (cited records as rows),
+ * calibration sessions (participants, blind submissions, ratings and notes as rows; the rubric is the pinned template
+ * version), fixtures, coverage plans and coverage assignments (targets and warnings as rows).
  */
 import { migrationApplied } from '../database.mjs';
 import { DISCOVERY_MIGRATION } from '../discovery.mjs';

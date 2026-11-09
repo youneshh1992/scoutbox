@@ -1,13 +1,7 @@
-// S11b-1 — Trust & Safety reviewers and jurisdiction policy versions as typed tables with explicit writes
-// (repositories/compliancePolicies.mjs, migration 0027). What this suite proves: the migration creates the ten STRICT
-// tables (no JSON column) and inserts the three seeded policy versions, which read back exactly as encoded; the typers
-// refuse junk with the record and field named (an unknown field, an unknown reviewer status, a rule parameter the
-// engine does not read or of the wrong type, a bad day, an override naming a jurisdiction twice, a publication by one
-// person); a reviewer is created and revoked once, and their identity never changes; a version is proposed, published
-// once by a different reviewer and never changes after; `supersedes` names an existing version of the same
-// jurisdiction; the published set is re-read when it changes (and after a rolled-back unit); and
-// a fixture written through the repository is typed and reads back what it wrote. Temporary databases only; nothing touches
-// DATA_DIR. Run with: npm test
+// Trust & Safety reviewers and jurisdiction policy versions (repositories/compliancePolicies.mjs, migration 0027): the
+// STRICT tables and the three seeded policy versions, the typers' refusals, a reviewer created and revoked once, a
+// version published once by a different reviewer (never by its proposer) and never changed after, and the published
+// set re-read when it changes. Temporary databases only; nothing touches DATA_DIR. Run with: npm test
 
 import assert from 'node:assert/strict';
 import fs from 'node:fs';

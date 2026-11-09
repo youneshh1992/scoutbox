@@ -29,7 +29,7 @@ export function hashPassword(password) {
 export function verifyPassword(password, stored) {
   if (!stored) return false;
   if (!stored.startsWith('scrypt$')) {
-    // Legacy plain-text record (pre-M7). Verify, and let the caller upgrade it.
+    // A plain-text record (no scrypt prefix). Verify, and let the caller upgrade it.
     return crypto.timingSafeEqual(Buffer.from(String(password)), Buffer.from(String(stored)))
       ? 'upgrade' : false;
   }
@@ -76,7 +76,7 @@ export function makeRateLimiter({ windowMs = 60_000, max = 30, bucket = 'default
 export const OUTBOX_SECRET_PLACEHOLDER = '[code withheld — delivered to the recipient only]';
 const DEV_DELIVERY_LIMIT = 500;
 
-/** The mail outbox (repositories/outboxPush.mjs `outbox`): every mail is recorded there, explicitly (S14d). */
+/** The mail outbox (repositories/outboxPush.mjs `outbox`): every mail is recorded there. */
 const needOutbox = (outbox) => {
   if (typeof outbox?.append !== 'function' || typeof outbox?.markDelivered !== 'function') throw new TypeError('createMailer needs the outbox repository ({ append, markDelivered })');
   return outbox;
@@ -84,9 +84,8 @@ const needOutbox = (outbox) => {
 
 export function createMailer(nextId, { outbox: outboxRepo } = {}) {
   const live = liveMailConfigured();
-  // S6a (review of e020aba, finding 1): `secrets` are one-time codes embedded in
-  // the mail. The outbox record is persisted with every save and copied into
-  // every backup, so the record keeps the mail with each secret replaced by
+  // `secrets` are one-time codes embedded in the mail. The outbox record is
+  // persisted and copied into every backup, so the record keeps the mail with each secret replaced by
   // OUTBOX_SECRET_PLACEHOLDER — in both transports. Delivery is unchanged: the
   // provider receives the full text; on the dev transport, where the outbox IS
   // the delivery, the full text is kept in this process's memory only (bounded,
@@ -124,7 +123,7 @@ export function createMailer(nextId, { outbox: outboxRepo } = {}) {
         } catch {
           ok = false; // recorded in the outbox either way
         }
-        // The provider's answer: on the record the caller holds (m23 reads `rec.delivered`) and on the stored row.
+        // The provider's answer: on the record the caller holds (the contact routes read `rec.delivered`) and on the stored row.
         record.delivered = ok;
         outbox.markDelivered(record.id, ok);
       }
@@ -137,8 +136,8 @@ export function createMailer(nextId, { outbox: outboxRepo } = {}) {
 
 // ---------------------------------------------------------------------- push
 /**
- * The push record is a row of `push_log` and the device tokens rows of `push_tokens` (repositories/outboxPush.mjs),
- * written and read explicitly (S14d). The sender runs as an after-commit effect of the notification, so its record is
+ * The push record is a row of `push_log` and the device tokens rows of `push_tokens` (repositories/outboxPush.mjs).
+ * The sender runs as an after-commit effect of the notification, so its record is
  * written in its own transaction once the notification is durable.
  */
 export function createPushSender(nextId, { pushLog, pushTokens } = {}) {
@@ -191,7 +190,7 @@ export function createIdvProvider() {
 // The deck's model: club subscription plans + a success fee when a signing is
 // recorded inside the attribution window. Dev provider issues the invoice
 // records; Stripe slots in behind the same call.
-// S13e: the invoice is a row of `invoices` (repositories/operations.mjs), stored exactly in minor units (cents), one per
+// The invoice is a row of `invoices` (repositories/operations.mjs), stored exactly in minor units (cents), one per
 // signing; the API still answers `amount` in whole euros.
 const SUCCESS_FEE_MINOR_BY_PLAN = { Pro: 150_000, Academy: 50_000, Agency: 200_000 };
 const DEFAULT_SUCCESS_FEE_MINOR = 100_000;

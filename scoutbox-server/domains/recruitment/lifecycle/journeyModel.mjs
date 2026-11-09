@@ -1,23 +1,23 @@
 /**
- * M23 P8 — the recruitment journey MODEL: pure functions over records that
+ * The recruitment journey MODEL: pure functions over records that
  * someone else owns.
  *
  * Nothing here reads a database, writes a field or keeps state. The projector
  * (journey.mjs) gathers a case's canonical records and hands them in; this
- * module answers the questions P8 asks of them:
+ * module answers these questions of them:
  *
  *   - which canonical STAGE the case is at (a workflow description derived
  *     from the frozen 18-state lifecycle plus the facts around it — never a
  *     nineteenth lifecycle state, never stored)
  *   - which stages have been COMPLETED, and on what basis
  *   - which resource is CURRENT when several exist (one deterministic rule per
- *     kind, so no app re-derives it differently — the P7.1 Agent bug)
+ *     kind, so no app re-derives it differently)
  *   - the NEXT ACTION the server derives (clients never manufacture one)
  *   - whether the journey is CANONICAL, LEGACY, PARTIALLY CANONICAL or in an
  *     INTEGRITY ERROR, and why
  *   - which timeline events each audience may see
  *
- * THE DIRECTION OF TRUTH (§2). Evidence informs assessment; assessment informs
+ * THE DIRECTION OF TRUTH. Evidence informs assessment; assessment informs
  * discussion; discussion informs an explicit human decision; a decision is not
  * an Offer; an Offer is not an acceptance; an acceptance is not a signing; a
  * signing in progress is not `signed`. Every function here reads those
@@ -43,7 +43,7 @@ export const JOURNEY_POLICY_VERSION = 1;
  * seen in search or matched) and never appears on one; the pipeline stages
  * are the ones a case walks; `paused` and `ended` describe a case that is
  * not walking. This is a DESCRIPTION of where the lifecycle is, mapped from
- * the frozen 18 states; it adds no state to them (§8).
+ * the frozen 18 states; it adds no state to them.
  */
 export const JOURNEY_STAGES = Object.freeze([
   'discovery', 'watching', 'review', 'contact', 'trial', 'assessment', 'decision', 'offer', 'acceptance', 'signing', 'signed', 'paused', 'ended',
@@ -88,7 +88,7 @@ const latest = (rows, atOf) => (rows.length ? rows.slice().sort(newestFirst(atOf
 // ------------------------------------------------- current-resource selection
 
 /**
- * THE current Contact of a case (§53/§54). Order of preference, each tier
+ * THE current Contact of a case. Order of preference, each tier
  * newest first:
  *   1. delivered and awaiting a response (the live conversation)
  *   2. responded or recorded (the last completed approach)
@@ -161,8 +161,8 @@ export function currentOfferForCase(offers, now) {
 /**
  * THE current signing package over an Offer (or over a case): a live package
  * (DRAFT, READY, IN_PROGRESS at `now`) over a COMPLETED one over the newest
- * terminal one. This is the rule the Agent app got wrong in P7.1 (an expired
- * package masked a live one); it now lives in one place.
+ * terminal one, so an expired package never masks a live one. One place, so
+ * no app re-derives it.
  */
 export function currentSigningForOffer(packages, now) {
   const rows = (packages ?? []).filter(Boolean);
@@ -288,7 +288,7 @@ const PERMISSION_MIN_ROLE = Object.freeze({ contact_write: 'room_lead', trial_wr
 const rankOf = (role) => ROLE_RANK[role] ?? -1;
 
 /**
- * THE next action (§7). Derived from the lifecycle status and the current
+ * THE next action. Derived from the lifecycle status and the current
  * resources; returns the code, the stage, the kind, the Room tab, the
  * resource ids the act concerns and whether THIS viewer may take it. A
  * `blockedBy` list names why an otherwise-due act cannot be taken (a block,
@@ -298,7 +298,7 @@ const rankOf = (role) => ROLE_RANK[role] ?? -1;
  *   status, role, isLead, now, blocked, subjectRemoved,
  *   contact (current), trial (current), trialRequest (pending invitation),
  *   assessed (bool), decision (current formal head), offer ({offer, revision, status, liveStatus} | null),
- *   signing (current package | null), signingRow (db.signings row | null)
+ *   signing (current package | null), signingRow (signing row | null)
  */
 export function nextActionFor(p) {
   const { status, now = Date.now() } = p;
@@ -390,7 +390,7 @@ export function playerNextActionFor({ pendingContactRequest = null, pendingTrial
 /**
  * The player-facing STAGE word: only stages that involve the player, derived
  * from records that reached them. Never "watching", "review", "priority" or
- * anything about the club's internal pipeline (§16, §58).
+ * anything about the club's internal pipeline.
  */
 export const PLAYER_STAGES = Object.freeze(['contacted', 'trial_invited', 'trial_scheduled', 'trial_completed', 'offer_received', 'offer_accepted', 'offer_declined', 'signing', 'signed', 'none']);
 export function playerStageFor({ contacts = [], trialRequests = [], trials = [], offer = null, signing = null, signingRow = null, now = Date.now() }) {
@@ -421,7 +421,7 @@ export const JOURNEY_CLASSIFICATIONS = Object.freeze(['canonical', 'legacy', 'pa
 export const JOURNEY_INTEGRITY_CODES = Object.freeze([
   'LIFECYCLE_STATE_UNKNOWN', 'PLAYER_MISMATCH', 'CLUB_MISMATCH', 'CASE_MISMATCH',
   'STALE_POINTER', 'LIFECYCLE_AHEAD_OF_EVIDENCE', 'LIFECYCLE_BEHIND_TERMINAL_EVIDENCE', 'EVIDENCE_AHEAD_OF_LIFECYCLE', 'HISTORY_MALFORMED', 'TEMPORAL_ORDER',
-  // M23 P8.1 (D-P81-17): a structurally corrupt record that NAMES this case
+  // A structurally corrupt record that NAMES this case
   // (an Offer, a package, a Contact or a Trial that fails its own integrity
   // check) is omitted from the projection — and the omission is a problem,
   // never a quiet downgrade to "legacy" with a live-looking next action.
@@ -429,19 +429,18 @@ export const JOURNEY_INTEGRITY_CODES = Object.freeze([
 ]);
 
 /**
- * validateRecruitmentJourney (§10). Detects — and never repairs — a
+ * validateRecruitmentJourney. Detects — and never repairs — a
  * lifecycle/resource combination that cannot both be true, a history entry
  * naming a record that no longer exists, a record that names another
  * player/club/case, a lifecycle ahead of its evidence, a lifecycle behind a
  * terminal record, and malformed time. Returns the problems and the
- * classification (§11):
+ * classification:
  *
  *   canonical            every evidence-bearing state the case reached is
  *                        backed by a canonical record
  *   legacy               the case reached evidence-bearing states through
- *                        the pre-P3/P7 status route and no canonical record
- *                        exists for any of them — history from before the
- *                        records existed, reported as such
+ *                        the legacy status route and no canonical record
+ *                        exists for any of them — reported as such
  *   partially_canonical  some backed, some not
  *   integrity_error      a problem in the list above
  *
@@ -485,7 +484,7 @@ export function validateRecruitmentJourney(facts) {
     if (d.offerId && !ids.offer.has(d.offerId)) problems.add('STALE_POINTER');
     if (d.signingPackageId && !ids.package.has(d.signingPackageId)) problems.add('STALE_POINTER');
   }
-  // M23 P8.1 (D-P81-16): the case's own link to a completed signing row is a
+  // The case's own link to a completed signing row is a
   // claim like any other. Every writer of `links.signingId` checks the row
   // exists, so a link that names no row is corruption — a stale pointer,
   // never a legacy `signed`. (Absent ids on the facts: the check is skipped.)
@@ -515,7 +514,7 @@ export function validateRecruitmentJourney(facts) {
   // Terminal evidence the lifecycle lags behind.
   const completedPkg = (facts.packages ?? []).some((p) => signingEffectiveStatus(p, now) === 'COMPLETED');
   if ((completedPkg || facts.signingRow) && status !== 'signed' && !TERMINAL_ROOM_STATUSES.includes(status) && status !== 'on_hold') problems.add('LIFECYCLE_BEHIND_TERMINAL_EVIDENCE');
-  // M23 P8.1 (§14) — evidence AHEAD of the lifecycle: a canonical record proves
+  // Evidence AHEAD of the lifecycle: a canonical record proves
   // a state this case never recorded reaching (an accepted revision on a case
   // whose history never reached offer_accepted; a delivered Contact with no
   // `contacted` ever recorded). Every canonical writer moves the case in the
@@ -550,7 +549,7 @@ const claimOf = (d) => !!(d.contactId || d.trialId || d.requestId || d.decisionI
 // ---------------------------------------------------------------- timeline
 
 /**
- * Which audiences may see each timeline event kind (§14/§15). The club sees
+ * Which audiences may see each timeline event kind. The club sees
  * everything on its own case; the player, guardian and an authorized agent
  * see only the events that involved them. `trust_safety` sees ids-only
  * milestones for moderation, never rationale (which no event carries).

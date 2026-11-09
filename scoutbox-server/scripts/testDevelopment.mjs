@@ -1,13 +1,6 @@
-// S12a — development objectives, drill-guidance reviews and the Development Hub as typed tables with explicit writes
-// (repositories/development.mjs, migration 0030). What this suite proves: the migration creates the eighteen STRICT
-// tables (no JSON column) and a fresh database holds no row; the typers refuse junk with the record and field named
-// (an unknown field, a third objective, a progress entry naming another objective's item, a history detail key the
-// Hub never writes, a blocked goal without a reason, a link with two holders, a review with a note but no club);
-// records are created and read back whole, the derived fields (a snapshot's completion, a review's supersededBy and
-// share scopes) worked out on read; an update keeps the fields that never change and only grows the history; the
-// list, count, duplicate and audit-feed queries answer what the routes need; a rolled-back unit leaves nothing; the
-// db.* names throw; and a fixture written through the repository is typed, refuses a missing reference (nothing
-// written) and reads back what it wrote.
+// Development objectives, drill-guidance reviews and the Development Hub (repositories/development.mjs, migration 0030):
+// the STRICT tables, the typers' refusals, records read back whole with their derived fields, updates that keep what
+// never changes and only grow the history, the routes' queries, units of work and fixtures.
 // Temporary databases only; nothing touches DATA_DIR. Run with: npm test
 
 import assert from 'node:assert/strict';

@@ -49,7 +49,7 @@ function Themed() {
   return (
     <>
       <StatusBar style="light" />
-      {/* M24C — every route, its header and its bottom navigation render
+      {/* Every route, its header and its bottom navigation render
           inside the phone viewport; a wide browser only adds the surround. */}
       <MobileViewport>
         <Stack

@@ -1,18 +1,10 @@
-// F11 — Post-signing outcomes with restart-safe follow-up jobs ·
-// F12 — Practical access: captions, honest benchmarks (resumable uploads: domains/media/uploads.mjs),
-// football-context fields · plus the persistent sweep that also powers
-// application reminders, trial-feedback escalation and upload cleanup.
+// Post-signing outcomes with restart-safe follow-up jobs · practical access: captions, honest benchmarks
+// (resumable uploads: domains/media/uploads.mjs), football-context fields · plus the persistent sweep that also
+// powers application reminders, trial-feedback escalation and upload cleanup.
 //
 // Every scheduled behaviour is a PERSISTED record examined by an idempotent
 // sweep (on boot + every 60 s). Restarts lose nothing and re-send nothing:
 // the marker that a reminder went out lives in the database, not in a timer.
-//
-// S8d (migration 0018): the follow-ups and outcome reports are read through the repository's SQL queries (§4.3 step 2;
-// there is no db.followUps or db.outcomeReports) — formerly read-only views of deep-frozen records over the
-// typed tables; every write is an explicit operation of the signings/follow-ups repository (followUps.schedule /
-// patch, outcomeReports.file / addConfirmation) that writes its rows at once — inside the route's unit of work, or in
-// a transaction of its own from the sweep — and returns the fresh record. Junk a client sends (a non-integer
-// matchesPlayed, an over-long note) is refused with the field named, where the blob store once sliced or nulled it.
 
 import { isAdult, visibleToOrg } from '../domain.mjs';
 import { deriveWorkflowState } from '../domains/recruitment/lifecycle/trial.mjs';
@@ -29,7 +21,7 @@ export function registerOperations(ctx) {
     scoutingReads, opportunitiesCampaigns,
   } = ctx;
   if (!recruitment?.trials) throw new TypeError('registerOperations needs the recruitment repository (S8a) from the data layer');
-  const trials = recruitment.trials; // S8a: an escalation or a reminder marker is an explicit write of the trial
+  const trials = recruitment.trials;
   if (typeof signingsFollowUps?.followUps?.schedule !== 'function' || typeof signingsFollowUps?.outcomeReports?.file !== 'function') throw new TypeError('registerOperations needs the signings/follow-ups repository (S8d) from the data layer');
   const fu = signingsFollowUps.followUps; const outcomes = signingsFollowUps.outcomeReports;
   const LIMITS = { progression: 200, endReason: 200, note: 300 };
@@ -37,7 +29,7 @@ export function registerOperations(ctx) {
 
   const usersOf = (orgId) => users.forOrg(orgId, { active: true });
 
-  // ================================================================== F11
+  // ========================================================= outcomes
   function scheduleFollowUps(signing) {
     let added = 0;
     for (const [milestone, days] of Object.entries(MILESTONES)) {
@@ -82,7 +74,7 @@ export function registerOperations(ctx) {
     if (!['registered', 'released', 'left', 'unknown'].includes(registrationStatus)) {
       return res.status(400).json({ error: 'REGISTRATION_STATUS_INVALID', allowed: ['registered', 'released', 'left', 'unknown'] });
     }
-    // S8d: typed input only — a non-integer or negative matchesPlayed and an over-long text are refused, never sliced or nulled.
+    // A non-integer or negative matchesPlayed and an over-long text are refused, never sliced or nulled.
     if (matchesPlayed !== undefined && matchesPlayed !== null && !(Number.isSafeInteger(matchesPlayed) && matchesPlayed >= 0)) return res.status(400).json({ error: 'FIELD_INVALID', field: 'matchesPlayed', message: 'matchesPlayed must be a whole number of matches, or omitted when not evidenced.' });
     if (tooLong(res, 'progression', progression, LIMITS.progression) || tooLong(res, 'endReason', endReason, LIMITS.endReason) || tooLong(res, 'note', note, LIMITS.note)) return;
     if (note && !moderateOrRefuse(res, note, { kind: 'outcome_report', playerId: f.playerId, orgId: req.org.id })) return;
@@ -96,7 +88,7 @@ export function registerOperations(ctx) {
     };
     const p = findPlayer(f.playerId);
     const text = `📊 ${req.org.name} filed the ${f.milestone} follow-up on the signing — please confirm or dispute it.`;
-    // S8d: the report row, the follow-up's status and the notification commit as one unit of work.
+    // The report row, the follow-up's status and the notification commit as one unit of work.
     let done;
     try { done = unit(() => { outcomes.file(report); const fresh = fu.patch(f.id, { status: 'complete' }); if (p && !isAdult(p) && p.guardianId) notify({ kind: 'guardian', id: p.guardianId }, 'outcome', text, f.id); else if (p) notify({ kind: 'player', id: p.id }, 'outcome', text, f.id); return fresh; }); }
     catch (e) { console.error(`OUTCOME report_rolled_back ${f.id}: ${e?.message ?? e}`); return res.status(500).json({ error: 'OUTCOME_STATE_UNKNOWN', message: 'The report could not be filed; nothing was recorded.' }); }
@@ -114,7 +106,7 @@ export function registerOperations(ctx) {
     if (tooLong(res, 'note', note, LIMITS.note)) return;
     if (experienceRating !== undefined && experienceRating !== null && ![1, 2, 3, 4, 5].includes(experienceRating)) return res.status(400).json({ error: 'FIELD_INVALID', field: 'experienceRating', message: 'experienceRating is 1 to 5, or omitted.' });
     if (note && !moderateOrRefuse(res, note, { kind: 'outcome_response', playerId: f.playerId })) return;
-    // S8d: the confirmation row and the report's status commit as one unit of work.
+    // The confirmation row and the report's status commit as one unit of work.
     try { unit(() => outcomes.addConfirmation(report.id, { by: actor, agree, note: note || null, experienceRating: experienceRating ?? null, at: Date.now() }, { status: agree ? 'confirmed' : 'disputed' })); }
     catch (e) { console.error(`OUTCOME response_rolled_back ${report.id}: ${e?.message ?? e}`); return res.status(500).json({ error: 'OUTCOME_STATE_UNKNOWN', message: 'The answer could not be recorded; nothing was recorded.' }); }
     res.json({ followUp: followUpView(f) });
@@ -160,7 +152,7 @@ export function registerOperations(ctx) {
     res.json({ rows, note: 'Missing data is counted as unknown, never as failure or success.' });
   });
 
-  // ================================================================= F12B/E
+  // ========================================================= captions
   // Captions for prerecorded video (upload + serve), size info on media,
   // and honest labelling of what has no captions. Serving uses the same
   // live entitlement rule as the media bytes themselves.
@@ -170,7 +162,7 @@ export function registerOperations(ctx) {
     const vtt = String(req.body?.vtt ?? '');
     if (!vtt.trim().startsWith('WEBVTT')) return res.status(400).json({ error: 'VTT_REQUIRED', message: 'Captions are a WebVTT track (starts with "WEBVTT").' });
     if (vtt.length > 200_000) return res.status(413).json({ error: 'CAPTIONS_TOO_LARGE' });
-    players.patchItem(req.player.id, 'media', { id: m.id }, { captions: vtt }); // S5: one row UPDATE, committed before the response
+    players.patchItem(req.player.id, 'media', { id: m.id }, { captions: vtt });
     broadcast('players', { playerId: req.player.id });
     res.json({ media: { id: m.id, captions: true } });
   });
@@ -190,12 +182,11 @@ export function registerOperations(ctx) {
     res.set('Content-Type', 'text/vtt').send(m.captions);
   });
 
-  // ================================================================= F12F
+  // ================================================= football context
   // Football context: competition category on the player's own profile.
   playerRouter.post('/football-category', (req, res) => {
     const c = req.body?.category;
     if (!['mens', 'womens', 'boys', 'girls', 'mixed', null].includes(c)) return res.status(400).json({ error: 'CATEGORY_INVALID' });
-    // S4a: a column-backed field goes through the repository (one row UPDATE, committed before the response).
     players.update(req.player.id, (d) => { d.footballCategory = c; });
     res.json({ footballCategory: c });
   });
@@ -207,12 +198,11 @@ export function registerOperations(ctx) {
     let changed = false;
     const now = Date.now();
 
-    // F11: backfill follow-ups for every signing (covers pre-M12 signings
-    // and new ones without touching the signing endpoint), then mark due.
-    // §4.3 step 2: three indexed queries, not a pass over every signing and follow-up.
+    // Backfill follow-ups for every signing (covers signings made before follow-ups
+    // existed and new ones without touching the signing endpoint), then mark due.
     for (const s of signingsFollowUps.signings.missingFollowUps(Object.keys(MILESTONES).length)) { if (scheduleFollowUps(s) > 0) changed = true; }
     for (const f of fu.dueToMark(now)) {
-      fu.patch(f.id, { status: 'due' }); // S8d: committed at once (a transaction of its own)
+      fu.patch(f.id, { status: 'due' }); // committed at once (a transaction of its own)
       changed = true;
     }
     for (let f of fu.dueUnnotified()) {
@@ -227,7 +217,7 @@ export function registerOperations(ctx) {
       changed = true;
     }
 
-    // F5: outstanding application outcomes nag once after 7 days. S9d: an indexed query; the marker is committed
+    // Outstanding application outcomes nag once after 7 days. The marker is committed
     // with the notification, so a restart re-sends nothing.
     for (const a of scoutingReads.applications.remindersDue(now - 7 * 86_400_000)) {
       unit(() => {
@@ -238,12 +228,11 @@ export function registerOperations(ctx) {
       changed = true;
     }
 
-    // F9: overdue trial feedback escalates once — to the club AND into the
+    // Overdue trial feedback escalates once — to the club AND into the
     // existing no-ghosting culture (admin can see it in reports volume).
-    // §4.3 step 2: the query is the old filter as an indexed predicate (a deadline passed, no report, never escalated,
-    // the subject not removed); the check below stays as written.
+    // The query already narrows to these trials; the check below repeats the rule.
     for (const t of trials.reportOverdue(now)) {
-      // P4A-D1/D14: a null deadline is "unknown", not "now"; a tombstoned
+      // A null deadline is "unknown", not "now"; a tombstoned
       // trial has nobody to file for, so it never escalates.
       if (Number.isFinite(t.reportDueAt) && t.reportDueAt < now && !t.report && !t.feedbackEscalatedAt && !t.subjectRemovedAt) {
         trials.update(t.id, (d) => { d.feedbackEscalatedAt = now; });
@@ -253,14 +242,14 @@ export function registerOperations(ctx) {
       }
     }
 
-    // M23 P4B: Trial reminders. Every marker lives on the row (`reminders`),
+    // Trial reminders. Every marker lives on the row (`reminders`),
     // so a restart re-sends nothing. A confirmed session within 48 h reminds
     // the recipient once per session per revision (guardian for a minor —
     // the recipient who accepted); a trial whose last session ended a day
     // ago without completion, and a completed trial without an assessment
     // after a week, remind the club lead once each. A blocked club sends the
-    // family nothing (D-16); a tombstoned trial has nobody to remind.
-    for (const t of trials.remindersDue(now)) { // §4.3 step 4: only the confirmed, open trials with a reminder due
+    // family nothing; a tombstoned trial has nobody to remind.
+    for (const t of trials.remindersDue(now)) { // only the confirmed, open trials with a reminder due
       if (t.subjectRemovedAt || !t.schedule?.confirmedAt) continue;
       if (deriveWorkflowState(t) !== 'scheduled') continue;
       const marks = {}; // the markers this sweep sets, written once below
@@ -296,7 +285,7 @@ export function registerOperations(ctx) {
       changed = true;
     }
 
-    // F12A: abandoned upload sessions cleaned after 24 h (domains/media/uploads.mjs).
+    // Abandoned upload sessions cleaned after 24 h (domains/media/uploads.mjs).
     if (ctx.sweepUploads(now)) changed = true;
 
   }

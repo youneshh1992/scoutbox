@@ -1,5 +1,5 @@
 import { GuidanceNote } from './InformationRows';
-// M23 P4B — the family's Trial workflow: what has been agreed, session by
+// The family's Trial workflow: what has been agreed, session by
 // session. The player or guardian confirms or declines a proposed schedule
 // and may cancel; nothing here is a judgement. A minor's own device shows the
 // guardian-managed outcome line only.
@@ -32,7 +32,7 @@ const fmtEnd = (ms: number, zone: string | null) => {
   try { return new Date(ms).toLocaleTimeString(uiLocale(), { timeZone: zone ?? undefined, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }); } catch { return fmtClock(ms); }
 };
 
-// M24B — `standalone`: on its own page the section shows an honest empty state instead of vanishing.
+// `standalone`: on its own page the section shows an honest empty state instead of vanishing.
 export function TrialWorkflowSection({ actor, standalone = false }: { actor: Actor; standalone?: boolean }) {
   const colors = useColors();
   const [trials, setTrials] = useState<FamilyTrial[] | null>(null);
@@ -133,7 +133,7 @@ export function TrialWorkflowSection({ actor, standalone = false }: { actor: Act
   );
 }
 
-/** The slot chips of a P4B invitation: day + times in the organiser zone + venue. Picking one is choosing the DAY the server accepts. */
+/** The slot chips of a trial invitation: day + times in the organiser zone + venue. Picking one is choosing the DAY the server accepts. */
 export function TrialSlotChips({ slots, chosenDay, onPick }: { slots: { id: string; day: string; kind: string | null; startsAt: number; endsAt: number; timezone: string; venue: { name: string; town: string | null } | null }[]; chosenDay: string; onPick: (day: string) => void }) {
   const colors = useColors();
   return <View style={{ gap: 9 }}>

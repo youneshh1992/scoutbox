@@ -2,7 +2,7 @@ import { PlayerMeta, PlayerName } from '../../components/PlayerIdentity';
 import { Pill } from '../../components/ui';
 import { MetricTiles, RecordPanel, DetailFact } from '../../components/RecordDetails';
 import { GuidanceNote, StatusRow } from '../../components/InformationRows';
-// Profile — M24F.1. Important information first, secondary information in
+// Profile. Important information first, secondary information in
 // separate sections. The page is the player: a plain avatar, the name as
 // the strongest element, position · place, the availability word, Verified,
 // View Passport. Then four local sections — Overview, Performance, Evidence,
@@ -12,10 +12,9 @@ import { GuidanceNote, StatusRow } from '../../components/InformationRows';
 // Overview shows ONE current action (the server's next action, a pending
 // request, a scheduled trial, or the account handover — in that order, never
 // two), four or five essentials, and four recent activities. Everything else
-// the old profile showed is one tap away in its section, or in You › Account
-// when it is a control. Every value is read from the session and the client
-// calls the previous profile, Home and Football already made — nothing is
-// invented (see M24F_PLAYER_PROFILE_DATA_MAP.md).
+// is one tap away in its section, or in You › Account when it is a control.
+// Every value is read from the session and the same client calls Home and
+// Football make — nothing is invented.
 import { createElement, useCallback, useEffect, useMemo, useState } from 'react';
 import { Image, Platform, Pressable, ScrollView, StyleSheet, Switch, View } from 'react-native';
 import { Text, TextInput } from '../../components/Text';
@@ -74,7 +73,7 @@ const upcomingSession = (t: FamilyTrial | undefined) => {
   return wf.schedule.sessions.find((s) => s.startsAt >= Date.now() - 3600e3) ?? wf.schedule.sessions[0] ?? null;
 };
 
-/** The Explore page a next-action code opens (M24B categories and their first useful page). */
+/** The Explore page a next-action code opens (the category and its first useful page). */
 const ROUTE_FOR_ACTION: Record<PlayerNextActionCode, { cta: string; tab: string } | null> = {
   RESPOND_TO_CONTACT: { cta: 'View request', tab: 'requests' },
   RESPOND_TO_TRIAL_INVITATION: { cta: 'View trial', tab: 'invitation' },
@@ -438,7 +437,7 @@ function CvBlock({ playerId }: { playerId: string }) {
   );
 }
 
-/** M24F.4 — a clip as a picture, not a player: the browser's first frame, no controls, tap to open. */
+/** A clip as a picture, not a player: the browser's first frame, no controls, tap to open. */
 function ClipThumb({ src, onPress, testID }: { src: string | null; onPress?: () => void; testID?: string }) {
   const colors = useColors();
   // No playable file (the demo's sample clips carry none): a quiet frame with the
@@ -460,7 +459,7 @@ function EvidenceSection({ me, playerId, isMinor, refresh, onUpload, onBoxCam, o
   const [combineCount, setCombineCount] = useState<number | null>(null);
   useEffect(() => { let on = true; combine.overview({ kind: 'player', id: playerId }).then((o) => on && setCombineCount(o.verifiedResults.length)).catch(() => on && setCombineCount(null)); return () => { on = false; }; }, [playerId]);
 
-  // M24F.4 — the root is visual: the latest clip as a picture, then one row
+  // The root is visual: the latest clip as a picture, then one row
   // per kind of evidence with its count. The clips, the references, the
   // attendance and the record itself each open one tap deep.
   const clips = [...me.media].sort((a, b) => new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime());
@@ -544,7 +543,7 @@ function EvidenceSection({ me, playerId, isMinor, refresh, onUpload, onBoxCam, o
       <View style={styles.block} testID="evidence-record">
         {back(pt('evBack'))}
         <SectionTitle>{pt('evRecord')}</SectionTitle>
-        {/* the evidence record itself (M12): tiers, records, the add-evidence form — unchanged */}
+        {/* the evidence record itself: tiers, records, the add-evidence form — unchanged */}
         <View style={styles.block} testID="evidence-passport">
           <PassportSection actor={{ kind: 'player', id: playerId }} />
         </View>
@@ -621,10 +620,9 @@ function JourneyTimeline({ journeys, requests, earlier, onExplore }: { journeys:
 }
 
 /**
- * The controls that used to sit on the profile: availability, first-team
- * seeker, contract status, Academy+, the contract facts and medical sharing.
- * They live in You › Account now (M24F.1 §52, §16 of the audit); the words,
- * the calls and the rules are the ones they always had.
+ * The profile's controls: availability, first-team seeker, contract status,
+ * Academy+, the contract facts and medical sharing. They are rendered in
+ * You › Account, not on the profile page.
  */
 export function ProfileSettings() {
   return (<><AvailabilitySettings /><MedicalSettings /></>);
@@ -659,7 +657,7 @@ export function AvailabilitySettings() {
               </Row>
             )}
             <Text style={[styles.subhead, { marginTop: 10 }]}>Contract status</Text>
-            {/* M23 P8 §26 — "Under contract" is recorded by a signing completed in ScoutBox and cannot be declared here. */}
+            {/* "Under contract" is recorded by a signing completed in ScoutBox and cannot be declared here. */}
             {me.contractStatus === 'under_contract' ? (
               <View testID="contract-status-canonical">
                 <Row><Button small primary label={CONTRACT_LABELS.under_contract} onPress={() => undefined} /></Row>

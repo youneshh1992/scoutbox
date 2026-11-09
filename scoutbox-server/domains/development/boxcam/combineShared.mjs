@@ -1,4 +1,4 @@
-// M16.1 — At-Home Combine pure engine + standardized protocol registry.
+// At-Home Combine pure engine + standardized protocol registry.
 //
 // At-Home Combine is a MEASUREMENT LAYER over Box Cam. It does not add a
 // second camera/observation stack: every Combine Attempt binds to a real
@@ -204,9 +204,9 @@ export const COMBINE_PROTOCOLS = [
  * restore brings it back. Computed at read time so invalidation is reflected
  * everywhere without ever rewriting the attempt.
  *
- * Extracted in M21 so there is exactly ONE definition of this rule. It was
- * M16.1's `effectiveState`, which still calls it; M21's objective targets need
- * the same answer, and a second copy would eventually give a different one.
+ * There is exactly ONE definition of this rule: the Combine's `effectiveState`
+ * and the objective targets both call it, and a second copy would eventually
+ * give a different answer.
  */
 export function liveCombineState(attempt, boundSession) {
   if (!attempt) return null;

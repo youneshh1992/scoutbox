@@ -1,7 +1,7 @@
 // Runtime compatibility contract: the data layer needs
 // `DatabaseSync.prototype.isTransaction` (Node.js 22.16 / 24.0), so an
 // unsupported runtime must be refused clearly BEFORE the data directory is
-// created or modified, and a supported one must save, roll a failed save back
+// created or modified, and a supported one must write, roll a failed unit back
 // and retry. Three kinds of check, labelled in the output:
 //   [current runtime]  the Node.js running this suite — a real runtime test;
 //   [simulation]       the current runtime with isTransaction masked by

@@ -1,4 +1,4 @@
-// M23 P8 — Full Recruitment Journey Integration: the end-to-end proof.
+// The full recruitment journey, end to end.
 //
 //   discovery → watching → review → contact → trial → assessment → decision →
 //   offer → acceptance → signing → signed, as ONE coherent journey read from
@@ -6,8 +6,8 @@
 //   no stage advanced by discovery, matching, Trust Score, Box Cam, an
 //   assessment, an acceptance or a signature alone.
 //
-// Groups: A model (pure) · B the canonical adult journey (§61 steps 1–25) ·
-// C the negatives (§62 #1–#20) · D legacy and integrity classification ·
+// Groups: A model (pure) · B the canonical adult journey (steps 1–25) ·
+// C the negatives (#1–#20) · D legacy and integrity classification ·
 // E cross-resource confusion · F audiences (player, guardian, agent) ·
 // G notification targets · H lifecycle authority and contract truth ·
 // Q partial failure · Z boundary invariants (source scans).
@@ -27,8 +27,8 @@ import {
   playerNextActionFor, playerStageFor, validateRecruitmentJourney, JOURNEY_CLASSIFICATIONS, TIMELINE_VISIBILITY, timelineVisibleTo,
 } from '../../domains/recruitment/lifecycle/journeyModel.mjs';
 import { JOURNEY_VIEWERS } from '../../domains/recruitment/lifecycle/journey.mjs';
-import { buildRecruitmentJourney, createEvidenceProvider } from '../../scripts/recruitmentReadsFixture.mjs'; // §4.3 step 2: the contacts/offers queries over the plain arrays
-const LATEST_SCHEMA = Number(DATA_MIGRATIONS.map((m) => m.id).sort().at(-1).slice(0, 4)); // S14a: the latest table migration's number
+import { buildRecruitmentJourney, createEvidenceProvider } from '../../scripts/recruitmentReadsFixture.mjs'; // the contacts/offers queries over plain arrays
+const LATEST_SCHEMA = Number(DATA_MIGRATIONS.map((m) => m.id).sort().at(-1).slice(0, 4)); // the latest table migration's number
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SERVER = path.join(HERE, '..', '..', 'server.mjs');
@@ -66,13 +66,12 @@ const at = (ms) => ({ 'x-scoutbox-test-clock': String(ms) });
 // ================================================================ A — model (pure)
 section('A — the model: stages, selectors, next actions, validator, visibility (pure)');
 {
-  // Rewritten in S14a: it compared the blob's schema numbers.
-  ok(DATA_MIGRATIONS.length === LATEST_SCHEMA && !DATA_MIGRATIONS.some((m) => /journey/i.test(m.id)), 'A1 every table migration, none for a journey: P8 adds no store');
+  ok(DATA_MIGRATIONS.length === LATEST_SCHEMA && !DATA_MIGRATIONS.some((m) => /journey/i.test(m.id)), 'A1 every table migration, none for a journey: the journey adds no store');
   ok(JOURNEY_STAGES.length === 13 && PIPELINE_STAGES.length === 10 && PIPELINE_STAGES.every((s) => JOURNEY_STAGES.includes(s)), 'A2 thirteen stage words, ten pipeline stages');
   neg(ROOM_STATUSES.length === 18 && JOURNEY_STAGES.every((s) => !ROOM_STATUSES.includes(s) || s === 'watching' || s === 'signed'), 'A3 the frozen lifecycle still has 18 states; a stage word is not a lifecycle state (only `watching` and `signed` coincide by name)');
   ok(canonicalStageFor('trial_completed', { assessed: false }) === 'assessment' && canonicalStageFor('trial_completed', { assessed: true }) === 'decision' && canonicalStageFor('offer_accepted', {}) === 'acceptance' && canonicalStageFor('offer_accepted', { signingOpened: true }) === 'signing' && canonicalStageFor('on_hold', {}) === 'paused' && canonicalStageFor('archived', {}) === 'ended', 'A4 stage refinements: assessed → decision, package → signing, hold → paused, terminal → ended');
   neg(canonicalStageFor('SIGNED', {}) === null && canonicalStageFor('', {}) === null && canonicalStageFor('constructor', {}) === null, 'A5 an unknown status has no stage (fails closed, prototype keys included)');
-  // Selectors: the P7.1 Agent defect (an expired package over a live one) can no longer happen.
+  // Selectors: an expired package never masks a live one.
   const pk = (id, status, createdAt, expiresAt) => ({ id, status, createdAt, expiresAt, revisions: [{ id: `${id}-r1`, revisionNumber: 1, status }], currentRevisionId: `${id}-r1` });
   const expired = pk('spk-old', 'READY', T0 - 10 * DAY, T0 - 5 * DAY); const live = pk('spk-new', 'READY', T0 - DAY, T0 + 5 * DAY); const done = pk('spk-done', 'COMPLETED', T0 - 3 * DAY, null);
   neg(currentSigningForOffer([expired, live], T0)?.id === 'spk-new' && currentSigningForOffer([live, expired], T0)?.id === 'spk-new', '#53 A6 a live package is current whatever its storage order; the expired one never masks it');
@@ -282,7 +281,7 @@ const agentJourney = (rel, token) => j('GET', `/org/agent/clients/${rel}/journey
 const done = (b) => b.completedStages.map((c) => `${c.stage}:${c.basis}`);
 
 // ================================================================ B — the canonical adult journey
-section('B — the canonical adult journey: 25 steps, one projection, every stage grounded (§61)');
+section('B — the canonical adult journey: 25 steps, one projection, every stage grounded');
 const J = {};
 {
   // 1. the player exists  2. discovery  3. watch
@@ -403,7 +402,7 @@ const J = {};
 }
 
 // ================================================================ C — negatives not covered above
-section('C — the boundaries the journey never crosses (§62)');
+section('C — the boundaries the journey never crosses');
 {
   // #4 a failed contact does not mark contacted
   const RID = await reviewed(maria.token, 'pl-nowak');
@@ -441,7 +440,7 @@ section('C — the boundaries the journey never crosses (§62)');
 }
 
 // ================================================================ D — legacy and integrity classification
-section('D — legacy cases: history from before the records, reported as history; a claimed record that is gone is an error (§11, §64)');
+section('D — legacy cases: history from before the records, reported as history; a claimed record that is gone is an error');
 const L = {};
 {
   L.contacted = await reviewed(maria.token, 'pl-okafor');
@@ -502,7 +501,7 @@ const L = {};
 }
 
 // ================================================================ F — audiences
-section('F — audiences: the player, the guardian, the agent (§16, §17, §46, §47)');
+section('F — audiences: the player, the guardian, the agent');
 {
   const before = await agentJourney(REP, ana.token);
   ok(before.status === 200 && Array.isArray(before.body.items) && before.body.grants.includes('offers') && before.body.grants.includes('signings') && before.body.grants.includes('contacts'), 'F1 Ana (employment, verified) reads Kola\'s journey with the offers and signings grants');
@@ -525,7 +524,7 @@ section('F — audiences: the player, the guardian, the agent (§16, §17, §46,
 }
 
 // ================================================================ G — notification targets
-section('G — notifications point to the current authorized resource (§29–§31)');
+section('G — notifications point to the current authorized resource');
 {
   const kn = await notifs('/player/notifications', P['pl-adeyemi'].token);
   const off = kn.find((n) => n.type === 'recruitment_offer' && n.refId === J.OID);
@@ -563,7 +562,7 @@ section('G — notifications point to the current authorized resource (§29–§
 }
 
 // ================================================================ H — lifecycle authority and contract truth
-section('H — one writer, one authority: the legacy route, the reopen bridge, the self-service route, the recording route (§5, §26, §27)');
+section('H — one writer, one authority: the legacy route, the reopen bridge, the self-service route, the recording route');
 {
   // Role parity on the legacy status route.
   const M = await reviewed(maria.token, 'pl-martin');
@@ -575,9 +574,8 @@ section('H — one writer, one authority: the legacy route, the reopen bridge, t
   neg(expect(await legacyStatus(M, 'signed', maria.token), 422, 'ROOM_EVIDENCE_REQUIRED'), '#14 H3 a recruitment lead is refused for the real reason: no signing supports it');
   neg(expect(await j('POST', `/org/rooms/${M}/status`, { status: 'contact_planned', expectedRev: await caseRev(M) }, tom.token), 409, 'ROOM_TRANSITION_INVALID'), 'H4 the transition table still applies before anything else');
   // The Second Look bridge reopens only a closed-out room.
-  // S12c (rewritten: a Second Look item is a typed row naming the decision cycle it belongs to, so the planted item is the
-  // writer's whole literal — secondLook.mjs reconcile — on the Room's real decision; the old literal's null decision and
-  // made-up trigger are refused by the table).
+  // A Second Look item is a typed row naming the decision cycle it belongs to, so the planted item is the writer's whole
+  // literal (secondLook.mjs reconcile) on the Room's real decision; a null decision or a made-up trigger is refused.
   await offline((layer) => { layer.discovery.secondLook.create({ id: 'slk-p8-live', orgId: 'org-eastport', playerId: 'pl-martin', roomId: M, decisionId: MDEC, policyVersion: 1, triggerType: 'general_update', changeFingerprints: ['evidence_added:evidence:ev-p8-planted'], directReasonCodes: [], status: 'open', createdAt: Date.now(), updatedAt: Date.now(), latestChangeAt: Date.now(), history: [{ at: Date.now(), action: 'surfaced', by: null }] }); });
   await relogin();
   neg(expect(await j('POST', '/org/second-look/slk-p8-live/reopen-room', { reasonCodes: ['continue_monitoring'] }, maria.token), 409, 'ROOM_NOT_REOPENABLE') && (await stage(M)) === 'offer_accepted', 'H5 Second Look cannot "reopen" a live case: 409 ROOM_NOT_REOPENABLE, the case untouched');
@@ -600,7 +598,7 @@ section('H — one writer, one authority: the legacy route, the reopen bridge, t
 }
 
 // ================================================================ Q — partial failure
-section('Q — partial failure: the case is never half-moved (§81)');
+section('Q — partial failure: the case is never half-moved');
 {
   const G = globalThis.__G;
   const cur = await sGet(G.SID2);
@@ -620,7 +618,7 @@ section('Q — partial failure: the case is never half-moved (§81)');
 
 
 // ================================================================ I — analytics canonicalization
-section('I — analytics: every journey stage derives from the canonical record, case-based, no double count (§42–§45, §90)');
+section('I — analytics: every journey stage derives from the canonical record, case-based, no double count');
 {
   const dash = await j('GET', '/org/recruitment-analytics?window=last_90_days', undefined, maria.token);
   const m = dash.body?.data?.pipeline?.metrics?.journey_evidence_funnel;
@@ -654,31 +652,29 @@ section('Z — the boundaries, read from the source: one writer per truth, no au
   neg(statusWriters.length === 1 && statusWriters[0] === 'domains/recruitment/rooms/rooms.mjs', `Z1 exactly one file assigns room.status on a live case: ${statusWriters.join(', ')}`);
   const stageWriters = serverFiles.filter((f) => /(?:kase|room|c|k)\.stage\s*=[^=]/.test(strip(src(f))));
   neg(stageWriters.every((f) => ['domains/recruitment/rooms/rooms.mjs', 'domains/scouting/scouting.mjs'].includes(f)), `Z2 case.stage is written only by the ONE writer and the room-guarded M12 routes: ${stageWriters.join(', ')}`);
-  // S4a: the column is written through the identity repository (`players.update(id, { contractStatus: 'under_contract' })`), never assigned on the record; the one writer is still m29.
+  // The column is written through the identity repository (`players.update(id, { contractStatus: 'under_contract' })`), never assigned on the record, and only by the signings domain.
   const ucWriters = serverFiles.filter((f) => /contractStatus\s*=\s*'under_contract'|players\.update\([^\n]*contractStatus: 'under_contract'/.test(strip(src(f))));
   neg(ucWriters.length === 1 && ucWriters[0] === 'domains/recruitment/signings/index.mjs', `#26 Z3 'under_contract' is written in exactly one file: ${ucWriters.join(', ')}`);
   const csWriters = serverFiles.filter((f) => /\.contractStatus\s*=[^=]/.test(strip(src(f))));
   neg(csWriters.every((f) => ['domains/recruitment/signings/index.mjs', 'server.mjs'].includes(f)) && /CONTRACT_STATUS_NOT_SELF_DECLARABLE/.test(src('server.mjs')) && /CONTRACT_STATUS_CANONICAL/.test(src('server.mjs')) && /canonicalContractFor\(p\.id, Date\.now\(\), \{ exceptOrgId: req\.org\.id \}\)/.test(src('server.mjs')), `#26 Z4 every other contractStatus assignment sits behind the two refusals or the release guard: ${csWriters.join(', ')}`);
-  neg(!/applyLifecycleTransition|room\.status|recordCompletedSigning/.test(strip(src('domains/discovery/matching/index.mjs'))) && files('domains/development/boxcam/cv').every((f) => !/applyLifecycleTransition|room\.status|rejectCase|archived/.test(strip(src(f)))) && !/applyLifecycleTransition|room\.status/.test(strip(src('domains/verification/trust/shared.mjs'))), '#15 #16 #17 Z5 matching (M19), Box Cam / CV (M22) and Trust (M16.2) never touch the lifecycle');
+  neg(!/applyLifecycleTransition|room\.status|recordCompletedSigning/.test(strip(src('domains/discovery/matching/index.mjs'))) && files('domains/development/boxcam/cv').every((f) => !/applyLifecycleTransition|room\.status|rejectCase|archived/.test(strip(src(f)))) && !/applyLifecycleTransition|room\.status/.test(strip(src('domains/verification/trust/shared.mjs'))), '#15 #16 #17 Z5 matching, Box Cam / CV and Trust never touch the lifecycle');
   neg(!/db\.signings\.push/.test(strip(src('domains/recruitment/offers/index.mjs'))) && !/'signed'/.test(strip(src('domains/recruitment/offers/index.mjs')).replace(/ROOM_STATUS_LABELS/g, '')) && !/db\.signingPackages\.push/.test(strip(src('domains/recruitment/offers/index.mjs'))), '#11 Z6 the Offer domain writes no signing row, no package, no signed');
   neg(!/db\.recruitmentOffers\.push/.test(strip(src('domains/recruitment/lifecycle/decisionRoutes.mjs'))), '#9 Z7 the decision domain writes no Offer');
   neg(!/db\.recruitmentJourneys|recruitmentJourneyStates/.test(serverFiles.map((f) => strip(src(f))).join('')) && files('repositories/migrations').every((f) => !/recruitmentJourneys|recruitmentJourneyStates|recruitment_journey/.test(src(f))), '#83 Z8 there is no journey store and no migration names one');
   neg(!/\.push\(|\.splice\(|\s=\s(?!==)/.test(strip(src('domains/recruitment/lifecycle/journeyModel.mjs')).replace(/const |let |\w+\s*=\s*\(|=>|===|!==|<=|>=|\?\?=/g, '')) || true, 'Z9 the model is read-only by construction (no store access)');
   neg(!/\bdb\b/.test(strip(src('domains/recruitment/lifecycle/journeyModel.mjs'))), 'Z9b the model never receives a database');
   neg(/registerJourneyRoutes/.test(src('server.mjs')) && !/\.push\(|persist/.test(strip(src('domains/recruitment/lifecycle/journeyRoutes.mjs')).replace(/items\.push|out\.push|grants\.push/g, '')), 'Z10 the journey routes write nothing');
-  // S4a: the completion is one unit of work (store.unitOfWork) — the case lifecycle, the signings row, the player's
-  // columns roll back together through the unit's participants, never by a hand-written
-  // restore in the signing module; the lifecycle writer keeps its own snapshot for its own failures (M17).
+  // The completion is one unit of work (store.unitOfWork): the case lifecycle, the signings row and the player's
+  // columns roll back together through the unit's participants, never by a hand-written restore in the signing module.
   neg(!/lifecycleSnapshot|restoreLifecycle/.test(src('domains/recruitment/rooms/rooms.mjs')) && /unit\(\(\) => \{[\s\S]{0,400}recordCompletedSigning\(/.test(src('domains/recruitment/signings/index.mjs')) && !/kase\.room\.status = snapshot/.test(src('domains/recruitment/signings/index.mjs')) && !/restoreLifecycle/.test(src('domains/recruitment/signings/index.mjs')), 'Z11 the signing completion rolls back as one unit of work (S4a), not through a hand-written restore (S8b: the lifecycle writer has none left)');
   neg(/pkg\.caseId !== kase\.id/.test(src('domains/recruitment/lifecycle/evidence.mjs')) && /ts < opened/.test(src('domains/recruitment/lifecycle/evidence.mjs')), 'Z12 the signed rule names the case (canonical) and the opening (legacy)');
   neg(/ROOM_NOT_REOPENABLE/.test(src('domains/recruitment/rooms/rooms.mjs')) && /namingActions/.test(src('domains/recruitment/rooms/rooms.mjs')), 'Z13 the reopen guard and the role parity are in the M17 source');
   neg(/currentSigningForOffer\(rows, at\)/.test(src('domains/recruitment/signings/index.mjs')), '#53 Z14 the Offer\'s signing summary uses the ONE current-package rule');
   const agentSel = src('../scoutbox-agent/src/screens.tsx');
-  // M24B moved the agent's signings off the Offer row: the Signings page lists
-  // every package the server marks live or COMPLETED and History the terminal
-  // ones, by the server's own flags — the agent app no longer chooses a
-  // package per Offer, so it can hold no preference of its own (M24D: the
-  // check follows the M24B shape; the ONE current-package rule is Z14's).
+  // The agent's Signings page lists every package the server marks live or
+  // COMPLETED and History the terminal ones, by the server's own flags: the
+  // agent app never chooses a package per Offer, so it can hold no preference
+  // of its own (the ONE current-package rule is Z14's).
   neg(/filter\(\(g\) => !g\.terminal \|\| g\.status === 'COMPLETED'\)/.test(agentSel) && /filter\(\(g\) => g\.terminal\)/.test(agentSel) && !/forOffer\[forOffer\.length - 1\]|\.sort\([^)]*createdAt[^)]*\)\[0\]/.test(agentSel), 'Z15 the agent app renders packages by the server\'s live / completed / terminal flags and keeps no preference of its own');
   neg(!/nextAction\s*[:=]\s*\{/.test(strip(src('../scoutbox-club/src/journeyStrip.tsx'))) && !/nextAction\s*[:=]\s*\{/.test(strip(src('../scoutbox-club/src/roomsScreens.tsx'))), '#7 Z16 the club app never manufactures a next action');
 }

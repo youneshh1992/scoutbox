@@ -1,9 +1,7 @@
 /**
- * Grassroots operations get their own typed tables (S13d): open days (positions and registrations as rows; deleting
- * one stamps it), match days (credited players as rows) and the friendlies board (responses as rows). A coverage
- * assignment's key to a friendly or an open day (declared by 0033) resolves from here on.
- * REGISTERED in DATA_MIGRATIONS. `up()` is the DDL only: nothing is carried over (no production data; rollback means
- * re-seed).
+ * Grassroots operations: open days (positions and registrations as rows; deleting one stamps it), match days
+ * (credited players as rows) and the friendlies board (responses as rows). A coverage assignment's key to a friendly
+ * or an open day (declared by 0033) resolves from here on.
  */
 import { migrationApplied } from '../database.mjs';
 import { GROUPS_MIGRATION } from '../groups.mjs';

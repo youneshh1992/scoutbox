@@ -1,4 +1,4 @@
-// M12 shared: helpers used by every feature module.
+// Helpers shared by the feature modules registered in m12/.
 import { isAdult, visibleToOrg, haversineKm } from '../domain.mjs';
 import { ageOrNull, parseDateOrInstant, isAbsent } from '../temporal.mjs';
 import { isLeadUser } from '../roles.mjs';
@@ -33,7 +33,7 @@ export function buildShared(ctx) {
     record.history.push({ id: nextId('aud'), at: Date.now(), byKind, byId, byName, action, detail });
   };
 
-  // The player-or-guardian actor pattern: many M12 flows accept either the
+  // The player-or-guardian actor pattern: many of these flows accept either the
   // adult player or, for a minor, ONLY the owning guardian.
   const guardianOwnsChild = (guardian, playerId) => guardian.childIds.includes(playerId);
 
@@ -48,15 +48,15 @@ export function buildShared(ctx) {
     return { ageDays: days, fresh: days <= 180 };
   };
 
-  // KNOWN DEFECT, kept until the Founder decides: matched by the coach's NAME, not by a staff account (migration.md §4.5 S9).
+  // KNOWN DEFECT, kept until the Founder decides: matched by the coach's NAME, not by a staff account.
   const activeAffiliation = (orgId, userName) => ctx.scoutingReads.coachAffiliations.activeFor(orgId, userName);
 
-  // Eligibility engine shared by opportunities + campaigns (F5/F6). Explicit
+  // Eligibility engine shared by opportunities + campaigns. Explicit
   // criteria in, explicit verdict out; missing required data fails CLOSED.
   function checkEligibility(elig, player, org) {
     const reasons = [];
     if (!elig) return { eligible: true, reasons };
-    // M23 P5.7 (T-8): THE age rule, not a second one. An unreadable date of
+    // THE age rule, not a second one. An unreadable date of
     // birth is `null`, and null fails both age bounds below (closed).
     const age = ageOrNull(player.dob, Date.now());
     if (elig.minAge != null && (age === null || age < elig.minAge)) reasons.push(`minimum age ${elig.minAge}`);
@@ -76,7 +76,7 @@ export function buildShared(ctx) {
     return { eligible: reasons.length === 0, reasons };
   }
 
-  // Distance shown as a band, never a precise home location (F12F).
+  // Distance shown as a band, never a precise home location.
   const distanceBand = (a, b) => {
     if (!a || !b) return null;
     const km = haversineKm(a, b);
@@ -84,7 +84,7 @@ export function buildShared(ctx) {
   };
 
   /**
-   * M23 P5.7: a due date (or a case deadline) is a calendar day or an instant that EXISTS, or it is absent.
+   * A due date (or a case deadline) is a calendar day or an instant that EXISTS, or it is absent.
    * Returns the canonical stored value (a `YYYY-MM-DD` string or integer ms), null for absent, or undefined after
    * sending a 400.
    */

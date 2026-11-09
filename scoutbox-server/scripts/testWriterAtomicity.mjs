@@ -1,4 +1,4 @@
-// The coupled writers of S4a through the REAL server (server.mjs booted as a
+// The coupled writers through the REAL server (server.mjs booted as a
 // child process on temporary data directories, synthetic records only). A
 // request that changes a column AND something else — a facet on the same
 // record, another table of the same domain, an audit entry, another domain's facet — must
@@ -54,7 +54,6 @@ async function boot(dir) {
 const q1 = (dir, sql, ...p) => { const s = new DatabaseSync(path.join(dir, 'scoutbox.db'), { readOnly: true }); try { return s.prepare(sql).get(...p); } finally { s.close(); } };
 const facets = (dir, table, id) => JSON.parse(q1(dir, `SELECT facets_json FROM ${table} WHERE id = ?`, id).facets_json);
 // The audit collections (idvQueue, ledger, …) read in the writer's literal through the repository's own reader.
-// (Rewritten in S14a: this looked for a blob row first; there is no blob.)
 const auditRows = (dir, name) => { const s = new DatabaseSync(path.join(dir, 'scoutbox.db'), { readOnly: true }); try { const all = createSafetyAuditRepository({ sqlite: s }).exportAll(); assert.ok(all && Object.hasOwn(all, name), `${name} is an audit table`); return all[name]; } finally { s.close(); } };
 const orgLogin = async (S, orgId, scoutName, role, platform) => { const r = await S.j('POST', '/auth/org/login', { orgId, scoutName, role, ...(platform ? { platform } : {}) }); assert.equal(r.status, 200, `org login ${orgId}: ${JSON.stringify(r.body)}`); return r.body.token; };
 const signupAdult = async (S, name, extra = {}) => { const r = await S.j('POST', '/auth/player/signup', { name, dob: '2000-01-01', country: 'GB', password: 'synthetic-pass-1', ...extra }); assert.equal(r.status, 201, JSON.stringify(r.body)); return { pid: r.body.playerId, token: r.body.token }; };
@@ -104,7 +103,7 @@ async function coupled(S, dir, { seam, act, dbState, before, after, view, viewBe
   return again;
 }
 
-// ------------------------------------------------------------- medical record (the reviewer's reproduction)
+// ------------------------------------------------------------- medical record
 await test('medical record: the condition column and the record (a facet) commit together before the 201 — a second connection sees both at once, a SIGKILL right after the response loses neither; a failure after the row write and a failure of the real COMMIT are answered 500, leave neither in the database nor in memory, and the retry lands both', async () => {
   const dir = tempDir('s4wa-medical'); let S = await boot(dir);
   const { pid, token } = await signupAdult(S, 'Medical Adult');
@@ -112,7 +111,7 @@ await test('medical record: the condition column and the record (a facet) commit
     seam: 'medical.records.after_row',
     act: () => S.j('POST', '/player/medical/records', { title: 'Synthetic recovery record', conditionStatus: 'fully_fit', date: '2026-10-11' }, token),
     okStatus: 201,
-    dbState: () => ({ condition: q1(dir, 'SELECT medical_condition_status AS c FROM players WHERE id = ?', pid).c, records: q1(dir, 'SELECT COUNT(*) AS n FROM player_medical_records WHERE player_id = ?', pid).n }), // S5: rows of player_medical_records
+    dbState: () => ({ condition: q1(dir, 'SELECT medical_condition_status AS c FROM players WHERE id = ?', pid).c, records: q1(dir, 'SELECT COUNT(*) AS n FROM player_medical_records WHERE player_id = ?', pid).n }),
     before: { condition: 'unknown', records: 0 }, after: { condition: 'fully_fit', records: 1 },
     view: async (X) => { const me = (await X.j('GET', '/player/me', undefined, token)).body; return [me.medical.conditionStatus, me.medical.records.length]; },
     viewBefore: ['unknown', 0], viewAfter: ['fully_fit', 1],
@@ -143,8 +142,8 @@ await test('programme selection: the track columns and the reset of the complete
   const { pid, token } = await signupAdult(S, 'Programme Adult');
   assert.equal((await S.j('POST', '/player/programme', { track: 'attack' }, token)).status, 201);
   const done = await S.j('POST', '/player/programme/sessions/atk-sprint/complete', {}, token); assert.equal(done.status, 200, JSON.stringify(done.body)); assert.equal(done.body.current.doneThisWeek, 1);
-  // Completing a session is a facet-only write (no column): it is persisted by the next ordinary, debounced save (the S3 contract), so the pre-state is awaited in the database before the coupled operation is exercised.
-  const completedInDb = () => q1(dir, 'SELECT COUNT(*) AS n FROM player_programme_completions WHERE player_id = ?', pid).n; // S5: rows
+  // The pre-state (one completed session) is awaited in the database before the coupled operation is exercised.
+  const completedInDb = () => q1(dir, 'SELECT COUNT(*) AS n FROM player_programme_completions WHERE player_id = ?', pid).n;
   for (let i = 0; i < 200 && completedInDb() !== 1; i++) await new Promise((r) => setTimeout(r, 50));
   assert.equal(completedInDb(), 1, 'the completed session reached the database through the ordinary save');
   S = await coupled(S, dir, {
@@ -166,7 +165,7 @@ await test('Academy+: the column and the badge (a facet) commit together before 
   S = await coupled(S, dir, {
     seam: 'academyplus.after_row',
     act: () => S.j('POST', '/player/academyplus', { enabled: true }, token),
-    dbState: () => ({ academyPlus: q1(dir, 'SELECT academy_plus AS a FROM players WHERE id = ?', pid).a, badge: q1(dir, "SELECT COUNT(*) AS n FROM player_badges WHERE player_id = ? AND badge = 'Fresh Start'", pid).n > 0 }), // S5: rows of player_badges
+    dbState: () => ({ academyPlus: q1(dir, 'SELECT academy_plus AS a FROM players WHERE id = ?', pid).a, badge: q1(dir, "SELECT COUNT(*) AS n FROM player_badges WHERE player_id = ? AND badge = 'Fresh Start'", pid).n > 0 }),
     before: { academyPlus: 0, badge: false }, after: { academyPlus: 1, badge: true },
     view: async (X) => { const me = (await X.j('GET', '/player/me', undefined, token)).body; return [me.academyPlus, me.badges.includes('Fresh Start')]; },
     viewBefore: [false, false], viewAfter: [true, true],
@@ -190,14 +189,14 @@ await test('stats: the stat columns and the activity log (a facet) commit togeth
 });
 
 // ------------------------------------------------------------- squad release (a squad row, player columns, a vouch, the ledger, notifications)
-await test('squad release: the squad row (org_squad_members since S9c), the player\'s availability and contract columns, the published reference (a row of vouches since S10c) and the ledger row commit together before the 200 — second connection, SIGKILL, both failure seams, retry', async () => {
+await test('squad release: the squad row (org_squad_members), the player\'s availability and contract columns, the published reference (a row of vouches) and the ledger row commit together before the 200 — second connection, SIGKILL, both failure seams, retry', async () => {
   const dir = tempDir('s4wa-release'); let S = await boot(dir);
   const { pid, token } = await signupAdult(S, 'Near Hackney', { lat: 51.55, lng: -0.02 });
   assert.equal((await S.j('POST', '/player/availability', { availability: 'not_seeking' }, token)).status, 200);
   const grass = await orgLogin(S, 'org-hackneymarsh', 'Pat', 'Manager', 'grassroots');
   const added = await S.j('POST', '/org/squad', { name: 'Near Hackney', position: 'ST', playerId: pid }, grass); assert.equal(added.status, 201, JSON.stringify(added.body));
   const entryId = added.body.entries.find((e) => e.playerId === pid).id;
-  // S9c: adding a squad entry is an explicit row write, committed before the 201.
+  // Adding a squad entry is an explicit row write, committed before the 201.
   const onSquadInDb = () => !!q1(dir, 'SELECT 1 AS x FROM org_squad_members WHERE id = ?', entryId);
   assert.equal(onSquadInDb(), true, 'the squad entry is in the database when the route answers');
   const grassLogin = (X) => orgLogin(X, 'org-hackneymarsh', 'Pat', 'Manager', 'grassroots');
@@ -216,20 +215,19 @@ await test('squad release: the squad row (org_squad_members since S9c), the play
   await S.stop(); rm(dir);
 });
 
-// ============================================================= S5: the sub-record tables
-// Since S5 every array of the player record is rows of its own table. The
-// writers below couple a row of one sub-record table with rows of others (and
-// with audit rows); the same contract as above is proven through the real routes.
+// ============================================================= the sub-record tables
+// Every array of the player record is rows of its own table. The writers below
+// couple a row of one sub-record table with rows of others (and with audit
+// rows); the same contract as above is proven through the real routes.
 const qAll = (dir, sql, ...p) => { const s = new DatabaseSync(path.join(dir, 'scoutbox.db'), { readOnly: true }); try { return s.prepare(sql).all(...p).map((r) => ({ ...r })); } finally { s.close(); } };
 const rows = (dir, table, pid) => q1(dir, `SELECT COUNT(*) AS n FROM ${table} WHERE player_id = ?`, pid).n;
 
 // ------------------------------------------------------------- media upload + the activity it records; then the club's tags + the ledger
-await test('media upload (S5): the clip row (player_media) and the activity row it records commit together before the 201 — second connection, SIGKILL, both failure seams, retry; then a club\'s tags: the tag rows (player_media_tags) and the ledger row commit together, a failure of the real COMMIT leaves neither, the retry lands both, the player\'s aggregated view and the served file agree after a restart', async () => {
+await test('media upload: the clip row (player_media) and the activity row it records commit together before the 201 — second connection, SIGKILL, both failure seams, retry; then a club\'s tags: the tag rows (player_media_tags) and the ledger row commit together, a failure of the real COMMIT leaves neither, the retry lands both, the player\'s aggregated view and the served file agree after a restart', async () => {
   const dir = tempDir('s5wa-media'); let S = await boot(dir);
   const { pid, token } = await signupAdult(S, 'Media Adult');
-  // (The bytes are written to disk before the unit, as before S5: a refused
-  // unit leaves an unreferenced file, which nothing serves — unchanged
-  // behaviour, out of S5's scope. Only the rows are the contract here.)
+  // (The bytes are written to disk before the unit: a refused unit leaves an
+  // unreferenced file, which nothing serves. Only the rows are the contract here.)
   S = await coupled(S, dir, {
     seam: 'media.after_row',
     act: () => S.j('POST', '/player/media', { title: 'Synthetic clip', kind: 'video', dataUrl: 'data:video/webm;base64,AAAAAAAA' }, token),
@@ -261,7 +259,7 @@ await test('media upload (S5): the clip row (player_media) and the activity row 
 });
 
 // ------------------------------------------------------------- verified attendance + activity + the Turnstile badge + the ledger
-await test('verified attendance (S5): the attendance row (GPS kept), the activity row, the Turnstile badge row and the ledger row commit together before the 201 — second connection, SIGKILL, both failure seams, retry', async () => {
+await test('verified attendance: the attendance row (GPS kept), the activity row, the Turnstile badge row and the ledger row commit together before the 201 — second connection, SIGKILL, both failure seams, retry', async () => {
   const dir = tempDir('s5wa-attendance'); let S = await boot(dir);
   const { pid, token } = await signupAdult(S, 'Attendance Adult');
   S = await coupled(S, dir, {
@@ -278,7 +276,7 @@ await test('verified attendance (S5): the attendance row (GPS kept), the activit
 });
 
 // ------------------------------------------------------------- drill completion + its result + activity
-await test('drill completion (S5): the drill row, the result row and the activity row commit together before the 200 — second connection, SIGKILL, both failure seams, retry', async () => {
+await test('drill completion: the drill row, the result row and the activity row commit together before the 200 — second connection, SIGKILL, both failure seams, retry', async () => {
   const dir = tempDir('s5wa-drills'); let S = await boot(dir);
   const { pid, token } = await signupAdult(S, 'Drill Adult');
   S = await coupled(S, dir, {

@@ -1,4 +1,4 @@
-// M23 P6.1 — Offer workflow hardening and adversarial closure.
+// Offer workflow hardening and adversarial closure.
 //
 // The Offer domain is attacked as a hostile second reviewer would: every
 // mutation is re-authorised at the moment it happens, every race has one
@@ -8,7 +8,7 @@
 // closed, retries cannot become capabilities, and an accepted Offer stays
 // categorically distinct from a signed contract.
 //
-// Groups (mandate §80):
+// Groups:
 //   A authorization drift  B role removal  C representation loss  D block transitions
 //   E expiry races  F revision races  G idempotency  H rate limiting  I same-agency privacy
 //   J hidden-resource oracle  K deep links  L notification privacy  M event privacy
@@ -35,8 +35,8 @@ import { isExpiredAt } from '../../temporal.mjs';
 import { canTransitionRecruitmentCase } from '../../domains/recruitment/lifecycle/lifecycle.mjs';
 import { readRecords, writeFixture } from '../../scripts/dataLayerFixture.mjs';
 import { DATA_MIGRATIONS } from '../../repositories/index.mjs';
-import { createEvidenceProvider } from '../../scripts/recruitmentReadsFixture.mjs'; // §4.3 step 2: the contacts/offers queries over the plain arrays
-const LATEST_SCHEMA = Number(DATA_MIGRATIONS.map((m) => m.id).sort().at(-1).slice(0, 4)); // S14a: the latest table migration's number
+import { createEvidenceProvider } from '../../scripts/recruitmentReadsFixture.mjs'; // the contacts/offers queries over plain arrays
+const LATEST_SCHEMA = Number(DATA_MIGRATIONS.map((m) => m.id).sort().at(-1).slice(0, 4)); // the latest table migration's number
 
 const PORT = 6900 + Math.floor(Math.random() * 200);
 const BASE = `http://localhost:${PORT}`;
@@ -75,7 +75,7 @@ section('E/R — pure: expiry boundary, unknown status, temporal corruption fail
   neg(offerIntegrity(offer(rev({ issuedAt: T - 2 * H }))).includes('issued_before_created'), 'R-p3 issued before drafted is corruption');
   neg(offerIntegrity(offer(rev({ status: 'ACCEPTED', respondedAt: T - 1 }), { responses: [{ revisionId: 'r1', responseType: 'accepted', actorType: 'player' }] })).includes('responded_before_issued'), 'R-p4 answered before issued is corruption');
   neg(offerIntegrity(offer(rev({ status: 'WITHDRAWN', withdrawnAt: T - 2 * H }))).includes('withdrawn_before_created'), 'R-p5 withdrawn before drafted is corruption');
-  neg(offerIntegrity(offer(rev({ expiresAt: T + 400 * DAY }))).includes('expiry_out_of_bounds'), 'R-p6 an expiry beyond the 180-day rule (a corrupt or imported "forever" row) is corruption, not a fresh Offer (§44)');
+  neg(offerIntegrity(offer(rev({ expiresAt: T + 400 * DAY }))).includes('expiry_out_of_bounds'), 'R-p6 an expiry beyond the 180-day rule (a corrupt or imported "forever" row) is corruption, not a fresh Offer');
   neg(offerIntegrity(offer(rev({ expiresAt: T - 1 }))).includes('expired_before_issued'), 'R-p7 expired before issued is corruption');
   neg(offerIntegrity(offer(rev({ revisionNumber: 0 }))).includes('revision_number') && offerIntegrity(offer(rev({ revisionNumber: -3 }))).includes('revision_number') && offerIntegrity(offer(rev({ revisionNumber: 1e9 })), {}).length === 0, 'R-p8 zero and negative revision numbers are corruption; a large one is merely large (server-derived, never client-chosen)');
   neg(offerIntegrity({ ...offer(rev()), currentRevisionId: 7 }).includes('current_revision') && offerIntegrity({ ...offer(rev()), currentRevisionId: 'rofr-other' }).includes('current_revision'), 'R-p9 a forged or dangling current-revision pointer is corruption');
@@ -118,7 +118,7 @@ section('L/M — pure: notification category, event registry audiences and paylo
   const src = readdirSync(path.join(HERE, '..', '..', 'domains', 'recruitment', 'offers')).filter((f) => f.endsWith('.mjs')).map((f) => readFileSync(path.join(HERE, '..', '..', 'domains', 'recruitment', 'offers', f), 'utf8')).join('\n').replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
   neg(!/req\.body\??\.(status|role|verified|licensed|isAdult|canAccept|isGuardian|isAgent|complianceClear|currentRevision|playerId|orgId|caseId|occurredAt|issuedAt|revisionNumber|actorId)\b/.test(src), 'T-p1 client trust audit: m28 never reads status/role/verified/licensed/isAdult/canAccept/isGuardian/isAgent/complianceClear/currentRevision/playerId/orgId/caseId/occurredAt/revisionNumber/actorId from a request body');
   neg(!/dangerouslySetInnerHTML/.test(readFileSync(path.join(HERE, '..', '..', '..', 'scoutbox-club', 'src', 'offerPanel.tsx'), 'utf8')) && !/dangerouslySetInnerHTML/.test(readFileSync(path.join(HERE, '..', '..', '..', 'scoutbox-agent', 'src', 'screens.tsx'), 'utf8')), 'T-p2 no Offer field is rendered as HTML in the club or agent app');
-  ok(Object.keys(M28_ERROR_HTTP).length === 23, 'T-p3 the 23-code error table is unchanged by hardening (OFFER_STORE_MISSING left with the db collection, §4.3 step 2)');
+  ok(Object.keys(M28_ERROR_HTTP).length === 23, 'T-p3 the 23-code error table is unchanged by hardening');
   const bidi = validateMessages({ recipientMessage: 'Join‮evil‬ us​ now', internalNote: 'a⁦b⁩c' });
   neg(bidi.recipientMessage === 'Joinevil us now' && bidi.internalNote === 'abc', 'T-p4 bidi and zero-width format controls are stripped from messages (spoof-proof), ordinary text kept');
   ok(validateTerms({ role: 'Ailier — «gauche» / 左ウイング' }).terms.role === 'Ailier — «gauche» / 左ウイング', 'T-p5 legitimate Unicode is kept as typed');
@@ -471,7 +471,7 @@ section('G — idempotency + authority loss: an old key is not a capability toke
   const demote = await j('PATCH', `/org/rooms/${RB}`, { leadScoutUserId: null, expectedRev: await caseRev(RB) }, maria.token);
   ok(demote.status === 200 || demote.status === 400, `G16 Tom is demoted (${demote.status})`);
   const stale = await issue(c.body.offer.id, { expectedRev: 1, clientKey: KT }, tom.token);
-  neg(expect(stale, 403, 'OFFER_NOT_PERMITTED'), 'G17 the same key from a user who lost the role is refused BEFORE the replay: current authority is re-derived first (§22)');
+  neg(expect(stale, 403, 'OFFER_NOT_PERMITTED'), 'G17 the same key from a user who lost the role is refused BEFORE the replay: current authority is re-derived first');
   neg(expect(await withdraw(c.body.offer.id, { expectedRev: 2, clientKey: key() }, tom.token), 403, 'OFFER_NOT_PERMITTED'), 'B1 the demoted user cannot withdraw');
   neg(expect(await revise(c.body.offer.id, { expectedRev: 2, clientKey: key() }, tom.token), 403, 'OFFER_NOT_PERMITTED'), 'B2 nor revise');
   ok((await getOffer(c.body.offer.id, tom.token)).status === 200, 'B3 he still reads it (club memory; the note is a club note)');
@@ -537,7 +537,7 @@ section('C/I/K — representation loss, same-agency sweep, deep links reauthoris
   const rb = await aList(REP, ana.token);
   neg((rb.status === 403 || rb.status === 404) && !has(rb.body, X.OID), `C7 a block closes the agent\'s read (${rb.status} ${rb.body?.error})`);
   // the client can still answer his own Offer regardless of the agent's standing
-  ok((await pGet(X.OID, kola.token)).status === 200 && (await pGet(X.OID, kola.token)).body.offer.answerable === true, 'C8 Kola\'s own access to his Offer is untouched by the agent\'s standing (§69)');
+  ok((await pGet(X.OID, kola.token)).status === 200 && (await pGet(X.OID, kola.token)).body.offer.answerable === true, 'C8 Kola\'s own access to his Offer is untouched by the agent\'s standing');
   // un-share works even without an agent
   const un = await pShare(X.OID, { share: false }, kola.token);
   ok(un.status === 200 && un.body.offer.agentShared === false, 'C9 Kola un-shares while the agency is blocked — no active agent is needed to clear a share');
@@ -565,7 +565,7 @@ section('D — block transitions at every point of the Offer life');
     const before = (await surface(RID)).body.offers.find((o) => o.status === 'ACCEPTED');
     ok((await j('POST', '/player/block', { orgId: 'org-eastport' }, chi.token)).status === 201, 'D1 Okafor blocks Eastport AFTER accepting');
     const after = (await surface(RID)).body.offers.find((o) => o.id === before.id);
-    neg(after.status === 'ACCEPTED' && (await stage(RID)) === 'offer_accepted', 'D2 the acceptance is historical fact: the block rewrites nothing (§70)');
+    neg(after.status === 'ACCEPTED' && (await stage(RID)) === 'offer_accepted', 'D2 the acceptance is historical fact: the block rewrites nothing');
     neg(expect(await revise(before.id, { expectedRev: after.rev, clientKey: key() }), 409, 'OFFER_STATE_INVALID'), 'D3 (no revision over an accepted Offer, block or not)');
     neg(expect(await j('POST', `/org/rooms/${RID}/contacts`, { body: 'hello', contactMode: 'player_only' }, maria.token), 403, null) || (await j('POST', `/org/rooms/${RID}/contacts`, { body: 'hello', contactMode: 'player_only' }, maria.token)).status >= 400, 'D4 the block still stops new communication (Offer access does not imply Inbox access)');
     rules.push('after acceptance: history kept, no new revision, communication blocked');
@@ -656,13 +656,13 @@ section('O — partial failure: authoritative state first, side effects never tu
   const i = await issue(c.body.offer.id, { expectedRev: 1, clientKey: KI });
   ok(i.status === 200, 'O1 an issue succeeds');
   // Every post-persist side effect is wrapped: the m28 source proves it, and the route order is persist → effects.
-  // S8c (§4.3): an Offer write is a repository operation inside a unit of work (`unit(…)`, or `inUnit(res, …)` where
+  // An Offer write is a repository operation inside a unit of work (`unit(…)`, or `inUnit(res, …)` where
   // the case may refuse the move); the side effects follow the unit's COMMIT.
   const src = readFileSync(path.join(HERE, '..', '..', 'domains', 'recruitment', 'offers', 'index.mjs'), 'utf8');
   const unitIdx = [...src.matchAll(/\b(unit|inUnit)\((res, )?\(\) =>/g)].map((m) => m.index);
   const bareBroadcast = [...src.matchAll(/^\s*broadcast\?\.\(/gm)].length;
   neg(bareBroadcast === 0 && /const safe = \(label, fn\)/.test(src) && unitIdx.length >= 6, 'O2 every broadcast/notification after a persisted write is wrapped in safe() — a throwing side effect is logged, not surfaced as a 500');
-  // The case refusing the move is thrown INSIDE the unit, which rolls the Offer rows, the mirrors and the case back together.
+  // The case refusing the move is thrown INSIDE the unit, which rolls the Offer rows and the case back together.
   neg(/catch \(e\) \{ console\.error\(`OFFER lifecycle_writer_threw/.test(src) && /throw new OfferRefusal\(\{ error: 'OFFER_LIFECYCLE_CONFLICT'/.test(src) && /try \{ return \{ value: unit\(work\) \}; \} catch \(e\) \{\n\s+if \(!\(e instanceof OfferRefusal\)\) throw e;/.test(src), 'O3 a lifecycle writer that throws is caught and the Offer change rolled back — no half-written state');
   // A replay after a "lost response" returns the committed truth.
   const replay = await issue(c.body.offer.id, { expectedRev: 1, clientKey: KI });
@@ -684,7 +684,7 @@ section('P — lifecycle consistency: a case paused while a revision is out');
   ok((await getOffer(OID)).body.offer.responses.length === 0 && (await getOffer(OID)).body.offer.status === 'ISSUED', 'P9b no response row, the Offer still ISSUED');
   const resume = await lifecycle(RID, 'resumeCase', {});
   const st2 = await stage(RID);
-  // M23 P8.1 (D-P81-1): a hold is a pause, not a rewind — resuming returns the
+  // A hold is a pause, not a rewind — resuming returns the
   // case to Offer made, where it was held from, and the live revision is
   // answerable again. Nothing was rewritten: the revision stayed ISSUED throughout.
   ok(resume.status === 200 && st2 === 'offer_made', `P10 resuming returns the case to where it was held from (${st2}); the Offer is answerable again`);
@@ -796,7 +796,6 @@ section('Z — restart: idempotency keys, terminal states, the paused-case warni
   ok((await issue(globalThis.__G.OID, { expectedRev: 1, clientKey: globalThis.__G.KI }, re.token)).body.idempotent === true, 'Z3 the issue key replays after the reboot');
   ok((await pAccept(globalThis.__G.OID, { revisionId: globalThis.__G.R, clientKey: globalThis.__G.KA }, theoRe.token)).body.idempotent === true, 'Z4 the accept key replays after the reboot');
   neg(expect(await aList(REP, beaRe.token), 404, 'REPRESENTATION_NOT_FOUND'), 'Z5 the same-agency rule holds after the reboot');
-  // Rewritten in S14a: the schema is the latest table migration, not the old blob version.
   neg((await j('GET', '/healthz')).body.schemaVersion === LATEST_SCHEMA && DATA_MIGRATIONS.length === LATEST_SCHEMA && !DATA_MIGRATIONS.some((m) => /offer/i.test(m.id) && !/contacts_offers/.test(m.id)), 'Z6 the current schema after the reboot, and no migration of its own for an Offer beyond the contacts/offers tables');
 }
 

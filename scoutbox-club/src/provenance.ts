@@ -1,10 +1,9 @@
-// M18.2 — the one place provenance becomes words.
+// The one place provenance becomes words.
 //
-// Until M18.1 the Passport screen, the Room evidence list and the Second Look
-// changes each carried their own copy of "provenance id → label", and one of
-// those copies fell back to "Player-provided" for anything it did not know —
-// which is how Box Cam evidence was badged as something the player typed.
-// The canonical vocabulary lives here and only here. Every surface imports
+// The canonical vocabulary lives here and only here: separate copies of
+// "provenance id → label" drift, and a copy that falls back to "Player-provided"
+// for an id it does not know badges Box Cam evidence as something the player
+// typed. Every surface imports
 // this module; none of them hard-codes a label.
 //
 // Colour is never the only signal: every entry carries its label, a short
@@ -29,7 +28,7 @@ interface ProvenanceEntry {
   labelKey: string;
   tone: ProvenanceTone;
   /** A text glyph so the badge is distinguishable without colour. Labels that
-   *  already carry the M15 tick (Coach/Club confirmed ✓, Registry ✓) get none. */
+   *  already carry the tick (Coach/Club confirmed ✓, Registry ✓) get none. */
   glyph: string;
 }
 

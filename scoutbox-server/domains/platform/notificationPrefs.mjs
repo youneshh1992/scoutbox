@@ -1,12 +1,8 @@
 /**
- * M18.2 — notification preferences, enforced where notifications are made.
- *
- * Forty notification `type` values had accumulated across four audiences with
- * no way for anyone to turn any of them off. This adds the smallest system
- * that is actually a system: every type maps to one CATEGORY, every person
- * has an on/off per category, and `notify()` consults it before it creates a
- * row — so an "off" category is never created and never pushed, rather than
- * created and then hidden by a client.
+ * Notification preferences, enforced where notifications are made: every type
+ * maps to one CATEGORY, every person has an on/off per category, and `notify()`
+ * consults it before it creates a row — so an "off" category is never created
+ * and never pushed, rather than created and then hidden by a client.
  *
  * Two things are deliberately fixed:
  *
@@ -40,25 +36,25 @@ export const CATEGORIES = Object.freeze({
   // outcome, a signing or a report deadline is not in here — those are
   // obligations, and "conservative default" must not mean "muted by surprise".
   discovery_nudges: { label: 'Discovery nudges and badges', default: false, mandatory: false },
-  // M19: membership changes on a Dynamic Watchlist. On by default because a
+  // Membership changes on a Dynamic Watchlist. On by default because a
   // watchlist is something the club deliberately asked ScoutBox to maintain —
   // it is a requested alert, not an unsolicited nudge.
   watchlist_changes: { label: 'Dynamic Watchlist changes', default: true, mandatory: false },
-  // M21: ONE category for the whole Development Hub, not three. §81 asks for a
-  // reasonable count, and the honest trade is stated rather than hidden: a
+  // ONE category for the whole Development Hub, not three. The honest trade is
+  // stated rather than hidden: a
   // person who mutes this mutes shared goals, due actions and shared reviews
   // together. Splitting it would have produced three switches that are almost
   // always set the same way, which is how a preferences screen stops being read.
   development_updates: { label: 'Development plans, goals and reviews', default: true, mandatory: false },
-  // M23 P5.6B: agent relationship requests and their outcomes. On by default
+  // Agent relationship requests and their outcomes. On by default
   // because a request is something a person must answer; a player who mutes
   // it is muting solicitations, which is their right.
   representation: { label: 'Agent representation requests and changes', default: true, mandatory: false },
-  // M23 P5.6C: compliance — a review that needs answering, a consent someone
-  // is waiting on, a verification that went stale. Mandatory (P5.6A final
-  // architecture §9): muting it would mute a regulatory obligation.
+  // Compliance — a review that needs answering, a consent someone is waiting
+  // on, a verification that went stale. Mandatory: muting it would mute a
+  // regulatory obligation.
   compliance: { label: 'Regulatory review, consent and verification', default: true, mandatory: true },
-  // M23 P5.6D: transaction workspace activity — a party asked to confirm, a
+  // Transaction workspace activity — a party asked to confirm, a
   // document shared, a status change. ONE category rather than three, for the
   // same reason `development_updates` is one: three switches nobody sets
   // differently is how a preferences screen stops being read. It is NOT
@@ -66,13 +62,13 @@ export const CATEGORIES = Object.freeze({
   // obligation — the compliance half of a transaction is routed to
   // `compliance`, which is, and which a person cannot mute.
   transaction_updates: { label: 'Transaction workspace activity', default: true, mandatory: false },
-  // M23 P6: an Offer issued, withdrawn, answered or expiring. On by default and
+  // An Offer issued, withdrawn, answered or expiring. On by default and
   // NOT mandatory: an Offer is something a person must answer, but answering
   // it is their own free act and a recipient may choose not to hear about
   // Offers at all — a club is never owed a channel to a player. The category
   // carries no term, note or rationale; the text is a factual line only.
   offer_updates: { label: 'Offers and Offer answers', default: true, mandatory: false },
-  // M23 P7: a document presented for signing, a party's confirmation, a
+  // A document presented for signing, a party's confirmation, a
   // completion. Not mandatory for the same reason as Offers; factual lines only.
   signing_updates: { label: 'Signing workflow', default: true, mandatory: false },
   security_account: { label: 'Security and account', default: true, mandatory: true },
@@ -91,9 +87,9 @@ export const TYPE_CATEGORY = Object.freeze({
   // A saved-search alert is something the scout ASKED for by saving the
   // search; it is not an unrequested nudge, so it stays on by default.
   saved_search: 'activity',
-  // M19 watchlist membership changes.
+  // watchlist membership changes
   watchlist: 'watchlist_changes',
-  // M21 Development Hub: one type, one category.
+  // Development Hub: one type, one category.
   development: 'development_updates',
   // evidence and combine
   evidence: 'evidence_requests',
@@ -116,7 +112,7 @@ export const TYPE_CATEGORY = Object.freeze({
   request: 'messages',
   accepted: 'messages',
   declined: 'messages',
-  // M23 P4A-D10: a minor hears that their guardian accepted or declined a
+  // A minor hears that their guardian accepted or declined a
   // request for them. It is the outcome of a request, so it lives with the
   // other request outcomes — on by default, never a discovery nudge.
   guardian_decision: 'messages',
@@ -132,14 +128,14 @@ export const TYPE_CATEGORY = Object.freeze({
   signing: 'activity',
   released: 'activity',
   representation: 'activity',
-  // M23 P5.6B Agent core
+  // Agent core
   representation_request: 'representation',
   representation_confirmed: 'representation',
   representation_rejected: 'representation',
   representation_terminated: 'representation',
   representation_disputed: 'representation',
   representation_expiring: 'representation',
-  // M23 P5.6E. Both are about the representation relationship itself — what the
+  // Both are about the representation relationship itself — what the
   // client shares, and a club message the client's agent was made a party to.
   representation_disclosure: 'representation',
   representation_contact: 'representation',
@@ -148,11 +144,11 @@ export const TYPE_CATEGORY = Object.freeze({
   // relationship admin.
   representation_opportunity: 'messages',
   // A club inviting a transaction workspace is workspace traffic, like every
-  // other P5.6D notification.
+  // other transaction workspace notification.
   representation_transaction: 'transaction_updates',
   agent_verification: 'security_account',
   agency_membership: 'security_account',
-  // M23 P5.6C Conflict & Compliance Engine
+  // Conflict & Compliance Engine
   regulatory_review_required: 'compliance',
   regulatory_review_completed: 'compliance',
   regulatory_consent_requested: 'compliance',
@@ -160,13 +156,13 @@ export const TYPE_CATEGORY = Object.freeze({
   regulatory_consent_declined: 'compliance',
   regulatory_consent_revoked: 'compliance',
   agent_verification_stale: 'compliance',
-  // M23 P5.6D Agent Transaction Workspace. Workspace traffic and "we need you
+  // Agent Transaction Workspace. Workspace traffic and "we need you
   // to do something" are operational; a compliance change is not, and goes to
   // the mandatory category.
   agent_transaction: 'transaction_updates',
-  // M23 P6: the canonical Offer — one type, one category.
+  // The canonical Offer — one type, one category.
   recruitment_offer: 'offer_updates',
-  // M23 P7: the signing workflow — one type, one category.
+  // The signing workflow — one type, one category.
   recruitment_signing: 'signing_updates',
   agent_transaction_action: 'transaction_updates',
   agent_transaction_compliance: 'compliance',
@@ -199,8 +195,7 @@ export function defaultPrefs() {
 
 export function registerNotificationPrefs(ctx) {
   const { notifications, orgRouter, playerRouter, guardianRouter } = ctx;
-  // S7a: the stored preferences are rows of notification_prefs /
-  // notification_pref_categories (repositories/notifications.mjs); this module
+  // Stored preferences live in repositories/notifications.mjs; this module
   // keeps the vocabulary, the validation, the effective view and the gate.
   if (!notifications || typeof notifications.prefsFor !== 'function') throw new TypeError('registerNotificationPrefs needs the notifications repository (ctx.notifications)');
 
@@ -257,7 +252,7 @@ export function registerNotificationPrefs(ctx) {
     for (const [k, v] of Object.entries(incoming ?? {})) {
       // Own keys only — `__proto__`, `constructor`, `toString` are not categories.
       if (!Object.hasOwn(CATEGORIES, k)) return res.status(400).json({ error: 'PREF_CATEGORY_UNKNOWN', category: k, message: 'That is not a notification category.' });
-      // S14e: a value is true or false; anything else is refused, never coerced (a numeric 0 once stored "off" on a mandatory category).
+      // A value is true or false; anything else is refused, never coerced (a numeric 0 would read as "off" on a mandatory category).
       if (typeof v !== 'boolean') return res.status(400).json({ error: 'PREFS_INVALID', category: k, message: `${k} must be true or false.` });
       if (CATEGORIES[k].mandatory && v === false) {
         return res.status(400).json({ error: 'PREF_CATEGORY_MANDATORY', category: k, message: 'Security and account notices cannot be turned off.' });

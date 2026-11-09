@@ -1,19 +1,19 @@
 /**
- * M19 — Explainable Matching and Dynamic Watchlists: routes.
+ * Explainable Matching and Dynamic Watchlists: routes.
  *
  * The order below is the whole security design and it is not negotiable:
  *
  *   organisation standing → authorization → visibility → blocks →
  *   minor/guardian/agency → grassroots radius → candidate facts → matching
  *
- * Matching is the LAST step. S14j: a match is one SQL query over the players
- * the organisation may see (identity's `visibleWhere`: the whole visibility
- * rule — standing, the under-18 wall, the Grassroots radius, the blocks)
- * joined to their stored facts (repositories/matchFacts.mjs), with each
- * required criterion as a condition (match.mjs `criterionSql`, beside its JS
- * test). The visibility conditions come first in every query, so there is no
- * path by which a criterion can be evaluated against a player the club is not
- * allowed to know exists — including through a count (§24).
+ * Matching is the LAST step. A match is one SQL query over the players the
+ * organisation may see (identity's `visibleWhere`: the whole visibility rule —
+ * standing, the under-18 wall, the Grassroots radius, the blocks) joined to
+ * their stored facts (repositories/matchFacts.mjs), with each required
+ * criterion as a condition (match.mjs `criterionSql`, beside its JS test). The
+ * visibility conditions come first in every query, so there is no path by
+ * which a criterion can be evaluated against a player the club is not allowed
+ * to know exists — including through a count.
  */
 import {
   validateCriteria, criteriaVersion, describeCriteria, CRITERION_TYPES,
@@ -30,7 +30,7 @@ import {
 import { guardRev, bumpRev, revMeta } from '../../platform/concurrency.mjs';
 import { readPage, pageOf, sendPageError } from '../../platform/paging.mjs';
 
-/** Every ordering M19 offers. None of them is a match quality rank, and the
+/** Every ordering matching offers. None of them is a match quality rank, and the
  *  default is deliberately the least suggestive thing that is still useful. */
 export const MATCH_SORTS = ['recent_evidence', 'name', 'age', 'evidence_confidence', 'distance'];
 export const DEFAULT_MATCH_SORT = 'recent_evidence';
@@ -41,7 +41,6 @@ export function registerMatching(ctx) {
     isLead, requireLead, audit, vmetric, notify, broadcast, discovery, unit, matchFacts,
   } = ctx;
   if (typeof matchFacts?.query !== 'function' || typeof players?.visibleWhere !== 'function') throw new TypeError('registerMatching needs the matchFacts repository and the players\' visibleWhere (S14j)');
-  // S12c: watchlists and their membership transitions are rows of the discovery repository, written only through it.
   const dreads = ctx.discoveryReads;
   if (typeof dreads?.watchlists?.page !== 'function' || typeof discovery?.watchlists?.reconcile !== 'function') throw new TypeError('registerMatching needs the discovery repository and discoveryReads from the data layer');
 
@@ -130,7 +129,7 @@ export function registerMatching(ctx) {
     let page;
     try { page = readMatchPage(req.body, shape); } catch (e) { return sendPageError(res, e); }
 
-    // S14j: one query over every player this organisation can see; only the page is decoded and explained.
+    // One query over every player this organisation can see; only the page is decoded and explained.
     const query = matchQuery(req.org, resolved.criteria.required, at);
     const { items, nextCursor } = pageOf(query.page(order, page), page.limit, keyOfRow);
     const total = query.count();
@@ -193,7 +192,7 @@ export function registerMatching(ctx) {
   orgRouter.get('/watchlists', (req, res) => {
     const status = req.query.status ? String(req.query.status) : null;
     if (status !== null && !WATCHLIST_STATUSES.includes(status)) return res.status(400).json({ error: 'WATCHLIST_STATUS_UNKNOWN', statuses: WATCHLIST_STATUSES });
-    // S12c: archived watchlists accumulate, so the list pages (newest activity first, id as the stable tie-break).
+    // Archived watchlists accumulate, so the list pages (newest activity first, id as the stable tie-break).
     let page;
     try { page = readPage(req.query, ['number', 'string']); } catch (e) { return sendPageError(res, e); }
     const { rows, total } = dreads.watchlists.page(req.org.id, { status, after: page.after, limit: page.limit });
@@ -218,7 +217,7 @@ export function registerMatching(ctx) {
     }
     const mode = WATCHLIST_MODES.includes(req.body?.mode) ? req.body.mode : null;
     if (!mode) return res.status(400).json({ error: 'WATCHLIST_MODE_REQUIRED', modes: WATCHLIST_MODES, message: 'Choose whether this watchlist follows the Recruitment Brief or keeps its own saved criteria.' });
-    // S12c: an unknown source type or a notify that is not true or false is refused, not read as the default.
+    // An unknown source type or a notify that is not true or false is refused, not read as the default.
     if (req.body?.sourceType != null && !WATCHLIST_SOURCES.includes(req.body.sourceType)) return res.status(400).json({ error: 'WATCHLIST_SOURCE_UNKNOWN', sources: WATCHLIST_SOURCES });
     if (req.body?.notify != null && typeof req.body.notify !== 'boolean') return res.status(400).json({ error: 'FIELD_INVALID', field: 'notify', message: 'notify must be true or false.' });
 
@@ -259,7 +258,7 @@ export function registerMatching(ctx) {
       notify: req.body?.notify ?? true,
       createdBy: req.orgUser.id,
       // The person is attributed, but the organisation owns the list: if they
-      // leave, the watchlist stays and keeps their name on its creation (§50).
+      // leave, the watchlist stays and keeps their name on its creation.
       createdByName: req.orgUser.name,
       createdAt: at,
       updatedAt: at,
@@ -296,7 +295,7 @@ export function registerMatching(ctx) {
       return { blocked, query: EMPTY_QUERY, total: 0, at: now(), summary: membershipSummary({}), criteria: criteria ?? { required: [], preferred: [] } };
     }
 
-    // S14j: the membership is the match query's ids (every visible player meeting every required criterion); facts
+    // The membership is the match query's ids (every visible player meeting every required criterion); facts
     // are decoded only for the players who left and are still visible, to name the criterion they no longer meet.
     const at = now();
     const query = matchQuery(req.org, criteria.required, at);
@@ -316,7 +315,7 @@ export function registerMatching(ctx) {
     // An entering player was not a member, so their explanation never reads a current evaluation; a leaver's does.
     const currentById = new Map(visibleFactsOf(req.org, diff.left, at).map((facts) => [facts.playerId, { result: matchPlayerToCriteria(facts, criteria, { now: at }) }]));
 
-    // S12c: an explicit upsert, in one unit — the membership derived now, the transitions not recorded before, the
+    // An explicit upsert, in one unit — the membership derived now, the transitions not recorded before, the
     // reconciliation clock, and the grouped notification all commit together.
     if (record && w.status !== 'archived') {
       const events = [];
@@ -422,7 +421,7 @@ export function registerMatching(ctx) {
     try { page = readMatchPage(req.query, shape); } catch (e) { return sendPageError(res, e); }
     const r = reconcile(req, w);
     const fresh = dreads.watchlists.byId(w.id) ?? w; // the reconciliation clock this read recorded
-    // S14j: the members page by cursor in SQL, in the declared order; only the page is decoded and explained.
+    // The members page by cursor in SQL, in the declared order; only the page is decoded and explained.
     const { items, nextCursor } = pageOf(r.query.page(order, page), page.limit, keyOfRow);
     res.set('X-ScoutBox-Ordering', `${sort},player_id`);
     res.json({
@@ -442,7 +441,7 @@ export function registerMatching(ctx) {
     const w = findWatchlist(req, res);
     if (!w) return;
     if (limited('watchlist_write', req.org.id)) return res.status(429).json({ error: 'RATE_LIMITED', action: 'watchlist_write' });
-    // The shared M18.1 concurrency contract: a write built on a stale read is
+    // The shared concurrency contract: a write built on a stale read is
     // refused and says who moved it, through the same 409 shape as everywhere.
     if (!guardRev(req, res, w, {
       errorCode: 'WATCHLIST_VERSION_CONFLICT',
@@ -497,7 +496,7 @@ export function registerMatching(ctx) {
   orgRouter.get('/watchlists/:id/history', (req, res) => {
     const w = findWatchlist(req, res);
     if (!w) return;
-    // S12c: the transitions grow without limit, so they page through SQL (newest first, id descending).
+    // The transitions grow without limit, so they page through SQL (newest first, id descending).
     let req2;
     try { req2 = readPage(req.query, ['number', 'string']); } catch (e) {
       if (e?.code === 'PAGE_CURSOR_INVALID') return res.status(400).json({ error: 'HISTORY_CURSOR_INVALID', message: 'That page no longer exists — start again from the first page.' });
@@ -532,8 +531,8 @@ export function registerMatching(ctx) {
 
   /**
    * The Room bridge. It does not create a Room itself: it calls the canonical
-   * M17 creator, so every standing gate, the one-open-room rule and the
-   * activity trail behave exactly as they do from anywhere else (§70).
+   * rooms' creator, so every standing gate, the one-open-room rule and the
+   * activity trail behave exactly as they do from anywhere else.
    */
   orgRouter.post('/watchlists/:id/room', (req, res) => {
     const w = findWatchlist(req, res);
@@ -555,7 +554,7 @@ export function registerMatching(ctx) {
       room: created.room,
       // A Room and a watchlist answer different questions. The player stays on
       // the list while they still match; being evaluated is not a reason to
-      // stop tracking whether they still meet the criteria (§72).
+      // stop tracking whether they still meet the criteria.
       note: 'A Recruitment Room was opened. This player stays on the watchlist while they still match your criteria.',
     });
   });

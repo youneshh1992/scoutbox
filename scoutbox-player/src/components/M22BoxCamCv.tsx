@@ -1,5 +1,5 @@
 import { GuidanceNote } from './InformationRows';
-// M22 — Box Cam CV: Ready Check, live attempt, result (§76–§84).
+// Box Cam CV: Ready Check, live attempt, result.
 //
 // THE COPY DECISION THIS COMPONENT IS BUILT AROUND
 //
@@ -15,7 +15,7 @@ import { GuidanceNote } from './InformationRows';
 // explained state beside the first, never as an error, never in red, and never
 // only in a footnote someone has to scroll for.
 //
-// §79 is the other half: the engine does produce an exact count, and it is
+// The other half: the engine does produce an exact count, and it is
 // genuinely interesting, but it is NOT the player-facing result. It appears
 // under an explicit "experimental" heading, after the real outcome, with its
 // status attached — or not at all if the product later decides it confuses
@@ -32,7 +32,7 @@ import type { CvFinalize, ReadyCheckItem, ReadyCheckResult } from '../data/m22cl
 
 const WEB = typeof document !== 'undefined';
 
-/** Capture geometry — inside FRAME_LIMITS, and small on purpose (§9, §11). */
+/** Capture geometry — inside FRAME_LIMITS, and small on purpose. */
 const CAP_W = 240;
 const CAP_H = 180;
 const CAP_FPS = 12;
@@ -40,7 +40,7 @@ const BATCH = 6;
 
 type Phase = 'ready_check' | 'ready' | 'capturing' | 'finalizing' | 'done' | 'refused' | 'error';
 
-/** §49 — the client maps structure to copy. The server never sends a sentence. */
+/** The client maps structure to copy. The server never sends a sentence. */
 function checkLabel(id: string): string {
   return pt(`m22chk_${id}` as Parameters<typeof pt>[0]) || id;
 }
@@ -62,11 +62,11 @@ export function M22BoxCamCv({
   const [captureState, setCaptureState] = useState<'idle' | 'sending' | 'degraded'>('idle');
   const [dropped, setDropped] = useState(0);
   const [outcome, setOutcome] = useState<CvFinalize | null>(null);
-  // §81 — a technical failure and an observation refusal are different things,
+  // A technical failure and an observation refusal are different things,
   // so they are different PHASES ('error' vs 'refused') with different copy.
   //
-  // The underlying error message is deliberately NOT held in state: §88 keeps
-  // server internals away from the client, and the player-facing copy is
+  // The underlying error message is deliberately NOT held in state: server
+  // internals stay away from the client, and the player-facing copy is
   // generic on purpose ("this is a problem on our side"). Storing a message
   // nothing renders would only invite someone to render it later.
   const [showExperimental, setShowExperimental] = useState(false);
@@ -80,7 +80,7 @@ export function M22BoxCamCv({
   const pendingRef = useRef<ReturnType<typeof captureGray8>[]>([]);
   const startedAtRef = useRef(0);
 
-  /** §52 — one place that releases everything, called on every exit path. */
+  /** One place that releases everything, called on every exit path. */
   const teardown = useCallback(() => {
     if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
     if (captureRef.current) { clearInterval(captureRef.current); captureRef.current = null; }
@@ -108,7 +108,7 @@ export function M22BoxCamCv({
       if (WEB && navigator?.mediaDevices?.getUserMedia) {
         const stream = await navigator.mediaDevices.getUserMedia({
           video: { width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 24 } },
-          audio: false,   // §91 — audio is never requested, let alone analysed
+          audio: false,   // audio is never requested, let alone analysed
         });
         streamRef.current = stream;
         cameraPermission = 'granted';
@@ -119,7 +119,7 @@ export function M22BoxCamCv({
         if (videoRef.current) { videoRef.current.srcObject = stream; await videoRef.current.play().catch(() => {}); }
       }
     } catch (e) {
-      // §50 — the permission states, distinguished rather than collapsed.
+      // The permission states, distinguished rather than collapsed.
       const name = (e as { name?: string })?.name ?? '';
       cameraPermission = name === 'NotAllowedError' ? 'denied'
         : name === 'NotReadableError' ? 'in_use'
@@ -217,13 +217,13 @@ export function M22BoxCamCv({
   const timer = `${String(Math.floor(secs / 60)).padStart(2, '0')}:${String(secs % 60).padStart(2, '0')}`;
 
   /**
-   * §76/§78 — the two-fact block. Rendered wherever the player could otherwise
+   * The two-fact block. Rendered wherever the player could otherwise
    * conclude that a successful observation means a verified measurement.
    */
   const combineNotice = (available: boolean, reason?: { short: string; detail: string } | null) => (
     <View
       style={{ marginTop: 8, backgroundColor: colors.panel2, borderRadius: 8, padding: 10 }}
-      // §82 — one live region for the status pair, so a screen reader announces
+      // One live region for the status pair, so a screen reader announces
       // the whole claim rather than two fragments that separately mislead.
       accessible
       accessibilityRole="summary"
@@ -268,7 +268,7 @@ export function M22BoxCamCv({
       {phase === 'ready' && checks ? (
         <View>
           <Text style={{ color: colors.text, fontWeight: '700', fontSize: 13, marginTop: 8 }}>{pt('m22readyCheck')}</Text>
-          {/* §82 — a list, each row labelled for a screen reader in full. */}
+          {/* a list, each row labelled for a screen reader in full. */}
           <View accessibilityRole="list">
             {checks.checks.map((c) => (
               <Muted key={c.id} size={12}>
@@ -292,7 +292,7 @@ export function M22BoxCamCv({
             />
           </Row>
 
-          {/* §48/§76 — the distinction, side by side, always. */}
+          {/* the distinction, side by side, always. */}
           {combineNotice(checks.combineVerificationAvailable, checks.combineDisabledReason)}
 
           <Row style={{ marginTop: 10, flexWrap: 'wrap' }}>
@@ -306,7 +306,7 @@ export function M22BoxCamCv({
       {/* ----------------------------------------------------- capturing */}
       {phase === 'capturing' ? (
         <View>
-          {/* §77 — protocol, timer, capture status, provider status. No live
+          {/* protocol, timer, capture status, provider status. No live
               count: the server has not finished deciding, and a number that
               moves during an attempt reads as a score being kept. */}
           <Row style={{ marginTop: 8 }}>
@@ -346,10 +346,10 @@ export function M22BoxCamCv({
           </Row>
           <Muted size={12}>{pt('m22observedDetail')}</Muted>
 
-          {/* §78 — and immediately, the other fact. */}
+          {/* and immediately, the other fact. */}
           {combineNotice(false, outcome.combineDisabledReason)}
 
-          {/* §79 — the experimental count, behind a disclosure, after the real
+          {/* the experimental count, behind a disclosure, after the real
               outcome, with its status attached. Never the headline. */}
           {outcome.result.experimental.exactCount != null ? (
             <View style={{ marginTop: 8 }}>
@@ -375,7 +375,7 @@ export function M22BoxCamCv({
         </View>
       ) : null}
 
-      {/* §80/§81 — a REFUSAL: the attempt was understood and not verifiable.
+      {/* a REFUSAL: the attempt was understood and not verifiable.
           Plain, specific, and it tells the player what to change. */}
       {phase === 'refused' && outcome ? (
         <View accessibilityLiveRegion="polite">
@@ -400,7 +400,7 @@ export function M22BoxCamCv({
         </View>
       ) : null}
 
-      {/* §81 — a TECHNICAL failure. Different words, because it is not about
+      {/* a TECHNICAL failure. Different words, because it is not about
           the player's attempt at all. */}
       {phase === 'error' ? (
         <View accessibilityLiveRegion="assertive">

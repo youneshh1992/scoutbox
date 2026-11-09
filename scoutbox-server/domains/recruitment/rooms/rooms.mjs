@@ -1,7 +1,7 @@
-// M17 — Recruitment Rooms: stores, the room projector and the org routes.
+// Recruitment Rooms: stores, the room projector and the org routes.
 //
 // A Room is the CLUB's private decision workspace around one player. It is a
-// facet of the M12 recruitment case, never a second pipeline: `room.status` is
+// facet of the recruitment case, never a second pipeline: `room.status` is
 // canonical and `case.stage` is derived from it by `applyStatus` alone.
 //
 // Three rules govern every line below.
@@ -28,7 +28,7 @@ import {
 } from './shared.mjs';
 import { guardRev, bumpRev, revMeta } from '../../platform/concurrency.mjs';
 import { rateLimitedBody } from '../../platform/rateLimit.mjs';
-// M23 P8 — the lifecycle's own role table, so the legacy status route and the
+// The lifecycle's own role table, so the legacy status route and the
 // semantic-action route agree on WHO may reach a state (a room lead could reach
 // `signed` here while `confirmSignedOutcome` needs a recruitment lead).
 import { LIFECYCLE_ACTIONS } from '../lifecycle/lifecycle.mjs';
@@ -40,9 +40,8 @@ export function registerRooms(ctx) {
     byId, users, orgRouter, adminRouter, nextId, notify, ledgerAppend, broadcast,
     findPlayer, moderateOrRefuse, playerViewForOrg, orgCanSee, isLead, audit, vmetric,
     faults = null,
-    recruitmentCases, unit, dueAtOrRefuse, // S8b: every case and room write is an explicit repository operation, inside `unit` when it touches more than one row
+    recruitmentCases, unit, dueAtOrRefuse, // every case and room write is an explicit repository operation, inside `unit` when it touches more than one row
   } = ctx;
-  // §4.3 step 2: the signings are read through SQL (the signings repository's queries).
   const reads = ctx.recruitmentReads;
   if (typeof reads?.signings?.forPlayer !== 'function') throw new TypeError('registerRooms needs recruitmentReads (signings) from the data layer');
   if (typeof unit !== 'function' || !recruitmentCases?.cases) throw new TypeError('registerRooms needs the recruitment-cases repository and unit from the data layer');
@@ -52,13 +51,11 @@ export function registerRooms(ctx) {
 
   const now = () => Date.now();
   const orgUsers = (orgId) => users.forOrg(orgId, { active: true });
-  // The staff index, not a scan of the club's staff (migration.md §4.3, deferred).
+  // The staff index, not a scan of the club's staff.
   const orgUser = (orgId, userId) => { const u = byId.user(userId); return u && u.orgId === orgId && !u.removedAt ? u : null; };
 
-  // Fixed-window counters for the abuse surfaces. Same shape as the in-memory
-  // guards M13 already uses; nothing here is security-critical state.
-  // M18.1: one shared limiter, one named policy per action. The local Map that
-  // used to live here counted separately from five other copies of itself.
+  // Fixed-window counters for the abuse surfaces; nothing here is
+  // security-critical state. One shared limiter, one named policy per action.
   const limited = (action, keyPart) => !!ctx.rateLimit?.limited(action, keyPart);
 
   // Comment bodies are stored inert: markup is removed on write, so no renderer
@@ -70,11 +67,11 @@ export function registerRooms(ctx) {
    * The player header inside a Room.
    *
    * `playerViewForOrg` carries a LEGACY `trustScore` from the original
-   * safeguarding heuristic, which predates the M16.2 Trust Score. Two different
+   * safeguarding heuristic, separate from the Trust Score. Two different
    * numbers both called "trust" in one header is exactly how an
    * evidence-confidence score gets read as a player rating, so the Room shows
-   * one: the M16.2 score, with its disclaimer attached. The legacy field is
-   * untouched everywhere else — this is a presentation decision local to M17.
+   * one: the Trust Score, with its disclaimer attached. The legacy field is
+   * untouched everywhere else — this is a presentation decision local to Rooms.
    */
   function roomPlayerView(player, org) {
     const view = playerViewForOrg(player, org);
@@ -83,7 +80,7 @@ export function registerRooms(ctx) {
     return rest;
   }
 
-  /** M23 P8 (D-P8-15): an M12 assessment's `context` is a word or an object; the Room list row shows a short label. */
+  /** An assessment's `context` is a word or an object; the Room list row shows a short label. */
   function assessmentContextLabel(ctx) {
     if (ctx == null) return null;
     if (typeof ctx === 'string') return ctx;
@@ -167,11 +164,11 @@ export function registerRooms(ctx) {
 
     const passport = ctx.buildFootballPassport?.(player, viewerKind, { orgId: org.id }) ?? null;
 
-    // Combine obeys the identical dual consent rule M16.1 applies: the standing
+    // Combine obeys the identical dual consent rule the Combine applies: the standing
     // gates AND (the player's recruitment opt-in OR this org's own request).
     const maySeeCombine = ctx.combineOrgMaySeeResults?.(org, player) ?? false;
     const combine = maySeeCombine ? (ctx.combineProjection?.(player.id) ?? null) : null;
-    const combineRequests = ctx.boxCamReads.requests.forOrg(org.id, { playerId: player.id }).reverse() // S12b: read through SQL, oldest first
+    const combineRequests = ctx.boxCamReads.requests.forOrg(org.id, { playerId: player.id }).reverse() // oldest first
       .map((r) => ctx.combineRequestView(r));
 
     // Development activity only behind the player's own recruitment share pref.
@@ -229,31 +226,30 @@ export function registerRooms(ctx) {
       note: d.note, by: d.by, createdAt: d.createdAt,
       supersededById: d.supersededById ?? null,
       snapshot: d.snapshot ?? null,
-      // M23 P5 — a formal decision is the same row with an outcome. Legacy
-      // rows read as advisory recommendations; nothing is backfilled.
+      // A formal decision is the same row with an outcome; any other row is
+      // an advisory recommendation.
       kind: d.kind === 'formal' ? 'formal' : 'recommendation',
       outcome: d.kind === 'formal' ? d.outcome ?? null : null,
       lifecycle: d.kind === 'formal' ? d.lifecycle ?? null : null,
     };
   }
 
-  /** Assessments for this org only, through M12's existing blind-until-submit rule. */
+  /** Assessments for this org only, through the existing blind-until-submit rule. */
   function assessmentsFor(req, room) {
     const mine = ctx.scoutingReads.assessments.forOrgPlayer(req.org.id, room.playerId);
     const lead = isLead(req.orgUser);
     const ownNonDraft = mine.some((a) => a.scoutUserId === req.orgUser.id && a.state !== 'draft');
     return mine
-      // M13 calibration policy: a scout cannot read a peer's submitted
+      // Calibration policy: a scout cannot read a peer's submitted
       // assessment until they have submitted their own. The Room surfaces
       // assessments; it does not become a way around that.
       .filter((a) => lead || a.scoutUserId === req.orgUser.id || (a.state !== 'draft' && ownNonDraft))
       .map((a) => ({
         id: a.id, scoutUserId: a.scoutUserId, scoutName: a.scoutName,
         templateId: a.templateId, templateVersion: a.templateVersion,
-        // M23 P8 (D-P8-15): an M12 assessment's recommendation is `{ verdict, reasons }`;
-        // the Room reads the verdict WORD only. The reasons are the scout's rationale
-        // and belong to the assessment surface, not to a list row — and a client that
-        // expected a word here crashed the whole Room on the first submitted assessment.
+        // An assessment's recommendation is `{ verdict, reasons }`; the Room reads the
+        // verdict WORD only. The reasons are the scout's rationale and belong to the
+        // assessment surface, not to a list row — and the client expects a word here.
         state: a.state, recommendation: typeof a.recommendation === 'string' ? a.recommendation : (a.recommendation?.verdict ?? null),
         // Likewise the context: a word or a short label (fixture · date, or "trial"), never the object.
         context: assessmentContextLabel(a.context), createdAt: a.createdAt, submittedAt: a.submittedAt ?? null,
@@ -271,7 +267,7 @@ export function registerRooms(ctx) {
    *
    * The Passport's club projection deliberately returns `evidence` as a SUMMARY
    * object (`{fullMatches, clips, references, lastEvidenceDays, …}`), not a row
-   * list — so the Room reads the canonical evidence rows itself (scoutingReads, S9a) and keeps
+   * list — so the Room reads the canonical evidence rows itself (scoutingReads) and keeps
    * the summary for the header. Access is already settled: `sources()` returned
    * `visible: true`, which means `orgCanSee` passed on this read.
    */
@@ -380,7 +376,7 @@ export function registerRooms(ctx) {
         ? { userId: room.room.leadScoutUserId, name: orgUser(org.id, room.room.leadScoutUserId)?.name ?? 'Former colleague' }
         : null,
       viewerRole: role,
-      // M18.1 concurrency token: moves on every accepted workflow mutation, so
+      // Concurrency token: moves on every accepted workflow mutation, so
       // a second scout editing a stale copy is refused rather than silently
       // overwriting the first.
       ...revMeta(room.room),
@@ -458,7 +454,7 @@ export function registerRooms(ctx) {
     try { page = readPage(req.query, ['number', 'string']); } catch (e) { return sendPageError(res, e); }
     const viewer = { userId: req.orgUser.id, isLead: isLead(req.orgUser) };
 
-    // The access rule (roomRole), the view and the filters are applied in SQL; only the page is decoded (§4.3 step 4).
+    // The access rule (roomRole), the view and the filters are applied in SQL; only the page is decoded.
     const VIEW_STATUSES = {
       shortlisted: ['shortlisted', 'priority'], trials: ['trial_requested', 'trial_scheduled', 'trial_completed'],
       offers: ['offer_consideration', 'offer_made'], archived: ['archived', 'closed', 'withdrawn'], active: OPEN_ROOM_STATUSES,
@@ -509,13 +505,13 @@ export function registerRooms(ctx) {
     });
   });
 
-  /** Needs-attention: deterministic, no priority scoring of any kind. Read as sets, not per Room (§4.3 step 4). */
+  /** Needs-attention: deterministic, no priority scoring of any kind. Read as sets, not per Room. */
   orgRouter.get('/rooms/needs-attention', (req, res) => {
     const orgId = req.org.id;
     const open = reads.cases.roomRowsForViewer(orgId, { userId: req.orgUser.id, isLead: isLead(req.orgUser) }, { statuses: OPEN_ROOM_STATUSES });
     const overdue = reads.cases.overdueTaskCounts(orgId, now());
-    const supplied = ctx.insightReads.suggestions.playerIdsWithStatus(orgId, 'supplied'); // S12d: one indexed query
-    const doneCombine = ctx.boxCamReads.requests.completedPlayerIds(orgId); // S12b: one indexed query
+    const supplied = ctx.insightReads.suggestions.playerIdsWithStatus(orgId, 'supplied'); // one indexed query
+    const doneCombine = ctx.boxCamReads.requests.completedPlayerIds(orgId); // one indexed query
     const reported = reads.trials.playerIdsForOrgStatus(orgId, 'reported');
     const decided = reads.decisions.roomIdsForOrg(orgId);
     const items = [];
@@ -590,7 +586,7 @@ export function registerRooms(ctx) {
     if (!p) return res.status(404).json({ error: 'PLAYER_NOT_FOUND' });
     // A room cannot be used to bookmark a player the club may not see.
     if (!orgCanSee(req.org, p)) return res.status(403).json({ error: 'NOT_VISIBLE', message: 'This player is not visible to your organisation under the standing rules.' });
-    if (vacancyId && !ctx.scoutingReads.vacancies.ofOrg(vacancyId, req.org.id)) return res.status(404).json({ error: 'VACANCY_NOT_FOUND' }); // S9c: read through SQL
+    if (vacancyId && !ctx.scoutingReads.vacancies.ofOrg(vacancyId, req.org.id)) return res.status(404).json({ error: 'VACANCY_NOT_FOUND' });
 
     const existing = reads.cases.forOrgPlayer(req.org.id, p.id).find((c) => isRoom(c) && OPEN_ROOM_STATUSES.includes(c.room.status));
     if (existing) {
@@ -619,7 +615,7 @@ export function registerRooms(ctx) {
     if (!room) return;
     const { priority, tags, leadScoutUserId, ownerUserId, restricted, deadline } = req.body ?? {};
 
-    // M18.1: guard the fields where a lost update changes who is responsible
+    // Guard the fields where a lost update changes who is responsible
     // for a decision or how urgent it is. Tags and a deadline are not worth a
     // conflict — demanding a rev for every trivial edit teaches people to send
     // whatever number makes the error go away.
@@ -690,11 +686,11 @@ export function registerRooms(ctx) {
     })) return;
 
     const to = String(req.body?.status ?? '');
-    // M23 P8 — role parity. Every state a semantic action reaches carries that
+    // Role parity. Every state a semantic action reaches carries that
     // action's role requirement HERE too; otherwise this route is the side
     // door around it (a room lead reaching `signed`, which the lifecycle
-    // reserves for a recruitment lead). A state no action names keeps M17's
-    // `set_status` rule.
+    // reserves for a recruitment lead). A state no action names keeps the
+    // Room's `set_status` rule.
     const namingActions = Object.values(LIFECYCLE_ACTIONS).filter((a) => a.to === to);
     if (namingActions.length) {
       const role = roleFor(req, room);
@@ -710,11 +706,11 @@ export function registerRooms(ctx) {
     const check = validateTransition(room.room.status, to, { reasonCodes: reasons.codes });
     if (!check.ok) return res.status(check.error === 'ROOM_TRANSITION_INVALID' ? 409 : 400).json(check);
 
-    // M23 §14 — a status that asserts a durable fact needs the record proving it.
+    // A status that asserts a durable fact needs the record proving it.
     //
     // This route takes a status string from the client, so without this gate it
-    // is a side door around the M23 lifecycle: `offer_made` + `{status:'signed'}`
-    // would have landed on `signed` with no signing in the database. The
+    // is a side door around the lifecycle: `offer_made` + `{status:'signed'}`
+    // would land on `signed` with no signing in the database. The
     // requirement is keyed by TARGET status in domains/recruitment/rooms/shared.mjs, so every path to
     // `signed` carries the identical burden and no future edge can skip it.
     //
@@ -746,7 +742,7 @@ export function registerRooms(ctx) {
           activity(d, req, 'room_reopened', { from, to, reasonCodes: reasons.codes });
         }
         activity(d, req, 'room_status_changed', { from, to, reasonCodes: reasons.codes, note: note ? true : false });
-        // Keep M12's sign-off artefact consistent so "closing needs a decision"
+        // Keep the case's sign-off artefact consistent so "closing needs a decision"
         // stays true without a second decision store fighting this one.
         if (ends) d.decision = { outcome: 'pass', reasons: reasons.codes.join(', '), byUserId: req.orgUser.id, byName: req.orgUser.name, at: now() };
         if (to === 'signed') d.decision = { outcome: 'sign', reasons: reasons.codes.join(', ') || 'signed', byUserId: req.orgUser.id, byName: req.orgUser.name, at: now() };
@@ -772,18 +768,18 @@ export function registerRooms(ctx) {
   });
 
   /**
-   * The ONE reopen path, shared with M18 Second Look.
+   * The ONE reopen path, shared with Second Look.
    *
    * A Second Look never reopens a room by itself — a recruiter does, and when
    * they do, the move runs through exactly this code: the same transition
    * table, the same reason requirement, the same snapshot capture, the same
-   * append-only decision memory and the same activity trail. M18 supplies only
+   * append-only decision memory and the same activity trail. Second Look supplies only
    * the source context so the reopen is attributable later.
    */
   ctx.reopenRoom = ({ req, room, to = 'under_review', reasonCodes = [], sourceContext = null, sourceRef = null }) => {
     const role = roleFor(req, room);
     if (!roomCan(role, 'reopen')) return { ok: false, status: 403, error: 'ROOM_PERMISSION_REQUIRED' };
-    // M23 P8 — a reopen reopens something CLOSED. A live room (contacted,
+    // A reopen reopens something CLOSED. A live room (contacted,
     // shortlisted, on hold…) pulled back to under_review through this bridge
     // would rewrite a live case under a "reopened" label; it is refused.
     if (!REOPENED_FROM.includes(room.room.status)) {
@@ -794,7 +790,7 @@ export function registerRooms(ctx) {
     const check = validateTransition(room.room.status, to, { reasonCodes: reasons.codes });
     if (!check.ok) return { ok: false, status: check.error === 'ROOM_TRANSITION_INVALID' ? 409 : 400, ...check };
 
-    // Same gate as the status route. `to` is a parameter here, and M18's
+    // Same gate as the status route. `to` is a parameter here, and the
     // Second Look bridge supplies it, so an evidence-bearing target must be
     // refused on this path too rather than trusted because the caller is
     // internal. Fails closed for the same reason.
@@ -825,29 +821,29 @@ export function registerRooms(ctx) {
   };
   ctx.findRoomForRequest = findRoom;
   ctx.roomIsRoom = isRoom;
-  // M23 P5 — the decision-time snapshot, captured by the formal decision
+  // The decision-time snapshot, captured by the formal decision
   // route through exactly the code the advisory recommendation uses.
   ctx.captureRoomSnapshot = (room, req, trigger) => captureSnapshot(room, req, trigger);
 
   /**
-   * The lifecycle write seam, shared with M23.
+   * The lifecycle write seam, shared with the lifecycle module.
    *
-   * M23 owns which semantic actions exist and what each one requires; it does
+   * The lifecycle owns which semantic actions exist and what each one requires; it does
    * NOT own how a status is written. That stays here, in `applyStatus` — the
    * single writer that also derives `case.stage` and bumps the rev — so there
    * is exactly one place where the two representations can be made to agree.
    *
    * The caller has already validated the transition. This performs it and
-   * appends the history entry M20's funnel reads, in that order, so a status
+   * appends the history entry the funnel reads, in that order, so a status
    * that moved is always a status with a recorded reason for moving.
    */
   ctx.applyLifecycleTransition = ({ req, room, to, reasonCodes = [], trigger = 'lifecycle', actor = null, statusDetail = null }) => {
     const from = room.room.status;
-    // M23 P4B: a case may move BECAUSE a recipient acted (a guardian accepted
+    // A case may move BECAUSE a recipient acted (a guardian accepted
     // a concrete trial slot), through this same writer. The recipient never
     // addresses the case; the caller passes who acted, and the history entry
     // names them by kind rather than pretending a club user did it. Absent an
-    // actor, the club user on the request is the actor, exactly as before.
+    // actor, the club user on the request is the actor.
     const org = actor?.org ?? req.org;
     const by = actor ? { id: actor.id ?? null, name: actor.name ?? null } : req.orgUser;
     const reopens = REOPENED_FROM.includes(from) && OPEN_ROOM_STATUSES.includes(to);
@@ -858,7 +854,7 @@ export function registerRooms(ctx) {
         ? audit(d, actor.kind ?? 'system', actor.id ?? null, actor.name ?? null, type, detail)
         : activity(d, req, type, detail));
       applyStatus(d, to, org, by);
-      // M23 P8.1 (§15) — a development-only fault seam between the status write
+      // A development-only fault seam between the status write
       // and the history entry: the write is refused whole, so status, stage,
       // rev, instants and history stay exactly as they were.
       if (faults?.shouldFail?.('lifecycle.after_status')) throw new Error('simulated failure after the status write (development fault layer)');
@@ -866,7 +862,7 @@ export function registerRooms(ctx) {
         d.room.reopened = { by: { userId: by.id ?? null, name: by.name ?? null }, at: now(), from, reasonCodes };
         write('room_reopened', { from, to, reasonCodes });
       }
-      // The same action name M20's funnel already reads. A second name would
+      // The same action name the funnel reads. A second name would
       // mean a second funnel, silently disagreeing with the first. The caller's
       // `statusDetail` (the semantic action, the policy version, the record that
       // moved the case) is part of the same entry.
@@ -874,16 +870,16 @@ export function registerRooms(ctx) {
     });
     if (reopens) vmetric('recruitment_room_reopened');
     vmetric('recruitment_room_status_changed');
-    // M23 P8 — open Rooms re-read the journey on this event (ids and words only).
+    // Open Rooms re-read the journey on this event (ids and words only).
     broadcast?.('recruitment_case_moved', { orgId: room.orgId, roomId: room.id, from, to });
     return { from, to, room: fresh };
   };
 
   /**
-   * The ONE room creator reachable from another milestone, shared with M18
-   * Nobody Missed. A candidate added from a brief gets a room through exactly
+   * The ONE room creator reachable from another module, shared with Nobody
+   * Missed. A candidate added from a brief gets a room through exactly
    * the same path as one added from Discover: the same visibility check, the
-   * same uniqueness rule, the same adoption of an existing case. M18 supplies
+   * same uniqueness rule, the same adoption of an existing case. Nobody Missed supplies
    * only the source context, so the funnel can later distinguish a room opened
    * from a brief from one opened organically.
    */
@@ -913,7 +909,7 @@ export function registerRooms(ctx) {
         trigger,
         sourceRefs: {
           // passportVersion is the projection schema version (always 1).
-          // passportRevision (M18.1) is the CONTENT revision, so a later
+          // passportRevision is the CONTENT revision, so a later
           // Second Look can say whether the Passport truth itself moved.
           passportVersion: full?.passportVersion ?? null,
           passportRevision: ctx.passportRevisionOf?.(room.playerId) ?? null,
@@ -1138,7 +1134,7 @@ export function registerRooms(ctx) {
     if (['archived', 'closed', 'withdrawn'].includes(fresh.room.status)) {
       // The Second Look contract: a typed, machine-readable domain event with
       // reason CODES and no private free text.
-      // M18.2: the STREAM carries ids only. secondLookEvent() remains the
+      // The STREAM carries ids only. secondLookEvent() remains the
       // internal shape (reason codes, revisitability, source refs) for the
       // Second Look engine and its tests; none of that belongs on a live
       // channel whose only consumer refetches through an authorised read.
@@ -1156,9 +1152,9 @@ export function registerRooms(ctx) {
     if (clientKey) {
       const dup = reads.decisions.forRoom(room.id).find((d) => d.clientKey === clientKey);
       // Idempotent submit: the same key returns the same decision instead of
-      // stacking a duplicate onto the decision memory. M23 P8.1 (D-P81-11): the
+      // stacking a duplicate onto the decision memory. The
       // same key with DIFFERENT content is a different request wearing the
-      // same name, and a key that named a formal M23 decision is not this
+      // same name, and a key that named a formal decision is not this
       // route's to replay — both are conflicts, never a silent old answer.
       if (dup) {
         const codesOf = (xs) => [...new Set((Array.isArray(xs) ? xs : []).map((x) => String(x)))].sort().join(',');
@@ -1168,7 +1164,7 @@ export function registerRooms(ctx) {
         return res.status(200).json({ decision: decisionView(dup), idempotent: true });
       }
     }
-    // M18.1: a decision is pinned to the room revision it was written against.
+    // A decision is pinned to the room revision it was written against.
     // Two colleagues deciding at once therefore produce ONE accepted decision
     // and one conflict — never two rows both claiming to be current. The
     // history stays append-only either way: nothing here edits a past decision.
@@ -1256,7 +1252,7 @@ export function registerRooms(ctx) {
     res.status(201).json({ assignment: a });
   });
 
-  /** Raise an evidence request through the M13 engine — same rules, no shortcut. */
+  /** Raise an evidence request through the evidence-request engine — same rules, no shortcut. */
   orgRouter.post('/rooms/:id/evidence-requests', (req, res) => {
     const room = findRoom(req, res);
     if (!room) return;
@@ -1266,10 +1262,10 @@ export function registerRooms(ctx) {
     // Deliberately no free-text field: a scout can never send their own words
     // to a player or a guardian from inside a private room. The engine's
     // whitelisted, rule-derived wording is the only thing that travels.
-    // M23 P8.1 (D-P81-6): the suggestion must be about THIS room's player. A
+    // The suggestion must be about THIS room's player. A
     // room's request authority never reaches another player's profile — not
     // even one this org may otherwise see — so the id is scoped to the room.
-    // One unit (S12d): the request, its notice and the Room's activity entry commit together, or none of them.
+    // One unit: the request, its notice and the Room's activity entry commit together, or none of them.
     const out = unit(() => {
       const r = ctx.requestEvidenceGap({ org: req.org, suggestionId, playerId: room.playerId });
       if (r.ok) touch(room, (d) => { activity(d, req, 'room_evidence_requested', { suggestionId, ruleId: r.suggestion.ruleId, routedTo: r.routedTo }); d.room.updatedAt = now(); });
@@ -1280,7 +1276,7 @@ export function registerRooms(ctx) {
     res.status(201).json({ suggestion: out.suggestion, routedTo: out.routedTo, note: 'Routed through the standing evidence-request rules, including guardian routing for under-18s.' });
   });
 
-  /** Request standardized Combine protocols through the M16.1 creator. */
+  /** Request standardized Combine protocols through the Combine's creator. */
   orgRouter.post('/rooms/:id/combine-requests', (req, res) => {
     const room = findRoom(req, res);
     if (!room) return;
@@ -1290,8 +1286,7 @@ export function registerRooms(ctx) {
     if (!req.org.verified) return res.status(403).json({ error: 'ORG_NOT_ELIGIBLE', message: 'Only a verified organisation can create a Club Combine.' });
     if (limited('room_combine_request', req.org.id)) return res.status(429).json(rateLimitedBody('room_combine_request'));
 
-    // S12b: refused, not coerced: protocol ids are text, the title text, the deadline a real day (it was cut to ten
-    // characters and stored unchecked before).
+    // Refused, not coerced: protocol ids are text, the title text, the deadline a real day.
     const { protocolIds, title = null, deadline = null } = req.body ?? {};
     if (protocolIds !== undefined && (!Array.isArray(protocolIds) || protocolIds.some((x) => typeof x !== 'string'))) return res.status(400).json({ error: 'FIELD_INVALID', field: 'protocolIds', message: 'protocolIds is a list of protocol ids.' });
     if (title !== null && typeof title !== 'string') return res.status(400).json({ error: 'FIELD_INVALID', field: 'title', message: 'A title is text.' });
@@ -1305,7 +1300,7 @@ export function registerRooms(ctx) {
     const instructions = req.body?.instructions ? String(req.body.instructions) : null;
     if (instructions && !moderateOrRefuse(res, instructions, { kind: 'combine_request', orgId: req.org.id })) return;
 
-    // One unit (S12b): the request, its ledger row and notification, and the Room's activity.
+    // One unit: the request, its ledger row and notification, and the Room's activity.
     const out = unit(() => {
       const o = ctx.createCombineRequests({
         org: req.org, orgUser: req.orgUser, playerIds: [room.playerId],
@@ -1322,7 +1317,7 @@ export function registerRooms(ctx) {
   /**
    * Link a canonical record to this room. Trials, contact requests and signings
    * are created by their own workflows — the Room references them, exactly as
-   * M12 cases already do, so there is never a duplicate trial or signing row.
+   * cases already do, so there is never a duplicate trial or signing row.
    */
   orgRouter.post('/rooms/:id/link', (req, res) => {
     const room = findRoom(req, res);
@@ -1374,18 +1369,11 @@ export function registerRooms(ctx) {
 
   // ------------------------------------------- legacy stage route alignment
   //
-  // There is deliberately no stage → status bridge here.
-  //
-  // One existed: `ctx.syncRoomStatusFromStage`, which mapped a legacy stage
-  // write back onto the room status. It was never called by anything, so
-  // M12's `POST /org/cases/:id/stage` wrote `case.stage` on a Room while
-  // `room.status` stayed where it was — the two representations of one case
-  // disagreeing, which is the thing the single-writer rule exists to prevent.
-  //
-  // It is not repaired by wiring it up. `roomStatusForStage` is the inverse of
-  // a lossy projection (eighteen statuses onto six stages), so `decision`
-  // alone means any of four statuses and the inverse would move a room at
-  // `offer_made` backwards — past the transition table, the evidence gate, the
-  // history append and the rev bump. The legacy route now refuses a Room and
-  // names the lifecycle route instead; `applyStatus` stays the only writer.
+  // There is deliberately no stage → status bridge here. `roomStatusForStage`
+  // is the inverse of a lossy projection (eighteen statuses onto six stages),
+  // so `decision` alone means any of four statuses and a bridge would move a
+  // room at `offer_made` backwards — past the transition table, the evidence
+  // gate, the history append and the rev bump. `POST /org/cases/:id/stage`
+  // refuses a Room and names the lifecycle route instead; `applyStatus` stays
+  // the only writer.
 }

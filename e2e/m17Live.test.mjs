@@ -1,4 +1,4 @@
-// M17 LIVE browser journeys — Recruitment Rooms, real backend, separate
+// LIVE browser journeys — Recruitment Rooms, real backend, separate
 // browser contexts per actor so sessions and tenants are genuinely isolated.
 //
 // R1  a scout discovers a player and opens a Room
@@ -193,7 +193,7 @@ await scoutA.waitForSelector('[role="tabpanel"][aria-label="Decision"]', { timeo
 {
   const before = await scoutA.locator('body').innerText();
   await roomTab(scoutA, 'Overview');
-  // M18.2: archiving asks for confirmation with its consequence stated; accept it.
+  // Archiving asks for confirmation with its consequence stated; accept it.
   scoutA.on('dialog', (d) => d.accept());
   await scoutA.selectOption('[aria-label="Move to"]', 'archived');
   // Archiving without a reason must be refused by the UI or the server.

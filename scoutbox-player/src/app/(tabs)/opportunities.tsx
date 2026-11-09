@@ -1,9 +1,9 @@
-// M23 P2.5 — Opportunities: everything a player can pursue and everything a
+// Opportunities: everything a player can pursue and everything a
 // club has put in front of them.
 //
-// M24B — the recruitment experience is CATEGORY → SUBCATEGORY: My journey,
-// Club contact, Trial, Offer, Signing. M24D — five categories: the Board the
-// screen always carried is a page of the journey, and Current stage and Tasks
+// The recruitment experience is CATEGORY → SUBCATEGORY: My journey,
+// Club contact, Trial, Offer, Signing. Five categories: the Board is a page
+// of the journey, and Current stage and Tasks
 // are part of the Overview. Only the chosen page renders; `?cat=&tab=` deep-links it and a
 // notification opens the category that holds its record. A category is UI
 // organisation only — the stage a club is at comes from the server's journey
@@ -54,7 +54,7 @@ export default function Opportunities() {
         <CaseCategories model={PLAYER_NAV} value={category.id} onChange={goCategory} />
         <PageTabs tabs={tabs} value={sub} onChange={(k) => go({ category: category.id, sub: k })} />
         <View testID={`case-panel-${sub}`} style={styles.panel} accessibilityLabel={pt(category.labelKey as Parameters<typeof pt>[0])}>
-          {/* M24F — the Overview reads Current (what clubs have put in motion), then Upcoming (open roles, fit, invitations, follow-ups), with History one tab away. */}
+          {/* The Overview reads Current (what clubs have put in motion), then Upcoming (open roles, fit, invitations, follow-ups), with History one tab away. */}
           {actor && sub === 'overview' ? (
             <>
               <SectionTitle testID="opp-current">Current</SectionTitle>
@@ -95,6 +95,6 @@ export default function Opportunities() {
 const makeStyles = (colors: Palette) => StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bg },
   scroll: { paddingHorizontal: 22, paddingTop: 8, paddingBottom: 32, gap: 0 },
-  // M24F.5 — the first section's rule lands on the tab bar's own line, so a tab that opens on a section shows one rule, not two.
+  // The first section's rule lands on the tab bar's own line, so a tab that opens on a section shows one rule, not two.
   panel: { gap: 10, marginTop: 0 },
 });

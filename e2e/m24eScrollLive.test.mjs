@@ -1,4 +1,4 @@
-// M24E LIVE — "I can scroll screens where I need to so I can see everything
+// LIVE — "I can scroll screens where I need to so I can see everything
 // in all orientations": the global scroll invariant, and Inter resolving,
 // across the five applications at nine viewports (phone portrait, phone
 // landscape, short laptops), against real builds and a real server.
@@ -228,7 +228,7 @@ const pageAudit = async (page, tag, lastSel) => {
     const needs = content.scrollHeight > content.clientHeight + 1;
     const last = [...document.querySelectorAll(lastSel)].pop();
     const reach = last ? __sc.reach(last) : null;
-    // M24F.4 — a page whose last control already fits the first screen (flat rows
+    // A page whose last control already fits the first screen (flat rows
     // are shorter) still has to move when it is taller than the viewport: scroll
     // it to the end, the way the entry audit does, and report where it landed.
     if (needs && content.scrollTop === 0) content.scrollTop = content.scrollHeight;
@@ -250,14 +250,14 @@ for (const [who, port, org, name, role, hash, lastSel] of [
     const page = await enter(ctx, port, org, name, role, `${who} page@${w}x${h}`);
     if (hash) {
       await page.evaluate((x) => { location.hash = x; }, hash); await sleep(600);
-      // M24F.5 — Staff & Security sections are rows; open every row so the true last control (and the taller page) is what gets audited.
+      // Staff & Security sections are rows; open every row so the true last control (and the taller page) is what gets audited.
       await page.evaluate(() => document.querySelectorAll('.content details.settings-row').forEach((d) => { d.open = true; })); await sleep(300);
     }
     else {
       // Trust // Trust & Safety has no hash router Safety has no hash router: pick the section in the sidebar (a drawer at ≤ 900px, opened from the top bar).
       if (w <= 900) {
         await page.click('.nav-hamburger'); await page.waitForSelector('nav.sidebar.drawer-open', { timeout: 5000 }); await sleep(450); /* the 0.18s slide */ await inject(page);
-        // M24E defect E1: the console had no way to open its sidebar at ≤ 900px — Sign out and every section were unreachable.
+        // Regression: without a way to open the console's sidebar at ≤ 900px, Sign out and every section are unreachable.
         const dr = await page.evaluate(() => ({ exit: __sc.visible(document.querySelector('nav.sidebar [data-testid="sign-out"]')), region: !!document.querySelector('nav.sidebar [data-testid="nav-scroll"]') }));
         ok(dr.exit && dr.region, `P ${who} ${w}×${h}: the top bar opens the sidebar drawer; Sign out is on screen inside it`);
       }

@@ -1,13 +1,8 @@
-// S9c — a club's setup as typed tables with explicit writes (repositories/clubSetup.mjs, migration 0021): the
-// tactical setup (roles, criteria, windows), the squad, the shadow list, looking-for, the federation-route request and
-// vacancies. What this suite proves: the migration creates the nine typed tables, empty, and removes the four retired
-// facets from orgs.facets_json; the organisation record refuses them (reading, writing, a record carrying one) and
-// the typers refuse junk with the field named; a tactical re-save diffs roles by id (a kept role
-// keeps its vacancies and shadow entries, a dropped one leaves them with no role); a role of another club is refused;
-// the squad and shadow uniqueness rules hold and the two lists are separate; a rolled-back unit leaves nothing; the
-// vacancy list pages by cursor; and a fixture written through the repository is typed, refuses missing references,
-// uniqueness and junk (nothing written), and reads back what it wrote.
-// Temporary databases only; nothing touches DATA_DIR. Run with: npm test
+// A club's setup (repositories/clubSetup.mjs, migration 0021): the tactical setup (roles, criteria, windows), the
+// squad, the shadow list, looking-for, the federation-route request and vacancies. The organisation record refuses
+// these as fields. A tactical re-save diffs roles by id (a kept role keeps its vacancies and shadow entries, a dropped
+// one leaves them with no role); a role of another club is refused. Also: the typers, uniqueness rules, units of work,
+// vacancy paging and fixtures. Temporary databases only; nothing touches DATA_DIR. Run with: npm test
 
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -55,7 +50,7 @@ function serverOpen(dir) {
 }
 
 // ------------------------------------------------------------- schema
-test('[schema] 0021 is registered after 0020 and creates the nine STRICT tables empty (S14g: the organisations have no facets to clean up)', () => {
+test('[schema] 0021 is registered after 0020 and creates the nine STRICT tables empty', () => {
   const ids = DATA_MIGRATIONS.map((m) => m.id);
   assert.equal(ids.indexOf(MIGRATION), ids.indexOf('0020_scouting_assessments') + 1);
   for (const n of COLLECTIONS) assert.ok(TABLE_BACKED.includes(n), `${n} is table-backed`);

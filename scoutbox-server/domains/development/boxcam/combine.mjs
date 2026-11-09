@@ -1,5 +1,5 @@
-// M16.1 — At-Home Combine: standardized, measurable tests recorded live with
-// Box Cam. This module is a MEASUREMENT LAYER over M16, not a second camera
+// At-Home Combine: standardized, measurable tests recorded live with
+// Box Cam. This module is a MEASUREMENT LAYER over Box Cam, not a second camera
 // stack: every Combine Attempt binds a server-minted Box Cam session
 // (ctx.boxMintSession) and is completed through the shared Box Cam completion
 // path (ctx.boxCompleteSession), inheriting all Box Cam integrity. The
@@ -17,8 +17,8 @@
 // provider has — not even the test one — so their sprint/jump/distance
 // numbers are never fabricated anywhere.
 //
-// S12b: requests and attempts are rows of repositories/boxCam.mjs, written by explicit operations (an attempt with
-// its minted session in one unit of work; the measurement inside the session's completion unit), read through
+// Requests and attempts are rows of repositories/boxCam.mjs, written by explicit operations (an attempt with its
+// minted session in one unit of work; the measurement inside the session's completion unit), read through
 // `boxCamReads`.
 import { isAdult, visibleToOrg } from '../../../domain.mjs';
 import { ageOrNull, endOfDayExclusive, parseStrictDateOnly, isAbsent } from '../../../temporal.mjs';
@@ -47,14 +47,13 @@ export function registerCombine(ctx) {
 
   const orgCanSee = (org, p) => !!p && visibleToOrg(p, org) && !isBlocked(p.id, org.id);
   const guardianOwnsChild = (g, id) => g.childIds.includes(id);
-  // M23 P5.7 (T-8): THE age rule (a missing dob used to compute as NaN here and
-  // serialise as null by accident; now it is null by rule).
+  // THE age rule: a missing dob is a null age, by rule.
   const ageOf = (p) => ageOrNull(p?.dob, Date.now());
   const prodProvider = PROVIDERS[PROD_PROVIDER_ID];
 
-  // ------------------------------------------------- M22: the Combine gate
+  // ------------------------------------------------------ the Combine gate
   //
-  // THE distinction M22 turns on. A provider's `capabilities` list is what it
+  // THE distinction the gate turns on. A provider's `capabilities` list is what it
   // can OBSERVE. That is the right input for Box Cam, and the wrong input for
   // Combine, because a Combine measurement is a standardised, comparable
   // NUMBER and comparability is a claim about the real world.
@@ -64,16 +63,15 @@ export function registerCombine(ctx) {
   // evidence alone. Instead its Combine list is derived per protocol from the
   // versioned real-world validation record, and is currently empty for every
   // protocol. No argument to this function can change that — see
-  // m22/eligibility.mjs.
+  // cv/eligibility.mjs.
   //
   // Other providers are unaffected: `web_client` is honestly limited and
   // `local_test` is test-only and already cannot reach production.
-  // NOTE ON THE CONSTANT ABOVE. `PROD_PROVIDER_ID` is a historical misnomer:
-  // it is 'web_client', and it meant "the best honest provider available here"
-  // back when no real CV existed. It does NOT mean production_cv. An earlier
-  // cut of this function compared against it and therefore handed
-  // production_cv its OBSERVATION list — opening the gate completely. The
-  // comparison is against the literal CV provider id for that reason.
+  // NOTE ON THE CONSTANT ABOVE. `PROD_PROVIDER_ID` is 'web_client' ("the best
+  // honest provider available here"); it does NOT mean production_cv.
+  // Comparing against it would hand production_cv its OBSERVATION list and
+  // open the gate completely, so the comparison is against the literal CV
+  // provider id.
   const combineCapsFor = (providerId, protocolId) => {
     const prov = PROVIDERS[providerId];
     if (!prov) return [];
@@ -81,8 +79,8 @@ export function registerCombine(ctx) {
     return combineCapabilities(protocolId, { providerCapabilities: prov.capabilities ?? [] });
   };
 
-  // Rate limits (per §109 / §76): attempt creation and request creation.
-  // M18.1: the shared limiter and its named policy (see domains/platform/rateLimit.mjs).
+  // Rate limits: attempt creation and request creation. The shared limiter and
+  // its named policy (see domains/platform/rateLimit.mjs).
   const limited = (action, keyPart) => !!ctx.rateLimit?.limited(action, keyPart);
 
   // ------------------------------------------------------------- views
@@ -91,15 +89,12 @@ export function registerCombine(ctx) {
     description: p.description, metricType: p.metricType, metricUnit: p.metricUnit,
     direction: p.direction, precision: p.precision, protocolWindowMs: p.protocolWindowMs,
     requiredCapabilities: p.requiredCapabilities,
-    // Honest, device-aware capability: is this measurable on the production
-    // provider here? The test/demo provider can simulate the rest.
-    // Combine capability, not observation capability (M22). A protocol the
-    // engine can observe but has not been real-world validated for reports
-    // `not_configured` here, which is the truth about MEASUREMENT.
-    // MEASUREMENT capability across the providers a player can actually use,
-    // with production_cv gated by real-world validation. Currently this is
-    // web_client's honest list plus an empty CV list, so ball protocols stay
-    // not_configured — which is the truth about MEASUREMENT.
+    // Honest, device-aware MEASUREMENT capability across the providers a
+    // player can actually use, with production_cv gated by real-world
+    // validation (its Combine list, never its observation list). Currently
+    // this is web_client's honest list plus an empty CV list, so ball
+    // protocols stay not_configured — which is the truth about MEASUREMENT.
+    // The test/demo provider can simulate the rest.
     measurementCapability: measurementCapability(p, [
       ...combineCapsFor(PROD_PROVIDER_ID, p.id),
       ...combineCapsFor(CV_PROVIDER_ID, p.id),
@@ -124,7 +119,7 @@ export function registerCombine(ctx) {
   // Cam session is later invalidated by Trust & Safety immediately stops
   // counting; a restore brings it back. Computed at read time so invalidation
   // is reflected everywhere without rewriting the stored attempt.
-  // The rule itself lives in combineShared.mjs as `liveCombineState` so M21's
+  // The rule itself lives in combineShared.mjs as `liveCombineState` so the
   // objective targets ask the same question and cannot get a different answer.
   const effectiveState = (a) => liveCombineState(a, boundSession(a));
 
@@ -214,7 +209,7 @@ export function registerCombine(ctx) {
     };
   }
   ctx.combineProjection = combineProjection;
-  // Safe facts for future Recruitment Rooms / Watchlists (§26/§96) — factual
+  // Safe facts for other surfaces (Rooms, Watchlists) — factual
   // measurements only, never an athletic/talent score.
   ctx.combineFacts = (playerId) => {
     const proj = combineProjection(playerId);
@@ -386,7 +381,7 @@ export function registerCombine(ctx) {
     if (COMBINE_TERMINAL.has(a.combineState)) return res.status(409).json({ error: 'ALREADY_FINALIZED' });
     const proto = combineProtocol(a.protocolId, a.protocolVersion);
     const required = proto?.calibrationRequirements ?? [];
-    // S12b: a list of check names as sent (anything else was turned into strings before).
+    // A list of check names as sent: anything else is refused, not turned into strings.
     const rawChecks = req.body?.checks;
     if (rawChecks !== undefined && (!Array.isArray(rawChecks) || rawChecks.length > 10 || rawChecks.some((c) => typeof c !== 'string' || !c.length || c.length > 60))) {
       return res.status(400).json({ error: 'FIELD_INVALID', field: 'checks', message: 'Calibration checks are a list of at most 10 check names.' });
@@ -439,7 +434,7 @@ export function registerCombine(ctx) {
     const r = measureAttempt({
       protocolDef: proto, session,
       calibrationPassed,
-      // M22: the Combine-eligible list, never the observation list.
+      // The Combine-eligible list, never the observation list.
       providerCapabilities: combineCapsFor(session.provider, a.protocolId),
       mode: a.mode,
     });
@@ -489,7 +484,7 @@ export function registerCombine(ctx) {
    *  request window (after it was created, before its deadline). */
   function requiredDone(r) {
     const done = new Set();
-    // M23 P5.7: a deadline is a DATE_ONLY covering the whole day; an unreadable
+    // A deadline is a DATE_ONLY covering the whole day; an unreadable
     // one is a window that has already closed, never one that stays open.
     const deadlineMs = r.deadline ? (endOfDayExclusive(r.deadline) ?? -Infinity) : Infinity;
     for (const a of verifiedAttempts(r.playerId)) {
@@ -526,7 +521,7 @@ export function registerCombine(ctx) {
 
   // ================================================================== CLUB
   // The one creator for Club Combine requests. Extracted from the route so a
-  // Recruitment Room (M17) can raise a request through exactly this code path
+  // Recruitment Room can raise a request through exactly this code path
   // instead of growing a second copy of it. Callers do their own eligibility,
   // rate-limit and moderation checks first — this only creates.
   function createRequests({ org, orgUser, playerIds, protocolIds, title, deadline, instructions }) {
@@ -567,7 +562,7 @@ export function registerCombine(ctx) {
     if (req.org.suspended) return res.status(403).json({ error: 'ORG_SUSPENDED' });
     if (!req.org.verified) return res.status(403).json({ error: 'ORG_NOT_ELIGIBLE', message: 'Only a verified organisation can create a Club Combine.' });
     const { title, protocolIds, deadline, instructions } = req.body ?? {};
-    // S12b: protocol and player ids are text as sent (anything else was turned into strings before).
+    // Protocol and player ids are text as sent: anything else is refused, not turned into strings.
     if (protocolIds !== undefined && (!Array.isArray(protocolIds) || protocolIds.some((x) => typeof x !== 'string'))) return res.status(400).json({ error: 'FIELD_INVALID', field: 'protocolIds', message: 'protocolIds is a list of protocol ids.' });
     if (req.body?.playerIds !== undefined && (!Array.isArray(req.body.playerIds) || req.body.playerIds.some((x) => typeof x !== 'string'))) return res.status(400).json({ error: 'FIELD_INVALID', field: 'playerIds', message: 'playerIds is a list of player ids.' });
     if (title !== undefined && title !== null && typeof title !== 'string') return res.status(400).json({ error: 'FIELD_INVALID', field: 'title', message: 'A title is text.' });
@@ -589,7 +584,7 @@ export function registerCombine(ctx) {
   });
 
   orgRouter.get('/combine/requests', (req, res) => {
-    // Bounded by one club's requests: the visibility rule applied in code, then the page cut (S12b).
+    // Bounded by one club's requests: the visibility rule applied in code, then the page cut.
     const mine = reads.requests.forOrg(req.org.id, { playerId: req.query.playerId ? String(req.query.playerId) : null })
       .filter((r) => { const p = findPlayer(r.playerId); return p && orgCanSee(req.org, p); });
     const page = pageNewestFirst(req, res, mine, { readPage, pageOf, sendPageError });
@@ -614,7 +609,7 @@ export function registerCombine(ctx) {
     if (reads.prefs.sharesForRecruitment(p.id)) return true;
     return reads.requests.activeBetween(org.id, p.id);
   }
-  // Shared with M17 so a Recruitment Room applies the identical consent rule
+  // Shared with the Recruitment Rooms so a Room applies the identical consent rule
   // rather than inventing a laxer one. A room is not consent.
   ctx.combineOrgMaySeeResults = orgMaySeeResults;
   orgRouter.get('/combine/players/:id', (req, res) => {

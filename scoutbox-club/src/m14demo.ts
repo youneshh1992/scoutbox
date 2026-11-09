@@ -1,4 +1,4 @@
-// M14 in-browser demo mirror (VITE_DEMO=1). Same honesty rules as the live
+// In-browser demo mirror (VITE_DEMO=1). Same honesty rules as the live
 // server: nothing here shows "verified" for anything that was only uploaded,
 // and the demo personas cover the full range of states — verified club, root
 // admin, verified scout, pending coach, former (historical) coach, and a
@@ -108,7 +108,7 @@ const me: MyVerification = {
 const dl = <T,>(v: T): Promise<T> => new Promise((r) => setTimeout(() => r(v), 120));
 
 
-// ---- M23 P5.6C: one open consent ask and one granted-then-revocable ask.
+// ---- one open consent ask and one granted-then-revocable ask.
 const DEMO_CONSENT_HONEST = 'You may decline. Consent is specific to this agent, this transaction context and these parties; it can be revoked at any time, and a revocation stops any future regulated action that needs it. ScoutBox records your answer; it does not advise you.';
 const DEMO_CLUB_CONSENTS: import('./m14api').ClubConsentRequest[] = [
   {
@@ -122,7 +122,7 @@ const DEMO_CLUB_CONSENTS: import('./m14api').ClubConsentRequest[] = [
   },
 ];
 
-// M23 P5.6D — two synthetic transactions this demo club is a party to: one it
+// Two synthetic transactions this demo club is a party to: one it
 // is ENGAGING in (compliance clear once it confirms) and one it is RELEASING
 // from (consent outstanding). The club sees its own private note and the
 // documents shared with it; the other club's private note and the agent's

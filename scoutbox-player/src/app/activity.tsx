@@ -1,4 +1,4 @@
-// Activity — M24F.4. The full scouting stream the Home previews: every
+// Activity. The full scouting stream the Home previews: every
 // event, grouped Today / This week / Earlier, one line each, plus the week's
 // figures as a single quiet line. Server data only (the same calls Home
 // makes); tap a row for the organisation's directory entry is not offered

@@ -1,13 +1,7 @@
-// M23 P5.6B — persistence, migration and restart audit for the Agent core.
-// S11a: the profiles, affiliations and agreements are typed tables (migration 0026), and a snapshot save types every
-// record. S14 last: fixtures are written through the repositories. S14a: the blob store and its snapshot registry (step 2305) are retired; schema checks read data_migrations.
-//
-//   1  migration 0026: registered once; a clean database holds no agent record, and reopening it changes nothing
-//   2  a database of staff with no agent rows: nothing is bootstrapped or mirrored (no staff exist before their login)
-//   3  a real boot over that database: the first member into the agency becomes its administrator and can administer
-//   4  clean boot → a full relationship → stop → read back → reboot: bytes survive (keys, revs, provenance, history)
-//   5  junk is refused by the typed write, naming the record; an odd row a typed table CAN hold (an active agreement
-//      nobody confirmed) grants nothing and is never "repaired" on boot
+// Persistence, migration and restart audit for the Agent core: (1) migration 0026, (2) staff with no agent rows get
+// nothing bootstrapped, (3) the first member into an agency becomes its administrator, (4) a full relationship
+// survives a restart byte for byte, (5) junk is refused by the typed write, and an odd row a typed table CAN hold (an
+// active agreement nobody confirmed) grants nothing.
 //
 // Nothing is rewritten, re-ordered or "repaired" on boot.
 
@@ -63,7 +57,7 @@ async function bootOn(dataDir, port) {
   return { up, j, stop, log: () => log };
 }
 
-const PORT = pickPort(6500, 200, [0, 1, 3]); // TH-6: never a fetch-blocked port
+const PORT = pickPort(6500, 200, [0, 1, 3]); // never a fetch-blocked port
 const SCHEMA_VERSION = Number(DATA_MIGRATIONS.map((m) => m.id).sort().at(-1).slice(0, 4));
 /** The table migrations recorded in a data directory's file, with when each ran. */
 const appliedMigrations = (dir) => {
@@ -102,8 +96,6 @@ function staffSnapshot() {
 }
 
 // ======================================================= 1 — the migration
-// Rewritten in S14a: sections 1 and 2 described the retired snapshot registry (step m240_001 at 2305, runMigrations
-// over in-memory snapshots, the store contract). They now check the table migration and what a database holds.
 section('1 — migration 0026: registered once; a clean database holds no agent record');
 {
   const ids = DATA_MIGRATIONS.map((m) => m.id);
@@ -231,7 +223,7 @@ section('5 — junk is refused by the typed write; what a typed row can hold is 
   neg(verificationGap(profile, 'INT', T0)?.state === 'MANUAL_REVIEW_REQUIRED', 'and is a verification gap');
   neg(!agreementGrantsAccess(signed, 'usr-lead', T0 + 1), 'an agreement with status "signed" grants NO access');
   neg(!clientTransitionAllowed(signed, 'active', T0 + 1) && !agentTransitionAllowed(signed, 'terminated_by_agent', T0 + 1), 'and moves nowhere');
-  // S11a: the repository's typed create refuses both, naming the record; nothing is written.
+  // The repository's typed create refuses both, naming the record; nothing is written.
   let refused = null;
   const junkDir = () => mkdtempSync(path.join(tmpdir(), 'sbx-m24p5-junk-'));
   try { fixture(junkDir(), { ...db, agentProfiles: [profile] }); } catch (e) { refused = e; }

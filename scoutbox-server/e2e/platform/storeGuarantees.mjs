@@ -1,10 +1,7 @@
 // The store guarantees: what a ScoutBox database is, and that a server answers on any database this build can create.
 //
-// Since S14a every domain lives in its own tables and the blob store is retired: there is no `collections` table, no
-// `db.schema` record and no list of in-memory containers to guarantee. What used to be "every collection production
-// code reads exists after boot" (M23-D2) is now a property of the schema: the table migrations create every table
-// before any module registers, and a boot on a database that holds nothing but one organisation must answer its
-// first requests. This battery checks:
+// Every domain lives in its own tables: the table migrations create every table before any module registers, and a
+// boot on a database that holds nothing but one organisation must answer its first requests. This battery checks:
 //
 //   part 1  the file — the table migrations, the counter, no blob, the catalogue constants, and every lifecycle
 //           state projecting as itself;
@@ -23,7 +20,7 @@ import { DATA_MIGRATIONS, TABLE_BACKED } from '../../repositories/index.mjs';
 import { createIdCounter } from '../../repositories/counters.mjs';
 import { ROOM_STATUSES, ROOM_STATUS_LABELS, TERMINAL_ROOM_STATUSES, stageForRoomStatus } from '../../domains/recruitment/rooms/shared.mjs';
 import { NULL_EVIDENCE_PROVIDER } from '../../domains/recruitment/lifecycle/lifecycle.mjs';
-import { buildRecruitmentJourney } from '../../scripts/recruitmentReadsFixture.mjs'; // §4.3 step 2: the contacts/offers queries over the plain arrays
+import { buildRecruitmentJourney } from '../../scripts/recruitmentReadsFixture.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(HERE, '..', '..');
@@ -58,7 +55,7 @@ section('§1 — a new database file: every table migration, no blob');
   const dir = tempDir('fresh');
   const store = openLayer(dir); // server mode migrates the file as it opens it, exactly as a boot would
   const tables = tableNames(store.sqlite);
-  neg(!tables.includes('collections'), 'there is no `collections` table: the blob store is retired (S14a)');
+  neg(!tables.includes('collections'), 'there is no `collections` table: the blob store is retired');
   const applied = store.sqlite.prepare('SELECT id FROM data_migrations ORDER BY id').all().map((r) => r.id);
   ok(applied.length === DATA_MIGRATIONS.length && applied.join() === DATA_MIGRATIONS.map((m) => m.id).sort().join(), `all ${DATA_MIGRATIONS.length} table migrations are recorded, once each`);
   ok(LATEST === 39 || LATEST > 39, `the schema version is the latest migration's number (${LATEST})`);
@@ -160,8 +157,8 @@ section('§5 — every module registers before the socket opens');
 
 section('§6 — no production code creates or repairs a collection in memory');
 {
-  // The retired pattern: `db.x ??= []` at registration or inside a handler, which hid a missing store from every
-  // boot-time check. Every domain is a table now, created by its migration; none may come back.
+  // `db.x ??= []` at registration or inside a handler hides a missing store from every boot-time check. Every domain
+  // is a table created by its migration; the pattern must not appear.
   const SKIP = new Set(['node_modules', 'scripts', 'e2e', 'data', 'public', 'assets', 'dist']);
   const offenders = [];
   (function walk(d) {
@@ -209,7 +206,7 @@ async function bootOnce(dataDir, { port, probe = null } = {}) {
 
 /**
  * The FIRST requests to a freshly booted server, issued the instant /healthz answers: /healthz answering means
- * `app.listen` fired, so every `register*()` returned. It asks the last-registered module (M23) for its vocabulary
+ * `app.listen` fired, so every `register*()` returned. It asks a late-registered module (the recruitment lifecycle, `registerM23`) for its vocabulary
  * and asks routes over tables owned by three different repositories to answer.
  */
 const firstRequestProbe = async (base) => {

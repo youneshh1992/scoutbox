@@ -1,8 +1,6 @@
 /**
- * Group workspaces and group grants get their own typed tables (S13c): groups with their members (an admin flag on
- * the member row), pending invites, shared templates and programmes; grants with their recipients as ordered rows.
- * REGISTERED in DATA_MIGRATIONS. `up()` is the DDL only: nothing is carried over (no production data; rollback means
- * re-seed).
+ * Group workspaces and group grants: groups with their members (an admin flag on the member row), pending invites,
+ * shared templates and programmes; grants with their recipients as ordered rows.
  */
 import { migrationApplied } from '../database.mjs';
 import { ENTERPRISE_MIGRATION } from '../enterprise.mjs';

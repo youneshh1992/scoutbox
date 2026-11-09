@@ -1,10 +1,10 @@
 /**
- * M23 P3 — the Contact engine: pure functions over plain data.
+ * The Contact engine: pure functions over plain data.
  *
  * A Contact is the club's INTERNAL record of one communication process with
  * a player or, for a minor, with the guardian who owns that player's account.
  * It is not the recruitment lifecycle (the case owns that), not the Inbox
- * (the recipient sees a `db.requests` row) and not a message thread (channels
+ * (the recipient sees a request row) and not a message thread (channels
  * own conversation). It exists so that three facts have an honest home:
  *
  *   a draft is not contact           — it lives here and nowhere the recipient reads
@@ -30,7 +30,7 @@ const has = (t, k) => typeof k === 'string' && Object.prototype.hasOwnProperty.c
 // ------------------------------------------------------------------ states
 
 /**
- * The Contact object's own states. NONE of these is a case status (contract §2).
+ * The Contact object's own states. NONE of these is a case status.
  *
  *   draft      written, nothing left the building
  *   delivered  handed to the in-app transport and durable in the recipient's Inbox
@@ -42,7 +42,7 @@ const has = (t, k) => typeof k === 'string' && Object.prototype.hasOwnProperty.c
  * `queued`, `sent`, `bounced`, `read` are deliberately absent: the only
  * transport this build has is its own durable Inbox, which either holds the
  * row or does not. Inventing intermediate states for a transport that cannot
- * distinguish them would be the "fake delivery state" §22 forbids.
+ * distinguish them would be a fake delivery state.
  */
 export const CONTACT_STATUSES = Object.freeze(['draft', 'delivered', 'failed', 'responded', 'recorded', 'cancelled']);
 
@@ -65,7 +65,7 @@ export const CONTACT_TRANSITIONS = table({
   cancelled: [],
 });
 
-/** States that count as "the recipient could have received it" (contract §3). */
+/** States that count as "the recipient could have received it". */
 export const CONTACT_EVIDENCE_STATUSES = Object.freeze(['delivered', 'responded', 'recorded']);
 
 // ---------------------------------------------------------------- channels
@@ -88,7 +88,7 @@ export const EXTERNAL_CHANNELS = Object.freeze(Object.keys(CONTACT_CHANNELS).fil
 export const RESPONSE_KINDS = Object.freeze(['accepted', 'declined']);
 
 /**
- * M23 P5.6E — the routing modes a club may ask for. The player is a target in
+ * The routing modes a club may ask for. The player is a target in
  * both: `both` adds their agent BESIDE them. There is deliberately no mode that
  * reaches an agent INSTEAD of the player (see `contactRouting` in
  * `m27/integration.mjs` for why).
@@ -118,12 +118,12 @@ export const CONTACT_CASE_STATUSES = Object.freeze(['contact_planned', 'contacte
 // ------------------------------------------------------------ roles/actions
 
 /**
- * Who may do what. Mirrors M17's ranking; `roomCan` in domains/recruitment/rooms/shared.mjs carries
+ * Who may do what. Matches the room role ranking; `roomCan` in rooms/shared.mjs carries
  * the same two actions so the Room's permission surface stays one table.
  *
  *   contact_view   viewer and above — Contact history is club memory
  *   contact_write  room_lead and above — drafting, sending, recording,
- *                  cancelling. The contract (§6) fixes `recordContact` at
+ *                  cancelling. `recordContact` is fixed at
  *                  room_lead; a contributor proposes through tasks and comments.
  */
 const ROLE_RANK = table({ viewer: 0, contributor: 1, room_lead: 2, recruitment_admin: 3 });
@@ -236,7 +236,7 @@ export function normaliseClientKey(raw) {
  * Derive who a contact for this case may reach. The client never names the
  * recipient: this is computed from the live player, the live organisation,
  * the live guardian records and the clock — and it is re-run on every
- * mutation, not only when the draft was written (§9, §13, §14).
+ * mutation, not only when the draft was written.
  *
  * @param {object} p
  * @param {object} p.player     live player record (may be undefined)
@@ -283,7 +283,7 @@ export function resolveContactRecipient({ player, org, guardians = [], isAdult, 
 // ----------------------------------------------------------- external record
 
 /**
- * Validate an attested external contact (§36–§38). The recipient
+ * Validate an attested external contact. The recipient
  * classification the club states must equal the one the platform derives:
  * recording "I phoned the player" about a minor is refused, not corrected.
  */
@@ -291,9 +291,8 @@ export function validateExternalRecord({ channel, occurredAt, summary, recipient
   if (!has(CONTACT_CHANNELS, channel) || !CONTACT_CHANNELS[channel].external) {
     return { ok: false, error: 'CONTACT_CHANNEL_INVALID', message: `Channel must be one of ${EXTERNAL_CHANNELS.join(', ')}.`, allowed: EXTERNAL_CHANNELS };
   }
-  // M23 P5.7 (T-6): one instant parser. A bare local time (`2026-03-01T10:00`)
-  // used to be read in whatever zone the server runs in, `02/03/2026` was read
-  // as an American date, and `2026-02-30T10:00Z` as 2 March. All refused now.
+  // One instant parser: a bare local time (`2026-03-01T10:00`, zone-dependent),
+  // `02/03/2026` (ambiguous) and `2026-02-30T10:00Z` (not a day) are refused.
   const parsed = parseInstant(occurredAt);
   if (!parsed.ok) {
     return { ok: false, error: 'CONTACT_OCCURRED_AT_INVALID', message: 'occurredAt must be a date and time: ISO 8601 with an explicit offset or Z, or a millisecond timestamp.' };
@@ -316,13 +315,13 @@ export function validateExternalRecord({ channel, occurredAt, summary, recipient
 // ------------------------------------------------------------- cooldown
 
 /**
- * Deterministic anti-spam (§54–§55): at most one DELIVERED in-app contact per
+ * Deterministic anti-spam: at most one DELIVERED in-app contact per
  * organisation and player within `cooldownMs`, unless that contact has been
  * answered. Server-enforced, clock-injected, no randomness.
  */
 export function cooldownFor(contacts, { orgId, playerId, now = Date.now(), exceptId = null }) {
-  // M23 P5.7 (T-13): a FINITE delivery instant. `typeof Infinity === 'number'`
-  // let a corrupt `deliveredAt: Infinity` cool the pair down for ever.
+  // A FINITE delivery instant: `typeof Infinity === 'number'`, and a corrupt
+  // `deliveredAt: Infinity` would cool the pair down for ever.
   const recent = contacts.filter((c) => c && c.orgId === orgId && c.playerId === playerId && c.id !== exceptId
     && c.channel === 'in_app' && c.status === 'delivered' && readInstant(c.deliveredAt) !== null
     && now - c.deliveredAt < CONTACT_LIMITS.cooldownMs);
@@ -370,7 +369,7 @@ export function contactView(c) {
     channelLabel: CONTACT_CHANNELS[c.channel]?.label ?? c.channel,
     external: !!CONTACT_CHANNELS[c.channel]?.external,
     recipient: c.recipient ? { type: c.recipient.type, minor: !!c.recipient.minor } : null,
-    // M23 P5.6E — what the club asked for, and what was actually routed. The
+    // What the club asked for, and what was actually routed. The
     // snapshot carries roles and ids only: the agent's own name is not the club's
     // to learn from here, and the club already has the agent-presence projection
     // for that, gated on the player's own choice.
@@ -429,7 +428,7 @@ export function caseAcceptsContact(status) {
 
 /**
  * Structural corruption checks for one stored record. Reports, never repairs
- * (§143). A corrupt record is excluded from projections and named in the log;
+ * A corrupt record is excluded from projections and named in the log;
  * nothing is fabricated to fill the gap.
  */
 export function contactIntegrity(c, { orgId = null, caseId = null } = {}) {
@@ -442,7 +441,7 @@ export function contactIntegrity(c, { orgId = null, caseId = null } = {}) {
   if (caseId && c.caseId !== caseId) problems.push('case_mismatch');
   if (typeof c.playerId !== 'string') problems.push('player_missing');
   if (['delivered', 'responded', 'recorded'].includes(c.status) && !c.recipient?.type) problems.push('recipient_missing');
-  // M23 P5.6E. An unknown mode and a malformed snapshot both mean the record
+  // An unknown mode and a malformed snapshot both mean the record
   // cannot say who it reached, which is exactly what this store is for.
   if (c.contactMode !== undefined && c.contactMode !== null && !CONTACT_MODES.includes(c.contactMode)) problems.push('contact_mode_unknown');
   if (c.routingSnapshot !== undefined && c.routingSnapshot !== null) {

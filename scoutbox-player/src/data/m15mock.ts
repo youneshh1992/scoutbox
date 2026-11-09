@@ -1,4 +1,4 @@
-// M15 demo mirror. Honesty rules match the live server exactly: every item
+// Demo mirror. Honesty rules match the live server exactly: every item
 // carries provenance and its plain-language copy; player-submitted history is
 // labelled as such; a flagged current-club conflict shows how the passport
 // EXPLAINS instead of silently overwriting; nothing is a score.

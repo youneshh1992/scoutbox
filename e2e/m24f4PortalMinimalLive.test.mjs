@@ -1,4 +1,4 @@
-// M24F.4 — the portals' reset screens in a real browser, on the demo bundles,
+// The portals' reset screens in a real browser, on the demo bundles,
 // at 1024 / 1280 / 1440: Nobody Missed and the Director Dashboard (Pro and
 // Grassroots), the Grassroots local radar and squad, and representative Pro /
 // Agent / Trust & Safety roots. Each: no long paragraph on the root beyond the
@@ -95,7 +95,7 @@ for (const [w, h] of [[1024, 768], [1280, 800], [1440, 900]]) {
     const kpis = p.locator('[data-kpis] [data-kpi]');
     ok((await kpis.count()) === 4, `${tag} ${app} Dashboard: four counts`);
     ok((await p.locator('[data-visual="funnel"] .dash-bar').count()) >= 1 && (await p.locator('[data-visual="time"]').count()) === 1 && (await p.locator('[data-visual="coverage"] .dash-ring').count()) === 1 && (await p.locator('[data-visual="attention"]').count()) === 1, `${tag} ${app} Dashboard: funnel bars, time by stage, coverage ring, needs attention`);
-    // M24F.5 — the governing sentence and the panels are one tap deeper; open both, then compare.
+    // The governing sentence and the panels are one tap deeper; open both, then compare.
     for (const id of ['dash-about-toggle', 'dash-detail-toggle']) { const b = p.locator(`[data-testid="${id}"][aria-expanded="false"]`); if (await b.count()) { await b.first().click(); await sleep(300); } }
     const funnelVals = await p.locator('[data-visual="funnel"] .dash-bar-value').allInnerTexts();
     const tableVals = await p.locator('[data-metric="funnel_progression"] tbody tr td:nth-child(2)').allInnerTexts();

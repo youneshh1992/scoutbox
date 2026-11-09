@@ -1,7 +1,5 @@
 /**
- * M23 P5.6E repair pass — the toast recorder.
- *
- * WHY THIS EXISTS.
+ * The toast recorder.
  *
  * Every ScoutBox client shows a transient toast for **3,500 ms** and then removes
  * it from the DOM (`App.tsx`: `setTimeout(() => setToast(null), 3500)` in the
@@ -10,15 +8,10 @@
  * window that closes by itself: when the machine is starved — four Chromium
  * instances competing for CPU is enough — two consecutive polls can land either
  * side of the whole 3.5-second lifetime and the assertion fails on a toast that
- * really did render.
+ * really did render: a test-only race on transient UI, not a product race.
  *
- * That is exactly the m23AgentLive B16 failure observed in the P5.6E
- * verification battery: a test-only race on transient UI, not a product race.
- *
- * THE FIX, AND WHY IT IS NOT A SLEEP.
- *
- * Record each toast as the browser renders it, instead of sampling for it. A
- * MutationObserver installed **before the page script runs** appends every
+ * So, rather than a sleep: record each toast as the browser renders it,
+ * instead of sampling for it. A MutationObserver installed **before the page script runs** appends every
  * `.toast` element's text to `window.__toastLog`. The log is append-only and
  * lives as long as the document, so a slow poll cannot lose an entry: the
  * assertion reads real observable product state — a toast element that actually

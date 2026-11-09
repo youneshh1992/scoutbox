@@ -1,4 +1,4 @@
-// M14 LIVE browser integration — separate browser contexts (club admin,
+// LIVE browser integration — separate browser contexts (club admin,
 // requesting scout, guardian, grassroots club, Trust & Safety console), one
 // real backend, no demo bus.
 //   L1. Professional requests club verification → work-email code → the club
@@ -115,7 +115,7 @@ async function clubLogin(ctx, orgText, name, port = 8392) {
 
 // ================================================================ L1
 const scout = await clubLogin(ctxScout, 'Eastport FC', 'Tom Field');
-await scout.evaluate(() => { location.hash = '#/verification'; }); // M15-Nav deep link (Verification)
+await scout.evaluate(() => { location.hash = '#/verification'; }); // deep link (Verification)
 await scout.waitForSelector('text=Verify your football role', { timeout: 15000 });
 await scout.fill('input[aria-label="Professional role (e.g. Academy Scout)"]', 'Academy Scout');
 await scout.click('button:has-text("Request affiliation")');
@@ -131,7 +131,7 @@ await scout.waitForSelector('text=automated checks passed', { timeout: 15000 });
 say('L1: scout requested affiliation and proved the work mailbox in his own context');
 
 const club = await clubLogin(ctxClub, 'Eastport FC', 'Maria Keane');
-await club.evaluate(() => { location.hash = '#/verification'; }); // M15-Nav deep link (Verification)
+await club.evaluate(() => { location.hash = '#/verification'; }); // deep link (Verification)
 await club.click('button[role="tab"]:has-text("Requests")');
 await club.waitForSelector('.list-row:has-text("Tom Field")', { timeout: 15000 });
 const reqRowText = await club.locator('.list-row', { hasText: 'Tom Field' }).first().innerText();
@@ -143,21 +143,21 @@ await club.waitForSelector('.list-row:has-text("Tom Field")', { timeout: 15000 }
 say('L1: club admin confirmed the request from a PREPARED case in her own context');
 
 await scout.reload();
-await scout.evaluate(() => { location.hash = '#/verification'; }); // M15-Nav deep link (Verification)
+await scout.evaluate(() => { location.hash = '#/verification'; }); // deep link (Verification)
 await scout.waitForSelector('text=Role verified: Academy Scout', { timeout: 20000 });
 const prov = await scout.locator('body').innerText();
 if (!prov.includes('Organisation confirmation')) fail('verification steps missing');
 say('L1: scout profile shows “Role verified: Academy Scout” with admin-confirmation provenance');
 
 // ================================================================ L4
-// M24F.5 — the credential form sits behind "Add a credential"; open it first.
+// The credential form sits behind "Add a credential"; open it first.
 await scout.click('[data-testid="verify-credential-add"] > summary');
 await scout.fill('input[aria-label="Licence type"]', 'UEFA B Licence');
 await scout.fill('input[aria-label="Issuing body"]', 'UEFA');
 await scout.click('button:has-text("Submit credential")');
 await scout.waitForSelector('text=Credential submitted', { timeout: 15000 });
 await scout.reload();
-await scout.evaluate(() => { location.hash = '#/verification'; }); // M15-Nav deep link (Verification)
+await scout.evaluate(() => { location.hash = '#/verification'; }); // deep link (Verification)
 await scout.waitForSelector('text=Verify your football role', { timeout: 15000 });
 // Assert on badges + claim rows, not the explanatory copy (which legitimately
 // SAYS "Licence verified" while explaining when that label may appear).
@@ -173,7 +173,7 @@ await club.waitForSelector('.list-row:has-text("Tom Field"):has-text("Former")',
 say('L2: staff registry shows the closed period');
 
 await scout.reload();
-await scout.evaluate(() => { location.hash = '#/verification'; }); // M15-Nav deep link (Verification)
+await scout.evaluate(() => { location.hash = '#/verification'; }); // deep link (Verification)
 await scout.waitForSelector('text=Verified history', { timeout: 20000 });
 const histText = await scout.locator('body').innerText();
 if (!histText.includes('Former Eastport')) fail('historical badge missing');
@@ -215,7 +215,7 @@ if (!r.body.some((o) => o.name === 'Riverton Athletic FC' && o.verified)) fail('
 say('L3: Trust & Safety approved the prepared case — organisation + first root admin established');
 
 // ================================================================ L5
-await scout.locator('[data-testid="claim-dispute-open"]').first().click(); // M24F.5 — the reason field opens from a quiet link
+await scout.locator('[data-testid="claim-dispute-open"]').first().click(); // the reason field opens from a quiet link
 await scout.locator('input[aria-label="Dispute reason"]').first().fill('My departure date is wrong — I worked through July.');
 await scout.locator('[data-testid="claim-dispute-send"]').first().click();
 await scout.waitForSelector('text=Trust & Safety reviews the dispute', { timeout: 15000 });
@@ -234,7 +234,7 @@ await guardian.goto('http://localhost:8391/');
 await guardian.waitForSelector('text=Our promises to every player', { timeout: 30000 });
 await guardian.locator('text=Enter').last().click();
 await guardian.waitForSelector('text=Guardian', { timeout: 20000 });
-// M24F.5 — the child's sections are rows on the guardian dashboard; open them before reading or acting inside.
+// The child's sections are rows on the guardian dashboard; open them before reading or acting inside.
 await guardian.waitForSelector('[data-testid^="guardian-child-"] > [role="button"]', { timeout: 25000 });
 { const closed = guardian.locator('[data-testid^="guardian-child-"] > [role="button"][aria-expanded="false"]'); for (let i = 0; i < 40 && (await closed.count()) > 0; i++) { await closed.first().click().catch(() => {}); await guardian.waitForTimeout(150); } }
 await guardian.waitForSelector('text=Join a club squad', { timeout: 25000 });
@@ -242,7 +242,7 @@ const gNote = await guardian.locator('body').innerText();
 if (!gNote.includes('accepted by you, the guardian')) fail('guardian invite section missing the guardian-only wording');
 await guardian.locator('input[placeholder="Invitation code"]').first().fill(inv.body.code);
 await guardian.locator('[data-testid="invite-accept"]').first().click();
-await guardian.waitForSelector('text=Joining links nothing else', { timeout: 15000 }); // M24F: the server's acceptance note, no pictograph prefix
+await guardian.waitForSelector('text=Joining links nothing else', { timeout: 15000 }); // the server's acceptance note, no pictograph prefix
 say('L6: guardian accepted the squad invitation for the minor (child never in the loop)');
 
 // Verified professionals still cannot bypass safeguarding — live negatives.
@@ -251,7 +251,7 @@ const kids = (await j('/guardian/children', {}, bearer(amara.token))).body;
 const minorId = (Array.isArray(kids) ? kids : kids.children ?? [])[0]?.id;
 const agency = (await j('/auth/org/login', { method: 'POST', body: JSON.stringify({ orgId: 'org-northstar', scoutName: 'Alex Agent', role: 'Agent' }) })).body;
 r = await j('/org/representation/propose', { method: 'POST', body: JSON.stringify({ playerId: minorId, scope: 'full_representation' }) }, bearer(agency.token));
-// M23 P5.6 retired the legacy representation route (410 Gone): representation now exists only through
+// The legacy representation route is retired (410 Gone): representation exists only through
 // the agent workspace's client request, whose minor rule m23AgentGrassrootsLive proves. Either answer is a refusal.
 if (r.status !== 403 && r.status !== 410) fail(`agency representation of a minor was not refused (got ${r.status})`);
 say(`L6: agency representation of a minor is refused (${r.status}) — verification bypasses nothing`);
@@ -260,7 +260,7 @@ say(`L6: agency representation of a minor is refused (${r.status}) — verificat
 const dee = (await j('/auth/org/login', { method: 'POST', body: JSON.stringify({ orgId: 'org-hackneymarsh', scoutName: 'Dee Coach', role: 'Manager', platform: 'grassroots' }) })).body;
 await j('/admin/verification/orgs/org-hackneymarsh/appoint-root', { method: 'POST', body: JSON.stringify({ userId: dee.userId, reason: 'live test: grassroots committee chair' }) }, A);
 const grass = await clubLogin(ctxGrass, 'Hackney Marsh', 'Dee Coach', 8393);
-await grass.evaluate(() => { location.hash = '#/verification'; }); // M15-Nav deep link (Verification)
+await grass.evaluate(() => { location.hash = '#/verification'; }); // deep link (Verification)
 await grass.waitForSelector('text=Verify your football role', { timeout: 15000 });
 await grass.click('button[role="tab"]:has-text("Requests")');
 await grass.waitForSelector('text=No pending requests.', { timeout: 15000 });

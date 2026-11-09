@@ -1,8 +1,5 @@
 /**
- * The eight audit collections (S6b) get their own tables: blocks, reports, moderation_log, org_notes, ledger,
- * ops_events, source_changes and idv_queue, typed (amended in place in S14b, when the repository became explicit).
- * REGISTERED in DATA_MIGRATIONS. `up()` is the DDL only: the tables start empty and are written
- * through the repository.
+ * The audit tables: blocks, reports, moderation_log, org_notes, ledger, ops_events, source_changes and idv_queue.
  */
 import { migrationApplied } from '../database.mjs';
 import { CHANNELS_MIGRATION } from '../channels.mjs';

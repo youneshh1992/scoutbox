@@ -1,14 +1,14 @@
-// M23 P5 — persistence, restart and corruption audit for the formal decision.
+// Persistence, restart and corruption audit for the formal decision.
 //
 //   1  no decision migration of its own: `roomDecisions` is the one decision
-//      table (0016), the draft lives on the case, nothing is renamed
+//      table, the draft lives on the case, nothing is renamed
 //   2  a fixture with legacy + formal rows and a draft restores byte-faithfully
 //      through a real boot: chain, keys, draft rev, case status
 //   3  corrupt FORMAL rows are named and omitted, never fabricated, never
 //      repaired; duplicate final heads are corruption, not a tie (500)
-//   4  legacy M17 rows read as advisory, keep their chain, and are never judged
-//      by the P5 integrity rules
-//   5  clean boot: draft → finalize → stop → snapshot → reboot: the row is on
+//   4  legacy (advisory) rows read as advisory, keep their chain, and are never
+//      judged by the formal-decision integrity rules
+//   5  clean boot: draft → finalize → stop → read back → reboot: the row is on
 //      `roomDecisions` (no second store), the draft is gone, keys replay
 //
 // Nothing is rewritten, re-ordered or "repaired" on boot.
@@ -23,7 +23,7 @@ import { JOURNEY_REQUIRED_STORES } from '../../domains/recruitment/lifecycle/jou
 import { decisionIntegrity, duplicateFinalHeads, chainHead, isFormal } from '../../domains/recruitment/lifecycle/decision.mjs';
 import { DATA_MIGRATIONS, TABLE_BACKED } from '../../repositories/index.mjs';
 import { pickPort } from '../../scripts/testPort.mjs';
-const LATEST_SCHEMA = Number(DATA_MIGRATIONS.map((m) => m.id).sort().at(-1).slice(0, 4)); // S14a: the latest table migration's number
+const LATEST_SCHEMA = Number(DATA_MIGRATIONS.map((m) => m.id).sort().at(-1).slice(0, 4)); // the latest table migration's number
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SERVER = path.join(HERE, '..', '..', 'server.mjs');
@@ -64,16 +64,15 @@ async function bootOn(dataDir, port) {
   return { up, j, stop, log: () => log };
 }
 
-const PORT = pickPort(5800, 200, [0, 1, 2, 3, 4, 5, 6]); // TH-6: never a fetch-blocked port
+const PORT = pickPort(5800, 200, [0, 1, 2, 3, 4, 5, 6]); // never a fetch-blocked port
 const T0 = 1_800_000_000_000;
 const BY = { userId: 'usr-owner', name: 'Owner', role: 'Head of Recruitment' };
 
 // ------------------------------------------------------------- fixtures
 
 /** A minimal, sound database: one verified club, one adult player, its owner on the staff table, one case at shortlisted.
- *  S8b (migration 0016): the case's owner and lead scout are staff keys of the real table, so the fixture carries the
- *  staff row the case names (as m23TrialPersistence and m23ContactPersistence always did); a file naming an unknown
- *  staff member is refused at the cutover with the id, never repaired. */
+ *  The case's owner and lead scout are real staff keys, so the fixture carries the staff row the case names; a fixture
+ *  naming an unknown staff member is refused with the id, never repaired. */
 function baseDb() {
   const db = {
     players: [{ id: 'pl-x', name: 'Xavier Adult', dob: '2000-05-05', country: 'GB', city: 'London', media: [], attendance: [], trialReports: [], badges: [], timeline: [], medical: { shared: false, records: [], conditionStatus: 'unknown' }, level: 'amateur', location: { lat: 51.5, lng: -0.1 } }],
@@ -123,19 +122,18 @@ const draftRow = (over = {}) => ({
 
 const write = (dir, db) => writeFixture(dir, db);
 
-// Key-order-insensitive: since S8b (migration 0016) the five collections are read back from tables in the stored shape's
-// column order, not the writer's insertion order (the documented S8a/S8b limitation); every key and value is compared.
+// Key-order-insensitive: the rows are read back from tables in column order, not the writer's insertion order; every
+// key and value is compared.
 const canon = (v) => (Array.isArray(v) ? v.map(canon) : v && typeof v === 'object' ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, canon(v[k])])) : v);
 const stableJson = (v) => JSON.stringify(canon(v));
 const lead = (s) => s.j('POST', '/auth/org/login', { orgId: 'org-x', scoutName: 'Owner', role: 'Head of Recruitment' }).then((r) => r.body);
 
 // ======================================================= 1 — no migration
-section('1 — no P5 migration: one decision store, the draft on the case, nothing renamed');
+section('1 — no decision migration: one decision store, the draft on the case, nothing renamed');
 {
-  // Rewritten in S14a: the schema-number, store-contract and runMigrations checks described the blob. The rows surviving
-  // a boot unchanged, with no case field invented, is proved over a real boot in §2.
+  // The rows surviving a boot unchanged, with no case field invented, is proved over a real boot in section 2.
   ok(DATA_MIGRATIONS.length === LATEST_SCHEMA && !DATA_MIGRATIONS.some((m) => /decision/i.test(m.id)), 'the current schema, and the decision adds no migration of its own (its table comes with the cases, 0016)');
-  ok(TABLE_BACKED.includes('roomDecisions') && !JOURNEY_REQUIRED_STORES.includes('roomDecisions'), 'roomDecisions is a typed table read through SQL (§4.3 step 2)');
+  ok(TABLE_BACKED.includes('roomDecisions') && !JOURNEY_REQUIRED_STORES.includes('roomDecisions'), 'roomDecisions is a typed table read through SQL');
   neg(!TABLE_BACKED.includes('recruitmentDecisions') && !TABLE_BACKED.includes('decisionDrafts'), 'no second decision table and no draft table');
 }
 
@@ -185,7 +183,7 @@ section('3 — corrupt formal rows are named and omitted; duplicate heads are co
 {
   const DIR = mkdtempSync(path.join(tmpdir(), 'sbx-m23d-corrupt-'));
   const db = baseDb();
-  // Eight defects. Six are values the typed columns cannot hold (S8b, §4.3): a save refuses each by its id. Two — a
+  // Eight defects. Six are values the typed columns cannot hold: a save refuses each by its id. Two — a
   // formal row with no actor and one citing a prohibited reason code — are rows the tables can carry: they are planted
   // and judged on read.
   const unstorable = [
@@ -200,11 +198,9 @@ section('3 — corrupt formal rows are named and omitted; duplicate heads are co
     formalRow({ id: 'rdec-bad-actor', by: null, supersedes: null, supersededById: 'x1', createdAt: T0 + 3 }),
     formalRow({ id: 'rdec-bad-code', reasonCodes: ['race'], supersedes: null, supersededById: 'x1', createdAt: T0 + 5 }),
   ];
-  // S8b (migration 0016): roomDecisions is a table. The cutover imports the blob through the repository's validation and
-  // REFUSES a file the blob store tolerated — an entry that is not a record (positions named) or a chain pointer naming a
-  // decision that does not exist (ids named) — with the file left exactly as it was: nothing deleted, nothing repaired,
-  // an operator fixes a copy by hand. The old contract ("tolerated on disk, omitted on read") is kept below for the
-  // corrupt rows the cutover does carry losslessly: every row defect but the dangling chain pointer.
+  // A fixture goes through the repository's validation, which REFUSES an entry that is not a record (positions named)
+  // or a chain pointer naming a decision that does not exist (ids named), with nothing written. The corrupt rows the
+  // tables can carry (every row defect but the dangling chain pointer) are stored and omitted on read, below.
   {
     // A fixture is written through the decisions repository's create, one unit of work: a record it cannot type is
     // refused by its id and field, and nothing of the fixture is written (only the first installation's organisation
@@ -225,7 +221,7 @@ section('3 — corrupt formal rows are named and omitted; duplicate heads are co
     for (const [r, field] of unstorable.map((r, i) => [r, ['outcome', 'outcome', 'createdAt', 'reasonCodes', 'evidenceRefs', 'rev'][i]])) await refused(`a corrupt row the typed columns cannot hold (${r.id}.${field})`, [r], new RegExp(`RECRUITMENT_CASES_INPUT_INVALID[\\s\\S]*${r.id}\\.${field}`));
     await refused('two corrupt rows whose chain pointer names a decision that does not exist', bad, /DECISION_CHAIN_BROKEN[\s\S]*rdec-bad-actor \(room case-x\) names x1 \(supersededById\): no such decision/);
   }
-  // The two storable defects, each row superseded by the real head, are stored and judged on read as before.
+  // The two storable defects, each row superseded by the real head, are stored and judged on read.
   for (const r of bad) r.supersededById = 'rdec-formal-2';
   db.roomDecisions.push(legacyRow({ supersededById: 'rdec-formal-2' }), headRow({ supersedes: 'rdec-legacy' }), ...bad);
   write(DIR, db);
@@ -276,7 +272,7 @@ section('4 — legacy M17 rows read as advisory and keep their chain; P5 judges 
   db.roomDecisions.push(
     legacyRow({ id: 'rdec-l1', createdAt: T0, supersededById: 'rdec-l2' }),
     legacyRow({ id: 'rdec-l2', recommendation: 'offer', reasonCodes: [], note: null, createdAt: T0 + 1, supersedes: 'rdec-l1', supersededById: null }),
-    // An odd legacy row: no actor and no reason (a time and a reason list are typed columns now; a save refuses junk there).
+    // An odd legacy row: no actor and no reason (a time and a reason list are typed columns, so a save refuses junk there).
     legacyRow({ id: 'rdec-l-odd', by: null, reasonCodes: [], supersededById: 'rdec-l1' }),
   );
   write(DIR, db);

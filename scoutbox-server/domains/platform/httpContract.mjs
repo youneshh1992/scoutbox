@@ -1,15 +1,10 @@
 /**
- * M18.2 — the HTTP error contract, in one place.
- *
- * M18.1 gave the known request faults their own codes (413, 400, 415). What
- * was still missing: a 429 said "too many" without saying how long; nothing
- * told a client whether an error was worth retrying; and the schema version
- * was not on the wire. This middleware adds all three as HEADERS, so no
- * response body anywhere has to change shape.
+ * The HTTP error contract, in one place. Added as HEADERS, so no response
+ * body has to change shape:
  *
  *   Retry-After         on every 429, from the named policy's window
  *   X-ScoutBox-Retry    retryable | not-retryable, on every 4xx/5xx
- *   X-ScoutBox-Schema   the snapshot schema version, on every response
+ *   X-ScoutBox-Schema   the database schema version, on every response
  *
  * "Retryable" is a statement about the CLIENT'S next move, never about the
  * server's internals: 429, 503 and 504 are worth a retry; 401, 403, 404, 409

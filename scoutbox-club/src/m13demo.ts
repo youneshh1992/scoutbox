@@ -1,5 +1,5 @@
-// In-browser demo mirror of the M13 org API (VITE_DEMO=1 builds only).
-// Populated synthetic examples for every M13 area; state lives in this tab's
+// In-browser demo mirror of the m13api org client (VITE_DEMO=1 builds only).
+// Populated synthetic examples for every area of it; state lives in this tab's
 // memory and resets on reload. No real people, credentials or providers.
 import type { Session } from './api';
 import type {
@@ -16,7 +16,7 @@ let n = 500;
 const id = (p: string) => `${p}-d${++n}`;
 const delay = <T,>(v: T): Promise<T> => new Promise((r) => setTimeout(() => r(structuredClone(v)), 120));
 
-// ------------------------------------------------------------- F1 fixtures
+// ------------------------------------------------------------- fixtures
 const BATCHES: ImportBatch[] = [{
   id: 'imp-d1', status: 'committed', createdByName: 'Maria Keane', createdAt: NOW - 2 * DAY,
   summary: { total: 24, creatable: 21, errors: 1, duplicatesInFile: 1, alreadyImported: 0, linkedExisting: 0, ambiguous: 1 },
@@ -38,7 +38,7 @@ const CONNECTORS: Connector[] = [
   { id: 'video-host', name: 'Licensed video platform', kind: 'inbound', status: 'not_configured', note: 'No provider credentials — no scraping, ever.' },
 ];
 
-// ------------------------------------------------------------- F7 fixtures
+// ------------------------------------------------------------- fixtures
 const FIXTURES: Fixture[] = [
   { id: 'fix-d1', source: 'own', competition: 'U21 Development League', home: 'Eastport U21', away: 'Harbour Rovers U21', date: new Date(NOW + 6 * DAY).toISOString().slice(0, 10), location: { city: 'Manchester' } },
   { id: 'fix-d2', source: 'friendly_board', competition: 'Friendly', home: 'Hackney Marsh Rovers', away: 'open invitation', date: new Date(NOW + 9 * DAY).toISOString().slice(0, 10), location: { city: 'London' } },
@@ -65,7 +65,7 @@ const SUGGESTIONS: VisitSuggestion[] = [{
   rationale: '2 players you track are within 30 km of this fixture\'s location',
 }];
 
-// ------------------------------------------------------------- F5 fixtures
+// ------------------------------------------------------------- fixtures
 const CAL_SESSIONS: CalibrationSession[] = [{
   id: 'cal-d1', title: 'Wing-play rubric alignment', status: 'open', templateVersion: 1,
   mediaUrl: null, footageNote: null,
@@ -78,7 +78,7 @@ const CAL_SESSIONS: CalibrationSession[] = [{
   notes: [], comparison: null,
 }];
 
-// ------------------------------------------------------- F4 / F6 fixtures
+// ------------------------------------------------------- fixtures
 const EXPOSURE: ExposureReport = {
   funnel: {
     windowDays: 90,
@@ -112,7 +112,7 @@ const GAPS: Record<string, EvidenceGap[]> = {
   ],
 };
 
-// ------------------------------------------------------- F8 / F2 fixtures
+// ------------------------------------------------------- fixtures
 const GROUPS: GroupRow[] = [{
   id: 'grp-d1', name: 'North West Development Group', youAdmin: true,
   members: [{ id: 'org-eastport', name: 'Eastport Academy', level: 'pro' }, { id: 'org-hackneymarsh', name: 'Hackney Marsh Rovers', level: 'grassroots' }],
@@ -135,7 +135,7 @@ const TRANSITION_PACKS: Record<string, TransitionPack> = {
   },
 };
 
-// ------------------------------------------------------------- F9 fixtures
+// ------------------------------------------------------------- fixtures
 const totalsOf = (scn: Scenario): ScenarioTotals => {
   const per: ScenarioTotals['perCurrency'] = {};
   const occ = (sch: string) => (sch === 'one_off' ? 1 : sch === 'monthly' ? scn.termMonths : sch === 'annual' ? Math.ceil(scn.termMonths / 12) : Math.round((scn.termMonths * 52) / 12));
@@ -167,7 +167,7 @@ const SCENARIOS: Record<string, Scenario[]> = {
   }],
 };
 
-// ------------------------------------------------------------ F12 fixtures
+// ------------------------------------------------------------ fixtures
 const ONBOARDING: OnboardingState = {
   tasks: [
     { id: 'verify_org', label: 'Verify your organisation (company email domain)', done: true, help: 'Trust & Safety reviews verification — required before any under-18 visibility.' },

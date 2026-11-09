@@ -1,14 +1,14 @@
 import { GuidanceNote } from './InformationRows';
-// M23 P7 — the player's signing: the document the club presented, exactly as
+// The player's signing: the document the club presented, exactly as
 // presented, identified by its SHA-256 digest; who still has to sign; and the
 // player's own act, behind a second explicit step that names the revision
-// and the digest being confirmed (§46, §51). Confirming is the player's own
+// and the digest being confirmed. Confirming is the player's own
 // signature on that exact document. It is NOT the contract being signed by
 // ScoutBox, and nothing is "signed" until every required party has
-// confirmed and the club completes the signing (§24).
+// confirmed and the club completes the signing.
 //
 // A guardian sees nothing here: the guardian pathway is closed in every
-// jurisdiction in this build (§14), and the server lists nothing for it.
+// jurisdiction in this build, and the server lists nothing for it.
 import { useCallback, useEffect, useState } from 'react';
 import { useFocusEffect } from 'expo-router';
 import { Linking, View } from 'react-native';
@@ -43,7 +43,7 @@ const keyFor = (sid: string, rid: string) => `sg-complete-${sid}-${rid}`;
 
 export type SigningView = 'all' | 'signing' | 'documents' | 'contract';
 
-// M24B — one read, three views: the signing (status, parties, your act), the document and its digest, the contract days and the completion record.
+// One read, three views: the signing (status, parties, your act), the document and its digest, the contract days and the completion record.
 export function SigningSection({ actor, view = 'all' }: { actor: Actor; view?: SigningView }) {
   const colors = useColors();
   const [items, setItems] = useState<FamilySigning[] | null>(null);

@@ -1,4 +1,4 @@
-// M13 LIVE browser integration — four separate browser contexts (Pro lead,
+// LIVE browser integration — four separate browser contexts (Pro lead,
 // adult player, guardian, grassroots club), one real backend, no demo bus.
 //   L1. Suitability: player sets private preferences in his own context,
 //       checks fit against a structured opportunity, applies, APPROVES a
@@ -9,7 +9,7 @@
 //       guardian panel (relocation never collected).
 //   L4. Transition: the adult player opens a case and grants Eastport; the
 //       Pro Network screen reads the pack; revocation cuts it off live.
-//       Grassroots context renders its M13 screens (isolated by default).
+//       Grassroots context renders the same screens (isolated by default).
 import { spawn, execSync } from 'node:child_process';
 import { playerCategory, playerSub } from './caseNavHelpers.mjs';
 import fs from 'node:fs';
@@ -102,7 +102,7 @@ await player.waitForSelector('text=Our promises to every player', { timeout: 300
 await player.locator('text=Enter').nth(0).click(); // Kola (adult, dev login)
 await player.waitForSelector('text=Your visibility right now', { timeout: 20000 });
 await player.click('a[href^="/you"]');
-await player.getByRole('tab', { name: 'Account' }).click(); // M24F.2: suitability preferences are Account › Preferences
+await player.getByRole('tab', { name: 'Account' }).click(); // suitability preferences are Account › Preferences
 await player.click('[data-testid="account-cat-preferences"]');
 await player.waitForSelector('text=Suitability preferences', { timeout: 20000 });
 await player.fill('input[aria-label="Travel limit"]', '40');
@@ -110,18 +110,18 @@ await player.locator('text=Save travel limit').click();
 await player.waitForSelector('text=Saved — private to you', { timeout: 10000 });
 say('L1: adult player saved a private preference through his own screen');
 
-await playerCategory(player, 'journey', 'Board'); // M24D: the board is My journey › Board
+await playerCategory(player, 'journey', 'Board'); // the board is My journey › Board
 await player.waitForSelector('text=Opportunity board', { timeout: 20000 });
-await player.locator('[data-testid^="board-view-"]').filter({ hasText: 'First-team look — wide forwards' }).first().click(); // M24F.3 — the row opens its details
+await player.locator('[data-testid^="board-view-"]').filter({ hasText: 'First-team look — wide forwards' }).first().click(); // the row opens its details
 await player.locator('[data-testid^="board-apply-"]').first().click();
 await player.waitForSelector('text=Application submitted', { timeout: 10000 });
 // board reloads on apply; the fit section fetches its own copy when the page
-// mounts (M24D: it sits on the same Board page), so leave and return to it
+// mounts (it sits on the same Board page), so leave and return to it
 await playerSub(player, 'Overview');
 await playerSub(player, 'Board');
 await player.waitForSelector('text=Opportunity fit', { timeout: 20000 });
 await player.locator('text=Check fit').first().click();
-await player.waitForSelector('[data-testid^="fit-why-"]', { timeout: 15000 }); await player.locator('[data-testid^="fit-why-"]').first().click(); // M24F.3 — reasons behind Why
+await player.waitForSelector('[data-testid^="fit-why-"]', { timeout: 15000 }); await player.locator('[data-testid^="fit-why-"]').first().click(); // reasons behind Why
 await player.waitForSelector('text=travel time unavailable', { timeout: 15000 });
 say('L1: fit verdicts render with the honest “travel time unavailable” line');
 await player.locator('text=Share summary with this club').first().click();
@@ -134,7 +134,7 @@ await club.click('.org-card:has-text("Eastport FC")');
 await club.fill('.enter-row input', 'Maria Keane');
 await club.click('button:has-text("Enter workspace")');
 await club.waitForSelector('.topbar', { timeout: 20000 });
-await club.evaluate(() => { location.hash = '#/opportunities'; }); // M15-Nav deep link (Opportunities)
+await club.evaluate(() => { location.hash = '#/opportunities'; }); // deep link (Opportunities)
 await club.locator('.list-row', { hasText: 'First-team look' }).locator('button:has-text("Applications")').click();
 await club.waitForSelector('text=Kola Adeyemi', { timeout: 15000 });
 await club.locator('.list-row', { hasText: 'Kola Adeyemi' }).locator('button:has-text("Suitability")').click();
@@ -144,7 +144,7 @@ if (clubText.includes('BTEC') || clubText.includes('40 km') || clubText.includes
 say('L1: Pro sees the approved verdict summary — and none of the private reasons');
 
 // ====================================================== L2 coverage+insight
-await club.evaluate(() => { location.hash = '#/coverage'; }); // M15-Nav deep link (Coverage)
+await club.evaluate(() => { location.hash = '#/coverage'; }); // deep link (Coverage)
 await club.waitForSelector('text=Coverage plans', { timeout: 15000 });
 await club.fill('input[aria-label="Home"]', 'Eastport U21');
 await club.fill('input[aria-label="Away"]', 'Harbour Rovers U21');
@@ -161,7 +161,7 @@ await club.locator('button:has-text("Mark observed")').first().click();
 await club.waitForSelector('text=observed', { timeout: 10000 });
 say('L2: fixture + assignment created through the real Coverage screen (honest travel note shown)');
 
-await club.evaluate(() => { location.hash = '#/insight'; }); // M15-Nav deep link (Scouting Insight)
+await club.evaluate(() => { location.hash = '#/insight'; }); // deep link (Scouting Insight)
 await club.waitForSelector('text=Exposure funnel', { timeout: 15000 });
 await club.waitForSelector('text=Not yet assessed', { timeout: 10000 });
 say('L2: exposure funnel + not-yet-assessed review queue render for the lead');
@@ -172,7 +172,7 @@ await guardian.goto('http://localhost:8291/');
 await guardian.waitForSelector('text=Our promises to every player', { timeout: 30000 });
 await guardian.locator('text=Enter').last().click(); // Amara (guardian, dev login)
 await guardian.waitForSelector('text=Guardian', { timeout: 20000 });
-// M24F.5 — the child's sections are rows on the guardian dashboard; open them before reading or acting inside.
+// The child's sections are rows on the guardian dashboard; open them before reading or acting inside.
 await guardian.waitForSelector('[data-testid^="guardian-child-"] > [role="button"]', { timeout: 25000 });
 { const closed = guardian.locator('[data-testid^="guardian-child-"] > [role="button"][aria-expanded="false"]'); for (let i = 0; i < 40 && (await closed.count()) > 0; i++) { await closed.first().click().catch(() => {}); await guardian.waitForTimeout(150); } }
 await guardian.waitForSelector('text=Suitability preferences', { timeout: 25000 });
@@ -194,7 +194,7 @@ await player.locator('text=Share with club').click();
 await player.waitForSelector('text=Shared — expiring and revocable', { timeout: 10000 });
 say('L4: adult player opened a transition case and granted one specific club');
 
-await club.evaluate(() => { location.hash = '#/network'; }); // M15-Nav deep link (Club Network)
+await club.evaluate(() => { location.hash = '#/network'; }); // deep link (Club Network)
 await club.waitForSelector('text=Transition packs shared with you', { timeout: 15000 });
 await club.waitForSelector('text=Kola Adeyemi', { timeout: 10000 });
 await club.locator('button:has-text("Open pack")').first().click();
@@ -206,7 +206,7 @@ say('L4: Pro Network screen reads exactly the shared pack');
 // The long-lived SPA page occasionally resets to its Home tab on a live-sync
 // tick; open a fresh page at /you in the SAME authenticated context instead.
 const player2 = await ctxPlayer.newPage();
-await player2.goto('http://localhost:8291/you?tab=clubs'); // P2.5: Club transition sits on You › Clubs
+await player2.goto('http://localhost:8291/you?tab=clubs'); // Club transition sits on You › Clubs
 await player2.waitForSelector('text=Club transition', { timeout: 25000 });
 await player2.getByText('Withdraw', { exact: true }).locator('visible=true').first().click({ timeout: 15000 });
 await player2.waitForSelector('text=cannot be remotely erased', { timeout: 10000 }).catch(async () => {
@@ -226,12 +226,12 @@ await grass.click('.org-card:has-text("Hackney Marsh")');
 await grass.fill('.enter-row input', 'Dee Coach');
 await grass.click('button:has-text("Enter workspace")');
 await grass.waitForSelector('.topbar', { timeout: 20000 });
-await grass.evaluate(() => { location.hash = '#/insight'; }); // M15-Nav deep link (Scouting Insight)
+await grass.evaluate(() => { location.hash = '#/insight'; }); // deep link (Scouting Insight)
 await grass.waitForSelector('text=Not yet assessed', { timeout: 15000 });
-await grass.evaluate(() => { location.hash = '#/network'; }); // M15-Nav deep link (Club Network)
+await grass.evaluate(() => { location.hash = '#/network'; }); // deep link (Club Network)
 await grass.waitForSelector('text=No group memberships', { timeout: 15000 });
-await grass.evaluate(() => { location.hash = '#/organisation'; }); // M15-Nav deep link (Organisation)
-for (let i = 0; i < 20 && !(await grass.locator('details.settings-row').count()); i++) await grass.waitForTimeout(250); await grass.evaluate(() => document.querySelectorAll('details.settings-row').forEach((d) => { d.open = true; })); // M24F.5 — Staff & Security sections are rows; open them, then assert the same
+await grass.evaluate(() => { location.hash = '#/organisation'; }); // deep link (Organisation)
+for (let i = 0; i < 20 && !(await grass.locator('details.settings-row').count()); i++) await grass.waitForTimeout(250); await grass.evaluate(() => document.querySelectorAll('details.settings-row').forEach((d) => { d.open = true; })); // Staff & Security sections are rows; open them, then assert the same
 await grass.waitForSelector('text=Onboarding checklist', { timeout: 15000 });
 say('L4b: grassroots context renders its M13 screens — isolated by default, no shares, own onboarding');
 

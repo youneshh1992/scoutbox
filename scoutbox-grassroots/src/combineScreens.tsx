@@ -1,4 +1,4 @@
-// M16.1 org screen — the At-Home Combine panel in the player drawer. A
+// Org screen — the At-Home Combine panel in the player drawer. A
 // verified, non-agency org requests standardized Combine tests, tracks their
 // completion, and reads the player's Combine Verified RESULTS only — never raw
 // home footage, DOB or notes. The comparison shows verified numbers with blank

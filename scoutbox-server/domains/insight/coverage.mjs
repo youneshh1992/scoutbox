@@ -1,9 +1,6 @@
-// F7 — Recruitment coverage and observation planning (moved from m13/planning.mjs).
+// Recruitment coverage and observation planning (fixtures, plans, assignments: repositories/insightCoverage.mjs).
 // Travel times are never invented; candidate suggestions only ever contain
 // players the org can see under the standing rules.
-//
-// S12d: fixtures, plans and assignments are typed rows of repositories/insightCoverage.mjs, written by explicit
-// operations. Responses are built from explicit allowlists.
 import { parseStrictDateOnly } from '../../temporal.mjs';
 import { readPage, pageOf, sendPageError } from '../platform/paging.mjs';
 import { INSIGHT_LIMITS as L } from '../../repositories/insightCoverage.mjs';
@@ -42,7 +39,7 @@ export function registerCoverage(ctx) {
     observedAt: a.observedAt, assessmentIds: a.assessmentId ? [a.assessmentId] : [], cancelledAt: a.cancelledAt,
   });
 
-  // ============================================================ F7 coverage
+  // ============================================================ coverage
   orgRouter.post('/coverage/fixtures', (req, res) => {
     const b = req.body ?? {};
     if (typeof b.home !== 'string' || !b.home.trim() || typeof b.away !== 'string' || !b.away.trim() || absent(b.date)) return res.status(400).json({ error: 'FIXTURE_FIELDS', message: 'home, away and date are required.' });
@@ -66,7 +63,7 @@ export function registerCoverage(ctx) {
     res.status(201).json({ fixture: fixtureView(f) });
   });
 
-  // Read-time union (S13d: one SQL query): own fixture records + platform events the org can already see (every
+  // Read-time union (one SQL query): own fixture records + platform events the org can already see (every
   // friendly on the board, every open day). Nothing scraped, nothing duplicated into new rows. Each carries its `ref`
   // (kind and id) for an assignment.
   const observableView = (o) => (o.fixture

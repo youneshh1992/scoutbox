@@ -1,11 +1,11 @@
-// M24B — the Recruitment Room's category → subcategory arrangement (Grassroots).
+// The Recruitment Room's category → subcategory arrangement (Grassroots).
 //
 // Simpler than Pro: five categories, the player's record and the club's
 // review in one "Player review" area, and a shorter history. Every
 // subcategory is a function the Room already had, or a read-only view over
 // records it already reads; a category is UI organisation only and nothing
-// persists it. The `legacy` ids are the flat tab names the server still
-// emits and the old links still carry; each resolves to its subcategory.
+// persists it. The `legacy` ids are the flat tab names the server emits and
+// flat links carry; each resolves to its subcategory.
 // The minor safeguards, the 50 km rule and the verified-club rules are
 // server rules and are untouched by where a page sits.
 import { validateCaseNav, type CaseNavModel } from '../../design-system/caseNav';
@@ -35,7 +35,7 @@ export const ROOM_NAV: CaseNavModel = {
     {
       id: 'recruitment', labelKey: 'rm.cat.recruitment',
       subs: [
-        // Internal talk first, shared communication second (M23 P3): the
+        // Internal talk first, shared communication second: the
         // Discussion never travels; Contact and Trial reach the player.
         { id: 'discussion', labelKey: 'rm.tab.discussion' },
         { id: 'contact', labelKey: 'rm.tab.contact' },

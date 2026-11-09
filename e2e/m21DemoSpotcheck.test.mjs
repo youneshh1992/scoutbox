@@ -1,14 +1,14 @@
-// M21 demo spotcheck — the Development Hub as it appears in the SHIPPED
+// Demo spotcheck — the Development Hub as it appears in the SHIPPED
 // single-file bundles.
 //
 // The demo bundles are the artifact HTML: no server, no network. What this
-// asserts is that the M21 surface is really in them and really behaves:
+// asserts is that the Development Hub is really in them and really behaves:
 //   • the club and grassroots bundles reach a Development panel inside a
 //     player, with no new top-level destination
 //   • plan, goals, actions, evidence, reviews and history all render
 //   • the demo's Combine result is SIMULATED, so the objective target reads
 //     "no current valid measurement" and says why — a demo number crossing a
-//     production threshold is the dishonesty §149 exists to prevent
+//     production threshold would be dishonest
 //   • an unavailable evidence link is shown as unavailable, because that is a
 //     real state and hiding it would make the demo easier than the product
 //   • the club sees its internal review note; the PLAYER bundle contains no
@@ -17,15 +17,11 @@
 //   • the demos make NO real network request
 //   • 390px
 //
-// Requires `node serve.mjs` on :8099 with freshly built demo bundles.
+// Needs freshly built demo bundles (buildDemos.mjs).
 import { chromium } from 'playwright-core';
 import { ensureDemoHost } from './demoHost.mjs';
 
-// D7 (M22 §74-§76): this test OWNS its demo host rather than assuming one
-// is already listening. The old comment above said "Requires node
-// serve.mjs on :8099" — an instruction nobody followed, because
-// crosstab and demoOffline happened to leave a host behind. They no
-// longer do.
+// This test owns its demo host: it starts one if none is running (see demoHost.mjs).
 const demo = await ensureDemoHost();
 const BASE = demo.host.replace('localhost', '127.0.0.1');
 const EXE = process.env.CHROMIUM || '/opt/pw-browsers/chromium';
@@ -75,7 +71,7 @@ for (const [name, path] of [['club', 'club/'], ['grassroots', 'grassroots/']]) {
   const { p, errors, network } = await open(`${BASE}/${path}`);
   await login(p);
 
-  // ---- §54: no new top-level destination
+  // ---- no new top-level destination
   const sidebar = await p.locator('nav.sidebar').innerText().catch(() => '');
   ok(!/^Development$/m.test(sidebar), `${name} Development is not a new sidebar section`);
 
@@ -191,7 +187,7 @@ for (const [name, path] of [['club', 'club/'], ['grassroots', 'grassroots/']]) {
   if (await enter.count()) { await enter.click(); await p.waitForTimeout(1500); }
   const you = p.locator('a[href="/football"]');
   if (await you.count()) { await you.click(); await p.getByRole('tab', { name: 'Development' }).click(); await p.waitForTimeout(2000); }
-  // M24F.4 — the root is four rows; the plan, its goals and the reviews are one tap deep. Read root, Goals and Feedback.
+  // The root is four rows; the plan, its goals and the reviews are one tap deep. Read root, Goals and Feedback.
   const readPage = async (row) => { const r = p.locator(`[data-testid="${row}"]`); if (!(await r.count())) return ''; await r.first().click(); await p.waitForTimeout(900); for (const d of await p.locator('[role="button"][aria-label="About this target"]').all()) { await d.click(); await p.waitForTimeout(150); } const t = await p.evaluate(() => document.body.innerText ?? ''); const back = p.locator('[data-testid="dev-back"]'); if (await back.count()) { await back.first().click(); await p.waitForTimeout(500); } return t; };
   const bodyRoot = await p.evaluate(() => document.body.innerText ?? '');
   const bodyGoals = await readPage('dev-focus');

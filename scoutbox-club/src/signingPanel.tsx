@@ -1,4 +1,4 @@
-// M23 P7 — Signing & Contract Completion, inside the Room's Signing tab.
+// Signing & Contract Completion, inside the Room's Signing tab.
 //
 //   Offer accepted ≠ Signing ≠ Contract effective
 //
@@ -26,7 +26,7 @@ interface Props {
 }
 
 const statusLabel = (s: string) => t(`rm.st.${s}`, s.replace(/_/g, ' '));
-/** Text + a glyph for every signing status — never colour alone (§96). */
+/** Text + a glyph for every signing status — never colour alone. */
 export const SIGNING_GLYPH: Record<SigningStatus, string> = { DRAFT: '○', READY: '➤', IN_PROGRESS: '◐', COMPLETED: '✓', CANCELLED: '⊘', VOIDED: '⊘', EXPIRED: '◷', SUPERSEDED: '↻' };
 export const signingStatusLabel = (s: SigningStatus | null) => (s ? `${SIGNING_GLYPH[s] ?? ''} ${t(`sg.st.${s}`, s)}` : '');
 

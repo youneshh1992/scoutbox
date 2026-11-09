@@ -1,5 +1,5 @@
 /**
- * The recruitment reads of one player's journeys, read once (migration.md §4.3 step 4).
+ * The recruitment reads of one player's journeys, read once.
  *
  * A player's journey list builds one journey per Room, and each journey reads about a dozen record sets: the case,
  * the club's cases, requests, trials and signings of the player, and the case's contacts, offers, packages and
@@ -20,7 +20,6 @@ const indexById = (...lists) => { const out = new Map(); for (const list of list
 
 /**
  * `cases` are the player's cases (from `reads.cases.forPlayer(playerId)`); the journeys are built for these.
- * Returns an object with the shape of `reads`, scoped as above.
  */
 export function playerJourneyReads(reads, playerId, cases) {
   const caseIds = cases.map((k) => k.id);

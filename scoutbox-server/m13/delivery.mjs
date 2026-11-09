@@ -1,7 +1,6 @@
-// F11 — Delivery and response centre.
-// Transactional-outbox architecture: the notifications table (S7a,
-// repositories/notifications.mjs, read here through the `notifications`
-// repository) is the single canonical in-app record (the business action
+// Delivery and response centre.
+// Transactional-outbox architecture: the notifications table
+// (repositories/notifications.mjs) is the single canonical in-app record (the business action
 // happens exactly once). The dispatcher creates per-channel dispatch rows
 // AFTER the fact and retries only the SENDING — a retry can therefore never
 // duplicate the business action.
@@ -9,14 +8,11 @@
 // "delivered"/"opened" are set ONLY from confirmed provider callbacks — email
 // acceptance is never reported as read.
 //
-// S14d: the dispatches and their attempts (repositories/dispatches.mjs) and the
-// fake provider's outbox record (repositories/outboxPush.mjs) are explicit writes
-// and SQL reads. A notification's dispatches are created in one unit of work; each
+// A notification's dispatches are created in one unit of work; each
 // send — its attempt, its status, the outbox row, the injected failure it used and,
 // when the retries run out, the ops event and the webhook intent — is one unit; a
 // provider callback event commits with its seen marker; an acknowledgment with the
-// notification's contract. The ladder's RANK, the retry schedule, the destination
-// rules and the callback contract are unchanged.
+// notification's contract.
 import crypto from 'node:crypto';
 import { readPage, sendPageError } from '../domains/platform/paging.mjs';
 
@@ -32,13 +28,11 @@ export function registerDelivery(ctx) {
   if (!dispatches) throw new TypeError('registerDelivery needs the dispatches repository (ctx.dispatches)');
   if (typeof outbox?.append !== 'function') throw new TypeError('registerDelivery needs the outbox repository (ctx.outbox)');
   if (typeof operations?.delivery?.markSeen !== 'function') throw new TypeError('registerDelivery needs the operations repository (ctx.operations, S13e)');
-  // S13e: the callback ids applied, the instant the delivery centre started and the injected failures are rows of
-  // repositories/operations.mjs (delivery_callbacks_seen, delivery_centre, delivery_fail_injections), written explicitly.
   const bookkeeping = operations.delivery;
   // An exhausted retry's ops event is a row of ops_events (repositories/safetyAudit.mjs), written at once
   // (in the sweep's unit of work when one is open).
   const opsEvent = (row) => safetyAudit.opsEvents.record(row);
-  // Notifications older than the delivery centre's start (written by migration 0038) get an in-app record only — no
+  // Notifications older than the delivery centre's start get an in-app record only — no
   // retroactive email blast; admin-injected provider failures (tests/monitoring) are used up one send at a time.
 
   // Local fake provider: deterministic, in-process, honestly labelled.
@@ -63,7 +57,7 @@ export function registerDelivery(ctx) {
       if (p && !isAdult(p)) {
         // Guardian-approved destinations only: a minor's external channels are
         // the guardian's. The child's in-app record stays (contentless flows
-        // are handled at notification-creation time by the M12 rules).
+        // are handled at notification-creation time by the notification rules).
         dests.push({ channel: 'email', to: null, skip: 'guardian_routed — external delivery for under-18s goes to the guardian record' });
       } else if (p?.email) {
         dests.push({ channel: 'email', to: p.email });
@@ -169,7 +163,7 @@ export function registerDelivery(ctx) {
 
   // ------------------------------------------------ action-required notices
   // notifyAction: same canonical notification + an acknowledgement contract,
-  // written in ONE repository operation (S7a: `notify` passes the contract
+  // written in ONE repository operation (`notify` passes the contract
   // through to the create or the coalesce, so the row and its contract are
   // never two writes). A notification the person's preferences mute is null
   // here as it is from notify(); the caller gets null, never a crash.
@@ -188,7 +182,7 @@ export function registerDelivery(ctx) {
       if (!n || n.audience.kind !== audience.kind || n.audience.id !== audience.id) return res.status(404).json({ error: 'NOTIFICATION_NOT_FOUND' });
       if (!n.actionRequired) return res.status(400).json({ error: 'NO_ACTION_REQUIRED' });
       if (!n.actionRequired.ackedAt) {
-        // S7a/S7b: the acknowledgment on the notification row and the dispatch
+        // The acknowledgment on the notification row and the dispatch
         // rows' status changes (every row of the notice, a terminal skipped row
         // included — it keeps its status and gains actionedAt) commit together
         // or not at all: both repositories join this unit.
@@ -217,7 +211,7 @@ export function registerDelivery(ctx) {
     const body = JSON.stringify(req.body ?? {});
     if (!ts || Math.abs(Date.now() - Number(ts)) > 5 * 60_000) return res.status(401).json({ error: 'TIMESTAMP_INVALID', message: 'Callbacks older than 5 minutes are rejected (replay protection).' });
     if (!timingSafeEq(sig, signBody(CALLBACK_SECRET, 'callback', ts, body))) return res.status(401).json({ error: 'SIGNATURE_INVALID' });
-    // S14d: the whole batch is checked before anything is applied; junk is refused naming the field, never skipped or
+    // The whole batch is checked before anything is applied; junk is refused naming the field, never skipped or
     // read as "now". An event is { callbackId (1–200 characters), providerMessageId (text), status (delivered, opened,
     // bounced or failed), at (a whole-number timestamp; omitted or null means now), reason (text, optional) }.
     const events = req.body?.events ?? [];
@@ -266,8 +260,8 @@ export function registerDelivery(ctx) {
   });
 
   // ------------------------------------------------------------------ views
-  // S14d: a club's staff dispatches, newest first, paged by cursor (an index on the dispatch's organisation). The view
-  // is an allowlist: the fields the club's delivery screen had, the attempts as outcomes and times.
+  // A club's staff dispatches, newest first, paged by cursor. The view is an allowlist: the fields the club's
+  // delivery screen shows, the attempts as outcomes and times.
   const orgDeliveryView = (d) => ({
     id: d.id, notificationId: d.notificationId, audience: { kind: d.audience.kind, id: d.audience.id }, orgId: d.orgId, channel: d.channel, to: d.to,
     provider: d.provider, status: d.status, skipReason: d.skipReason, providerMessageId: d.providerMessageId,
@@ -284,9 +278,9 @@ export function registerDelivery(ctx) {
 
   orgRouter.put('/delivery/prefs', (req, res) => {
     const { quietStart, quietEnd, email } = req.body ?? {};
-    // S14f: the switch is a boolean or absent (on) — anything else used to read as "on".
+    // The switch is a boolean or absent (on); anything else is refused.
     if (!(email === undefined || email === null || typeof email === 'boolean')) return res.status(400).json({ error: 'FIELD_INVALID', field: 'email', message: 'email is true or false.' });
-    // PRE-M24 (PM-10): quiet hours are HH:MM or absent — an object was stored and read back as a time.
+    // Quiet hours are HH:MM or absent.
     const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
     for (const [f, v] of [['quietStart', quietStart], ['quietEnd', quietEnd]]) if (v != null && !(typeof v === 'string' && HHMM.test(v))) return res.status(400).json({ error: 'FIELD_INVALID', field: f, message: `${f} is a time written HH:MM.` });
     const saved = users.update(req.orgUser.id, (d) => {
@@ -306,14 +300,12 @@ export function registerDelivery(ctx) {
   });
 
   adminRouter.post('/delivery/inject-failure', (req, res) => {
-    // `contact` (M23 P3) makes the next in-app Contact sends fail at the
+    // `contact` makes the next in-app Contact sends fail at the
     // transport, so the honest `failed` state can be exercised end to end.
-    // `trial` (M23 P4B) makes the next Trial invitation, acceptance or
+    // `trial` makes the next Trial invitation, acceptance or
     // completion refuse at the transport with NOTHING written.
-    // `decision` (M23 P5) makes the next formal decision finalize refuse
+    // `decision` makes the next formal decision finalize refuse
     // before anything is written.
-    // S13e: junk is refused, not read as `email` or clamped: the channel is one of the five (default email), the count a
-    // whole number from 1 to 20 (default 1).
     const channel = req.body?.channel ?? 'email';
     const count = req.body?.count ?? 1;
     if (!['email', 'push', 'contact', 'trial', 'decision'].includes(channel)) return res.status(400).json({ error: 'FIELD_INVALID', field: 'channel', message: 'channel is email, push, contact, trial or decision.' });

@@ -1,4 +1,4 @@
-// M23 P8 — persistence and restart audit for the recruitment journey.
+// Persistence and restart audit for the recruitment journey.
 //
 //   1  a real journey is driven to nine checkpoints — contacted,
 //      trial_requested, trial_scheduled, trial_completed, offer_consideration,
@@ -7,11 +7,11 @@
 //      the journey projection (stage, completed stages, resources, next
 //      action, classification, timeline) is IDENTICAL before and after
 //   2  after the final reboot: the player's journey and the club's journey
-//      agree; db.signings stays unique; nothing is fabricated on boot
+//      agree; the signings stay unique; nothing is fabricated on boot
 //   3  planted legacy and corrupt cases survive five restarts untouched:
 //      never repaired, never re-classified, never given a record
-//   4  the migration ledger applies nothing on replay (schema 39)
-//   5  M23 P8.1 (§67): an under_review checkpoint; a stale Offer pointer,
+//   4  the migration ledger applies nothing on replay
+//   5  an under_review checkpoint; a stale Offer pointer,
 //      a cross-case second case, a legacy mix and a signed mismatch across
 //      restarts (never repaired, nothing inherited, nothing fabricated); key
 //      replays after a restart; a block and a role loss across restarts;
@@ -231,12 +231,11 @@ section('4 — the migration ledger on replay');
 {
   const h = await fetch(`http://localhost:${PORT}/health`);
   ok(h.headers.get('x-scoutbox-schema') === String(SCHEMA_VERSION), `schema ${SCHEMA_VERSION} on the wire`);
-  // Rewritten in S14a: the old check matched the blob's m2xx step ids in the log.
   neg(JSON.parse(LEDGER1).length === DATA_MIGRATIONS.length && ledger() === LEDGER1, 'no migration step applied on replay (the ledger is as boot 1 left it)');
 }
 
-// ================================================================ 5 — P8.1 hardening (§67)
-section('5 — P8.1: stale pointers, cross-case, legacy mixes, a signed mismatch, key replays, blocks and role loss across restarts; analytics stable');
+// ================================================================ 5 — hardening
+section('5 — stale pointers, cross-case, legacy mixes, a signed mismatch, key replays, blocks and role loss across restarts; analytics stable');
 {
   const T5 = T0 + 30 * DAY;
   const dash = async () => JSON.stringify((await S.j('GET', '/org/recruitment-analytics?window=last_90_days', undefined, maria.token)).body?.data?.pipeline?.metrics?.journey_evidence_funnel ?? null);
@@ -256,8 +255,8 @@ section('5 — P8.1: stale pointers, cross-case, legacy mixes, a signed mismatch
       for (const to of ['contacted', 'trial_requested', 'trial_scheduled', 'trial_completed', 'offer_consideration', 'offer_made']) { tt += H; k.history.push({ id: `hist-p81p-${Math.random().toString(36).slice(2, 8)}`, at: tt, action: 'room_status_changed', byKind: 'org', byId: 'legacy', byName: 'Legacy', detail: { from: k.room.status, to, reasonCodes: [] } }); k.room.status = to; }
       k.room.rev = (k.room.rev ?? 1) + 6; };
     // A REAL Offer (Kola's, cloned) re-homed on this case with its current-revision pointer stale: every field is sound,
-    // only the pointer is behind — it names revision 1 while revision 2 is out. (S8c, typed since §4.3: a pointer naming
-    // a revision the Offer does not hold at all is a row the tables cannot hold; that write is REFUSED, naming the row.)
+    // only the pointer is behind — it names revision 1 while revision 2 is out. (A pointer naming a revision the Offer
+    // does not hold at all is a row the tables cannot hold; that write is REFUSED, naming the row.)
     const src = db.recruitmentOffers.find((o) => o.id === OID);
     const clone = JSON.parse(JSON.stringify(src));
     const { discardedByResponseId: _d, ...r0 } = clone.revisions[0];
@@ -273,13 +272,13 @@ section('5 — P8.1: stale pointers, cross-case, legacy mixes, a signed mismatch
   const spFps = [];
   for (let i = 1; i <= 3; i += 1) {
     const jr = await journey(SP); spFps.push(fingerprint(jr));
-    if (i === 1) neg(jr.journey.classification === 'integrity_error' && jr.journey.integrity.includes('RECORD_CORRUPT') && jr.journey.resources.offerId === null && jr.journey.nextAction.blockedBy.includes('INTEGRITY_ERROR'), `5.2 a stale Offer pointer: integrity_error, RECORD_CORRUPT (the corrupt Offer names this case and is omitted, never a quiet legacy read), no current Offer, the act blocked (${jr.journey.integrity.join(',')}) (D-P81-17)`);
+    if (i === 1) neg(jr.journey.classification === 'integrity_error' && jr.journey.integrity.includes('RECORD_CORRUPT') && jr.journey.resources.offerId === null && jr.journey.nextAction.blockedBy.includes('INTEGRITY_ERROR'), `5.2 a stale Offer pointer: integrity_error, RECORD_CORRUPT (the corrupt Offer names this case and is omitted, never a quiet legacy read), no current Offer, the act blocked (${jr.journey.integrity.join(',')})`);
     db = await stopStart(`5.2 restart ${i}`);
     const o = db.recruitmentOffers.find((x) => x.id === 'rof-p81p-stale');
     neg(o && o.currentRevisionId === 'rofr-p81p-1' && o.revisions.length === 2 && db.recruitmentCases.find((x) => x.id === SP).room.status === 'offer_made', `5.2 restart ${i}: the pointer is still stale on disk (never repaired, never re-pointed)`);
   }
   neg(spFps.every((f) => f === spFps[0]), '5.2 the integrity_error projection is identical across three restarts');
-  // 5.3 cross-case: an ended case and a second case for the same player — nothing inherited, before and after a restart (D-P81-15).
+  // 5.3 cross-case: an ended case and a second case for the same player — nothing inherited, before and after a restart.
   const ended = await mk('pl-okafor'); // LEG from section 3: legacy trial_completed, now ended
   await lifecycle(ended, 'rejectCase').then(async (r) => { if (r.status !== 200) { const r2 = await S.j('POST', `/org/rooms/${ended}/lifecycle`, { action: 'rejectCase', expectedRev: await rev(ended), reasonCodes: ['rejected'] }, maria.token); ok(r2.status === 200, `5.3 setup: the legacy case ended (${r2.status} ${r2.body?.error ?? ''})`); } });
   const second = await mk('pl-okafor');
@@ -320,7 +319,7 @@ section('5 — P8.1: stale pointers, cross-case, legacy mixes, a signed mismatch
   S = await bootOn(DATA, PORT); ok(S.up, '5.5 booted'); await login();
   const imani = (await S.j('POST', '/auth/player/login', { playerId: 'pl-imani' })).body;
   const smJ = await journey(SM);
-  neg(smJ.journey.classification === 'integrity_error' && smJ.journey.integrity.includes('STALE_POINTER') && smJ.journey.resources.completedSigningId === null && smJ.outcome.signing === null, `5.5 signed with a dangling link: integrity_error, STALE_POINTER, no completed signing named (${smJ.journey.integrity.join(',')}) (D-P81-16)`);
+  neg(smJ.journey.classification === 'integrity_error' && smJ.journey.integrity.includes('STALE_POINTER') && smJ.journey.resources.completedSigningId === null && smJ.outcome.signing === null, `5.5 signed with a dangling link: integrity_error, STALE_POINTER, no completed signing named (${smJ.journey.integrity.join(',')})`);
   const imaniLine = async () => (await S.j('GET', '/player/journeys', undefined, imani.token)).body.items.filter((x) => x.club.id === 'org-eastport').map((x) => x.journey.stage);
   neg(!(await imaniLine()).includes('signed') && (await S.j('GET', '/org/players/pl-imani', undefined, maria.token)).body.contractStatus !== 'under_contract', '5.5 the player is not told signed and is not under contract by a dangling link');
   const smBefore = fingerprint(smJ);

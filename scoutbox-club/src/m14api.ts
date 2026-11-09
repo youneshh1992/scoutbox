@@ -1,4 +1,4 @@
-// M14 typed client (org side): verification & trust — personal claims, the
+// Typed client (org side): verification & trust — personal claims, the
 // club Verification console (requests, staff, domains, administrators),
 // licences, references, squad invitations and safe public badge profiles.
 // Same live/demo split as api.ts: VITE_DEMO=1 selects the in-browser mirror.
@@ -13,7 +13,7 @@ export interface VerBadge {
   verifiedAt: number | null; provenance: string;
 }
 
-// ------------------------------------------------------------ M23 P5.6C
+// ------------------------------------------------------------ multiple-representation consent
 // An agent who would act for both a club and the individual in the same
 // transaction needs the club's prior written consent. Only the club's recorded
 // verification authority (its signatory) can bind it — the server decides that,
@@ -71,7 +71,7 @@ export interface ReferenceRow {
 export interface PlayerInviteRow { id: string; name: string; squad: string; status: string; byName: string; createdAt: number; expiresAt: number; guardianApproved: { guardianId: string; at: number } | null }
 export interface ConflictRow { id: string; userId: string; kind: string; subject: string; note: string; createdAt: number; withdrawnAt: number | null }
 
-// ------------------------------------------- M23 P5.6D transaction workspace
+// ------------------------------------------- transaction workspace
 // The club's side of a multi-party transaction: the transactions this club is
 // actually a party to, projected for THIS club. What the server withholds — the
 // other club's private documents, the agent's private notes, the agent's own
@@ -103,7 +103,7 @@ export interface ClubTxTimelineEntry { id: string; at: number; action: string; a
 
 export interface M14Api {
   me(s: Session): Promise<MyVerification>;
-  /** M23 P5.6C: the club's own consent lane. `signatory` says whether THIS user may bind the club. */
+  /** The club's own consent lane. `signatory` says whether THIS user may bind the club. */
   agentConsents(s: Session): Promise<{ items: ClubConsentRequest[]; signatory: boolean }>;
   answerAgentConsent(s: Session, id: string, action: 'grant' | 'decline' | 'revoke', input: { acknowledgedParticulars?: boolean; acknowledgedLegalAdvice?: boolean; expectedRev: number; clientKey: string }): Promise<{ consent: ClubConsentRequest }>;
   startIdentity(s: Session): Promise<{ claim: SubjectClaim }>;
@@ -145,7 +145,7 @@ export interface M14Api {
 
   listConflicts(s: Session): Promise<{ items: ConflictRow[] }>;
   declareConflict(s: Session, kind: string, subject: string, note: string): Promise<{ conflict: ConflictRow; note: string }>;
-  // ---- M23 P5.6D: the club's transaction party lane
+  // ---- the club's transaction party lane
   transactions(s: Session): Promise<{ items: ClubTransaction[]; signatory: boolean; statuses: string[]; documentTypes: string[]; note: string | null; honest: string }>;
   confirmTransaction(s: Session, id: string, input: { expectedRev: number }): Promise<{ transaction: ClubTransaction }>;
   transactionNote(s: Session, id: string, input: { text: string; visibility: string; expectedRev: number }): Promise<{ note: { id: string } }>;

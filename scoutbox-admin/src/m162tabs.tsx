@@ -1,4 +1,4 @@
-// M16.2 Trust & Safety — the ScoutBox Trust Score derivation inspector.
+// Trust & Safety — the ScoutBox Trust Score derivation inspector.
 //
 // The Trust Score is EVIDENCE CONFIDENCE, derived at read time from canonical
 // evidence. It is never ability, potential, character or recruitment
@@ -199,7 +199,7 @@ export function M162Panel({ adminKey, say }: { tab: M162Tab; adminKey: string; s
           <div className="dim" style={{ fontSize: 12.5 }}>
             Bands: {policy.bands.map((b) => `${b.label} ${b.min}–${b.max}`).join(' · ')}
           </div>
-          {/* M24F.5 — the engine's parameters stay available to staff, one tap deeper, in the product face. */}
+          {/* The engine's parameters stay available to staff, one tap deeper, in the product face. */}
           <details className="f-about" data-testid="trust-policy-params">
             <summary>Technical parameters</summary>
             <div className="dim" style={{ fontSize: 11.5 }}>

@@ -1,11 +1,10 @@
-// Test helper (§4.3 step 2). The server reads the cases and Room records, requests, trials, contacts, offers, signing
+// Test helper. The server reads the cases and Room records, requests, trials, contacts, offers, signing
 // packages, signings, follow-ups and outcome reports through SQL (the repositories' queries, `recruitmentReads`); the pure projectors and
 // providers take those queries as `reads`. The batteries that exercise the projectors directly build plain in-memory databases, so this
 // helper answers the same queries over the plain arrays of such a database, in array order (the tables' rowid order).
 //
-// A database WITHOUT one of the arrays gets no query object for it, exactly as the old code saw no collection: the
-// journey reports the missing contacts store, the evidence provider answers "store unavailable", and the offers stay
-// the optional phase they always were.
+// A database WITHOUT one of the arrays gets no query object for it: the journey reports the missing contacts store,
+// the evidence provider answers "store unavailable", and the offers stay an optional phase.
 import { buildRecruitmentJourney as journey } from '../domains/recruitment/lifecycle/journey.mjs';
 import { createEvidenceProvider as provider } from '../domains/recruitment/lifecycle/evidence.mjs';
 import { buildReportingContext as reportingContext } from '../m20/dashboard.mjs';
@@ -136,7 +135,7 @@ function roomRowQueries(rows, { orgPlayer = false } = {}) {
 }
 
 /** The `recruitmentReads` shape over a plain database's arrays (an absent or non-array collection gives no queries). */
-/** The S9a evidence queries (scoutingReads.evidence) over a plain array, in array order. */
+/** The evidence queries (scoutingReads.evidence) over a plain array, in array order. */
 function evidenceQueries(rows) {
   const list = () => rows.filter(sound);
   return {
@@ -146,7 +145,7 @@ function evidenceQueries(rows) {
   };
 }
 
-/** The S9b assessment queries (scoutingReads.assessments) over a plain array, in array order. */
+/** The assessment queries (scoutingReads.assessments) over a plain array, in array order. */
 function assessmentQueries(rows) {
   const list = () => rows.filter(sound);
   return {
@@ -183,7 +182,7 @@ export function arrayReads(db) {
   return out;
 }
 
-/** S12b: the Box Cam sessions and Combine attempts a pure projector reads (`reads.boxCam`), over plain arrays. */
+/** The Box Cam sessions and Combine attempts a pure projector reads (`reads.boxCam`), over plain arrays. */
 function boxCamQueries(sessions, attempts) {
   const find = (list) => (id) => list.find((x) => x && x.id === id) ?? null;
   const newest = (list) => [...list].sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0));
@@ -211,11 +210,11 @@ export const createEvidenceProvider = (db, reads = arrayReads(db)) => provider(r
 /** `buildReportingContext` over a plain database: `reads` defaults to the database's own arrays. */
 export const buildReportingContext = (args) => reportingContext({ reads: arrayReads(args?.db), ...args });
 
-// The M21 evidence links and the M23 decision evidence over a plain database: `reads` defaults to its own arrays.
+// The evidence links and the decision evidence over a plain database: `reads` defaults to its own arrays.
 export const resolveEvidenceLink = (link, opts = {}) => resolveLink(link, { reads: arrayReads(opts.db), ...opts });
 export const recordBelongsToPlayer = (opts = {}) => belongs({ reads: arrayReads(opts.db), ...opts });
 export const validateEvidenceLink = (opts = {}) => validateLink({ reads: arrayReads(opts.db), ...opts });
 export const resolveEvidenceRefs = (refs, opts = {}) => resolveRefs(refs, { reads: arrayReads(opts.db), ...opts });
 export const evidenceCandidates = (opts = {}) => candidates({ reads: arrayReads(opts.db), ...opts });
-// S12a: a plan's own records are the development repository's, so give `collected` ({ plan, goals, actions, links, reviews }).
+// A plan's own records are the development repository's, so give `collected` ({ plan, goals, actions, links, reviews }).
 export const buildDevelopmentPlan = (opts = {}) => buildPlan({ reads: arrayReads(opts.db), ...opts });

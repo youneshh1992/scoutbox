@@ -1,4 +1,4 @@
-// M20 typed client (org side): Recruitment Analytics and the Director Dashboard.
+// Typed client (org side): Recruitment Analytics and the Director Dashboard.
 //
 // The rule this whole module exists to keep:
 //

@@ -1,6 +1,6 @@
 import { RecordIdentity } from './RecordDetails';
 import { GuidanceNote } from './InformationRows';
-// M23 P5.6D — "My transactions": the individual's side of a multi-party
+// "My transactions": the individual's side of a multi-party
 // transaction workspace.
 //
 // The card shows what the individual is entitled to see and nothing else: the

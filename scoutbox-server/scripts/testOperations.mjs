@@ -1,16 +1,7 @@
-// S13e — the remaining operations collections as typed tables with explicit writes (repositories/operations.mjs,
-// migration 0038). What this suite proves: the migration creates the STRICT tables (no JSON column) with the delivery
-// centre's start and a zero count per failure channel, and nothing else; the typers refuse junk naming the record and
-// field (an upload whose chunks do not add up, a checksum that is not hex, a finalised session without its media, an
-// unknown or junk search filter, an invoice in a lower-case currency, a success rate over 100); an upload session
-// records each chunk once, ends once (finalised with its media, aborted or abandoned by the sweep) and is deleted with
-// its player; saved searches read the scout's name live, are deleted by their own club only, and the new-player
-// candidates are prefiltered by position, foot, country and availability and skip removed staff; an invoice is one per
-// signing, stored in minor units, and pages newest first; callback ids are remembered once and the oldest 1,000 go past
-// 5,000; injected failures are added and used up one at a time; the demo reputation rows are imported once with a first
-// installation's seed and never otherwise; a rolled-back unit leaves nothing; a fixture written through the repository
-// is typed, names a missing reference and reads back what it wrote; and the plans the orgs table accepts are exactly the
-// catalogue's. Temporary databases only. Run with: npm test
+// The remaining operations collections (repositories/operations.mjs, migration 0038): upload sessions, saved searches,
+// invoices (one per signing, minor units), delivery bookkeeping (callback ids remembered once, the oldest 1,000 go past
+// 5,000), injected failures, the demo reputation rows (imported only with a first installation's seed), units of work,
+// fixtures, and the orgs table's plans matching the catalogue. Temporary databases only. Run with: npm test
 
 import assert from 'node:assert/strict';
 import fs from 'node:fs';

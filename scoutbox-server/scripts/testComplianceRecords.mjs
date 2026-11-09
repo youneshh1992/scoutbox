@@ -1,14 +1,7 @@
-// S11b-2 — compliance contexts and their evaluations, regulatory reviews and consents as typed tables with explicit
-// writes (repositories/complianceRecords.mjs, migration 0028). What this suite proves: the migration creates the
-// twenty-six STRICT tables (no JSON column), empty; the typers refuse junk with the record and field named (an unknown
-// field, a status or role the tables do not know, a facet subject carrying the old "referenceHash", an Other Services
-// list, a decision that does not follow its status); an evaluation is appended with its history entry, read back whole
-// (reasons with their extras and lists, outstanding consents, the identity of the inputs; alias, required actions and
-// rule statuses worked out) and an entry that claims to repeat it must; a context keeps what never changes and does not
-// reopen; a review's snapshot names an evaluation of its context, its decision is final and its supersession written
-// once; a consent is answered once and revoked once, on its own row; the queue pages open items first; an account
-// deletion keeps ids only; a rolled-back unit leaves nothing; and a fixture written through the
-// repositories is typed, refuses a review naming a context that is not there and reads back what it wrote. Temporary databases only; nothing touches DATA_DIR. Run with: npm test
+// Compliance contexts and their evaluations, regulatory reviews and consents (repositories/complianceRecords.mjs,
+// migration 0028): the STRICT tables, the typers' refusals, evaluations appended and read back whole, a context that
+// never reopens, a final review decision, a consent answered and revoked once, the queue's order, account deletion
+// keeping ids only, units of work and fixtures. Temporary databases only; nothing touches DATA_DIR. Run with: npm test
 
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -116,7 +109,7 @@ test('[typing] the typers refuse junk with the record and field named', () => {
   assert.match(typeContext(context({ representations: [{ id: 'crp-1', agentUserId: UID, partyRole: 'individual', agreementId: null, status: 'declared', declaredOnly: false, keys: {} }] })).reason, /status must be one of verified\|pending_review\|withdrawn/);
   assert.match(typeContext(context({ history: [entry('aud-x', 'compliance_context_party_added', { partyRole: 'individual', kind: 'agent' })] })).reason, /detail\.kind/);
   assert.equal(typeReview(review()).ok, undefined);
-  assert.match(typeReview(review({ kind: 'verification_facet', subject: { profileId: 'agp-1', userId: UID, facet: 'fifa_licence', memberAssociation: null, referenceHash: '9' } })).reason, /does not store: referenceHash/, 'the facet subject no longer carries the reference length');
+  assert.match(typeReview(review({ kind: 'verification_facet', subject: { profileId: 'agp-1', userId: UID, facet: 'fifa_licence', memberAssociation: null, referenceHash: '9' } })).reason, /does not store: referenceHash/, 'the facet subject does not carry the reference length');
   assert.match(typeReview(review({ status: 'APPROVED' })).reason, /history|decision|status/);
   assert.match(typeReview(review({ history: [entry('aud-y', 'regulatory_review_requested', { kind: 'conflict_evaluation', reasonCodes: ['OTHER'], policyVersions: ['jp-fifa-2025-1'] })] })).reason, /repeats the review's kind, reason codes and versions/);
   assert.match(typeReview(review({ reasons: [{ code: 'X', ruleId: null, ruleStatus: 'MAYBE', policyVersion: null }] })).reason, /ruleStatus must be one of/);

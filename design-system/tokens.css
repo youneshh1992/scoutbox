@@ -15,7 +15,7 @@
 :root {
   color-scheme: light;
   /* type */
-  --sb-font: 'Inter', -apple-system, system-ui, 'Segoe UI', sans-serif;          /* M24E — the product typeface */
+  --sb-font: 'Inter', -apple-system, system-ui, 'Segoe UI', sans-serif;          /* the product typeface */
   --sb-font-brand: 'Albert Sans', 'Inter', -apple-system, system-ui, sans-serif;  /* the ScoutBox wordmark only */
   /* surfaces */
   --sb-paper: #f6f7f3;      /* workspace */
@@ -66,7 +66,7 @@
   --sb-urgent: #ab4736; --sb-urgent-ink: #913b32;
   --sb-info-bg: #e6eef8; --sb-info-ink: #1e4a7a;
   --sb-gold-bg: #f7efd6; --sb-gold-ink: #7a5a12;
-  /* M24F.3 — the special message states (shared with the Player): trial warm gold, offer blue-green, signing confirmed green */
+  /* the special message states (shared with the Player): trial warm gold, offer blue-green, signing confirmed green */
   --sb-trial: #c9a227; --sb-trial-bg: #fbf4dc; --sb-trial-ink: #6e5410;
   --sb-offer: #1b6f6a; --sb-offer-bg: #e2f2f0; --sb-offer-ink: #145450;
   --sb-signing: #007f42; --sb-signing-bg: #e1f2e5; --sb-signing-ink: #215b38;
@@ -185,7 +185,7 @@
   --sb-crumb: #615a49;
   --sb-tool: #615a49;
   --sb-nav-active-bg: #f7f1e3;
-  --sb-nav-active-fg: #7a5a1c;   /* M24F.2 — the active destination reads in the Agent's gold */
+  --sb-nav-active-fg: #7a5a1c;   /* the active destination reads in the Agent's gold */
   --sb-nav-active-icon: #a67c2e;
   --sb-filter-active-bg: #f5efdf;
   --sb-filter-active-fg: #373e2d;
@@ -201,7 +201,7 @@
   --sb-shadow-panel: inset 0 1px 0 #fff9, 0 2px 5px #705b3710;
 }
 
-/* M24F.2 — Agent dark: the gold active destination (champagne on the embossed dark) */
+/* Agent dark: the gold active destination (champagne on the embossed dark) */
 :root[data-app="agent"][data-theme="dark"] {
   --sb-nav-active-bg: rgba(199, 169, 107, 0.14);
   --sb-nav-active-fg: #d0b57b;

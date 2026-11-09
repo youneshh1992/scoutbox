@@ -1,12 +1,12 @@
 /**
- * M20 — pipeline shape and where work comes from.
+ * Recruitment analytics: pipeline shape and where work comes from.
  *
  * Pure functions over the reporting context built in dashboard.mjs. Nothing
- * here touches `db`, nothing here writes, and nothing here reads a note, a
+ * here reads the store, nothing here writes, and nothing here reads a note, a
  * comment or a person's name.
  *
  * The one design decision worth stating loudly: **this is not a conversion
- * funnel.** M17 makes reopening first-class — an archived room can go back to
+ * funnel.** Reopening is first-class — an archived room can go back to
  * under_review, and Second Look exists precisely to cause that. So a room is
  * counted once for each stage it EVER reached, in a set, not once per visit
  * and not as a monotonic drop-off. A club whose rooms cycle is not a club
@@ -26,11 +26,11 @@ import {
  * ladder rather than a departure from it.
  */
 /**
- * M23 added five statuses, and only three of them are progress.
+ * Five of the later case statuses need a ruling, and only three of them are progress.
  *
  *   contact_planned, contacted   ARE rungs on the ladder — they are the step
  *                                between reviewing a player and asking them
- *                                for a trial, and M23's own funnel names them.
+ *                                for a trial, and the journey funnel names them.
  *   offer_accepted               IS a rung: it is further than offer_made.
  *
  *   on_hold                      is NOT. A paused case has not advanced; it is
@@ -43,9 +43,7 @@ import {
  *                                progression rows, as though declining were a
  *                                further step forward.
  *
- * This is the explicit compatibility mapping M23 §50 asks for rather than a
- * silent change in what the funnel means. Every historical room keeps counting
- * exactly as it did: no existing status changed name, position or inclusion.
+ * The mapping is written out so what the funnel means never changes silently.
  */
 export const FUNNEL_NON_PROGRESS_STATUSES = ['withdrawn', 'archived', 'closed', 'on_hold', 'offer_declined'];
 
@@ -58,7 +56,7 @@ export const REASON_CATEGORIES = Object.keys(REASON_CODES);
  * Every status transition a room ever made, oldest first.
  *
  * Two history actions carry a transition: `room_status_changed` (every change)
- * and `room_reopened` (the M18 Second Look bridge, which writes only the
+ * and `room_reopened` (the Second Look bridge, which writes only the
  * reopen entry). The normal reopen path writes BOTH at the same instant, so
  * identical (at, from, to) triples are collapsed — otherwise every reopen
  * would count twice in every figure derived from here.
@@ -92,7 +90,7 @@ export function stagesReached(room) {
     if (t.from) seen.add(t.from);
     seen.add(t.to);
   }
-  // A room whose history predates the created-detail still has a status now.
+  // A room whose history has no created-detail still has a status now.
   if (!seen.size && room.status) seen.add(room.status);
   return seen;
 }
@@ -235,7 +233,7 @@ export function roomSourceMix(ctx) {
  * For each source, of the rooms opened from it in the window, how many later
  * reached a trial or beyond.
  *
- * This is the most dangerous figure in M20 and it is built defensively:
+ * This is the most dangerous figure in analytics and it is built defensively:
  * suppressed below SMALL_N_MIN without exception, ordered alphabetically so it
  * can never be read as a league table of surfaces, and shipped with the
  * association sentence in the payload so a client cannot render the number
@@ -277,21 +275,21 @@ export const SOURCE_METRICS = { roomSourceMix, sourceStageReach };
 // ----------------------------------------------------- F4 · trial process
 
 /**
- * M23 P4B (D-29): the Trial workflow as process COUNTS in the window — one
+ * The Trial workflow as process COUNTS in the window — one
  * number per step, each keyed on the moment the step happened. No rate, no
  * ratio, no "conversion": the mandate says only process metrics, and a
  * completion count beside an invitation count already invites the reader to
  * divide, so the limitation sentence says why they must not.
  */
 /**
- * M23 P5 — formal decisions finalized in the window, by outcome. Reads the
+ * Formal decisions finalized in the window, by outcome. Reads the
  * outcome WORD and two timestamps; never the reason codes, the rationale, the
  * evidence references or anything about the player. Superseded rows still
  * count as decisions that were made; the `superseded` figure says how many.
  */
 export function decisionOutcomes(ctx) {
   const w = ctx.window;
-  // The context's projected decisions (org-scoped, room-filtered) — not the raw store (D-P5-2).
+  // The context's projected decisions (org-scoped, room-filtered) — not the raw store.
   const rows = (ctx.decisions ?? []).filter((d) => d && typeof d === 'object' && d.kind === 'formal' && d.state !== 'draft' && inWindow(d.createdAt, w));
   const by = { progress: 0, hold: 0, reject: 0 };
   for (const d of rows) if (Object.prototype.hasOwnProperty.call(by, d.outcome)) by[d.outcome] += 1;
@@ -325,7 +323,7 @@ export function trialProcess(ctx) {
 }
 
 
-// ---------------------------------------------------------------- M23 P8
+// ------------------------------------------------------------ journey funnel
 
 /** The evidence rule for each journey stage, over the context's org-scoped records. One function per stage; each returns the instant that proves it, or null. */
 const JOURNEY_EVIDENCE = Object.freeze({
@@ -333,7 +331,7 @@ const JOURNEY_EVIDENCE = Object.freeze({
   trial_requested: (k, x) => firstAt(x.requestsByCase.get(k.id), (r) => r.type === 'trial', (r) => r.createdAt),
   trial_scheduled: (k, x) => firstAt(x.trialsByCase.get(k.id), (t) => Number.isFinite(t.schedule?.confirmedAt) || t.completion?.state === 'completed', (t) => t.schedule?.confirmedAt ?? t.completion?.at),
   trial_completed: (k, x) => firstAt(x.trialsByCase.get(k.id), (t) => t.completion?.state === 'completed', (t) => t.completion?.at),
-  // M23 P8.1 (D-P81-18): the club's assessment of the player counts for ONE case — the case whose Trial it was written in, else the case that was OPEN when it was written. A second case never counts the ended case's assessment as its own `assessed`.
+  // The club's assessment of the player counts for ONE case — the case whose Trial it was written in, else the case that was OPEN when it was written. A second case never counts the ended case's assessment as its own `assessed`.
   assessed: (k, x) => firstAt(x.assessmentsByPlayer.get(k.playerId), (a) => a.state !== 'draft' && assessmentOfCase(a, k, x), (a) => a.submittedAt ?? a.createdAt),
   decision_progress: (k, x) => decisionAt(x.decisionsByCase.get(k.id), 'progress'),
   decision_hold: (k, x) => decisionAt(x.decisionsByCase.get(k.id), 'hold'),
@@ -362,7 +360,7 @@ function caseEndedAt(k) {
   const ends = transitions(k).filter((t) => TERMINAL_ROOM_STATUSES.includes(t.to)).map((t) => Number(t.at) || 0);
   return ends.length ? Math.max(...ends) : 0;
 }
-/** M23 P8.1 (D-P81-18): does this assessment belong to this case? (mirrors domains/recruitment/lifecycle/journey.mjs ownedByAnotherCase) */
+/** Does this assessment belong to this case? (mirrors domains/recruitment/lifecycle/journey.mjs ownedByAnotherCase) */
 function assessmentOfCase(a, k, x) {
   const tid = a?.context?.trialId;
   if (typeof tid === 'string' && tid) { const t = x.trialsById.get(tid); return !!t && t.caseId === k.id; }
@@ -385,7 +383,7 @@ const median = (xs) => { const a = xs.filter((x) => Number.isFinite(x)).sort((p,
 const days = (ms) => Math.round((ms / 86_400_000) * 10) / 10;
 
 /**
- * M23 P8 — the journey funnel from the records (§42–§45). Cohort: cases
+ * The journey funnel from the records. Cohort: cases
  * opened in the window (the same cohort rule as `funnel_progression`, so the
  * two panels can be read side by side). Case-based: a case counts once per
  * stage. `historyOnly` per stage counts cohort cases whose lifecycle history

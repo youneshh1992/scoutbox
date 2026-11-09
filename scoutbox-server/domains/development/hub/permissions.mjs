@@ -1,12 +1,12 @@
 /**
- * M21 — who may do what to a Development Plan. One function, one table (§73).
+ * Who may do what to a Development Plan. One function, one table.
  *
  * Every route in this module asks `planAccess()` and nothing else. That is a
  * deliberate constraint: the alternative — each route checking ownership,
  * visibility, minority and organisation access in its own way — is how a
  * fourteenth route eventually forgets one of them.
  *
- * Four viewer contexts exist and no more (§102):
+ * Four viewer contexts exist and no more:
  *
  *     player_self       the player, on their own plan
  *     guardian          the guardian of a minor they own
@@ -15,17 +15,17 @@
  *
  * There is deliberately NO Trust & Safety context and NO agency context.
  *
- *   • T&S (§103): development plans are not a moderation surface, and the
- *     M18.2 scoped-support boundary is not widened here. If a plan ever needs
+ *   • T&S: development plans are not a moderation surface, and the
+ *     scoped-support boundary is not widened here. If a plan ever needs
  *     to be inspected for a safeguarding reason, that is a new, scoped,
  *     audited mechanism — not a flag on this function.
- *   • Agencies (§75): an agency gains nothing through the Development Hub, and
+ *   • Agencies: an agency gains nothing through the Development Hub, and
  *     in particular gains no route to a minor. The safest reading of "must
  *     follow current restrictions" is no access at all, so that is what this is.
  *
  * The other absolute: authorisation is evaluated before lookup, and a viewer
  * with no access gets the answer a nonexistent record would give. A 403 on a
- * foreign plan id confirms the plan exists, which is itself a leak (§79).
+ * foreign plan id confirms the plan exists, which is itself a leak.
  */
 
 export const VIEWER_KINDS = Object.freeze(['player_self', 'guardian', 'org_staff', 'grassroots_staff']);
@@ -84,8 +84,8 @@ export function planAccess(viewer, plan, { player, orgCanSee, isLead = () => fal
  *
  * A minor gets READ on their own plan and nothing else. That is not a slight:
  * it is the existing safeguarding model, in which a minor's outward-facing and
- * record-changing actions run through the guardian. M21 introduces no new
- * direct minor capability (§74), and specifically does not become the one
+ * record-changing actions run through the guardian. The hub introduces no new
+ * direct minor capability, and specifically does not become the one
  * place a minor can create records a club will read.
  */
 function playerAccess(viewer, plan, player) {
@@ -132,7 +132,7 @@ function guardianAccess(viewer, plan, player) {
  *
  * Two gates in series, and both are live. `orgCanSee` is the same wall search,
  * profiles and Rooms use, so a block or a visibility change removes access at
- * the same instant everywhere (§77). The plan's own ownership and visibility
+ * the same instant everywhere. The plan's own ownership and visibility
  * then decide what that access is worth.
  *
  * `manage` is a lead capability. Archiving a plan or changing who can read it
@@ -145,7 +145,7 @@ function orgAccess(viewer, plan, player, { orgCanSee, isLead }) {
   const lead = viewer.isLead ?? isLead(viewer.orgUser);
 
   if (plan.owner.kind === 'org') {
-    // Tenant isolation: another organisation's plan does not exist here (§79).
+    // Tenant isolation: another organisation's plan does not exist here.
     if (plan.owner.orgId !== org.id) return NONE;
     return caps({
       read: true, readInternal: true, writeGoals: true,
@@ -162,7 +162,7 @@ function orgAccess(viewer, plan, player, { orgCanSee, isLead }) {
 }
 
 /**
- * Can this viewer be recorded as the assignee of an action (§21)?
+ * Can this viewer be recorded as the assignee of an action?
  *
  * The rule is ownership, not politeness: club staff can only be assigned work
  * inside their own organisation's plan, and only if they are still staff. A
@@ -197,9 +197,9 @@ export function canAssign({ assignee, plan, player, guardianById = () => null, s
 }
 
 /**
- * What a viewer is allowed to see OF a review (§39/§41).
+ * What a viewer is allowed to see OF a review.
  *
- * The internal note is the single most sensitive field M21 stores: it is a
+ * The internal note is the single most sensitive field the hub stores: it is a
  * club talking to itself about a player who can, in the shared case, read the
  * same record. It is stripped here, by capability, once — never filtered in a
  * client and never "hidden" by omission from a UI while still on the wire.

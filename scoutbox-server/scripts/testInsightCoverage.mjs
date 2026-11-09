@@ -1,14 +1,8 @@
-// S12d — exposure events, review-later deferrals, evidence suggestions, calibration sessions, fixtures, coverage plans and
-// coverage assignments as typed tables with explicit writes (repositories/insightCoverage.mjs, migration 0033). What
-// this suite proves: the migration creates the STRICT tables (no JSON column), empty; the typers refuse junk naming the
-// record and field (a rating out of range, a day that does not exist, half a location, an unknown rule, a negative
-// budget); an exposure event is recorded once per day and the window prune deletes only what lies before it; a deferral
-// is replaced, and the due ones are found once; a reconciliation supplies closed gaps, rewrites an open one only when it
-// changed, and keeps one open suggestion per rule; status moves are guarded; a calibration session pins its template
-// version, takes one submission per participant against the rubric's attributes, and pages; an assignment keys its own
-// fixture, keeps targets and warnings as rows, completes once and pages; a rolled-back unit leaves nothing; the db.*
-// names throw; and a fixture written through the repository is typed, names a missing reference and reads back what it wrote. Temporary
-// databases only; nothing touches DATA_DIR. Run with: npm test
+// Exposure events, review-later deferrals, evidence suggestions, calibration sessions, fixtures, coverage plans and
+// coverage assignments (repositories/insightCoverage.mjs, migration 0033): the STRICT tables, the typers' refusals,
+// exposure recorded once per day and pruned by window, deferrals, reconciliation keeping one open suggestion per rule,
+// calibration sessions pinned to a template version, coverage assignments, paging, units of work and fixtures.
+// Temporary databases only; nothing touches DATA_DIR. Run with: npm test
 
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -208,7 +202,7 @@ test('[coverage] an assignment keys its own fixture, keeps targets and warnings,
   const p = pl.create(plan());
   refused(() => as.create(assignment({ fixture: { kind: 'own', id: 'fix-none' } })), /no fixture fix-none/);
   as.create(assignment());
-  // S13d: an assignment to a friendly or an open day is a key to it.
+  // An assignment to a friendly or an open day is a key to it.
   refused(() => as.create(assignment({ id: 'cva-2', fixture: { kind: 'friendly_board', id: 'frd-7' } })), /no friendly frd-7/);
   refused(() => as.create(assignment({ id: 'cva-2', fixture: { kind: 'open_trial', id: 'open-7' } })), /no open day open-7/);
   s.grassroots.friendlies.create({ id: 'frd-7', orgId: ORG.id, postedByUserId: SCOUT2.id, ageGroup: 'u15', date: '2026-10-01', venue: '', notes: '', responses: [], createdAt: NOW });

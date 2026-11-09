@@ -1,5 +1,5 @@
 /// <reference types="jest" />
-// Human time (M24F.3): a list shows how long ago, a record shows the day, a
+// Human time: a list shows how long ago, a record shows the day, a
 // precise moment shows the day and the minute — never seconds, never a
 // machine timestamp. The clock is frozen so the expectations are exact; the
 // process runs in UTC (the `test` script sets TZ).

@@ -1,4 +1,4 @@
-// M23 P6.1 LIVE — the Offer under adversarial conditions, driven through the
+// Live: the Offer under adversarial conditions, driven through the
 // real Pro workspace, the real player app and the real agent app against a
 // real server. The exhaustive invariants live in
 // scoutbox-server/e2e/recruitment/offersAdversarial.mjs; this suite proves the real
@@ -161,7 +161,7 @@ async function enterClub(ctx, org, name, role, who) {
   if (!token) fail(`${name}: the client stored no session token after login`);
   return { page, token };
 }
-// M24B — the Room is category → subcategory; the helper opens the category that holds the page, then the page.
+// The Room is category → subcategory; the helper opens the category that holds the page, then the page.
 const tab = async (page, name) => { await roomTab(page, name); };
 const ow = (page) => page.locator('[data-testid="offer-workflow"]');
 const liveLine = (page) => ow(page).locator('[role="status"][aria-live="polite"]').first().innerText();
@@ -214,7 +214,7 @@ async function enterPlayer(ctx, rowText, who, landing = 'text=Your visibility ri
 }
 const goTab = async (page, href) => { await page.click(`a[href="${href}"]`); await page.waitForTimeout(900); };
 async function offersSection(page) {
-  await playerCategory(page, 'offer'); // M24B — Offer › Offer
+  await playerCategory(page, 'offer'); // Offer › Offer
   const sec = page.locator('[data-testid="offer-section"]');
   await sec.waitFor({ timeout: 20000 });
   return sec;
@@ -309,7 +309,7 @@ const ctxMat = await browser.newContext({ viewport: { width: 390, height: 844 },
   neg(/◷ Expired/.test(txt) && !/Awaiting your answer/.test(txt), 'S2b: it reads ◷ Expired — derived at read time, no status was ever written');
   neg((await sec.locator(`[data-testid="offer-accept-${X.OID}"]`).count()) === 0 && (await sec.locator(`[data-testid="offer-decline-${X.OID}"]`).count()) === 0, 'S2c: no accept or decline control on an expired Offer');
   expect(await j('POST', `/player/offers/${X.OID}/accept`, { revisionId: X.R, clientKey: key() }, MAT), 409, 'OFFER_EXPIRED', 'S2d: forcing the request is refused OFFER_EXPIRED');
-  // M24F.4 — the club's message sits behind "View terms"; open it, then read the same section.
+  // The club's message sits behind "View terms"; open it, then read the same section.
   await sec.locator(`[data-testid="offer-terms-${X.OID}"] > [role="button"]`).first().click().catch(() => {}); await mat.waitForTimeout(400);
   const txtTerms = await sec.innerText();
   ok(txtTerms.includes(S_MSG) && !txtTerms.includes(S_NOTE) && !txtTerms.includes(S_DEC), 'S2e: the message is his to read; the note and the decision never are');
@@ -339,7 +339,7 @@ let OID_K = null; let R1_K = null;
   expect(await j('POST', `/player/offers/${OID_K}/accept`, { revisionId: R1_K, clientKey: key() }, KOLA), 409, 'OFFER_SUPERSEDED', 'S3d: the API says OFFER_SUPERSEDED');
   const sec2 = await refreshOffers(kola);
   ok(await waitIn(sec2, /Revision 2/), 'S3e: after a reload the app shows revision 2');
-  // M24F.4 — earlier revisions sit behind "View terms"; open it, then read the same section.
+  // Earlier revisions sit behind "View terms"; open it, then read the same section.
   await sec2.locator(`[data-testid="offer-terms-${OID_K}"] > [role="button"]`).first().click().catch(() => {}); await kola.waitForTimeout(400);
   const txt = await sec2.innerText();
   ok(/First team/.test(txt) && /Revision 1 · ↻ Replaced by a newer revision/.test(txt), 'S3f: revision 2\'s terms, and revision 1 listed as replaced');

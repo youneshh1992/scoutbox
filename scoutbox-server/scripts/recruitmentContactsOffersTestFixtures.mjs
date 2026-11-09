@@ -1,26 +1,26 @@
-// S8c test fixtures: recruitment contacts and offers in the EXACT shapes the writers produce (domains/recruitment/lifecycle/contactRoutes.mjs the
+// Test fixtures: recruitment contacts and offers in the EXACT shapes the writers produce (domains/recruitment/lifecycle/contactRoutes.mjs the
 // draft, the external record, the send, the response hook, the edit; domains/recruitment/offers/index.mjs the offer, the edit, the issue, the
 // withdraw, the revise, the response, the share, the receipt, the deletion unit). Every record is valid: the typed
 // tables refuse junk, and the suites build junk from these with an override. Synthetic ids and names only.
-// Shared by testRecruitmentContactsOffers.mjs and testRecruitmentContactsOffersServer.mjs. The ids agree with the S8a
-// and S8b fixtures: case-1 is the room of pl-adult (req-p4b), case-2 the case of pl-child1 (req-minor, guardian
+// Shared by testRecruitmentContactsOffers.mjs and testRecruitmentContactsOffersServer.mjs. The ids agree with the request,
+// trial and case fixtures: case-1 is the room of pl-adult (req-p4b), case-2 the case of pl-child1 (req-minor, guardian
 // gd-primary), case-gone the tombstoned case of the historically missing pl-gone-long-ago.
 import { NOW } from './coreIdentityTestFixtures.mjs';
 import { ORG, SCOUT, p4bInvitation } from './recruitmentTestFixtures.mjs';
 
 const MIN = 60_000; const HOUR = 60 * MIN; const DAY = 24 * HOUR;
 export const TX = Object.freeze({ drafted: NOW - 6 * DAY, sent: NOW - 5 * DAY, answered: NOW - 4 * DAY, issued: NOW - 3 * DAY, revised: NOW - 2 * DAY, accepted: NOW - DAY, removed: NOW });
-const ACTOR = Object.freeze({ kind: 'org', userId: SCOUT.userId, name: SCOUT.name }); // contactRoutes.mjs:55 actorOf(req)
-const REVBY = Object.freeze({ userId: SCOUT.userId, name: SCOUT.name }); // domains/platform/concurrency.mjs:84 bumpRev
-const BY = Object.freeze({ kind: 'org', id: SCOUT.userId, name: SCOUT.name, role: SCOUT.role }); // domains/recruitment/offers/index.mjs:77 byOrg(req)
+const ACTOR = Object.freeze({ kind: 'org', userId: SCOUT.userId, name: SCOUT.name }); // contactRoutes.mjs actorOf(req)
+const REVBY = Object.freeze({ userId: SCOUT.userId, name: SCOUT.name }); // domains/platform/concurrency.mjs bumpRev
+const BY = Object.freeze({ kind: 'org', id: SCOUT.userId, name: SCOUT.name, role: SCOUT.role }); // domains/recruitment/offers/index.mjs byOrg(req)
 export const HONEST_AGENT = 'Who was validly routed when this contact was recorded. A later change to the relationship does not rewrite it, and the next contact is routed from the authority in force then.';
 export const HONEST_NONE = 'Routed to the recipient only: no agent authority could be resolved when this was sent.';
 export const PRIVATE_BODY = 'Internal: we would like to talk about next season.';
 export const PRIVATE_NOTE = 'Internal: hold until the winter window.';
 
-/** contactRoutes.mjs:61-64 `record()` — a contact history entry. */
+/** contactRoutes.mjs `record()` — a contact history entry. */
 export const chist = (id, at, action, detail = null, by = ACTOR) => ({ id, at, action, by, detail });
-/** The thirty-six-key contact literal (the in-app draft, contactRoutes.mjs:319-335). */
+/** The thirty-six-key contact literal (the in-app draft, contactRoutes.mjs). */
 export const draftContact = (over = {}) => ({
   id: 'rct-1', orgId: ORG.id, caseId: 'case-1', playerId: 'pl-adult', status: 'draft', channel: 'in_app', recipient: null, contactMode: 'player_only', routingSnapshot: null,
   subject: 'Next season', body: PRIVATE_BODY, summary: null, createdBy: ACTOR, createdAt: TX.drafted, updatedAt: TX.drafted,
@@ -41,7 +41,7 @@ export const respondedContact = (over = {}) => draftContact({
   history: [chist('aud-rc2', TX.drafted, 'contact_created', { channel: 'in_app', contactMode: 'both' }), chist('aud-rc3', TX.sent - MIN, 'contact_send_failed', { code: 'TRANSPORT_REFUSED', attempt: 1 }), chist('aud-rc4', TX.sent, 'contact_sent', { channel: 'in_app', recipientType: 'guardian', attempt: 2, mode: 'both', agentParty: true }), chist('aud-rc5', TX.answered, 'contact_responded', { kind: 'accepted' }, { kind: 'guardian', name: 'Guardian' })],
   rev: 3, revAt: TX.answered, revBy: null, ...over,
 });
-/** Delivered with a NULL send key (contactRoutes.mjs:453 `key.key ?? null`), the copy not available, the agent refused, the lifecycle not applied (pl-adult; req-p4b). */
+/** Delivered with a NULL send key (contactRoutes.mjs `key.key ?? null`), the copy not available, the agent refused, the lifecycle not applied (pl-adult; req-p4b). */
 export const nullKeyContact = (over = {}) => draftContact({
   id: 'rct-3', status: 'delivered', recipient: { type: 'player', playerId: 'pl-adult', guardianId: null, minor: false }, contactMode: 'both',
   routingSnapshot: { at: TX.sent, mode: 'player_only', player: true, guardian: false, agent: null, honest: HONEST_NONE }, subject: 'S', body: 'B',
@@ -61,11 +61,11 @@ export const externalContact = (over = {}) => draftContact({
 export const cancelledContact = (over = {}) => draftContact({ id: 'rct-5', caseId: 'case-gone', playerId: 'pl-gone-long-ago', status: 'cancelled', subject: 'Old', body: 'Old body', updatedAt: TX.drafted + MIN, cancelledAt: TX.drafted + MIN, cancelledBy: ACTOR, keys: { create: null, send: null, record: null }, history: [chist('aud-rc9', TX.drafted + MIN, 'contact_cancelled')], ...over });
 
 export const TERMS = Object.freeze({ offerType: 'direct_recruitment', role: 'CM', squad: 'U21', startDate: '2027-07-01', endDate: null, conditions: null });
-/** domains/recruitment/offers/index.mjs:78-81 `hist()` — an offer history entry. */
+/** domains/recruitment/offers/index.mjs `hist()` — an offer history entry. */
 export const ohist = (id, at, action, detail = null, by = { kind: 'org', id: SCOUT.userId, name: SCOUT.name }) => ({ id, at, action, by, detail });
-/** domains/recruitment/offers/index.mjs:326-333 — a revision literal (every key present; `discardedByResponseId` absent unless discarded). */
+/** domains/recruitment/offers/index.mjs — a revision literal (every key present; `discardedByResponseId` absent unless discarded). */
 export const revision = (over = {}) => ({ id: 'rofr-1', revisionNumber: 1, status: 'DRAFT', terms: TERMS, recipientMessage: null, internalNote: PRIVATE_NOTE, documents: [], expiresAt: null, createdAt: TX.drafted, createdBy: BY, updatedAt: TX.drafted, updatedBy: BY, issuedAt: null, issuedBy: null, withdrawnAt: null, withdrawnBy: null, withdrawReason: null, respondedAt: null, response: null, supersedesRevisionId: null, supersededByRevisionId: null, supersededAt: null, recipientSnapshot: null, readinessSnapshot: null, rev: 1, revAt: TX.drafted, revBy: null, ...over });
-/** domains/recruitment/offers/index.mjs:334-340 — the draft offer literal. */
+/** domains/recruitment/offers/index.mjs — the draft offer literal. */
 export const draftOffer = (over = {}) => ({
   id: 'rof-1', orgId: ORG.id, caseId: 'case-1', playerId: 'pl-adult', type: 'direct_recruitment', decisionId: 'rdec-2', transactionId: null, status: 'DRAFT', currentRevisionId: 'rofr-1',
   revisions: [revision()], responses: [], readReceipts: [], agentShare: null,
@@ -100,13 +100,13 @@ export const declinedOffer = (over = {}) => draftOffer({
 /** Withdrawn with a reason, on the tombstoned case of a historically missing player; no receipts; the subject removed. */
 export const withdrawnOffer = (over = {}) => draftOffer({ id: 'rof-4', caseId: 'case-gone', playerId: 'pl-gone-long-ago', decisionId: 'rdec-1', status: 'WITHDRAWN', currentRevisionId: 'rofr-6', revisions: [revision({ id: 'rofr-6', status: 'WITHDRAWN', recipientMessage: 'Welcome', internalNote: null, expiresAt: TX.issued + 9 * DAY, issuedAt: TX.issued, issuedBy: BY, withdrawnAt: TX.revised, withdrawnBy: BY, withdrawReason: 'Budget', recipientSnapshot: { type: 'player', playerId: 'pl-gone-long-ago', guardianId: null, minor: false, at: TX.issued }, rev: 2, revAt: TX.revised, revBy: REVBY })], keys: { create: null, issue: [], withdraw: [{ key: 'k-wd-6', revisionId: 'rofr-6' }], revise: [] }, lifecycle: { applied: true, action: 'considerOffer', from: 'offer_made', to: 'offer_consideration', at: TX.revised }, history: [ohist('aud-ro7', TX.revised, 'offer_withdrawn', { revisionId: 'rofr-6', wasIssued: true, hadReason: true })], updatedAt: TX.revised, rev: 2, revAt: TX.revised, revBy: REVBY, subjectRemovedAt: TX.removed, ...over });
 
-/** A contact's request (the S8a writer literal for a CONTACT, recruitmentTestFixtures.mjs:22-26 pattern): the pair the respond routes read both ways. */
+/** A contact's request (the request writer's literal for a CONTACT, as in recruitmentTestFixtures.mjs): the pair the respond routes read both ways. */
 export const contactRequest = (id, contactId, over = {}) => p4bInvitation({ id, type: 'contact', subject: 'Next season', contactId, trialDetails: null, keys: { invite: { key: `client-${id}`, fp: `fp-${id}` } }, ...over });
 
-/** The standard S8c graph beside the S8a/S8b fixtures: five contacts and four offers. */
+/** The standard contact/offer graph beside the request and case fixtures: five contacts and four offers. */
 export const S8C_FIX = () => ({
   recruitmentContacts: [draftContact(), respondedContact(), nullKeyContact(), externalContact(), cancelledContact()],
   recruitmentOffers: [draftOffer(), acceptedOffer(), declinedOffer(), withdrawnOffer()],
 });
-/** JSON-persisted shape (what the blob held): a live `undefined` is absence. */
+/** JSON-persisted shape: a live `undefined` is absence. */
 export const persisted = (v) => JSON.parse(JSON.stringify(v));

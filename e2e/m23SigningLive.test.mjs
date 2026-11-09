@@ -1,7 +1,7 @@
-// M23 P7 LIVE — signing and contract completion, driven through the real Pro
+// Live: signing and contract completion, driven through the real Pro
 // workspace, the real player app and the real agent app against a real server.
 //
-//   A  CLUB OPENS      Kola's Offer is accepted (P6, by HTTP) → the case sits at
+//   A  CLUB OPENS      Kola's Offer is accepted (by HTTP) → the case sits at
 //                      Offer accepted with NO signing → the Signing tab says a
 //                      signing can be opened and offers the button → the lead
 //                      opens a DRAFT (explicit act) → contract start day, an
@@ -12,7 +12,7 @@
 //                      the parties — never the note — and confirms behind a
 //                      second explicit step that names the revision and the
 //                      digest → IN_PROGRESS; the case is still Offer accepted,
-//                      nothing is in db.signings
+//                      no signing record exists
 //   C  CLUB COMPLETES  the lead signs for the club under their own name, then
 //                      completes → the ONE writer records the signing → the
 //                      case is Signed, the player under contract, and every
@@ -189,7 +189,7 @@ async function openRoomFor(page, playerName) {
   if (!/^case-/.test(id)) fail(`could not read the room id from the deep link (${hash})`);
   return id;
 }
-// M24B — the Room is category → subcategory; the helper opens the category that holds the page, then the page.
+// The Room is category → subcategory; the helper opens the category that holds the page, then the page.
 const tab = async (page, name) => { await roomTab(page, name); };
 const sw = (page) => page.locator('[data-testid="signing-workflow"]');
 const headerStatus = async (page) => (await page.locator('[aria-label="Room header"] .badges').innerText());
@@ -344,12 +344,12 @@ const SID_A = (await j('GET', `/org/rooms/${ROOM_A}/signing`, undefined, LEAD)).
 const ctxKola = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
 const kola = await enterPlayer(ctxKola, 'Kola Adeyemi', 'kola', 'text=Your visibility right now');
 {
-  await playerCategory(kola, 'signing'); // M24B — Signing › Signing
+  await playerCategory(kola, 'signing'); // Signing › Signing
   const sec = kola.locator('[data-testid="signing-section"]');
   await sec.waitFor({ timeout: 20000 });
   ok(await waitIn(sec, /Signing/i), 'B1: Kola\'s Opportunities carries the Signing section at 390px');
   const txt = await sec.innerText();
-  // M24B — the contract days live under Signing › Contract and the document under Signing › Documents.
+  // The contract days live under Signing › Contract and the document under Signing › Documents.
   await playerSub(kola, 'Contract');
   const txtContract = await sec.innerText();
   await playerSub(kola, 'Documents');
@@ -436,7 +436,7 @@ const ana = await enterAgent(ctxAna, 'Ana Agent', 'Agent', 'ana');
   neg(r.status === 200 && r.body.items.length === 0, 'D1b: the signings API lists nothing before the share');
   const sh = await j('POST', `/player/offers/${OFFER_A}/share-agent`, { share: true }, KOLA);
   ok(sh.status === 200 && sh.body.offer.agentShared === true, 'D2: Kola shares the Offer with his agent (HTTP) — his own act');
-  await go(ana, `#/clients/${REL}/transaction/signings`); // M24B — Transaction › Signing
+  await go(ana, `#/clients/${REL}/transaction/signings`); // Transaction › Signing
   await ana.locator(`[data-testid="offer-signing-${OFFER_A}"]`).waitFor({ timeout: 15000 });
   const line = ana.locator(`[data-testid="offer-signing-${OFFER_A}"]`);
   ok((await line.getAttribute('data-signing-status')) === 'COMPLETED' && /Signed/.test(await line.innerText()) && /2 of 2 parties signed/.test(await line.innerText()) && /Signing revision 1/.test(await line.innerText()) && /2027-07-01/.test(await line.innerText()), 'D3: Ana reads the signing line under the shared Offer: Signed, 2 of 2 parties, revision 1, contract days');
@@ -520,7 +520,7 @@ await signingTab(lead.page, ROOM_M);
   await sw(lead.page).locator('[data-testid="signing-reason"]').fill('Terms to be reconsidered.');
   await sw(lead.page).locator('[data-testid="signing-cancel"]').click();
   ok(await waitLive(lead.page, /Signing cancelled\. The accepted Offer is unchanged/), 'G3: CANCEL with a reason, behind a confirmation');
-  // The live-region sentence comes from the mutation's answer; the panel's status comes from its own re-read a moment later — wait for the re-read rather than assume its order (P8.1 T-P81-28).
+  // The live-region sentence comes from the mutation's answer; the panel's status comes from its own re-read a moment later — wait for the re-read rather than assume its order.
   let g3status = null;
   for (let i = 0; i < 40 && g3status !== 'CANCELLED'; i++) { g3status = await sw(lead.page).locator('[data-testid="signing-package"]').getAttribute('data-status').catch(() => null); if (g3status !== 'CANCELLED') await lead.page.waitForTimeout(250); }
   ok(g3status === 'CANCELLED', 'G3b: the package is CANCELLED');
@@ -567,7 +567,7 @@ for (const width of [1440, 1280, 768, 390, 360]) {
   await lead.page.evaluate((h) => { location.hash = h; }, `#/recruitment/rooms/${ROOM_A}`);
   await lead.page.reload();
   await lead.page.waitForSelector('[aria-label="En-tête de la salle"]', { timeout: 25000 });
-  await roomTab(lead.page, 'signing'); // M24B — by page id, so the French label is what is asserted below, not what is clicked
+  await roomTab(lead.page, 'signing'); // by page id, so the French label is what is asserted below, not what is clicked
   const frPanel = lead.page.locator('[role="tabpanel"][aria-label="Signature"] [data-testid="signing-workflow"]');
   await frPanel.waitFor({ timeout: 10000 });
   let frTxt = '';

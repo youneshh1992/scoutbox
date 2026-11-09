@@ -65,7 +65,7 @@ test('transaction coupling: an entry queued inside a unit of work that rolls bac
   let store = openStore(dir);
   let layer = attachDataLayer({ seed: { orgs: [], players: [adult()], guardians: [] }, store, nextId, sessionTtlMs: TTL, now: () => NOW });
   storage.saveDataUrl('media-x', 'data:video/webm;base64,AAAA');
-  // Rolled back: the queue entry and the player removal both go (S14a: the blob edit that went with them is gone).
+  // Rolled back: the queue entry and the player removal both go.
   assert.throws(() => store.unitOfWork(() => { layer.mediaDeletions.enqueue(['media-x'], { playerId: 'pl-adult', at: NOW }); layer.players.erase('pl-adult'); throw new Error('boom'); }), /boom/);
   assert.equal(layer.mediaDeletions.count(), 0); assert.equal(layer.players.count(), 1); assert.equal(store.sqlite.prepare("SELECT COUNT(*) AS n FROM players WHERE id = 'pl-adult'").get().n, 1);
   assert.ok(fs.existsSync(path.join(storageDir, 'media', 'media-x.webm')), 'the file was never touched');
@@ -97,7 +97,7 @@ test('the queue never imports from memory: a stale array handed in at boot is ig
   rm(dir);
 });
 
-// ------------------------------------------------------------- ownership guard (review of 4ef9345)
+// ------------------------------------------------------------- ownership guard
 // The invariant: a file referenced by ANY live player (`media[].id` on the
 // authoritative identity records, read through the mapping) is never deleted by
 // the removed-owner cleanup queue — whatever the queue entry's own player_id says.
@@ -122,12 +122,12 @@ test('ownership guard: a queue entry naming a clip a live player still reference
   assert.deepEqual(q.process(fakeStorage()), { removed: 0, absent: 0, failed: 0, conflicts: 1 });
   s.prepare('DELETE FROM media_deletions').run(); row('med-1', null);
   assert.deepEqual(q.process(fakeStorage()), { removed: 0, absent: 0, failed: 0, conflicts: 1 });
-  // A record held in memory (an upload whose facet is not flushed yet) is a live reference too.
+  // A record supplied through `liveRecords` is a live reference too.
   const q2 = createMediaDeletionsQueue({ sqlite: s, now: () => NOW, warn: () => {}, liveRecords: () => [{ id: 'pl-mem', media: [{ id: 'media-mem' }] }] });
   s.prepare('DELETE FROM media_deletions').run(); row('media-mem', null);
   assert.deepEqual(q2.conflicts(), [{ media_id: 'media-mem', owners: ['pl-mem'] }]);
   assert.deepEqual(q2.process(fakeStorage()), { removed: 0, absent: 0, failed: 0, conflicts: 1 });
-  // The owner really goes (today's hard delete, inside a transaction): the entry is legitimate again and completes.
+  // The owner really goes (the row deleted, inside a transaction): the entry is legitimate again and completes.
   s.prepare('DELETE FROM media_deletions').run(); row('med-1', 'pl-seeded');
   transaction(s, () => s.prepare("DELETE FROM players WHERE id = 'pl-seeded'").run());
   assert.deepEqual(q.conflicts(), []);

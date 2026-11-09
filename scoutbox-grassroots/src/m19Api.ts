@@ -1,4 +1,4 @@
-// M19 typed client (org side): Explainable Matching and Dynamic Watchlists.
+// Typed client (org side): Explainable Matching and Dynamic Watchlists.
 //
 // What these systems ARE: the club writes criteria; ScoutBox says which
 // visible players satisfy them and shows, criterion by criterion, why.
@@ -12,7 +12,7 @@
 //   • A recommendation. ScoutBox never says a player should be signed,
 //     trialled or looked at first. The club's own criteria are the only
 //     opinion in the payload.
-//   • Player-facing. There is no player, guardian or public route in M19.
+//   • Player-facing. There is no player, guardian or public route here.
 //     A player is never told a club is watching them, which criteria matched,
 //     or that they entered or left a list.
 //   • A way around a gate. Every standing rule (visibility, blocks,
@@ -76,7 +76,7 @@ export interface MatchCard {
 export interface MatchResult {
   items: MatchCard[];
   total: number;
-  /** S14j: the list pages by cursor; pass this back as `cursor` for the next page (null on the last). */
+  /** The list pages by cursor; pass this back as `cursor` for the next page (null on the last). */
   nextCursor: string | null;
   limit: number;
   sort: string;
@@ -131,7 +131,7 @@ export interface WatchlistDetail {
   watchlist: Watchlist;
   items: MatchCard[];
   total: number;
-  /** S14j: the members page by cursor; pass this back as `cursor` for the next page (null on the last). */
+  /** The members page by cursor; pass this back as `cursor` for the next page (null on the last). */
   nextCursor: string | null;
   limit: number;
   sort: string;

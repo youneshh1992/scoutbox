@@ -1,10 +1,10 @@
-// M23 P8 §60 — the entry-screen credit regression.
+// The entry-screen credit regression.
 //
 // "Built by Guni & Younes" is rendered on every intended entry surface: the
 // Club, Grassroots, Agent and Admin login screens and the Player onboarding
 // hero. The check reads the `login-signature` test id each surface carries and
-// the text inside it — nothing about pixels, fonts or colours (the styling is
-// M24's to change). No server is needed: the credit is part of the entry
+// the text inside it — nothing about pixels, fonts or colours (the styling may
+// change). No server is needed: the credit is part of the entry
 // screen before any request is made.
 //
 //   node e2e/entryCredit.test.mjs            # builds the five bundles, serves them, checks each at 1280 and 390

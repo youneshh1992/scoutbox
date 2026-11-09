@@ -1,4 +1,4 @@
-// M16 player/guardian data surface — Box Cam + Box Training.
+// Player/guardian data surface — Box Cam + Box Training.
 // The Box Session lifecycle (create → start with liveness → stream observed
 // events → complete) is driven server-side: the server owns identity, the
 // nonce and the derived result. This client never asserts verified time,

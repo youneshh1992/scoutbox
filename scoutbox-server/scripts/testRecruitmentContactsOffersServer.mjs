@@ -1,15 +1,8 @@
-// S8c through the REAL server (server.mjs booted as a child process on temporary data directories, synthetic records
-// only): recruitment contacts and offers as tables. A contact drafted, edited, sent with one injected transport
-// failure and then delivered (its request row in the same save), answered through the real respond route; an external
-// record; an offer created, edited, issued, revised (a draft beside the issued revision) and accepted by the recipient
-// with the draft discarded; read receipts; /capabilities counting the rows and the Q8c-a references; the recipient's
-// and another club's surfaces unchanged (no internal note, no decision id, no body in the journey; another club's 404);
-// a SIGKILL right after a send; the deletion unit's in-place edits with a REAL COMMIT failure leaving every row as it
-// was and the retry landing once; a restored backup given a contact naming a historically missing player serves and
-// counts it (Q8c-a); the admin backup (a copy of the
-// database) holding the two collections, a restore into a NEW directory serving them row for row.
-// Every database read goes through a second read-only connection. Nothing here touches DATA_DIR or real data. Run
-// with: npm test
+// Recruitment contacts and offers through the REAL server (booted as a child process on temporary data directories,
+// synthetic records only): the contact and offer routes (an injected transport failure, read receipts), the
+// recipient's and another club's surfaces showing no internal note, decision id or body, a SIGKILL, the deletion unit
+// with a real COMMIT failure, a historically missing player counted (Q8c-a), and backup/restore. Every database read
+// goes through a second read-only connection. Nothing here touches DATA_DIR or real data. Run with: npm test
 import assert from 'node:assert/strict';
 import { spawnChild } from './testChildren.mjs';
 import { freePort } from './testPort.mjs';
@@ -101,10 +94,10 @@ const TERMS = { role: 'Central midfielder', squad: 'Under-23s', startDate: '2027
 
 await test('[routes] a fresh boot records 0017_recruitment_contacts_offers; the ten typed tables exist with the real keys (the case and request keys deferred to COMMIT), no blob behind either collection; a contact drafted, edited, sent with one injected transport failure (the failed attempt a row) and then delivered — its request row, its send key and its history landing in the route\'s own unit of work — answered through the real respond route; an external record; an offer created, edited, issued, revised (a draft beside the issued revision), viewed by the recipient (a receipt row) and accepted with the draft discarded (discarded_by_response_id on it only); /capabilities counts the rows; a SIGKILL right after a send loses nothing; [compat] another club gets 404; the recipient\'s surfaces carry no internal note, no decision id and no contact body; the journey carries no body', async () => {
   const dir = tempDir('s8c-boot'); let S = await boot(dir);
-  assert.equal(applied(dir).filter((id) => id < '0019').at(-2), MIGRATION, 'the recorded migration (0018_signings_follow_ups, S8d, follows it)'); for (const t of TABLES) assert.ok(tableExists(dir, t), `${t} exists`);
+  assert.equal(applied(dir).filter((id) => id < '0019').at(-2), MIGRATION, 'the recorded migration (0018_signings_follow_ups follows it)'); for (const t of TABLES) assert.ok(tableExists(dir, t), `${t} exists`);
   assert.ok(fkOf(dir, 'recruitment_contacts').includes('request_id->recruitment_requests(id) NO ACTION'), `the request key: ${fkOf(dir, 'recruitment_contacts')}`); assert.ok(fkOf(dir, 'recruitment_offers').includes('case_id->recruitment_cases(id) RESTRICT'), 'the case key is immediate: the case is written before its offer');
   assert.match(ddlOf(dir, 'recruitment_contacts'), /request_id TEXT REFERENCES recruitment_requests\(id\) DEFERRABLE INITIALLY DEFERRED/, 'checked at COMMIT');
-  assert.doesNotMatch(ddlOf(dir, 'idempotency_keys') ?? '', /'recruitment_contacts'|'recruitment_offers'/, 'the keys are the records\' own columns'); assert.ok(noBlobTable(dir), 'no blob table'); // rewritten in S14a: it described the blob
+  assert.doesNotMatch(ddlOf(dir, 'idempotency_keys') ?? '', /'recruitment_contacts'|'recruitment_offers'/, 'the keys are the records\' own columns'); assert.ok(noBlobTable(dir), 'no blob table');
   const maria = await orgLogin(S); const a = await signupAdult(S, 'Contact Adult'); const RID = await plannedRoom(S, maria, a.pid);
   // the contact: draft → edit → send (one injected transport failure first) → respond
   const draft = await S.j('POST', `/org/rooms/${RID}/contacts`, { subject: 'Interest from Eastport', body: PRIVATE_BODY, clientKey: 'c-create' }, maria); assert.equal(draft.status, 201, draft.text); const CID = draft.body.contact.id;
@@ -135,7 +128,7 @@ await test('[routes] a fresh boot records 0017_recruitment_contacts_offers; the 
   assert.deepEqual(qAll(dir, 'SELECT id, status FROM offer_revisions WHERE offer_id = ? ORDER BY position', OID), [{ id: R1, status: 'ISSUED' }, { id: R2, status: 'DRAFT' }], 'a draft beside the issued revision'); assert.equal(q1(dir, 'SELECT supersedes_revision_id FROM offer_revisions WHERE id = ?', R2).supersedes_revision_id, R1); assert.equal(offerRow(dir, OID).current_revision_id, R2);
   const seen = await S.j('GET', `/player/offers/${OID}`, undefined, b.token); assert.equal(seen.status, 200, seen.text); assert.deepEqual(qAll(dir, 'SELECT revision_id, viewer_kind, viewer_id FROM offer_read_receipts WHERE offer_id = ?', OID), [{ revision_id: R1, viewer_kind: 'player', viewer_id: b.pid }], 'the receipt is a row');
   const pBlob = JSON.stringify([seen.body, (await S.j('GET', '/player/offers', undefined, b.token)).body]); assert.equal(pBlob.includes(PRIVATE_NOTE), false, '[compat] the recipient never receives the internal note'); assert.doesNotMatch(pBlob, new RegExp(DEC), '[compat] nor the decision id'); assert.equal(pBlob.includes(R2) && /DRAFT/.test(pBlob), false, '[compat] nor the draft');
-  // §4.3 step 4: a list or a read of offers already seen is a read only. Nothing is committed (a second connection's
+  // A list or a read of offers already seen is a read only. Nothing is committed (a second connection's
   // data_version moves on any other connection's commit), and the receipt is still the one row.
   { await sleep(1500); const side = new DatabaseSync(path.join(dir, 'scoutbox.db'), { readOnly: true }); const version = () => side.prepare('PRAGMA data_version').get().data_version; const v0 = version();
     for (let i = 0; i < 3; i += 1) { assert.equal((await S.j('GET', '/player/offers', undefined, b.token)).status, 200); assert.equal((await S.j('GET', `/player/offers/${OID}`, undefined, b.token)).status, 200); }
@@ -175,7 +168,7 @@ await test('[routes] the deletion unit redacts the person\'s contacts and offers
   const ok = await S.j('DELETE', '/player/account', {}, tok); assert.equal(ok.status, 200, ok.text);
   const crow = contactRow(dir, CID); assert.equal(crow.response_message, null, 'the reply\'s words go with the person'); assert.equal(crow.response_kind, 'accepted', 'the kind stays'); assert.equal(crow.player_id, a.pid, 'the id stays');
   const orow = offerRow(dir, OID); assert.ok(orow.subject_removed_at, 'subject_removed_at set'); assert.equal(orow.status, 'ACCEPTED'); assert.equal(q1(dir, 'SELECT actor_name FROM offer_responses WHERE offer_id = ?', OID).actor_name, null); assert.equal(qAll(dir, "SELECT by_name FROM offer_history WHERE offer_id = ? AND by_kind = 'player'", OID).every((h) => h.by_name === null), true);
-  // every reference OCCURRENCE of the retained person is counted (the review of 535e247, F3): the contact's parent and its player recipient; the offer's parent, the issued revision's recipient snapshot, the acceptance's for-player id and its player actor
+  // every reference OCCURRENCE of the retained person is counted: the contact's parent and its player recipient; the offer's parent, the issued revision's recipient snapshot, the acceptance's for-player id and its player actor
   const cap = await S.j('GET', '/capabilities'); assert.deepEqual(cap.body.dataLayer.domains.recruitmentContactsOffers.retainedPlayerReferences, { recruitmentContacts: 2, recruitmentOffers: 4 }, 'the retained person counted per occurrence');
   const rd = await S.j('GET', `/org/rooms/${RID}/contacts/${CID}`, undefined, maria); assert.equal(rd.status, 200, rd.text); assert.equal(rd.body.contact.response?.message ?? null, null, '[compat] the contact is served with the reply\'s words removed');
   // Q8c-a through a restored backup
@@ -195,10 +188,8 @@ await test('[backup] the admin backup is a copy of the database: the two collect
   const d = await S.j('POST', `/org/rooms/${RID}/contacts`, { subject: 'Kept through everything', body: 'Body kept through everything.', clientKey: 'b-create' }, maria); assert.equal(d.status, 201, d.text); const CID = d.body.contact.id;
   const s = await S.j('POST', `/org/rooms/${RID}/contacts/${CID}/send`, { expectedRev: d.body.contact.rev, clientKey: 'b-send' }, maria); assert.equal(s.status, 200, s.text);
   const { RID: ORID } = await considerationRoom(S, maria, a.pid); const c1 = await S.j('POST', `/org/rooms/${ORID}/offers`, { terms: TERMS, expiresAt: new Date(Date.now() + 7 * 86_400_000).toISOString(), internalNote: PRIVATE_NOTE, clientKey: 'b-offer' }, maria); assert.equal(c1.status, 201, c1.text); const OID = c1.body.offer.id;
-  // A second boot before the backup, then a saving route: M13's boot-time normaliser (m13/shared.mjs: a case without a
-  // budget gets `budget: null`) is an in-place change the S8b staged flush lands in the NEXT save. The restored server's
-  // boot applies it too, so the live file must have been through a boot and a save as well for the two sides to be
-  // comparable row for row (an S8b property, not an S8c one; the two S8c collections are unaffected by it).
+  // A second boot before the backup, then a writing route, so the live file has been through a boot as the restored
+  // one will be before the two are compared row for row.
   await S.stop(); S = await boot(dir); const maria2 = await orgLogin(S);
   assert.equal((await S.j('POST', `/org/offers/${OID}/issue`, { expectedRev: c1.body.offer.rev, clientKey: 'b-issue' }, maria2)).status, 200);
   const bk = await S.j('POST', '/admin/backup', {}, null, A); assert.equal(bk.status, 201, bk.text);

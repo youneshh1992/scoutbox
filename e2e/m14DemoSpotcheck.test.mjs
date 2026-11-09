@@ -1,16 +1,13 @@
-// M14 demo spotcheck — drives the self-contained demo bundles (the exact
+// Demo spotcheck — drives the self-contained demo bundles (the exact
 // artifact HTML) through the Verification surfaces and fails on any page
 // error. Demo personas: verified club + root admin, verified scout, pending
 // coach, former (historical) coach, licence submitted-but-NOT-verified, root
 // request awaiting T&S, grassroots request awaiting review.
-// Requires `node serve.mjs` on :8099.
+// Needs freshly built demo bundles (buildDemos.mjs).
 import { chromium } from 'playwright-core';
 import { ensureDemoHost } from './demoHost.mjs';
 
-// D7 (M22 §74-§76): own the demo host instead of assuming one is up.
-// These files hard-coded the URL inline, so the earlier pass imported the
-// helper without ever calling it — the import looked like the fix and was
-// not one.
+// This test owns its demo host: it starts one if none is running (see demoHost.mjs).
 const demo = await ensureDemoHost();
 
 const EXE = process.env.CHROMIUM || '/opt/pw-browsers/chromium';
@@ -32,7 +29,7 @@ await club.click('.org-card:has-text("Eastport FC")');
 await club.fill('.enter-row input', 'Maria Keane');
 await club.click('button:has-text("Enter workspace")');
 await club.waitForSelector('.topbar', { timeout: 20000 });
-await club.evaluate(() => { location.hash = '#/verification'; }); // M15-Nav deep link (Verification)
+await club.evaluate(() => { location.hash = '#/verification'; }); // deep link (Verification)
 await club.waitForSelector('text=Verify your football role', { timeout: 15000 });
 await club.waitForSelector('text=Role verified: Head of Recruitment', { timeout: 10000 });
 // licence honesty: submitted credential must NOT read as verified
@@ -68,7 +65,7 @@ await grass.click('.org-card:has-text("Hackney Marsh")');
 await grass.fill('.enter-row input', 'Dee Coach');
 await grass.click('button:has-text("Enter workspace")');
 await grass.waitForSelector('.topbar', { timeout: 20000 });
-await grass.evaluate(() => { location.hash = '#/verification'; }); // M15-Nav deep link (Verification)
+await grass.evaluate(() => { location.hash = '#/verification'; }); // deep link (Verification)
 await grass.waitForSelector('text=Verify your football role', { timeout: 15000 });
 const gText = await grass.locator('body').innerText();
 if (!gText.includes('Hackney Marsh Rovers')) fail('grassroots verification screen missing its own club identity');
@@ -82,7 +79,7 @@ await player.locator('text=Enter').nth(0).click();
 await player.waitForSelector('text=Your visibility right now', { timeout: 20000 });
 await player.click('a[href^="/you"]');
 await player.getByRole('tab', { name: 'Clubs' }).click();
-await player.getByRole('tab', { name: 'History' }).click(); // M24F.2: references sit in Clubs › History
+await player.getByRole('tab', { name: 'History' }).click(); // references sit in Clubs › History
 await player.waitForSelector('text=Coach references', { timeout: 20000 });
 await player.waitForSelector('text=Coach affiliation was verified when this reference was submitted.', { timeout: 10000 });
 const pText = await player.locator('body').innerText();
@@ -96,7 +93,7 @@ await admin.waitForSelector('text=Report queue', { timeout: 20000 });
 await admin.getByRole('button', { name: 'Verification', exact: true }).click();
 await admin.waitForSelector('text=Riverton Athletic FC', { timeout: 10000 });
 await admin.waitForSelector('text=Marsh Lane Juniors', { timeout: 10000 });
-// M24F.5 — the check reads in words (the machine code stays in the element's title).
+// The check reads in words (the machine code stays in the element's title).
 await admin.waitForSelector('text=DNS ownership: not configured', { timeout: 10000 });
 await admin.waitForSelector('text=signals, not fraud', { timeout: 10000 }).catch(() => {});
 say('T&S demo: root request (pro) + grassroots request awaiting review, honest check labels');

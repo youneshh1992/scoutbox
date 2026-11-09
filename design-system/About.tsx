@@ -1,4 +1,4 @@
-// M24F.3 — progressive disclosure for the portals. A screen's root shows one
+// Progressive disclosure for the portals. A screen's root shows one
 // line; anything longer than a line sits behind an "About" control. `Hint`
 // decides by length, so a short server-provided note still reads inline and a
 // long one folds away without the screen having to know which it will get.

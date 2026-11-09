@@ -1,4 +1,4 @@
-// Connected-mode E2E for the M11 hardening. Unlike apiE2E.mjs this script
+// Connected-mode E2E. Unlike platform/api.mjs this script
 // OWNS its server processes: it boots isolated instances on a throwaway
 // DATA_DIR, kills one with SIGKILL to prove durability, and reboots in
 // production mode to prove the dev-login gate. Run standalone:
@@ -224,11 +224,11 @@ ok(resyncEvents.some((e) => e.event === 'resync'), 'a cursor beyond the buffer (
 // ---- 7. durability: a SIGKILL right after a send loses nothing
 await j(`/player/channels/${chan.id}/messages`, { method: 'POST', body: JSON.stringify({ text: 'This message must survive a crash.' }) }, bearer(KOLA));
 await j(`/org/channels/${chan.id}/read`, { method: 'POST' }, bearer(EASTPORT));
-// A staff record is a table row written at once, not a blob written on a
-// debounce: created in the last instant before the crash, it is still there.
+// A staff record is written at once: created in the last instant before the
+// crash, it is still there.
 r = await j('/auth/org/login', { method: 'POST', body: JSON.stringify({ orgId: 'org-eastport', scoutName: 'Crash Survivor', role: 'Scout' }) });
 ok(r.status === 200 && r.body.userId, 'a staff account is created in the last instant before the crash');
-child.kill('SIGKILL'); // no graceful shutdown hook — the debounce never fires
+child.kill('SIGKILL'); // no graceful shutdown hook runs
 await new Promise((res) => setTimeout(res, 300));
 await startServer();
 const KOLA2 = (await j('/auth/player/login', { method: 'POST', body: JSON.stringify({ playerId: 'pl-adeyemi' }) })).body.token;
@@ -243,10 +243,10 @@ ok(r.status === 200 && r.body.some((u) => u.name === 'Crash Survivor'), 'the sta
 // ---- 8. production gate: seeded shortcuts refuse outside development
 child.kill('SIGKILL');
 await new Promise((res) => setTimeout(res, 300));
-// M18.1 boot assertions refuse production mode without a per-deployment media
-// signing secret, so this production-mode section supplies one — a real
-// deployment would. The assertion itself is exercised directly in m181E2E.
-// PRE-M24 (PM-1): production also refuses to start without its own admin key.
+// The boot assertions refuse production mode without a per-deployment media
+// signing secret or its own admin key, so this section supplies both — a real
+// deployment would. The assertions themselves are exercised in
+// productionHardening.mjs.
 await startServer({ NODE_ENV: 'production', MEDIA_SECRET: 'synthetic-media-secret-0123456789abcdef', ADMIN_KEY: 'connected-e2e-admin-key-not-real' });
 r = await j('/auth/player/login', { method: 'POST', body: JSON.stringify({ playerId: 'pl-adeyemi' }) });
 ok(r.status === 403 && r.body.error === 'DEV_LOGIN_DISABLED', 'passwordless seed player login refused in production');
@@ -264,11 +264,11 @@ r = await j('/auth/org/login', { method: 'POST', body: JSON.stringify({ orgId: p
 ok(r.status === 401, 'a wrong org password is refused');
 // Pro clubs get credentials via Trust & Safety provisioning — the production
 // login path that never depends on ALLOW_DEV_LOGINS.
-// PRE-M24 (PM-1): in production the T&S API answers only the deployment's own
+// In production the T&S API answers only the deployment's own
 // key; the public development key is refused (proved just below).
 const prodAdmin = { 'x-admin-key': 'connected-e2e-admin-key-not-real' };
 r = await j('/admin/clubs/org-eastport/credentials', { method: 'POST', body: JSON.stringify({ password: 'eastport-secret-1' }) }, admin);
-ok(r.status === 401, 'the public development admin key is refused by a production server (PM-1)');
+ok(r.status === 401, 'the public development admin key is refused by a production server');
 r = await j('/admin/clubs/org-eastport/credentials', { method: 'POST', body: JSON.stringify({ password: 'eastport-secret-1' }) }, prodAdmin);
 ok(r.status === 200, 'T&S provisions credentials for a Pro club');
 r = await j('/auth/org/login', { method: 'POST', body: JSON.stringify({ orgId: 'org-eastport', scoutName: 'Maria Keane', password: 'eastport-secret-1' }) });

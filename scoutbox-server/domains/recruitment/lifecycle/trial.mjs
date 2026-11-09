@@ -1,11 +1,10 @@
 /**
- * M23 P4B — the Trial engine: pure functions over the canonical `db.trials` row.
+ * The Trial engine: pure functions over the canonical trial row.
  *
- * A Trial row keeps its M12 meaning — AN ACCEPTED TRIAL — and its two-valued
- * `status` (the report obligation: `awaiting_report` | `reported`). Nothing in
- * this file reads `status` as a schedule and nothing writes it. The
- * operational truth P4B adds lives in its own fields, all additive
- * (M23_P4A_DECISION_REGISTER.md D-1, D-20):
+ * A Trial row means AN ACCEPTED TRIAL, and its two-valued `status` is the
+ * report obligation (`awaiting_report` | `reported`). Nothing in this file
+ * reads `status` as a schedule and nothing writes it. The operational truth
+ * lives in its own fields:
  *
  *   caseId          the recruitment case this trial belongs to (null = legacy)
  *   workflowState   legacy_accepted | accepted | scheduled | completed | cancelled
@@ -15,9 +14,9 @@
  *   keys            idempotency keys with payload fingerprints, per action
  *   rev/revAt/revBy the trial's OWN concurrency revision (never the case's)
  *   history[]       append-only, ids/states/times only
- *   reminders       persisted markers read by the M12 sweep
+ *   reminders       persisted markers read by the reminder sweep
  *
- * THE TRUTH MODEL THIS FILE ENFORCES (mandate §1)
+ * THE TRUTH MODEL THIS FILE ENFORCES
  *
  *   invitation ≠ accepted ≠ scheduled ≠ attended ≠ completed ≠ assessment ≠ decision
  *
@@ -44,7 +43,7 @@ const isPlain = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 
 // ------------------------------------------------------------------ vocabulary
 
-/** The Trial's operational states (architecture §3). `legacy_accepted` is read-only interpretation of pre-P4B rows. */
+/** The Trial's operational states. `legacy_accepted` is a read-only interpretation of a row with no operational fields. */
 export const TRIAL_WORKFLOW_STATES = Object.freeze(['legacy_accepted', 'accepted', 'scheduled', 'completed', 'cancelled']);
 export const TRIAL_FINAL_STATES = Object.freeze(['completed', 'cancelled']);
 
@@ -59,10 +58,10 @@ export const TRIAL_WORKFLOW_LABELS = table({
 /** Contextual session kinds (Box Cam change classification N6). Minimal, closed. */
 export const TRIAL_SESSION_KINDS = Object.freeze(['onboarding', 'training', 'drill', 'small_sided', 'match', 'other']);
 
-/** Per-session attendance states (D-8). `not_recorded` is DERIVED, never stored. */
+/** Per-session attendance states. `not_recorded` is DERIVED, never stored. */
 export const TRIAL_ATTENDANCE_STATES = Object.freeze(['attended', 'partial', 'no_show', 'club_cancelled', 'player_withdrew']);
 export const TRIAL_ATTENDANCE_SOURCES = Object.freeze(['checkin', 'manual']);
-/** The states that count as the player having taken part (D-5). */
+/** The states that count as the player having taken part. */
 export const TRIAL_ATTENDED_STATES = Object.freeze(['attended', 'partial']);
 
 export const TRIAL_COMPLETION_STATES = Object.freeze(['completed', 'cancelled']);
@@ -103,8 +102,8 @@ export const TRIAL_INSTANT_YEAR_MAX = 2100;
 // ------------------------------------------------------------------ roles
 
 /**
- * Who may do what (architecture §11). The same three levels are mirrored in
- * `roomCan` (domains/recruitment/rooms/shared.mjs) so the Room keeps one permission surface.
+ * Who may do what. The same three levels are carried by
+ * `roomCan` (rooms/shared.mjs) so the Room keeps one permission surface.
  *
  *   trial_view    viewer and above — shared Trial information is club memory
  *   trial_assess  contributor and above — a scout may assess in Trial context
@@ -130,10 +129,10 @@ export { payloadFingerprint };
 // ------------------------------------------------------------------ time
 
 /**
- * An organiser timezone is an exact IANA name this runtime knows (D-21). No
+ * An organiser timezone is an exact IANA name this runtime knows. No
  * case-folding, no alias resolution, no fallback to the server's zone: a
- * schedule whose zone is unknown is refused, never guessed. M23 P5.7: the
- * check itself is the platform's (`temporal.mjs`); this keeps the Trial code.
+ * schedule whose zone is unknown is refused, never guessed. The check itself
+ * is the platform's (`temporal.mjs`); this keeps the Trial code.
  */
 export function validateTimezone(tz) {
   const v = validateIanaZone(tz);
@@ -142,11 +141,11 @@ export function validateTimezone(tz) {
 }
 
 /**
- * The ONE parser for a Trial instant (mandate §46). Accepts an ISO 8601
+ * The ONE parser for a Trial instant. Accepts an ISO 8601
  * date-time WITH an explicit offset or `Z`, or a finite integer millisecond
  * timestamp; anything else — a bare local time, a date-only string, a number
  * that is not an integer, text, an object — is refused. Returns UTC ms.
- * M23 P5.7: the parsing is the platform's; the year bound and code are Trial's.
+ * The parsing is the platform's; the year bound and code are Trial's.
  */
 export function parseInstant(v) {
   const p = parseCanonicalInstant(v, { yearMin: TRIAL_INSTANT_YEAR_MIN, yearMax: TRIAL_INSTANT_YEAR_MAX });
@@ -205,13 +204,13 @@ export function validateVenue(raw, { addressAllowed = true } = {}) {
 // ------------------------------------------------------------------ sessions
 
 const SESSION_SEQ = (id) => { const n = Number(String(id ?? '').split('-').pop()); return Number.isFinite(n) ? n : 0; };
-/** Stable session order: start time, then the monotonic id part (mandate §68). */
+/** Stable session order: start time, then the monotonic id part. */
 export const byStartsAtThenId = (a, b) => (a.startsAt - b.startsAt) || (SESSION_SEQ(a.id) - SESSION_SEQ(b.id)) || String(a.id).localeCompare(String(b.id));
 
 /**
  * Validate ONE session as a club proposes it. `id` is assigned by the caller
  * (stable, never array position). The venue on a session may carry an
- * address: it is shared with the routed recipient after acceptance (D-23).
+ * address: it is shared with the routed recipient after acceptance.
  */
 export function validateSessionInput(raw, { now = Date.now(), allowPast = false } = {}) {
   const bad = (message) => ({ ok: false, error: 'TRIAL_SCHEDULE_INVALID', message });
@@ -228,7 +227,7 @@ export function validateSessionInput(raw, { now = Date.now(), allowPast = false 
   if (len > TRIAL_LIMITS.maxSessionMs) return bad('A session is at most 12 hours long.');
   // A NEW session cannot be placed in the past. A session the trial already
   // has may have ended — a revision must carry it unchanged (the route checks
-  // that), so it is not refused here (P4B defect D-P4B-2).
+  // that), so it is not refused here.
   if (!allowPast && end.ms <= now) return bad('A session cannot be scheduled entirely in the past.');
   const venue = validateVenue(raw.venue);
   if (!venue.ok) return venue;
@@ -276,8 +275,8 @@ export function validateScheduleInput(raw, { now = Date.now(), mintId, existingI
 }
 
 /**
- * Does a new revision change something the recipient agreed to (D-8, mandate
- * §50)? Material: the organiser timezone, the set of sessions, any session's
+ * Does a new revision change something the recipient agreed to?
+ * Material: the organiser timezone, the set of sessions, any session's
  * start or end, its venue name or town. Not material: instructions, the
  * venue address line, the session kind. A material change clears
  * `confirmedAt` and asks the recipient again.
@@ -293,7 +292,7 @@ export function materialChange(prev, next) {
 
 // ------------------------------------------------------------------ state
 
-/** Is this a row written before P4B (no operational containers)? */
+/** Is this a row with no operational containers? */
 export const isLegacyTrial = (t) => !t || t.workflowState === undefined || t.workflowState === 'legacy_accepted';
 
 /**
@@ -325,7 +324,7 @@ export function currentAttendance(t) {
 export const lastSession = (t) => (t?.schedule?.sessions ?? []).slice().sort((a, b) => b.endsAt - a.endsAt)[0] ?? null;
 
 /**
- * THE completion gate (D-5, mandate §13). Every reason is returned so the
+ * THE completion gate. Every reason is returned so the
  * refusal says what is missing rather than "no".
  */
 export function canComplete(t, { now = Date.now() } = {}) {
@@ -371,7 +370,7 @@ export function trialStateAllows(t, action) {
 }
 
 /**
- * Block policy (D-16, mandate §33). Once the player or guardian has blocked
+ * Block policy. Once the player or guardian has blocked
  * the organisation, the club may only CANCEL an accepted trial (an
  * operational safety notice, not solicitation) and file the mandatory
  * report; the recipient may still decline, cancel or read. Everything else —
@@ -386,7 +385,7 @@ export const blockedAllows = (action) => BLOCKED_CLUB_ACTIONS_ALLOWED.includes(a
 /**
  * Structural soundness of a Trial row for the evidence provider and the
  * projections. A problem list, never a repair: a corrupt row is omitted and
- * counted, and never becomes evidence (architecture §4).
+ * counted, and never becomes evidence.
  */
 export function trialIntegrity(t, { orgId = null, caseId = null } = {}) {
   try {
@@ -430,7 +429,7 @@ function trialIntegrityUnsafe(t, { orgId = null, caseId = null } = {}) {
   if (t.attendance !== undefined) {
     if (!Array.isArray(t.attendance)) p.push('attendance');
     else {
-      // D-P4B-4: a schedule whose `sessions` is not a list was already
+      // A schedule whose `sessions` is not a list was already
       // flagged above; the attendance check must not throw over it.
       const ids = new Set((Array.isArray(t.schedule?.sessions) ? t.schedule.sessions : []).map((s) => s?.id));
       for (const a of t.attendance) {
@@ -471,8 +470,8 @@ function sessionView(s, att, { withAddress, withInstructions, withEvidence }) {
  *   `club`             the organising club: everything operational, evidence included
  *   `family_accepted`  the player or guardian who accepted: the exact venue
  *                      address and the club's joining instructions, which were
- *                      held back from the invitation (P4B D-23)
- *   `agent`            M23 P5.6E: an authorised agent reading their client's
+ *                      held back from the invitation
+ *   `agent`            an authorised agent reading their client's
  *                      trial. Times, session kinds, the venue's NAME and town,
  *                      attendance. Not the address, not the instructions, not
  *                      the evidence list — those belong to the family and the
@@ -534,7 +533,7 @@ export function trialClubView(t) {
 /**
  * Family view (player or guardian): the shared operational edge and nothing
  * else — no caseId, no history internals, no evidence, no assessment. The
- * exact venue address and instructions are shared once accepted (D-23) —
+ * exact venue address and instructions are shared once accepted —
  * a Trial row exists only after acceptance, so here they always are.
  */
 export function trialFamilyView(t) {

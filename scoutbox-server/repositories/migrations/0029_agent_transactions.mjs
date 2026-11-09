@@ -1,8 +1,7 @@
 /**
- * The Agent Transaction Workspace gets its own typed tables (S11c): transactions (jurisdictions, parties, the
- * compliance snapshot naming its evaluation row, notes, linked threads, terms versions, replay keys, history),
- * representation bindings (scopes, history) and documents (version chain, history). REGISTERED in DATA_MIGRATIONS.
- * `up()` is the DDL only: nothing is carried over (no production data; rollback means re-seed).
+ * The Agent Transaction Workspace: transactions (jurisdictions, parties, the compliance snapshot naming its
+ * evaluation row, notes, linked threads, terms versions, replay keys, history), representation bindings (scopes,
+ * history) and documents (version chain, history).
  */
 import { migrationApplied } from '../database.mjs';
 import { COMPLIANCE_RECORDS_MIGRATION } from '../complianceRecords.mjs';

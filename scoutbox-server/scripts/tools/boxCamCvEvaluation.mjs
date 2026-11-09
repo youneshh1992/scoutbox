@@ -1,15 +1,15 @@
-// M22 — CV evaluation harness (§128).
+// Box Cam CV evaluation harness.
 //
 // This is NOT an API test. It evaluates the observation algorithm itself
 // against the golden fixtures and writes a measured artefact that the
-// production enablement gate reads (§129, §130).
+// production enablement gate reads.
 //
-// It reports what §60 demands — absolute count error, accept/reject
+// It reports absolute count error, accept/reject
 // correctness, false positives, FALSE VERIFICATIONS and refusal rate — and
 // deliberately not a single "average accuracy", because an average is how a
 // false verification hides.
 //
-// §61: a clearly invalid attempt accepted as a verified measurement is a P0.
+// A clearly invalid attempt accepted as a verified measurement is a P0.
 // The harness exits non-zero on any such case, whatever the other numbers say.
 
 import fs from 'node:fs';
@@ -202,7 +202,7 @@ for (const fam of families) {
 // ================================================ FIX B: false-touch stress
 //
 // Twenty attempts to manufacture a touch that never happened. Every one
-// expects zero. §4: any false touch here is a P0 for exact counting.
+// expects zero. Any false touch here is a P0 for exact counting.
 
 const stress = falseTouchStress();
 let falseTouches = 0;
@@ -272,8 +272,8 @@ console.log(
 
 // -------------------------------------------------------- determinism
 //
-// §76 of the negative list, and the property the whole gate rests on: the
-// same fixture must produce the same answer every time. Each fixture is run
+// The property the whole gate rests on: the same fixture must produce the
+// same answer every time. Each fixture is run
 // a second time and compared field by field.
 let nondeterministic = 0;
 for (const fx of fixtures) {
@@ -295,7 +295,7 @@ const report = {
   policyVersion: BOX_CAM_CV_POLICY_VERSION,
   generatedAt: new Date().toISOString(),
   fixtureCount: fixtures.length,
-  // §57/§59: the provenance of the evaluation material travels WITH the
+  // The provenance of the evaluation material travels WITH the
   // numbers, so no reader can mistake this for real-world validation.
   fixtureProvenance: 'synthetic_generated',
   realWorldValidation: false,

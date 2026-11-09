@@ -1,6 +1,6 @@
 // Delivery dispatches through the REAL server (server.mjs booted as a child process on temporary data directories,
 // synthetic seed records only, M13_FAST_RETRY so the sweep runs every 400 ms and the retry ladder is [0, 300, 600,
-// 900] ms). Explicit since S14d: each send is ONE unit of work (its attempt, its status, the outbox row, the injected
+// 900] ms). Each send is ONE unit of work (its attempt, its status, the outbox row, the injected
 // failure it used and, on the last failure, the ops event and the webhook intent) — a unit whose real COMMIT fails
 // leaves none of them and the next pass sends once; the retry ladder with the quiet-hours note; provider callbacks
 // (integer clocks kept exactly, an existing clock kept, duplicates, a late bounce, junk refused whole before anything
@@ -51,12 +51,12 @@ async function boot(dir, env = {}) {
 }
 const q1 = (dir, sql, ...p) => { const s = new DatabaseSync(path.join(dir, 'scoutbox.db'), { readOnly: true }); try { const r = s.prepare(sql).get(...p); return r ? { ...r } : r; } finally { s.close(); } };
 const qAll = (dir, sql, ...p) => { const s = new DatabaseSync(path.join(dir, 'scoutbox.db'), { readOnly: true }); try { return s.prepare(sql).all(...p).map((r) => ({ ...r })); } finally { s.close(); } };
-// S6b: opsEvents is the ops_events table since 0013 — read in the writer's literal through the repository's own reader.
-// S13e: the delivery centre's bookkeeping is rows of repositories/operations.mjs (rewritten: the blob reads described the old storage).
+// opsEvents (the ops_events table), read in the writer's literal through the repository's own reader. The delivery
+// centre's bookkeeping is rows of repositories/operations.mjs.
 const seenIds = (dir) => qAll(dir, 'SELECT callback_id FROM delivery_callbacks_seen ORDER BY rowid').map((r) => r.callback_id);
 const injected = (dir) => Object.fromEntries(qAll(dir, 'SELECT channel, remaining FROM delivery_fail_injections').map((r) => [r.channel, r.remaining]));
 const auditRows = (dir, name) => { const s = new DatabaseSync(path.join(dir, 'scoutbox.db'), { readOnly: true }); try { return createSafetyAuditRepository({ sqlite: s }).exportAll()[name] ?? null; } finally { s.close(); } };
-/** The webhook deliveries as the DATABASE holds them (S13a: rows of webhook_deliveries, the payload typed, attempts counted). */
+/** The webhook deliveries as the DATABASE holds them (rows of webhook_deliveries, the payload typed, attempts counted). */
 const webhookRows = (dir) => qAll(dir, "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'webhook_deliveries'").length
   ? qAll(dir, 'SELECT d.id, d.type, d.endpoint_id, d.subject_id, (SELECT COUNT(*) FROM webhook_delivery_attempts a WHERE a.delivery_id = d.id) AS attempts FROM webhook_deliveries d ORDER BY d.rowid')
     .map((r) => ({ id: r.id, type: r.type, endpointId: r.endpoint_id, data: r.type === 'delivery.failed' ? { dispatchId: r.subject_id } : null, attempts: r.attempts }))

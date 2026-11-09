@@ -1,9 +1,8 @@
 import { RecordIdentity, MetricTiles } from './RecordDetails';
 import { GuidanceNote } from './InformationRows';
-// M13 player/guardian sections, dropped into the existing tabs:
-// suitability preferences + opportunity fit (You / Home), transitions (You,
-// adults; guardian panel for minors), representation (You, adults only),
-// coarse exposure (You), and action-required acknowledgements (Inbox).
+// Player/guardian sections: suitability preferences + opportunity fit,
+// transitions (adults; the guardian panel for minors), representation
+// (adults only), coarse exposure, and action-required acknowledgements.
 import { useEffect, useState } from 'react';
 import { View } from 'react-native';
 import { Text, TextInput } from './Text';
@@ -37,7 +36,7 @@ const inputStyle = (colors: Palette) => ({
 
 const fitTone = (v: string): 'green' | 'red' | 'default' => (v === 'compatible' ? 'green' : v === 'conflict' ? 'red' : 'default');
 
-// -------------------------------------------------- F3 private preferences
+// -------------------------------------------------- private preferences
 export function PreferencesSection({ actor, isMinor }: { actor: Actor; isMinor: boolean }) {
   const colors = useColors();
   const [data, reload] = useLoad(
@@ -81,7 +80,7 @@ export function PreferencesSection({ actor, isMinor }: { actor: Actor; isMinor: 
   );
 }
 
-// ----------------------------------------------------- F3 opportunity fit
+// ----------------------------------------------------- opportunity fit
 export function OpportunityFitSection({ actor }: { actor: Actor }) {
   const colors = useColors();
   const [board, reloadBoard] = useLoad<{ items: BoardItem[] }>(
@@ -92,7 +91,7 @@ export function OpportunityFitSection({ actor }: { actor: Actor }) {
   const [fit, setFit] = useState<{ oppId: string; verdicts: Verdict[]; note?: string } | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   if (!board?.items.length) return null;
-  // M24F.3 — the root is one line and a "Check fit" per opportunity; the
+  // The root is one line and a "Check fit" per opportunity; the
   // verdicts are words per dimension, and the reasons are behind "Why".
   const toneColor = (v: string) => (fitTone(v) === 'green' ? colors.accentText : fitTone(v) === 'red' ? colors.danger : colors.text);
   return (
@@ -143,7 +142,7 @@ export function OpportunityFitSection({ actor }: { actor: Actor }) {
   );
 }
 
-// --------------------------------------------------------- F2 transitions
+// --------------------------------------------------------- transitions
 export function TransitionsSection({ actor, isMinor, mediaOptions }: { actor: Actor; isMinor: boolean; mediaOptions: { id: string; title: string }[] }) {
   const colors = useColors();
   const [cases, reload, err] = useLoad<TransitionCase[]>(
@@ -212,7 +211,7 @@ export function TransitionsSection({ actor, isMinor, mediaOptions }: { actor: Ac
   );
 }
 
-// ------------------------------------------------------------ F4 exposure
+// ------------------------------------------------------------ exposure
 export function ExposureSection({ playerId }: { playerId: string }) {
   const colors = useColors();
   const [exp] = useLoad(() => m13.exposure(playerId), [playerId]);
@@ -226,7 +225,7 @@ export function ExposureSection({ playerId }: { playerId: string }) {
   );
 }
 
-// -------------------------------------------------- F11 acknowledgements
+// -------------------------------------------------- acknowledgements
 export function AckSection({ actor }: { actor: Actor }) {
   const [items, reload] = useLoad<AckNotification[]>(
     () => (actor.kind === 'player' ? m13.ackList(actor.id) : m13.gAckList(actor.id)),
@@ -238,7 +237,7 @@ export function AckSection({ actor }: { actor: Actor }) {
     <Card>
       <SectionTitle>{pt('m13ack')}</SectionTitle>
       {pending.map((nn) => (
-        // M24F.3 — one line per notice; the full text and the action sit behind it.
+        // One line per notice; the full text and the action sit behind it.
         <Disclosure key={nn.id} label={nn.text.split(/[.;—]\s/)[0].slice(0, 64)} testID={`ack-${nn.id}`}>
           <GuidanceNote size={12.5}>{nn.text}</GuidanceNote>
           <Button small primary label={pt('m13ackBtn')} testID={`ack-confirm-${nn.id}`} onPress={async () => {

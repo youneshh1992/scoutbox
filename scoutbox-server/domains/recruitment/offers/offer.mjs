@@ -1,21 +1,20 @@
 /**
- * M23 P6 — the canonical Offer domain: pure functions over one
- * `db.recruitmentOffers` row and a clock. Nothing here reads `db`, answers
- * HTTP or writes a case status.
+ * The canonical Offer domain: pure functions over one stored Offer and a
+ * clock. Nothing here reads storage, answers HTTP or writes a case status.
  *
- * THE CHAIN THIS MODULE KEEPS DISTINCT (mandate §0)
+ * THE CHAIN THIS MODULE KEEPS DISTINCT
  *
  *   recruitment decision ≠ offer ≠ offer acceptance ≠ signing
  *
- *   - a positive P5 decision moves the case to `offer_consideration` and
- *     creates NOTHING here (§A, §10);
- *   - an Offer exists only through an explicit, authorised club action (§B);
- *   - only an ISSUED revision can move the lifecycle to `offer_made` (§C);
- *   - an issued revision is immutable; changed terms are a NEW revision (§E,
- *     §F); acceptance and decline name one exact issued revision (§G, §H);
- *   - superseded, withdrawn and expired revisions cannot be accepted (§I–§K);
- *   - an accepted Offer is NOT a signing: no `db.signings` row, no `signed`
- *     state, no `under_contract` (§L, §M, §83).
+ *   - a positive recruitment decision moves the case to `offer_consideration` and
+ *     creates NOTHING here;
+ *   - an Offer exists only through an explicit, authorised club action;
+ *   - only an ISSUED revision can move the lifecycle to `offer_made`;
+ *   - an issued revision is immutable; changed terms are a NEW revision;
+ *     acceptance and decline name one exact issued revision;
+ *   - superseded, withdrawn and expired revisions cannot be accepted;
+ *   - an accepted Offer is NOT a signing: no signing package, no `signed`
+ *     state, no `under_contract`.
  *
  * THE RECORD
  *
@@ -31,8 +30,8 @@
  *                    append-only, with actor provenance (a guardian is never
  *                    written as the player).
  *
- * EXPIRY (§20–§21) is a UTC_INSTANT on the revision, parsed by the P5.7
- * canonical parser. `effectiveRevisionStatus` reads an ISSUED revision whose
+ * EXPIRY is a UTC_INSTANT on the revision, parsed by the canonical
+ * temporal parser. `effectiveRevisionStatus` reads an ISSUED revision whose
  * expiry has passed — or cannot be read — as EXPIRED without any job having
  * run: the security decision never depends on a materialised status.
  */
@@ -47,7 +46,7 @@ const isPlain = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 
 // ------------------------------------------------------------------ vocabulary
 
-/** The seven revision statuses (§5). Nothing else exists; `viewed` is a receipt, not a status (§40). */
+/** The seven revision statuses. Nothing else exists; `viewed` is a receipt, not a status. */
 export const OFFER_STATUSES = Object.freeze(['DRAFT', 'ISSUED', 'ACCEPTED', 'DECLINED', 'WITHDRAWN', 'EXPIRED', 'SUPERSEDED']);
 export const OFFER_TERMINAL_STATUSES = Object.freeze(['ACCEPTED', 'DECLINED', 'WITHDRAWN', 'EXPIRED', 'SUPERSEDED']);
 
@@ -62,7 +61,7 @@ export const OFFER_STATUS_LABELS = table({
 });
 
 /**
- * Revision transitions (§5). Terminal at revision level. There is no edge out
+ * Revision transitions. Terminal at revision level. There is no edge out
  * of ACCEPTED: a later contract workflow or an explicit restart owns that.
  */
 export const OFFER_REVISION_TRANSITIONS = table({
@@ -76,14 +75,14 @@ export const OFFER_REVISION_TRANSITIONS = table({
 });
 
 /**
- * The one Offer context P6 supports (§8). A transfer or a loan needs a
- * releasing club, which is the P5.6D transaction's business; the engaging
+ * The one Offer context supported. A transfer or a loan needs a
+ * releasing club, which is the transaction's business; the engaging
  * club's Offer to the player stays distinct from club-to-club terms, and a
  * context this build cannot model honestly is refused rather than approximated.
  */
 export const OFFER_TYPES = Object.freeze(['direct_recruitment']);
 
-/** Recipient response kinds (§54). One authoritative response per active revision. */
+/** Recipient response kinds. One authoritative response per active revision. */
 export const OFFER_RESPONSE_TYPES = Object.freeze(['accepted', 'declined']);
 export const OFFER_RESPONSE_ACTORS = Object.freeze(['player', 'guardian']);
 
@@ -106,7 +105,7 @@ export const OFFER_LIMITS = Object.freeze({
 });
 
 /**
- * Minor recipients (§13). No jurisdiction-specific legal policy for an Offer
+ * Minor recipients. No jurisdiction-specific legal policy for an Offer
  * to a minor is encoded in this build, so the pathway is CLOSED everywhere:
  * an Offer whose recipient resolves to a guardian route is refused at ISSUE
  * with `OFFER_RECIPIENT_INVALID`. The guardian routes exist and are
@@ -128,11 +127,10 @@ export function normaliseOfferClientKey(raw) {
 }
 
 /** A stable fingerprint of the parts of a request that make it "the same request". */
-// P6.1 (D-P61-1): the fingerprint is a DEEP canonical serialisation. The
-// previous form passed the top-level key list as JSON.stringify's replacer,
-// which also filters every nested object — so `terms` serialised as `{}` and a
-// retry under the same key with DIFFERENT terms replayed the earlier Offer as
-// if it were the same request. Now every level is key-sorted and complete.
+// The fingerprint is a DEEP canonical serialisation: every level key-sorted and
+// complete, so a retry under the same key with DIFFERENT nested terms is not
+// mistaken for the same request. (JSON.stringify's key-list replacer would
+// filter nested objects too.)
 const canonical = (v) => {
   if (Array.isArray(v)) return v.map(canonical);
   if (v && typeof v === 'object') { const o = {}; for (const k of Object.keys(v).sort()) o[k] = canonical(v[k]); return o; }
@@ -147,7 +145,7 @@ function cleanText(raw, max, { oneLine = false } = {}) {
   if (typeof raw !== 'string') return { ok: false };
   // eslint-disable-next-line no-control-regex
   let s = raw.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, '');
-  // P6.1 (§61): directional and zero-width format controls are stripped — they
+  // Directional and zero-width format controls are stripped — they
   // let a message read differently from what was typed (bidi spoofing) and
   // survive into logs; ordinary Unicode text is kept as typed.
   s = s.replace(/[\u200b-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff]/g, '');
@@ -158,7 +156,7 @@ function cleanText(raw, max, { oneLine = false } = {}) {
 }
 
 /**
- * The structured terms (§7): deliberately narrow. A role, a squad, a start
+ * The structured terms: deliberately narrow. A role, a squad, a start
  * day, an optional end day, and conditions in the club's own words. No
  * compensation field exists in this product and none is invented; nothing
  * here is a legal clause and nothing here is an executed contract.
@@ -196,7 +194,7 @@ export function validateTerms(raw, { requireComplete = false } = {}) {
   return { ok: true, terms: { offerType, role: role.value, squad: squad.value, startDate, endDate, conditions: conditions.value } };
 }
 
-/** The recipient-visible message and the club-private note: two fields, never one (§34). */
+/** The recipient-visible message and the club-private note: two fields, never one. */
 export function validateMessages({ recipientMessage, internalNote } = {}) {
   const bad = (field, message) => ({ ok: false, error: 'OFFER_INPUT_INVALID', field, message });
   const m = cleanText(recipientMessage, OFFER_LIMITS.recipientMessage);
@@ -207,7 +205,7 @@ export function validateMessages({ recipientMessage, internalNote } = {}) {
 }
 
 /**
- * The expiry (§20, §48, §49): a UTC_INSTANT with an explicit offset or Z, or
+ * The expiry: a UTC_INSTANT with an explicit offset or Z, or
  * integer milliseconds — never a bare local time, never the client's clock.
  * At ISSUE it must lie at least an hour ahead of the server's now and within
  * 180 days. A DRAFT may carry none.
@@ -224,7 +222,7 @@ export function validateExpiry(raw, { now, required = false } = {}) {
   return { ok: true, ms: p.ms };
 }
 
-/** Document references (§31): the canonical evidence vault by id, with a label; no bytes, no paths. */
+/** Document references: the canonical evidence vault by id, with a label; no bytes, no paths. */
 export function validateDocumentRefs(raw) {
   const bad = (message, extra = {}) => ({ ok: false, error: 'OFFER_DOCUMENT_INVALID', field: 'documents', message, ...extra });
   if (raw === undefined) return { ok: true, documents: undefined };
@@ -248,7 +246,7 @@ export function validateDocumentRefs(raw) {
 
 /**
  * The status a revision HAS at `now`. Stored ISSUED with a passed — or
- * unreadable — expiry reads EXPIRED (§21). Every other stored status reads as
+ * unreadable — expiry reads EXPIRED. Every other stored status reads as
  * stored. A stored status this build does not know reads as corruption.
  */
 export function effectiveRevisionStatus(rev, now) {
@@ -267,7 +265,7 @@ export const wasIssued = (r) => !!r && r.status !== 'DRAFT' && readInstant(r.iss
  * revision that was ever issued. Distinct from the CURRENT revision, which is
  * the club's working one (a new draft while revision N is out). While the
  * club drafts revision N+1, revision N stays answerable; issuing N+1
- * supersedes N; an answer to N discards the unissued draft (§25, §26).
+ * supersedes N; an answer to N discards the unissued draft.
  */
 export function liveRevision(offer) {
   const issued = (offer?.revisions ?? []).filter(wasIssued);
@@ -285,7 +283,7 @@ export function offerStatus(offer, now) {
   return cur ? effectiveRevisionStatus(cur, now) : null;
 }
 
-/** May a new revision be drafted on this Offer (§25)? Not over an accepted one, not over a live draft. */
+/** May a new revision be drafted on this Offer? Not over an accepted one, not over a live draft. */
 export function canRevise(offer, now) {
   const st = offerStatus(offer, now);
   if (st === null) return { ok: false, error: 'OFFER_STATE_UNKNOWN' };
@@ -296,7 +294,7 @@ export function canRevise(offer, now) {
 }
 
 /**
- * THE acceptance/decline gate (§22, §23), for one exact revision at `now`.
+ * THE acceptance/decline gate, for one exact revision at `now`.
  * Returns the refusal that names why, or ok. Order: the revision must exist on
  * this Offer, be the current one, be ISSUED (not expired), and carry no
  * response yet.
@@ -316,7 +314,7 @@ export function canRespondToRevision(offer, revisionId, now) {
   return { ok: true, revision: rev };
 }
 
-/** May the club withdraw this revision (§24)? A DRAFT or an ISSUED, unanswered, unexpired revision. */
+/** May the club withdraw this revision? A DRAFT or an ISSUED, unanswered, unexpired revision. */
 export function canWithdrawRevision(offer, now) {
   const rev = currentRevision(offer);
   if (!rev) return { ok: false, error: 'OFFER_STATE_UNKNOWN' };
@@ -370,7 +368,7 @@ export function offerIntegrity(offer, { orgId = null, caseId = null } = {}) {
       if (issuedLike && readInstant(r.expiresAt) === null) problems.push('expires_at');
       if (r.status === 'WITHDRAWN' && readInstant(r.withdrawnAt) === null) problems.push('withdrawn_at');
       if (r.status === 'WITHDRAWN' && r.issuedAt !== null && r.issuedAt !== undefined && readInstant(r.issuedAt) === null) problems.push('issued_at');
-      // P6.1 (§43, §44): temporal order and bounds. A revision issued before it
+      // Temporal order and bounds. A revision issued before it
       // was drafted, answered or withdrawn before it was issued, or open for
       // longer than the issue rule ever allows, is corruption — and corruption
       // never widens authority (the row is refused, never read as live).
@@ -387,7 +385,7 @@ export function offerIntegrity(offer, { orgId = null, caseId = null } = {}) {
     }
     if (typeof offer.currentRevisionId !== 'string' || !ids.has(offer.currentRevisionId)) problems.push('current_revision');
     else {
-      // P6.1 (§29, §81): the pointer names the LATEST revision. The one shape in
+      // The pointer names the LATEST revision. The one shape in
       // which a later revision exists is a draft discarded by an acceptance of
       // the revision before it (recorded WITHDRAWN); any other later revision
       // means two revisions each claim to be current.
@@ -408,7 +406,7 @@ export function offerIntegrity(offer, { orgId = null, caseId = null } = {}) {
 }
 
 /**
- * P6.1 (§38) — case/Offer consistency. The case is the authority for where
+ * Case/Offer consistency. The case is the authority for where
  * recruitment stands; the Offer is the authority for what was proposed and
  * answered. Two readings that cannot both be true are CORRUPTION (refused,
  * never repaired on read); a case the club moved away from Offer made while
@@ -431,7 +429,7 @@ export const offerCaseCorrupt = (problems) => (problems ?? []).some((p) => OFFER
 // ------------------------------------------------------------------ evidence
 
 /**
- * The lifecycle evidence (M23 §14) for the three offer kinds, read from the
+ * The lifecycle evidence for the three offer kinds, read from the
  * canonical rows and written nowhere. Same direction as every other kind:
  * offer truth → lifecycle; lifecycle never → offer truth.
  *
@@ -530,7 +528,7 @@ export function offerRecipientView(offer, now, { orgName = null, caseOpen = true
     currentRevision: curIssued ? revisionBase(curIssued, now) : null,
     revisions: issued.map((r) => revisionBase(r, now)),
     awaitingYourResponse: st === 'ISSUED' && caseOpen,
-    // P6.1: an issued revision whose case the club has paused or moved cannot
+    // An issued revision whose case the club has paused or moved cannot
     // be answered right now; the recipient is told so instead of hitting a 409.
     answerable: st === 'ISSUED' && caseOpen,
     notAnswerableReason: st === 'ISSUED' && !caseOpen ? 'CASE_PAUSED' : null,
@@ -541,7 +539,7 @@ export function offerRecipientView(offer, now, { orgName = null, caseOpen = true
   };
 }
 
-/** The agent's view (§12, §42): read-only terms and state of a client's Offer the client shared; never the internal note, never documents. */
+/** The agent's view: read-only terms and state of a client's Offer the client shared; never the internal note, never documents. */
 export function offerAgentView(offer, now, { orgName = null } = {}) {
   const v = offerRecipientView(offer, now, { orgName });
   return {

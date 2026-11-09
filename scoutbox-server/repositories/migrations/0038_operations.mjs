@@ -1,9 +1,8 @@
 /**
- * The remaining operations collections get their own typed tables (S13e): resumable upload sessions (chunks as rows),
- * saved searches (typed filters), invoices (minor units, one per signing), the demo reputation seed and the delivery
- * centre's bookkeeping (callback ids applied, the instant the centre started, injected failures by channel).
- * REGISTERED in DATA_MIGRATIONS. `up()` is the DDL and the delivery centre's two singleton rows: nothing is carried over
- * (no production data; rollback means re-seed). Plans and archetypes are constants (catalogue.mjs), not tables.
+ * Operations: resumable upload sessions (chunks as rows), saved searches (typed filters), invoices (minor units, one
+ * per signing), the demo reputation seed and the delivery centre's bookkeeping (callback ids applied, the instant the
+ * centre started, injected failures by channel), with the delivery centre's two singleton rows. Plans and archetypes
+ * are constants (catalogue.mjs), not tables.
  */
 import { migrationApplied } from '../database.mjs';
 import { GRASSROOTS_MIGRATION } from '../grassroots.mjs';

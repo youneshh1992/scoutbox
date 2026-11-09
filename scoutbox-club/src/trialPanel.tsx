@@ -1,4 +1,4 @@
-// M23 P4B — the Trial tab of a Recruitment Room.
+// The Trial tab of a Recruitment Room.
 //
 // One operational workflow, rendered as the server holds it: an invitation
 // (a request the family answers), a trial that exists only once they accept,

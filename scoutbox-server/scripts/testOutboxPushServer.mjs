@@ -1,5 +1,5 @@
 // The mail outbox, the push log and the device push tokens through the REAL server (server.mjs booted as a child
-// process on temporary data directories, synthetic seed records only). Explicit since S14d: every mail record is
+// process on temporary data directories, synthetic seed records only). Every mail record is
 // durable when its route answers (the club challenge's text withheld in the table, the full text served from process
 // memory until a restart), the live provider's answer is written to the row as soon as it returns, the delivery
 // centre's record commits with its accepted dispatch, a push record is written once its notification is durable; the
@@ -57,7 +57,7 @@ async function boot(dir, env = {}, server = SERVER) {
 const snap = (dir, fn) => { const s = new DatabaseSync(path.join(dir, 'scoutbox.db'), { readOnly: true }); try { s.exec('BEGIN'); try { return fn({ get: (sql, ...p) => { const r = s.prepare(sql).get(...p); return r ? { ...r } : r; }, all: (sql, ...p) => s.prepare(sql).all(...p).map((r) => ({ ...r })) }); } finally { s.exec('COMMIT'); } } finally { s.close(); } };
 const q1 = (dir, sql, ...p) => snap(dir, (c) => c.get(sql, ...p));
 const qAll = (dir, sql, ...p) => snap(dir, (c) => c.all(sql, ...p));
-/** Whether the file still has the retired blob table (dropped by migration 0039, S14a). */
+/** Whether the file still has the retired blob table (dropped by migration 0039). */
 const hasBlobTable = (dir) => !!q1(dir, "SELECT 1 AS one FROM sqlite_master WHERE type = 'table' AND name = 'collections'");
 const outboxFromRow = (r) => (r.source === 'mailer' ? { id: r.id, ts: r.created_at, to: r.to_address, subject: r.subject, text: r.text, transport: r.transport, delivered: r.delivered === 1 } : { id: r.id, at: r.created_at, channel: r.channel, to: r.to_address, text: r.text, providerMessageId: r.provider_message_id, provider: r.transport });
 /** The three collections as the DATABASE holds them, in insertion order. */

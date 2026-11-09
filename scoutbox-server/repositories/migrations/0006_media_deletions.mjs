@@ -1,11 +1,9 @@
 /**
- * The media-deletion queue (migration plan step S4a; readiness review §7.4,
- * §9 item 14). Deleting a player removes their media FILES from object
- * storage, which is outside the database transaction. The intent to remove a
- * file is queued HERE, inside the same transaction that removes the player, so
- * a crash between the commit and the file removal leaves a row that the next
- * boot (and every sweep) retries; a queue entry goes only once the file is gone
- * or was already absent. While an entry exists the file is never served.
+ * The media-deletion queue. Deleting a player removes their media files from object storage, which is outside the
+ * database transaction. The intent to remove a file is queued here, inside the same transaction that removes the
+ * player, so a crash between the commit and the file removal leaves a row that the next boot (and every sweep)
+ * retries; an entry goes only once the file is gone or was already absent. While an entry exists the file is never
+ * served.
  *
  * Nothing else references this table and it references nothing.
  */

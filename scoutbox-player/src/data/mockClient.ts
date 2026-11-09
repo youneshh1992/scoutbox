@@ -719,7 +719,7 @@ export const mockClient: PlayerClient = {
     const req = (inboxes.get(playerId) ?? []).find((r) => r.id === requestId);
     if (!req) throw new ClientError('REQUEST_NOT_FOUND', 'No such request');
     if (req.status !== 'pending') throw new ClientError('ALREADY_RESPONDED', 'Already responded');
-    // M23 P3: a reply rides with the answer; only a contact can carry one, and it is moderated like any shared text.
+    // A reply rides with the answer; only a contact can carry one, and it is moderated like any shared text.
     if (message) {
       if (req.type !== 'contact' || message.length > 500) throw new ClientError('CONTACT_RESPONSE_INVALID', 'A reply must be short text on a contact request.');
       moderate(message);
@@ -842,7 +842,7 @@ export const mockClient: PlayerClient = {
   setAvailability: (playerId, availability?: Availability, contractStatus?: ContractStatus) => {
     const p = getPlayer(playerId);
     if (isMinorProfile(p)) throw new ClientError('GUARDIAN_MANAGED', 'This setting is managed by your parent or guardian.');
-    // M23 P8 §26 — the same two refusals the server gives.
+    // The same two refusals the server gives.
     if (contractStatus === 'under_contract') throw new ClientError('CONTRACT_STATUS_NOT_SELF_DECLARABLE', 'Under contract is recorded when a signing completes in ScoutBox; it cannot be declared here.');
     if (contractStatus && p.contractStatus === 'under_contract') throw new ClientError('CONTRACT_STATUS_CANONICAL', 'Your contract status is set by a signing completed in ScoutBox and cannot be changed here while that contract stands.');
     if (availability) p.availability = availability;
@@ -1227,7 +1227,7 @@ export const mockClient: PlayerClient = {
       };
       channels.push(channel);
       r.contactChannel = channel.id;
-      // M23 P4A-D10: mirrors the server — a guardian's decision is a request outcome, not an `update` nudge.
+      // Mirrors the server — a guardian's decision is a request outcome, not an `update` nudge.
       pushNotification('player', r.playerId, 'guardian_decision', `Your parent/guardian accepted the ${r.type} with ${r.orgName}.`);
     } else {
       pushNotification('player', r.playerId, 'guardian_decision', `Your parent/guardian declined the ${r.type} with ${r.orgName}.`);

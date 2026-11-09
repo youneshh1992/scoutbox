@@ -1,16 +1,14 @@
-// F3 — Player-controlled opportunity suitability.
+// Player-controlled opportunity suitability.
 // Preferences are PRIVATE to the player (guardian for under-18s). Clubs never
 // see raw preferences — only per-application summaries the player/guardian
 // explicitly approved. Suitability NEVER overrides mandatory eligibility
-// (which stays in the M12 checkEligibility path) and never widens the
+// (which stays in the checkEligibility path) and never widens the
 // grassroots 50 km ceiling.
 import { blankPreferences, typePreferences, typeStructured } from '../../repositories/opportunitiesCampaigns.mjs';
 import { opportunityView } from './journeys.mjs';
 
-// S9d: preferences, structured requirements and approved summaries are rows of the opportunities and campaigns
-// repository (repositories/opportunitiesCampaigns.mjs), written by explicit operations and read through SQL. Reading
-// preferences writes nothing: a player who never saved any gets the blank defaults. Junk is refused with the field
-// named (400 FIELD_INVALID); over-long text is still shortened.
+// Preferences, requirements and approved summaries live in repositories/opportunitiesCampaigns.mjs. Reading
+// preferences writes nothing: a player who never saved any gets the blank defaults. Over-long text is shortened.
 const prefsView = (p) => ({
   commitments: p.commitments.map((s) => ({ day: s.day, start: s.start, end: s.end, tz: s.tz, label: s.label })),
   availableSlots: p.availableSlots.map((s) => ({ day: s.day, start: s.start, end: s.end, tz: s.tz, label: s.label })),
@@ -52,7 +50,7 @@ export function registerSuitability(ctx) {
     const slotsIn = (list) => (Array.isArray(list) ? list.map((x) => (x && typeof x === 'object' ? { ...x, label: x.label === undefined || x.label === '' ? null : shorten(x.label, 60) } : x)) : list);
     if (body.commitments !== undefined) next.commitments = slotsIn(body.commitments);
     if (body.availableSlots !== undefined) next.availableSlots = slotsIn(body.availableSlots);
-    // A travel limit beyond 500 km is held at 500 (as it always was); a non-number is refused by the typer.
+    // A travel limit beyond 500 km is held at 500; a non-number is refused by the typer.
     if (body.travelLimitKm !== undefined) next.travelLimitKm = typeof body.travelLimitKm === 'number' && Number.isFinite(body.travelLimitKm) ? Math.max(0, Math.min(500, body.travelLimitKm)) : body.travelLimitKm;
     if (body.transport !== undefined) next.transport = body.transport;
     // Relocation preference is an ADULT field — never collected for minors.
@@ -100,7 +98,7 @@ export function registerSuitability(ctx) {
 
   // ---------------------------------------------- structured requirements
   // Additive: an opportunity may declare structured requirements; free-text
-  // `schedule`/`requirements` from M12 stay untouched. Replaced whole.
+  // `schedule`/`requirements` stay untouched. Replaced whole.
   orgRouter.put('/opportunities/:id/structured-requirements', (req, res) => {
     const o = scoutingReads.opportunities.ofOrg(req.params.id, req.org.id);
     if (!o) return res.status(404).json({ error: 'OPPORTUNITY_NOT_FOUND' });

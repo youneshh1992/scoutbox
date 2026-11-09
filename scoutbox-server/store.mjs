@@ -1,6 +1,5 @@
 // The SQLite store (node:sqlite, no native deps): one database file, data/scoutbox.db, holding every domain's tables.
-// Since S14a there is no blob: the `collections` table (one JSON row per collection) is gone, and the id counter is a
-// row of `counters`.
+// The id counter is a row of `counters`.
 //
 // node:sqlite is REQUIRED, with its transaction state (`isTransaction`):
 // Node.js 22.16 or later on the 22 line, or 24.0 or later (runtime.mjs is the
@@ -10,8 +9,7 @@
 //
 // `openStore(dir)` opens the file; the data layer (repositories/index.mjs `attachDataLayer`) runs the table
 // migrations and attaches the repositories, which own their tables and write their rows at once. The store gives them
-// the unit of work. There is no whole-file load or save (S14 last): tools and test suites go through the repositories
-// too (scripts/dataLayerFixture.mjs).
+// the unit of work. Tools and test suites go through the repositories too (scripts/dataLayerFixture.mjs).
 //
 // A backup is a copy of the database file (`copyTo`, VACUUM INTO); a restore
 // boots a new, empty DATA_DIR holding the copy.

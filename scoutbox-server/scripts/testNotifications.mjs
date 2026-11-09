@@ -1,10 +1,8 @@
-// Notifications and category notification preferences as typed tables with explicit writes (repositories/
-// notifications.mjs, migration 0009; explicit since S14e, docs/architecture/migration.md §4.6): the migration;
-// fixtures written through the repository (typed, junk refused whole, a staff audience a key); the repository's writes (each joins the open unit
-// of work or runs in its own transaction; junk refused by field) and its SQL reads (the feed in reverse insertion
-// order, coalescing, the counts, the undispatched notices, preferences); units of work (a failure, a caught refusal or
-// a real COMMIT failure leaves nothing); the M18.2 preference module over the repository; m13 notifyAction; the boot
-// (no mirror, the old db.* names throw). Temporary databases only; nothing touches DATA_DIR. Run with: npm test
+// Notifications and category notification preferences (repositories/notifications.mjs, migration 0009): fixtures, typed
+// writes that join the open unit or run in their own transaction, SQL reads (the feed in reverse insertion order,
+// coalescing, the counts, the undispatched notices, preferences), units of work, the preference module and m13
+// notifyAction over the repository, and the boot (the db.* names throw). Temporary databases only; nothing touches
+// DATA_DIR. Run with: npm test
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
@@ -271,7 +269,7 @@ test('units of work: a notification, a coalesce, a mark-read, an acknowledgment 
 });
 
 // ============================================================= the preference module and notifyAction
-test('preferences through the real M18.2 module over the repository: defaults are the module\'s, a stored row overrides them, a stored mandatory false is forced ON by the effective view and the gate, the route refuses a non-boolean value (numeric zero included), an unknown category, a literal false on a mandatory category and a non-object, an unknown type is delivered, and a preference is keyed by kind AND id', () => {
+test('preferences through the real module over the repository: defaults are the module\'s, a stored row overrides them, a stored mandatory false is forced ON by the effective view and the gate, the route refuses a non-boolean value (numeric zero included), an unknown category, a literal false on a mandatory category and a non-object, an unknown type is delivered, and a preference is keyed by kind AND id', () => {
   const dir = tempDir('ntf-prefs'); fixtureFile(dir, { notificationPrefs: [pref({ audienceKind: 'guardian', audienceId: 'g-1', categories: { combine: false, security_account: false } })] });
   const s = openRaw(dir); const repo = bare(s);
   const routes = {}; const stubFor = (prefix) => ({ get(p, h) { routes[`get ${prefix}${p}`] = h; }, put(p, h) { routes[`put ${prefix}${p}`] = h; } });

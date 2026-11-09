@@ -1,4 +1,4 @@
-// M13 typed client (org side): imports & integrations, coverage planning,
+// Typed client (org side): imports & integrations, coverage planning,
 // calibration, exposure/review insight, evidence gaps, groups & transitions,
 // deal budgets, representation (agency lane), organisation ops (onboarding,
 // MFA, SSO, sessions, support) and the delivery centre.
@@ -78,7 +78,7 @@ export interface OrgNotification { id: string; ts: number; type: string; text: s
 export interface SuitabilitySummary { approvedAt: number; approvedBy: string; verdicts: { dimension: string; verdict: string }[] }
 
 export interface M13Api {
-  // F1
+  // imports & integrations
   importTemplateUrl(): string;
   createImport(s: Session, csv: string): Promise<{ batch: ImportBatch; dryRun: boolean; note: string }>;
   listImports(s: Session): Promise<ImportBatch[]>;
@@ -94,7 +94,7 @@ export interface M13Api {
   webhookDeliveries(s: Session, id: string): Promise<WebhookDelivery[]>;
   rotateWebhook(s: Session, id: string): Promise<WebhookRow>;
   listConnectors(s: Session): Promise<Connector[]>;
-  // F7
+  // coverage planning
   listFixtures(s: Session): Promise<Fixture[]>;
   createFixture(s: Session, input: { competition?: string; home: string; away: string; date: string; city?: string; lat?: number; lng?: number }): Promise<Fixture>;
   listPlans(s: Session): Promise<CoveragePlan[]>;
@@ -103,7 +103,7 @@ export interface M13Api {
   createAssignment(s: Session, input: { fixtureId: string; scoutUserId: string; targetPlayerIds?: string[]; travelBudgetMinor?: number }): Promise<{ assignment: CoverageAssignment; warnings: string[] }>;
   completeAssignment(s: Session, id: string): Promise<void>;
   visitSuggestions(s: Session): Promise<{ items: VisitSuggestion[]; note: string }>;
-  // F5
+  // calibration and decision review
   listCalibrations(s: Session): Promise<CalibrationListRow[]>;
   createCalibration(s: Session, input: { templateId: string; title: string; mediaId?: string; participantUserIds: string[] }): Promise<CalibrationSession>;
   getCalibration(s: Session, id: string): Promise<CalibrationSession>;
@@ -111,7 +111,7 @@ export interface M13Api {
   closeCalibration(s: Session, id: string): Promise<CalibrationSession>;
   calibrationNote(s: Session, id: string, text: string): Promise<void>;
   decisionReview(s: Session): Promise<{ items: { assessmentId: string; playerName: string; scoutName: string; recommendation: { verdict: string }; since: { signedSomewhere: boolean; furtherAssessments: number } }[]; disclaimer: string }>;
-  // F4 + F6
+  // exposure, review insight and evidence gaps
   reportImpressions(s: Session, playerIds: string[]): Promise<void>;
   exposureReport(s: Session): Promise<ExposureReport>;
   reviewQueue(s: Session): Promise<ReviewQueue>;
@@ -120,7 +120,7 @@ export interface M13Api {
   evidenceGaps(s: Session, playerId: string): Promise<{ items: EvidenceGap[]; engine: { version: number; note: string } }>;
   requestGap(s: Session, id: string): Promise<void>;
   dismissGap(s: Session, id: string): Promise<void>;
-  // F8 + F2
+  // groups, grants and transitions
   listGroups(s: Session): Promise<{ items: GroupRow[]; invites: { groupId: string; name: string }[] }>;
   acceptGroup(s: Session, id: string): Promise<void>;
   leaveGroup(s: Session, id: string): Promise<{ grantsEnded: number }>;
@@ -136,13 +136,12 @@ export interface M13Api {
   groupReport(s: Session, id: string): Promise<{ group: { name: string; members: number }; activity: { orgName: string; assessments: number | string; signings: number | string }[]; note: string }>;
   listTransitions(s: Session): Promise<{ items: TransitionListRow[]; note: string }>;
   transitionPack(s: Session, id: string): Promise<TransitionPack>;
-  // F9
+  // deal budgets
   caseBudget(s: Session, caseId: string): Promise<{ scenarios: Scenario[]; note: string }>;
   createScenario(s: Session, caseId: string, input: Partial<Scenario>): Promise<{ scenario: Scenario; totals: ScenarioTotals; honest: string }>;
   updateScenario(s: Session, caseId: string, sid: string, patch: Partial<Scenario>): Promise<{ scenario: Scenario; totals: ScenarioTotals }>;
   approveScenario(s: Session, caseId: string, sid: string): Promise<{ scenario: Scenario; note: string }>;
-  // F10 (agency lane)
-  // F12 + F11
+  // organisation ops and the delivery centre
   onboarding(s: Session): Promise<OnboardingState>;
   listInvites(s: Session): Promise<InviteRow[]>;
   createInvite(s: Session, email: string, name: string, role: string): Promise<InviteRow>;
@@ -159,7 +158,7 @@ export interface M13Api {
   ackNotification(s: Session, id: string): Promise<void>;
   setDeliveryPrefs(s: Session, prefs: { quietStart?: string | null; quietEnd?: string | null; email?: boolean }): Promise<void>;
   auditExportUrl(): string;
-  // F3 (org view)
+  // suitability (org view)
   applicationSuitability(s: Session, applicationId: string): Promise<{ summary: SuitabilitySummary | null; note?: string }>;
   setStructuredRequirements(s: Session, oppId: string, input: { trainingSlots?: { day: string; start: string; end: string; tz: string }[]; relocationRequired?: boolean; feeMinor?: number; expensesCovered?: boolean; environment?: string[]; accommodations?: string[] }): Promise<void>;
 }
@@ -180,7 +179,7 @@ const G = (s: Session, path: string) => req<any>(path, { headers: H(s) });
 export const httpM13: M13Api = {
   importTemplateUrl: () => `${API_URL}/org/imports/template`,
   createImport: (s, csv) => P(s, '/org/imports', { csv }),
-  // The server pages this list ({ items, nextCursor }, newest first, S13a); the first page is shown. TODO: "load more" with ?cursor=.
+  // The server pages this list ({ items, nextCursor }, newest first); the first page is shown. TODO: "load more" with ?cursor=.
   listImports: async (s) => (await G(s, '/org/imports')).items,
   commitImport: (s, id) => P(s, `/org/imports/${id}/commit`, { confirm: true }),
   reverseImport: (s, id) => P(s, `/org/imports/${id}/reverse`),
@@ -199,13 +198,13 @@ export const httpM13: M13Api = {
   createFixture: async (s, input) => (await P(s, '/org/coverage/fixtures', input)).fixture,
   listPlans: async (s) => (await G(s, '/org/coverage-plans')).items,
   createPlan: async (s, input) => (await P(s, '/org/coverage-plans', input)).plan,
-  // The server pages this list ({ items, nextCursor }, newest first, S12d); the first page is shown. TODO: "load more" with ?cursor=.
+  // The server pages this list ({ items, nextCursor }, newest first); the first page is shown. TODO: "load more" with ?cursor=.
   listAssignments: async (s) => (await G(s, '/org/coverage/assignments')).items,
   createAssignment: (s, input) => P(s, '/org/coverage/assignments', input),
   completeAssignment: (s, id) => P(s, `/org/coverage/assignments/${id}/complete`),
   visitSuggestions: (s) => G(s, '/org/coverage/suggestions'),
 
-  // The server pages this list ({ items, nextCursor }, newest first, S12d); the first page is shown. TODO: "load more" with ?cursor=.
+  // The server pages this list ({ items, nextCursor }, newest first); the first page is shown. TODO: "load more" with ?cursor=.
   listCalibrations: async (s) => (await G(s, '/org/calibration')).items,
   createCalibration: async (s, input) => (await P(s, '/org/calibration', input)).session,
   getCalibration: async (s, id) => (await G(s, `/org/calibration/${id}`)).session,
@@ -244,7 +243,7 @@ export const httpM13: M13Api = {
 
 
   onboarding: (s) => G(s, '/org/onboarding'),
-  // The server pages this list ({ items, nextCursor }, newest first, S13b); the first page is shown. TODO: "load more" with ?cursor=.
+  // The server pages this list ({ items, nextCursor }, newest first); the first page is shown. TODO: "load more" with ?cursor=.
   listInvites: async (s) => (await G(s, '/org/invites')).items,
   createInvite: async (s, email, name, role) => (await P(s, '/org/invites', { email, name, role })).invite,
   mfaSetup: (s) => P(s, '/org/mfa/setup'),
@@ -253,7 +252,7 @@ export const httpM13: M13Api = {
   revokeSession: (s, sid) => P(s, '/org/sessions/revoke', { sid }),
   getSso: (s) => G(s, '/org/sso'),
   setSso: (s, issuer) => P(s, '/org/sso', { issuer }, 'PUT'),
-  // The server pages this list ({ items, nextCursor }, newest first, S13b); the first page is shown. TODO: "load more" with ?cursor=.
+  // The server pages this list ({ items, nextCursor }, newest first); the first page is shown. TODO: "load more" with ?cursor=.
   listSupport: async (s) => (await G(s, '/org/support')).items,
   createSupport: async (s, subject, body, refs) => (await P(s, '/org/support', { subject, body, refs })).ticket,
   approveSupportAccess: (s, ticketId) => P(s, `/org/support/${ticketId}/approve-access`),

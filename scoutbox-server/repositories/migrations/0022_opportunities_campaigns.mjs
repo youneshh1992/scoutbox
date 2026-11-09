@@ -1,7 +1,6 @@
 /**
  * The opportunity board, applications, assessment campaigns (drills, rubric, submissions and attempts) and players'
- * private suitability preferences get their own typed tables (S9d). REGISTERED in DATA_MIGRATIONS. `up()` is the DDL
- * only: the blob collections' contents are not carried over (no production data; rollback means re-seed).
+ * private suitability preferences.
  */
 import { migrationApplied } from '../database.mjs';
 import { CLUB_SETUP_MIGRATION } from '../clubSetup.mjs';

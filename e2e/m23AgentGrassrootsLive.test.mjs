@@ -1,17 +1,8 @@
-// M23 P5.6F — A3: the GRASSROOTS journey, directly observed (reconstructed).
-//
-// RECONSTRUCTION NOTE. The original P5.6F closed A3 with a suite that was lost
-// with its container. This is a rebuild against the frozen b8556c1 base. The
-// historical run reported 29 checks / 23 negative; that is a historical figure
-// and nothing here is padded toward it.
-//
-// A3 was the one of the three carried observations that was a genuine hole
-// rather than a classification question: confidence in the Grassroots side came
-// from shared code and inference, and the P5.6A privacy matrix's line
-// "Grassroots. No agent surface." had never been watched in a browser.
+// A3: the GRASSROOTS journey, directly observed: the privacy rule
+// "Grassroots. No agent surface." watched in a browser.
 //
 // The suite asserts two different kinds of thing, because the mandate forbids
-// manufacturing Agent UI where the product wants none (§7):
+// manufacturing Agent UI where the product wants none:
 //
 //   PRESENT — a grassroots club is a club. It signs in on its own platform, the
 //             app renders, its player list answers, its surfaces behave.
@@ -26,10 +17,7 @@
 // each withheld id directly.
 //
 // There is no `|| true`, no `.catch(() => null)` that degrades into a pass, and
-// no assertion that would hold on any status code. §7 forbids all three, and the
-// frozen P5.6E integration suite contains an example of the third
-// (`neg(true, 'N1 (the grassroots app has no seeded club…)')`) which is recorded
-// in the defect register rather than imitated here.
+// no assertion that would hold on any status code.
 
 import { spawn, execSync } from 'node:child_process';
 import fs from 'node:fs';

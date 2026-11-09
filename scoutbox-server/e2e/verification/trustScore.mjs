@@ -1,4 +1,4 @@
-// M16.2 acceptance suite — ScoutBox Trust Score.
+// Trust Score battery.
 //
 // The Trust Score is an evidence-confidence summary, so most invariants are
 // properties of the pure engine and are tested directly against it: volume
@@ -87,7 +87,7 @@ section('U1 — policy, determinism and bands');
 }
 
 // ============================================================ U2 dedupe
-section('U2 — canonical source deduplication (§39)');
+section('U2 — canonical source deduplication');
 {
   ok(canonicalTrustSources([{ key: 'k', strengthBp: 5000 }, { key: 'k', strengthBp: 9000 }]).length === 1, 'same canonical key counted once');
   ok(canonicalTrustSources([{ key: 'k', strengthBp: 5000 }, { key: 'k', strengthBp: 9000 }])[0].strengthBp === 9000, 'strongest statement of the same fact wins');
@@ -106,7 +106,7 @@ section('U3 — fact-specific authority and player-submitted honesty');
   neg(selfOnly.gaps.some((g) => g.code === 'HISTORY_PLAYER_SUBMITTED'), 'player-submitted history is explained as an evidence gap, not an accusation');
   const coachConfirmed = build({ historyRows: [histRow('h1', 'verified_coach_confirmed', true)] });
   ok(coachConfirmed.components.footballHistory.coverageBp > build({ historyRows: [histRow('h1', 'player_submitted', true)] }).components.footballHistory.coverageBp, 'coach-confirmed outranks player-submitted for a club fact');
-  // Historical facts do not decay (§36/§37)
+  // Historical facts do not decay
   const historical = build({ historyRows: [histRow('h1', 'verified_club_confirmed', false)] });
   const current = build({ historyRows: [histRow('h1', 'verified_club_confirmed', true)] });
   ok(historical.components.footballHistory.coverageBp === current.components.footballHistory.coverageBp, 'a verified historical club fact stays fully valid after the player leaves');
@@ -128,7 +128,7 @@ section('U4 — caps, diminishing returns and the anti-grinding invariant');
 }
 
 // ================================================== U5 the grinding attack
-section('U5 — adversarial grinding cannot buy trust (§85)');
+section('U5 — adversarial grinding cannot buy trust');
 {
   const grinder = build({
     // 500 Box Cam sessions and 100 verified attempts of ONE protocol,
@@ -142,7 +142,7 @@ section('U5 — adversarial grinding cannot buy trust (§85)');
   neg(grinder.components.identity.coverageBp === 0 && grinder.components.footballHistory.coverageBp === 0, 'grinder genuinely has no identity or history confidence');
 }
 
-// ======================================== U6 performance independence (§86)
+// ======================================== U6 performance independence
 section('U6 — athletic performance is invisible to Trust Score');
 {
   // The engine input carries NO measured value at all. Two players whose
@@ -183,7 +183,7 @@ section('U7 — Combine coverage, partial, invalidation and restoration');
   neg(!invalidated.gaps.some((g) => /fraud|cheat|dishonest/i.test(g.text)), 'invalidation copy never accuses the player');
 }
 
-// ================================== U8 demo/test provider isolation (§17)
+// ================================== U8 demo/test provider isolation
 section('U8 — simulated evidence never contributes to production trust');
 {
   const sim = [combineAttempt('c1', 'combine-box-touch-60', { simulated: true })];
@@ -374,7 +374,7 @@ ok([maria, alex, dee, kola, guni, amara].every((x) => x?.token), 'HTTP actors lo
   const pol = await j('GET', '/admin/trust-policy', undefined, undefined, A);
   ok(pol.status === 200 && pol.body.policyVersion === TRUST_SCORE_POLICY_VERSION, 'the policy is inspectable and versioned');
 
-  // §40 forged client values are ignored — the score is server-derived
+  // Forged client values are ignored — the score is server-derived
   const forged = await j('GET', '/player/trust-profile?score=100&band=very_strong_evidence&policyVersion=99', undefined, kola.token);
   neg(forged.body.trust.score === self.body.trust.score && forged.body.trust.policyVersion === TRUST_SCORE_POLICY_VERSION, 'forged query parameters cannot change the score, band or policy version');
 }
@@ -385,7 +385,7 @@ section('T2/T4 — a real Combine Verified result strengthens Trust, and invalid
   const trustOf = async (tok) => (await j('GET', '/player/trust-profile', undefined, tok)).body.trust;
   const before = await trustOf(kola.token);
   ok(before.components.combine.coverageBp === 0, 'T2: Combine Confidence starts at zero');
-  // S14j: matching reads each player's evidence-confidence band from the stored match facts, re-derived before every
+  // Matching reads each player's evidence-confidence band from the stored match facts, re-derived before every
   // COMMIT; the band a club's match card shows must be the band the Trust profile gives at that moment.
   const matchedBand = async () => {
     let cursor;
@@ -397,9 +397,9 @@ section('T2/T4 — a real Combine Verified result strengthens Trust, and invalid
     }
   };
   const clubBand = async () => (await j('GET', '/org/players/pl-adeyemi/trust-profile', undefined, maria.token)).body.trust.band;
-  ok(await matchedBand() === await clubBand(), 'S14j: before the attempt, matching shows the band the Trust profile gives');
+  ok(await matchedBand() === await clubBand(), 'before the attempt, matching shows the band the Trust profile gives');
 
-  // Run a genuine standardized attempt end-to-end through the M16.1 routes.
+  // Run a genuine standardized attempt end-to-end through the Combine routes.
   const created = await j('POST', '/player/combine/attempts', { protocolId: 'combine-box-touch-60', provider: 'local_test' }, kola.token);
   ok(created.status === 201, 'T2: Combine Attempt created');
   const { attempt, boxSession, nonce, livenessChallenge } = created.body;
@@ -424,7 +424,7 @@ section('T2/T4 — a real Combine Verified result strengthens Trust, and invalid
   // say the contribution came from simulated evidence.
   neg(after.simulatedEvidenceIncluded === true, 'T2: the profile declares that simulated evidence was included (demo/test environment)');
   ok(after.strengths.some((s) => s.code === 'COMBINE_VERIFIED'), 'T2: a Combine strength signal is explained to the player');
-  ok(await matchedBand() === await clubBand(), 'S14j: a verified Combine result reaches matching as soon as it commits');
+  ok(await matchedBand() === await clubBand(), 'a verified Combine result reaches matching as soon as it commits');
 
   // T4 — Trust & Safety invalidates the bound Box Cam session.
   await j('POST', `/player/box-cam/sessions/${boxSession.id}/dispute`, { reason: 'Camera fogged up.' }, kola.token);
@@ -436,35 +436,35 @@ section('T2/T4 — a real Combine Verified result strengthens Trust, and invalid
   neg(invalidated.score <= after.score, 'T4: the score falls only because evidence was removed');
   neg(invalidated.score >= before.score - 1, 'T4: removal is not a punitive penalty — the score returns toward the pre-evidence level, never below it');
   neg(!invalidated.gaps.some((g) => /fraud|cheat|dishonest|suspicious/i.test(g.text)), 'T4: no gap accuses the player after invalidation');
-  ok(await matchedBand() === await clubBand(), 'S14j: an invalidation reaches matching as soon as it commits');
+  ok(await matchedBand() === await clubBand(), 'an invalidation reaches matching as soon as it commits');
 
   // Restore returns the contribution deterministically.
   await j('POST', `/admin/box-cam/sessions/${boxSession.id}/restore`, { reason: 'Re-review overturned.' }, undefined, A);
   const restored = await trustOf(kola.token);
   ok(restored.score === after.score && restored.components.combine.coverageBp === after.components.combine.coverageBp, 'T4: restoration returns the exact previous contribution');
-  ok(await matchedBand() === await clubBand(), 'S14j: a restoration reaches matching as soon as it commits');
+  ok(await matchedBand() === await clubBand(), 'a restoration reaches matching as soon as it commits');
 }
 
-// ============================== Passport separation (M15 invariant intact)
+// ============================== Passport separation
 section('Passport separation — the Passport itself stays score-free');
 {
   const pp = await j('GET', '/player/football-passport', undefined, kola.token);
   ok(pp.status === 200, 'the Football Passport still builds');
-  // M15 guarantees there is no numeric score anywhere in the Passport
+  // There is no numeric score anywhere in the Passport
   // projection (a number in a Passport has always meant a talent rating).
   // The Trust Score is therefore a SEPARATE derived summary that consumes
   // the Passport — clients compose it into the Passport header.
-  neg(pp.body.trust === undefined, 'the Passport projection carries NO trust score — the M15 no-score guarantee is intact');
+  neg(pp.body.trust === undefined, 'the Passport projection carries NO trust score — the Passport no-score guarantee is intact');
   const trust = await j('GET', '/player/trust-profile', undefined, kola.token);
   ok(trust.status === 200 && typeof trust.body.trust.score === 'number', 'the Trust Score lives on its own endpoint instead');
   neg(!JSON.stringify(pp.body).match(/"score"\s*:\s*\d/), 'no numeric "score" field appears anywhere in the Passport payload');
 }
 
-// ================================== §41/§88 the score authorizes NOTHING
-section('§41 — a Trust Score grants no permission whatsoever');
+// ================================== the score authorizes NOTHING
+section('a Trust Score grants no permission whatsoever');
 {
   // Kola's real score is irrelevant to every gate below; these are the exact
-  // standing refusals, unchanged by M16.2.
+  // standing refusals, unchanged by the Trust Score.
   // Named, not "not 200". A refusal for the WRONG reason — a 404 from a renamed
   // route, a 500 from a broken projector — satisfies `!== 200` exactly as well
   // as the safeguarding rule does, and then the rule is untested.
@@ -493,22 +493,21 @@ section('§41 — a Trust Score grants no permission whatsoever');
   neg(_p6.status === 401 && _p6.body?.error === 'ORG_AUTH_REQUIRED', 'a player token cannot use the org Trust route');
 }
 
-// ================= D-P56A-1 — agency representation as a live relationship
-section('D-P56A-1 — an agency relationship counts only while it is active');
+// ================= agency representation as a live relationship
+section('an agency relationship counts only while it is active');
 {
-  // Regression for M23 P5.6A defect D-P56A-1: the relationship source keyed
-  // agency representations by a field the record does not have (`orgId`
-  // instead of `agencyOrgId`) and kept counting a withdrawn / disputed /
-  // expired relationship because `confirmedAt` survives those transitions.
+  // Regression: the relationship source must key agency representations by
+  // `agencyOrgId` (the field the record has), and must stop counting a
+  // withdrawn / disputed / expired relationship even though `confirmedAt`
+  // survives those transitions.
   const distinctOf = async () => (await j('GET', '/player/trust-profile', undefined, kola.token)).body?.trust?.components?.relationships?.detail?.distinct;
   const d0 = await distinctOf();
   ok(typeof d0 === 'number', 'the self view exposes the distinct-relationship count');
-  // M23 P5.6E: the legacy F10 writer is closed (E-1), and Trust now reads the
-  // CANONICAL P5.6B lane as a relationship source. The D-P56A-1 regression moves
-  // with it: the state filter is the point, and it is asserted here against the
-  // lane that can actually create a relationship.
+  // The legacy writer is closed, and Trust reads the CANONICAL agent lane as a
+  // relationship source: the state filter is the point, and it is asserted here
+  // against the lane that can actually create a relationship.
   const closed = await j('POST', '/org/representation/propose', { playerId: 'pl-adeyemi', scope: 'full' }, alex.token);
-  neg(closed.status === 404, 'the legacy representation writer is gone and creates nothing (P5.6E E-1, removed in S11a)');
+  neg(closed.status === 404, 'the legacy representation writer is gone and creates nothing');
   await j('POST', '/org/agent/agency/team', { name: 'Ana Agent', tiers: ['licensed_agent'] }, alex.token);
   const ana = await login('org-northstar', 'Ana Agent', 'Agent', 'agent');
   await j('POST', '/org/agent/profile', { displayName: 'Ana Agent', jurisdictions: ['ENG'] }, ana.token);
@@ -545,11 +544,11 @@ section('D-P56A-1 — an agency relationship counts only while it is active');
   neg((await distinctMateus()) === m0, 'a DISPUTED relationship stops counting');
   // Source guards. The relationship key is the agency (`agencyOrgId`, the field
   // the record carries), and the canonical source must apply the same state
-  // filter rather than counting any agreement it finds. The legacy lane is gone (S11a).
+  // filter rather than counting any agreement it finds.
   const { readFileSync } = await import('node:fs');
   const trustSrc = readFileSync(new URL('../../domains/verification/trust/trust.mjs', import.meta.url), 'utf8');
   neg(!/rel:agency:\$\{\w+\.orgId\}/.test(trustSrc) && /rel:agency:\$\{a\.agencyOrgId\}/.test(trustSrc) && !/db\.representations\b/.test(trustSrc), 'the relationship key reads `agencyOrgId`, the field the agreement actually carries, and no legacy lane is read');
-  neg(/agentReads\.agreements\.forClient/.test(trustSrc) && /agreementInForce\(a, now\)/.test(trustSrc), 'the canonical source requires confirmedAt AND an active status (agreementInForce, S11a)');
+  neg(/agentReads\.agreements\.forClient/.test(trustSrc) && /agreementInForce\(a, now\)/.test(trustSrc), 'the canonical source requires confirmedAt AND an active status (agreementInForce)');
   neg(!agreementInForce({ id: 'x', agentUserId: null, status: 'active', confirmedAt: 1, startAt: 1, endAt: null }, 2), 'and it refuses a row that names no licensed individual');
 }
 

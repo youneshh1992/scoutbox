@@ -1,7 +1,7 @@
-// Behavioural tests for the organisations: a typed table since S3, explicit writes
-// and SQL reads since S14g (no mirror, no facets, `db.orgs` throws). Everything
-// runs on throwaway databases under the OS temp directory with synthetic
-// fixtures; nothing touches DATA_DIR. Run with: npm test
+// Behavioural tests for the organisations: a typed table with explicit writes and
+// SQL reads (no facets; `db.orgs` throws). Everything runs on throwaway databases
+// under the OS temp directory with synthetic fixtures; nothing touches DATA_DIR.
+// Run with: npm test
 import assert from 'node:assert/strict';
 import { spawnChild } from './testChildren.mjs';
 import crypto from 'node:crypto';
@@ -20,11 +20,9 @@ import * as m0003 from '../repositories/migrations/0003_sessions_live.mjs';
 import * as m0004 from '../repositories/migrations/0004_orgs_live.mjs';
 import { openStore } from '../store.mjs';
 import { writeFixture, readRecords } from './dataLayerFixture.mjs';
-// The checks below that drive the runner on a raw connection are about the S2/S3
-// steps (0001–0004): they run exactly those. The S4a steps that follow them
-// (0005 core identity, 0006 media deletions) have their own suites
-// (testCoreIdentityMigration, testCoreSchema); the full registered list is what
-// attachDataLayer and the real-server checks below run.
+// The checks below that drive the runner on a raw connection run exactly migrations
+// 0001–0004; the later ones have their own suites (e.g. testCoreSchema). The full
+// registered list is what attachDataLayer and the real-server checks below run.
 const S3_MIGRATIONS = DATA_MIGRATIONS.filter((m) => /^000[1-4]_/.test(m.id));
 import { buildSeed } from '../seed.mjs';
 import { freePort } from './testPort.mjs';
@@ -122,7 +120,7 @@ test('typing: a record takes its defaults (null, false, the creation time), ever
 });
 
 // ------------------------------------------------------------- the migration
-test('migration 0004 on a new database: orgs is the typed table (no facet column) while org_users (0001\'s final form since S14f) and sessions keep referencing it, the first installation is pending, and a failure before commit leaves no trace', () => {
+test('migration 0004 on a new database: orgs is the typed table (no facet column) while org_users (0001\'s final form) and sessions keep referencing it, the first installation is pending, and a failure before commit leaves no trace', () => {
   const s = new DatabaseSync(':memory:'); s.exec('PRAGMA foreign_keys = ON;');
   assert.ok(runDataMigrations(s, S3_MIGRATIONS, { context: { sessionTtlMs: TTL } }).ran.includes(ORGS_CUTOVER_MIGRATION));
   const orgsSql = s.prepare("SELECT sql FROM sqlite_master WHERE name = 'orgs'").get().sql;
@@ -161,7 +159,7 @@ test('migration 0004 on a new database: orgs is the typed table (no facet column
   f = openRaw(dir);
   const exploding = { id: m0004.id, note: m0004.note, foreignKeysOff: true, up(sqlite, ctx) { m0004.up(sqlite, ctx); throw new Error('process died before commit'); } };
   assert.throws(() => runDataMigrations(f, [m0001, m0002, m0003, exploding], { context: { sessionTtlMs: TTL } }), /process died before commit/);
-  assert.match(f.prepare("SELECT sql FROM sqlite_master WHERE name = 'orgs'").get().sql, /verification_org_type/, 'the rebuild was rolled back: the S1 shadow definition is still there');
+  assert.match(f.prepare("SELECT sql FROM sqlite_master WHERE name = 'orgs'").get().sql, /verification_org_type/, 'the rebuild was rolled back: the shadow definition is still there');
   assert.equal(f.prepare('PRAGMA foreign_keys').get().foreign_keys, 1);
   f.close();
   assert.equal(fileDigest(dir), before, 'nothing of the failed attempt reached the file');
@@ -347,7 +345,7 @@ await atest('server: a fixture database boots; registration, settings, suspensio
   // A Room owned by a live organisation: the boot integrity report must still
   // see the organisation on every boot (regression: it ran
   // before the data layer attached and called every Room an orphan).
-  seed.recruitmentCases = [{ id: 'case-s3', orgId: 'org-eastport', playerId: seed.players[0].id, playerName: seed.players[0].name, ownerUserId: 'usr-legacy', ownerName: 'Maria Keane', stage: 'identified', priority: 'medium', deadline: null, restricted: false, assignments: [], tasks: [], approvals: [], decision: null, links: { requestIds: [], trialIds: [], signingId: null }, createdAt: 1, history: [], room: { status: 'watching', priority: 'normal', tags: [], leadScoutUserId: 'usr-legacy', sourceContext: 'direct', sourceRef: null, openedBy: { userId: 'usr-legacy', name: 'Maria Keane' }, updatedAt: 1, archivedAt: null, closedAt: null, rev: 1, revAt: 1, revBy: { userId: 'usr-legacy', name: 'Maria Keane' } } }]; // S8b: the case literal the room route writes
+  seed.recruitmentCases = [{ id: 'case-s3', orgId: 'org-eastport', playerId: seed.players[0].id, playerName: seed.players[0].name, ownerUserId: 'usr-legacy', ownerName: 'Maria Keane', stage: 'identified', priority: 'medium', deadline: null, restricted: false, assignments: [], tasks: [], approvals: [], decision: null, links: { requestIds: [], trialIds: [], signingId: null }, createdAt: 1, history: [], room: { status: 'watching', priority: 'normal', tags: [], leadScoutUserId: 'usr-legacy', sourceContext: 'direct', sourceRef: null, openedBy: { userId: 'usr-legacy', name: 'Maria Keane' }, updatedAt: 1, archivedAt: null, closedAt: null, rev: 1, revAt: 1, revBy: { userId: 'usr-legacy', name: 'Maria Keane' } } }]; // the case literal the room route writes
   // The fixture, written through the repositories.
   writeFixture(dir, seed, { idCounter: 1000 });
   const port = await freePort();
@@ -395,7 +393,7 @@ await atest('server: a fixture database boots; registration, settings, suspensio
     assert.deepEqual((await j('GET', '/orgs?platform=main')).body.map((o) => o.id), ['org-eastport', 'org-harbour', 'org-northstar']);
     assert.deepEqual((await j('GET', '/orgs?platform=agent')).body.map((o) => o.id), ['org-northstar']);
     // Registration: a new grassroots organisation is a table row at once.
-    // A registration whose administrator cannot be created leaves no organisation behind (one unit since S14g).
+    // A registration whose administrator cannot be created leaves no organisation behind (one unit).
     const before = (await j('GET', '/admin/clubs', undefined, null, A)).body.items.length;
     const badReg = await j('POST', '/auth/org/register-grassroots', { name: 'Half Rovers', scoutName: 'x'.repeat(121), country: 'GB', lat: 53.8, lng: -1.5, federation: 'West Riding FA', registrationId: 'WR-8' });
     assert.equal(badReg.status, 400);
@@ -412,7 +410,7 @@ await atest('server: a fixture database boots; registration, settings, suspensio
     const login = await j('POST', '/auth/org/login', { orgId: newOrgId, scoutName: 'Pat', platform: 'grassroots', password: 'rovers-pass-123' });
     assert.equal(login.status, 200, JSON.stringify(login.body)); regToken = login.body.token;
     assert.equal((await j('POST', '/auth/org/login', { orgId: newOrgId, scoutName: 'Pat', platform: 'grassroots', password: 'wrong-password' })).status, 401, 'the stored password hash is checked');
-    // Settings through the modules: lookingFor (server), security (m13) — a facet and a column.
+    // Settings through the modules: lookingFor (a club setup table) and security (a column).
     const lf = await j('POST', '/org/looking-for', { positions: ['ST', 'GK'] }, regToken);
     assert.ok([200, 404].includes(lf.status));
     const sec = await j('PUT', '/org/security', { mfaRequiredForLeads: true }, regToken);

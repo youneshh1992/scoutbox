@@ -1,26 +1,17 @@
 /**
- * The mail outbox, the push log and the device push tokens as typed tables with explicit writes (S7c, migration
- * `0011_outbox_push`; explicit since S14d, docs/architecture/migration.md §4.6; sql/03_messaging_safety_audit.sql).
+ * The mail outbox, the push log and the device push tokens (`outbox`, `push_log`, `push_tokens`).
  *
- * Records (the keys every reader sees):
- *   outbox, two sources told apart by `source` in the table and by their keys in the record:
- *     mailer   { id, ts, to, subject, text, transport, delivered }   adapters.mjs createMailer.send: `text` withholds
- *              every one-time code passed as a secret; `delivered` is the provider's answer (true on the dev outbox);
- *     delivery { id, at, channel, to, text, providerMessageId, provider }   m13/delivery.mjs, the local fake
- *              provider's record of an accepted e-mail dispatch (`text` the first 300 characters of the notice).
- *   push log   { id, ts, audience: { kind, id }, title, body, transport }   adapters.mjs createPushSender.send.
- *   push token { kind, refId, token, ts }   POST /push/register: a player's or a guardian's device.
+ * The outbox has two sources, told apart by `source` in the table and by their keys in the record:
+ *   mailer   { id, ts, to, subject, text, transport, delivered }   adapters.mjs createMailer.send: `text` withholds
+ *            every one-time code passed as a secret; `delivered` is the provider's answer (true on the dev outbox);
+ *   delivery { id, at, channel, to, text, providerMessageId, provider }   m13/delivery.mjs, the local fake provider's
+ *            record of an accepted e-mail dispatch (`text` the first 300 characters of the notice).
  *
- * Tables: `outbox` (the structural CHECK ties each source to its columns; vocabulary CHECKs for the transport and
- * channel; both sources carry an address), `push_log` (audience kind and transport CHECKs) and `push_tokens` (one row
- * per device token: registering a token another account holds moves it to the new account, so a phone receives
- * only the notices of the account that last signed in on it).
+ * One row per device token: registering a token another account holds moves it to the new account, so a phone
+ * receives only the notices of the account that last signed in on it.
  *
- * WRITES are explicit operations, each joining the open unit of work, the caller's transaction or its own. READS are
- * SQL: no mirror, no db.* view; fresh, frozen records. The admin outbox and push log page by cursor, newest first.
- *
- * Nothing here carries a key: the outbox and push rows outlive the accounts they were addressed to (retention is
- * open, Q6). Refusals name tables, ids and fields, never an address, a mail text or a token.
+ * Nothing here carries a key: the outbox and push rows outlive the accounts they were addressed to (retention is open,
+ * Q6 in docs/decisions.md). Refusals name tables, ids and fields, never an address, a mail text or a token.
  */
 import { transaction, migrationApplied } from './database.mjs';
 import { pageOf } from '../domains/platform/paging.mjs';
@@ -152,7 +143,7 @@ const pushFromDb = (r) => Object.freeze({ id: r.id, ts: r.created_at, audience: 
 const tokenParams = (row) => ({ ref_kind: row.kind, ref_id: row.refId, token: row.token, registered_at: row.ts });
 const tokenFromDb = (r) => Object.freeze({ kind: r.ref_kind, refId: r.ref_id, token: r.token, ts: r.registered_at });
 
-/** Whole-table reads (the test suites' read-back): one entry per collection, its records in insertion order; null before the 0011 record. */
+/** Whole-table reads (the test suites' read-back): one entry per collection, its records in insertion order. */
 const recordsTable = (name, table, fromDb) => ({
   name,
   read(sqlite) { return outboxPushLive(sqlite) ? sqlite.prepare(`SELECT * FROM ${table} ORDER BY seq`).all().map(fromDb) : null; },

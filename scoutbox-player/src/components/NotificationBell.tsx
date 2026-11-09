@@ -16,7 +16,7 @@ export function NotificationBell() {
   const router = useRouter();
   const colors = useColors();
   const styles = useStyles(makeStyles);
-  // M23 P8 §30 — a row whose server-resolved target is current opens the
+  // A row whose server-resolved target is current opens the
   // screen that holds it: a contact or trial invitation lives in the Inbox,
   // a trial schedule, an Offer or a signing on Opportunities (the guardian
   // page for a guardian). A row with no target stays plain text.
@@ -24,7 +24,7 @@ export function NotificationBell() {
     if (!target) return null;
     if (guardianId) return target.kind === 'inbox' || target.kind === 'trial' || target.kind === 'offer' ? '/guardian' : null;
     if (target.kind === 'inbox') return '/(tabs)/inbox';
-    // M24B — the category of Opportunities that holds the record (Trial / Offer / Signing).
+    // The category of Opportunities that holds the record (Trial / Offer / Signing).
     if (target.kind === 'trial' || target.kind === 'offer' || target.kind === 'signing') return `/(tabs)/opportunities?cat=${playerCategoryFor(target.kind)}`;
     return null;
   };
@@ -36,7 +36,7 @@ export function NotificationBell() {
 
   return (
     <>
-      {/* M24A — the reference bell: a round hairline button with a green dot while something is unread. */}
+      {/* The reference bell: a round hairline button with a green dot while something is unread. */}
       <Pressable onPress={openPanel} style={styles.bell} accessibilityRole="button" accessibilityLabel="Notifications" accessibilityValue={unread > 0 ? { text: `${unread} unread` } : undefined}>
         <Icon name="bell" size={22} color={colors.gold} />
         {unread > 0 && <View style={styles.dot} accessibilityElementsHidden />}
@@ -98,7 +98,7 @@ const makeStyles = (colors: Palette) => StyleSheet.create({
     borderColor: colors.line,
     padding: 22,
     maxHeight: '80%',
-    // M24C — the sheet keeps the phone's width even when a wide browser
+    // The sheet keeps the phone's width even when a wide browser
     // hosts the viewport (a Modal renders outside the frame on the web).
     width: '100%',
     maxWidth: 430,

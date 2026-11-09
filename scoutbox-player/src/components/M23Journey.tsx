@@ -1,12 +1,12 @@
 import { GuidanceNote } from './InformationRows';
-// M23 P8 — the player's (or guardian's) recruitment journeys: one line per
+// The player's (or guardian's) recruitment journeys: one line per
 // club, derived on the server only from records that reached this person —
 // a contact, a trial invitation, a schedule, an Offer, a signing. The stage
 // word and the next action come from GET /player/journeys; nothing here
 // derives them, and nothing here knows about a club's watchlist, its
-// priority, its decision or its assessments (§16, §58).
+// priority, its decision or its assessments.
 //
-// M24B — the same read, four views: the overview line (as before), the
+// The same read, four views: the overview line, the
 // current stage with what each club shared, the next things the person can
 // do (server next-action codes, nothing invented), and the full timeline.
 import { useCallback, useEffect, useState } from 'react';
@@ -32,10 +32,10 @@ export const CATEGORY_FOR_ACTION: Record<PlayerNextActionCode, string | null> = 
   RESPOND_TO_CONTACT: 'contact', RESPOND_TO_TRIAL_INVITATION: 'trial', CONFIRM_TRIAL_SCHEDULE: 'trial', RESPOND_TO_OFFER: 'offer', SIGN: 'signing', NONE: null,
 };
 
-export function JourneySection({ actor, view = 'overview', onGo, emptyLine }: { actor: Actor; view?: JourneyView; onGo?: (category: string) => void; /** M24F — say so when nothing is in motion instead of rendering nothing */ emptyLine?: boolean }) {
+export function JourneySection({ actor, view = 'overview', onGo, emptyLine }: { actor: Actor; view?: JourneyView; onGo?: (category: string) => void; /** Say so when nothing is in motion instead of rendering nothing */ emptyLine?: boolean }) {
   const colors = useColors();
   const [items, setItems] = useState<PlayerJourney[] | null>(null);
-  // Every return to the tab re-reads: a club may have moved while the person was elsewhere (§55).
+  // Every return to the tab re-reads: a club may have moved while the person was elsewhere.
   const [focusTick, setFocusTick] = useState(0);
   useFocusEffect(useCallback(() => { setFocusTick((x) => x + 1); }, []));
   useEffect(() => {
@@ -112,7 +112,7 @@ export function JourneySection({ actor, view = 'overview', onGo, emptyLine }: { 
       </Card></View>
     );
   }
-  // M24D — the Overview carries what the Current stage and Tasks pages
+  // The Overview carries what the Current stage and Tasks pages
   // carried: per club, the stage, what the club has shared, and the next
   // action with its "Go" where one exists.
   const todo = items.filter((j) => j.journey.nextAction.code !== 'NONE');

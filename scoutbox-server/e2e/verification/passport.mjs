@@ -1,7 +1,6 @@
-// M15 acceptance suite — Football Passport.
-// Unit fixtures for the pure engine (timeline §81, provenance §82,
-// visibility/projection §83 building blocks), then full HTTP journeys with
-// the §79 abuse catalogue: every safeguarding wall, privacy narrowing rule,
+// Football Passport battery. Unit fixtures for the pure engine (timeline,
+// provenance, visibility/projection building blocks), then full HTTP journeys
+// with the abuse catalogue: every safeguarding wall, privacy narrowing rule,
 // share re-gate and ownership boundary is negative-tested. Well over a
 // third of the checks are negative/abuse cases (the suite counts them).
 import { spawn } from 'node:child_process';
@@ -18,7 +17,7 @@ import {
   sha256, mintShareSecret, shareProblem, SHARE_MODES,
 } from '../../domains/verification/passport/shared.mjs';
 
-const PORT = pickPort(4900, 300, [0]); // TH-6: never a fetch-blocked port
+const PORT = pickPort(4900, 300, [0]); // never a fetch-blocked port
 const BASE = `http://localhost:${PORT}`;
 const DATA_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-m15-'));
 const SERVER = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'server.mjs');
@@ -63,7 +62,7 @@ async function mailWith(to, re) {
 }
 
 // ===================================================================== U1
-section('U1 — timeline engine (§81): deterministic, deduplicated, honest dates');
+section('U1 — timeline engine: deterministic, deduplicated, honest dates');
 {
   const src = {
     careerEntries: [
@@ -92,16 +91,16 @@ section('U1 — timeline engine (§81): deterministic, deduplicated, honest date
   const dup = buildTimeline({ ...src, trials: [src.trials[0], { ...src.trials[0] }] });
   neg(dup.length === tl.length, 'duplicated source row cannot create a duplicate event (canonical ids dedupe)');
   ok(tl.every((e, i) => i === 0 || tl[i - 1].when.t >= e.when.t), 'strictly reverse-chronological');
-  ok(tl.every((e) => e.id.startsWith('pev:') && e.source?.type), 'every event carries a canonical id and a source reference (§33/§34)');
+  ok(tl.every((e) => e.id.startsWith('pev:') && e.source?.type), 'every event carries a canonical id and a source reference');
   const c1join = tl.find((e) => e.id === evId('career', 'c1', 'club_joined'));
-  ok(c1join?.when.precision === 'year' && whenDisplay(c1join.when) === '2019', 'year-only input STAYS year precision — no invented month/day (§86)');
+  ok(c1join?.when.precision === 'year' && whenDisplay(c1join.when) === '2019', 'year-only input STAYS year precision — no invented month/day');
   const c1left = tl.find((e) => e.id === evId('career', 'c1', 'club_left'));
   ok(c1left?.when.precision === 'month' && whenDisplay(c1left.when) === '2021-06', 'month input stays month precision');
   ok(tl.find((e) => e.id === evId('career', 'c2', 'club_joined'))?.provenance === 'guardian_submitted', 'guardian-submitted entry carries guardian provenance');
   neg(!tl.some((e) => e.source.id === 'c3'), 'withdrawn career entry emits nothing');
   ok(tl.some((e) => e.type === 'trial_attended') && tl.some((e) => e.type === 'trial_outcome'), 'trial produces trial_* events');
-  neg(!tl.some((e) => e.type === 'club_joined' && e.source.type === 'trial'), 'a trial NEVER becomes a club_joined event (trial ≠ employment §10/§24)');
-  neg(!tl.some((e) => e.source.id === 'e3'), 'superseded evidence emits no event (supersession honoured §85)');
+  neg(!tl.some((e) => e.type === 'club_joined' && e.source.type === 'trial'), 'a trial NEVER becomes a club_joined event (trial ≠ employment)');
+  neg(!tl.some((e) => e.source.id === 'e3'), 'superseded evidence emits no event (supersession honoured)');
   neg(!tl.some((e) => e.source.id === 'e2'), 'non-footage evidence stays in the summary, not the timeline');
   ok(tl.some((e) => e.type === 'signed' && e.provenance === 'verified_club_confirmed'), 'signing event is club-confirmed');
   neg(!tl.some((e) => e.source.id === 'ach2'), 'withdrawn achievement emits nothing');
@@ -112,12 +111,12 @@ section('U1 — timeline engine (§81): deterministic, deduplicated, honest date
 }
 
 // ===================================================================== U2
-section('U2 — provenance & precedence (§8/§9/§57/§58)');
+section('U2 — provenance & precedence');
 {
   ok(provRank('player_submitted') < provRank('scoutbox_reviewed')
     && provRank('scoutbox_reviewed') < provRank('verified_club_confirmed')
     && provRank('verified_club_confirmed') < provRank('authoritative_registry'), 'provenance vocabulary is rank-ordered for precedence only');
-  ok(PROVENANCE.length === 9 && ['player_submitted', 'guardian_submitted', 'system_recorded', 'historical_migration', 'scoutbox_reviewed', 'verified_coach_confirmed', 'verified_club_confirmed', 'authoritative_registry'].every((p) => PROVENANCE.includes(p)), 'the eight M15 provenance values plus M16 box_cam_observed');
+  ok(PROVENANCE.length === 9 && ['player_submitted', 'guardian_submitted', 'system_recorded', 'historical_migration', 'scoutbox_reviewed', 'verified_coach_confirmed', 'verified_club_confirmed', 'authoritative_registry'].every((p) => PROVENANCE.includes(p)), 'the eight provenance values plus box_cam_observed');
   ok(provRank('box_cam_observed') > provRank('player_submitted')
     && provRank('box_cam_observed') > provRank('guardian_submitted')
     && provRank('box_cam_observed') < provRank('scoutbox_reviewed')
@@ -126,7 +125,7 @@ section('U2 — provenance & precedence (§8/§9/§57/§58)');
     && provenanceFromMethod('scoutbox_manual_review') === 'scoutbox_reviewed'
     && provenanceFromMethod('authoritative_registry') === 'authoritative_registry'
     && provenanceFromMethod('migration') === 'historical_migration'
-    && provenanceFromMethod('unknown_thing') === 'system_recorded', 'M14 verification methods map onto Passport provenance');
+    && provenanceFromMethod('unknown_thing') === 'system_recorded', 'verification methods map onto Passport provenance');
   ok(PROVENANCE_COPY.player_submitted.includes('has not independently confirmed'), 'player-submitted copy is honest about non-verification');
   ok(PROVENANCE_COPY.scoutbox_reviewed.includes('not an independent register check'), 'ScoutBox review copy names its own limitation');
 
@@ -136,14 +135,14 @@ section('U2 — provenance & precedence (§8/§9/§57/§58)');
   h = clubHistory({ signingRows: [mk({ endedAt: Date.UTC(2025, 0, 10) })] });
   ok(!h.rows[0].current && whenDisplay(h.rows[0].to) === '2025-01-10', 'outcome-report end date closes the period');
   h = clubHistory({ signingRows: [mk({ orgSuspended: true })] });
-  neg(!h.rows[0].current, 'a suspended organisation lends no CURRENT relationship — history preserved (§79#20)');
+  neg(!h.rows[0].current, 'a suspended organisation lends no CURRENT relationship — history preserved');
   h = clubHistory({ signingRows: [mk()], careerEntries: [{ id: 'c9', orgName: '  marsh LANE ', from: '2024', to: null, submittedBy: 'player' }] });
   ok(h.rows.length === 1 && h.foldedConflicts.length === 1 && h.foldedConflicts[0].entryId === 'c9', 'self entry duplicating an authoritative row folds into it (flagged, not duplicated)');
 
   const authRow = { key: 'k1', orgName: 'Marsh Lane', orgId: 'o9', role: null, from: normWhen('2024'), to: null, current: true, provenance: 'verified_club_confirmed', source: { type: 'signing', id: 's1' } };
   const selfRow = { key: 'k2', orgName: 'Sunday Kings', orgId: null, role: null, from: normWhen('2018'), to: null, current: true, provenance: 'player_submitted', source: { type: 'career_entry', id: 'c1' } };
   let st = currentStatus({ history: { rows: [authRow, selfRow], foldedConflicts: [] }, prefs: null });
-  ok(st.currentClub.orgName === 'Marsh Lane' && st.conflicts[0]?.code === 'CURRENT_CLUB_CONFLICT', 'authoritative current wins display; player input becomes a FLAGGED conflict, never silently discarded (§57)');
+  ok(st.currentClub.orgName === 'Marsh Lane' && st.conflicts[0]?.code === 'CURRENT_CLUB_CONFLICT', 'authoritative current wins display; player input becomes a FLAGGED conflict, never silently discarded');
   st = currentStatus({ history: { rows: [selfRow], foldedConflicts: [] }, prefs: null });
   ok(st.currentClub.orgName === 'Sunday Kings' && st.currentClub.provenance === 'player_submitted' && st.conflicts.length === 0, 'with no authoritative record, self entry displays under its own honest provenance');
 
@@ -162,11 +161,11 @@ section('U2 — provenance & precedence (§8/§9/§57/§58)');
   ok(flags.some((f) => f.kind === 'far_future' && f.eventId === 'ev2'), 'far-future event → TEMPORAL_CONFLICT flag');
   ok(flags.some((f) => f.kind === 'left_before_joined'), 'left-before-joined period flagged');
   ok(flags.some((f) => f.kind === 'overlapping_current_authoritative'), 'two authoritative current clubs flagged for review');
-  neg(flags.every((f) => f.code === 'TEMPORAL_CONFLICT'), 'impossible chronology is a correction flag — NEVER an automatic fraud accusation (§58)');
+  neg(flags.every((f) => f.code === 'TEMPORAL_CONFLICT'), 'impossible chronology is a correction flag — NEVER an automatic fraud accusation');
 }
 
 // ===================================================================== U3
-section('U3 — visibility, gaps and share primitives (§16/§14/§18)');
+section('U3 — visibility, gaps and share primitives');
 {
   neg(!viewerSees('public', 'recruitment') && !viewerSees('public', 'private') && !viewerSees('other_player', 'recruitment'), 'public/other-player viewers see ONLY public items');
   ok(viewerSees('pro_club', 'recruitment') && !viewerSees('pro_club', 'private') && !viewerSees('pro_club', 'guardian_only'), 'clubs see public+recruitment, never private/guardian layers');
@@ -177,9 +176,9 @@ section('U3 — visibility, gaps and share primitives (§16/§14/§18)');
   const good = { hasRecentFullMatch: true, fullMatchCount: 2, clipCount: 3, referenceCount: 1, hasConfirmedCurrentClub: true, hasRecentAssessment: true, hasPosition: true, hasAvailability: true, identityConfirmed: true, historyRows: 3, hasRecentTrainingEvidence: true };
   const cBad = completeness(bad); const cGood = completeness(good);
   ok(cBad.evidenceCoverage === 'limited' && cGood.evidenceCoverage === 'strong', 'coverage descriptors are words about evidence, never ability');
-  ok(cBad.eligibility.total === GAP_RULES.length && cBad.eligibility.rulesVersion === GAP_RULES_VERSION && cBad.eligibility.satisfied === 0, 'eligibility preview counts EXACTLY the versioned generic rules — never club criteria (§15/§55)');
+  ok(cBad.eligibility.total === GAP_RULES.length && cBad.eligibility.rulesVersion === GAP_RULES_VERSION && cBad.eligibility.satisfied === 0, 'eligibility preview counts EXACTLY the versioned generic rules — never club criteria');
   ok(cGood.gaps.length === 0 && evaluateGaps(bad).length === GAP_RULES.length, 'gap engine is deterministic over facts');
-  neg(!JSON.stringify(cBad).match(/"score"|rating/i), 'completeness output contains no score and no rating (§13/§36)');
+  neg(!JSON.stringify(cBad).match(/"score"|rating/i), 'completeness output contains no score and no rating');
   ok(JSON.stringify(evaluateGaps(bad)) === JSON.stringify(evaluateGaps({ ...bad })), 'same facts → same gaps (versioned, no AI)');
 
   // Projection units on a small assembled fixture.
@@ -204,11 +203,11 @@ section('U3 — visibility, gaps and share primitives (§16/§14/§18)');
   neg(!pub.timeline.some((e) => e.id === trialId), 'trial participation is NOT public by default');
   pub = projectPassport({ ...mini, prefs: { ...mini.prefs, publicSelections: [trialId, evId('assessment', 'a1', 'assessment_completed'), evId('reference', 'r1', 'reference_received')] } }, 'public');
   ok(pub.timeline.some((e) => e.id === trialId), 'explicit selection makes a public-ELIGIBLE item public (opt-in)');
-  neg(!pub.timeline.some((e) => e.type === 'assessment_completed') && !pub.timeline.some((e) => e.type === 'reference_received'), 'selecting a non-eligible item id surfaces NOTHING — selections narrow, never widen (§16/§79#23)');
+  neg(!pub.timeline.some((e) => e.type === 'assessment_completed') && !pub.timeline.some((e) => e.type === 'reference_received'), 'selecting a non-eligible item id surfaces NOTHING — selections narrow, never widen');
   const own = projectPassport(mini, 'pro_club', { orgId: 'o2' });
   const other = projectPassport(mini, 'pro_club', { orgId: 'oZ' });
   ok(own.timeline.some((e) => e.type === 'assessment_completed') && own.timeline.some((e) => e.type === 'trial_attended'), 'assessing org sees its own assessment/trial events');
-  neg(!other.timeline.some((e) => e.type === 'assessment_completed') && !other.timeline.some((e) => e.type === 'trial_attended'), 'another org NEVER sees them (own-org visibility §25/§79#13)');
+  neg(!other.timeline.some((e) => e.type === 'assessment_completed') && !other.timeline.some((e) => e.type === 'trial_attended'), 'another org NEVER sees them (own-org visibility)');
   ok(projectPassport(mini, 'self').timeline.every((e) => e.source.id) && own.timeline.every((e) => e.source.id === undefined), 'raw source ids stay with self/guardian/T&S; org viewers get the source TYPE only');
   const minorMini = { ...mini, player: { ...mini.player, age: 14, minor: true } };
   neg(projectPassport(minorMini, 'pro_club', { orgId: 'o2' }).player.location === null
@@ -244,13 +243,13 @@ section('H1 — self passport: canonical projection, honest identity, no rating'
   const r = await j('GET', '/player/football-passport', undefined, kola.token);
   ok(r.status === 200 && r.body.viewer === 'self' && r.body.passportVersion === 1, 'self passport is one server-built projection');
   ok(r.body.identity?.assurance === 'scoutbox_document_review' && r.body.identity.label === 'Identity confirmed by ScoutBox review', 'identity header states EXACTLY what ScoutBox did (a document review)');
-  neg(!JSON.stringify(r.body).includes('Government identity verified'), 'never claims government identity verification — no authoritative IDV is configured (§5A)');
-  ok(r.body.note.includes('not a rating of football ability'), 'passport self-describes as evidence+provenance, not a rating (§36)');
+  neg(!JSON.stringify(r.body).includes('Government identity verified'), 'never claims government identity verification — no authoritative IDV is configured');
+  ok(r.body.note.includes('not a rating of football ability'), 'passport self-describes as evidence+provenance, not a rating');
   ok(r.body.status.currentClub === null, 'no invented current club before any confirmed relationship');
   ok(r.body.completeness.eligibility.total === GAP_RULES.length && r.body.completeness.gaps.some((g) => g.id === 'gap.current_club_confirmed'), 'gap engine speaks in generic versioned checks');
   neg(!/"score"/.test(JSON.stringify(r.body)), 'no numeric score anywhere in the self projection');
   const forged = await j('GET', '/player/football-passport?viewer=trust_safety&orgId=org-eastport', undefined, kola.token);
-  neg(forged.body.viewer === 'self' && !('graph' in forged.body), 'viewer context comes from the SESSION — query-string viewer forging is inert (§79#9)');
+  neg(forged.body.viewer === 'self' && !('graph' in forged.body), 'viewer context comes from the SESSION — query-string viewer forging is inert');
 }
 
 section('H2 — preferences, career entries, date honesty');
@@ -261,7 +260,7 @@ let sundayKingsId;
   r = await j('PATCH', '/player/football-passport/prefs', { availability: 'open_to_trials', positions: { primary: 'ST', secondary: ['RW'] }, positionHistoryAdd: { from: '2020', primary: 'RW' } }, kola.token);
   ok(r.status === 200 && r.body.prefs.availability === 'open_to_trials', 'coarse availability + player-declared positions accepted');
   r = await j('PATCH', '/player/football-passport/prefs', { bio: 'DM me on WhatsApp 07700 900123' }, kola.token);
-  neg(r.status === 400 && r.body.error === 'MODERATION_BLOCKED', 'bio goes through the EXISTING moderation pipeline (§41)');
+  neg(r.status === 400 && r.body.error === 'MODERATION_BLOCKED', 'bio goes through the EXISTING moderation pipeline');
   r = await j('PATCH', '/player/football-passport/prefs', { bio: 'Right-footed forward developing link-up play.' }, kola.token);
   ok(r.status === 200 && r.body.prefs.bio.includes('link-up'), 'clean bio accepted');
 
@@ -278,13 +277,13 @@ let sundayKingsId;
   r = await j('POST', '/player/football-passport/career', { orgName: 'Future FC', from: '2031' }, kola.token);
   const futureId = r.body.entry.id;
   let sp = (await j('GET', '/player/football-passport', undefined, kola.token)).body;
-  ok(sp.temporalConflicts.some((f) => f.kind === 'far_future'), 'far-future entry is FLAGGED for correction, not rejected as fraud (§58)');
+  ok(sp.temporalConflicts.some((f) => f.kind === 'far_future'), 'far-future entry is FLAGGED for correction, not rejected as fraud');
   await j('POST', `/player/football-passport/career/${futureId}/withdraw`, {}, kola.token);
   sp = (await j('GET', '/player/football-passport', undefined, kola.token)).body;
   ok(!sp.temporalConflicts.some((f) => f.kind === 'far_future'), 'withdrawing the entry auto-resolves the flag');
   const joined = sp.timeline.find((e) => e.type === 'club_joined' && e.title.org === 'Sunday Kings FC');
   ok(joined?.when.display === '2018' && joined.when.precision === 'year', 'timeline renders the year AS a year');
-  // S10b: junk is refused at the route, naming the field, rather than stored.
+  // Junk is refused at the route, naming the field, rather than stored.
   r = await j('PATCH', '/player/football-passport/prefs', { positions: { primary: 'striker' } }, kola.token);
   neg(r.status === 400 && r.body.error === 'FIELD_INVALID' && r.body.field === 'positions.primary', 'a position outside the position codes is refused');
   r = await j('PATCH', '/player/football-passport/prefs', { positions: { primary: 'ST', secondary: ['RW', 'LW', 'CF', 'CAM'] } }, kola.token);
@@ -307,12 +306,12 @@ let sundayKingsId;
 section('H3 — evidence integration: projection only, no file duplication');
 {
   const r = await j('POST', '/player/evidence', { claimType: 'footage', label: 'Full match vs Harbour City U23' }, kola.token);
-  ok(r.status === 201, 'footage evidence recorded through the EXISTING M12 route');
+  ok(r.status === 201, 'footage evidence recorded through the EXISTING route');
   const sp = (await j('GET', '/player/football-passport', undefined, kola.token)).body;
   ok(sp.evidence.fullMatches === 1 && sp.evidence.note.includes('not football ability'), 'evidence summary counts coverage, disclaims ability');
   const ev = sp.timeline.find((e) => e.type === 'evidence_added');
   ok(ev?.provenance === 'player_submitted' && ev.provenanceCopy.includes('has not independently confirmed'), 'self-reported footage says so');
-  neg(!JSON.stringify(sp.timeline).match(/mediaIds|\/media\/|dataUrl/), 'timeline carries NO media ids and NO file URLs — files stay in their source system (§12, §79#14/#15)');
+  neg(!JSON.stringify(sp.timeline).match(/mediaIds|\/media\/|dataUrl/), 'timeline carries NO media ids and NO file URLs — files stay in their source system');
 }
 
 section('H4 — trials: own-org only, never employment');
@@ -322,10 +321,10 @@ let eastportName;
   ok(r.status === 201 && r.body.routedTo === 'player', 'trial requested through the existing flow');
   r = await j('POST', `/player/requests/${r.body.requestId}/respond`, { accept: true, chosenSlot: '2026-10-01' }, kola.token);
   ok(r.status === 200, 'player accepts — a trial record now exists');
-  // M23 P4B (D-14): the Passport keys `trial_attended` on RECORDED attendance,
+  // The Passport keys `trial_attended` on RECORDED attendance,
   // never on acceptance. Accepted-but-not-attended is not shown as attended.
   const spAccepted = (await j('GET', '/player/football-passport', undefined, kola.token)).body;
-  neg(!spAccepted.timeline.some((e) => e.type === 'trial_attended'), 'an accepted trial with no attendance recorded is NOT a trial_attended event (P4B D-14)');
+  neg(!spAccepted.timeline.some((e) => e.type === 'trial_attended'), 'an accepted trial with no attendance recorded is NOT a trial_attended event');
   {
     const trialId = r.body.trialId;
     const rm = await j('POST', '/org/rooms', { playerId: 'pl-adeyemi', sourceContext: 'search' }, maria.token);
@@ -341,12 +340,12 @@ let eastportName;
   }
   const sp = (await j('GET', '/player/football-passport', undefined, kola.token)).body;
   ok(sp.timeline.some((e) => e.type === 'trial_attended' && e.legacy === false), 'self timeline shows the trial once attendance is recorded');
-  neg(!sp.clubHistory.some((x) => /eastport/i.test(x.orgName ?? '')), 'the trial creates NO club-history row — a trial is never employment (§10)');
+  neg(!sp.clubHistory.some((x) => /eastport/i.test(x.orgName ?? '')), 'the trial creates NO club-history row — a trial is never employment');
   const mine = await j('GET', '/org/players/pl-adeyemi/football-passport', undefined, maria.token);
   eastportName = mine.body.status?.currentClub?.orgName ?? null; // still null here; org name captured later
   ok(mine.status === 200 && mine.body.trials.length === 1, 'trialling org sees its own trial in the recruitment passport');
   const theirs = await j('GET', '/org/players/pl-adeyemi/football-passport', undefined, ruth.token);
-  neg(theirs.status === 200 && theirs.body.trials.length === 0 && !theirs.body.timeline.some((e) => e.type === 'trial_attended'), "another org sees NEITHER the trial list NOR trial events (§24, §79#13)");
+  neg(theirs.status === 200 && theirs.body.trials.length === 0 && !theirs.body.timeline.some((e) => e.type === 'trial_attended'), "another org sees NEITHER the trial list NOR trial events");
 }
 
 section('H5 — assessments: own-org privacy, notes never travel');
@@ -364,20 +363,20 @@ section('H5 — assessments: own-org privacy, notes never travel');
   const mine = await j('GET', '/org/players/pl-adeyemi/football-passport', undefined, maria.token);
   ok(mine.body.assessments.length === 1 && mine.body.assessments[0].state === 'submitted', 'assessing org sees its own assessment existence');
   const theirs = await j('GET', '/org/players/pl-adeyemi/football-passport', undefined, ruth.token);
-  neg(theirs.body.assessments.length === 0 && !theirs.body.timeline.some((e) => e.type === 'assessment_completed'), "org B never sees org A's assessment (§25, §79#13)");
+  neg(theirs.body.assessments.length === 0 && !theirs.body.timeline.some((e) => e.type === 'assessment_completed'), "org B never sees org A's assessment");
   const sp = (await j('GET', '/player/football-passport', undefined, kola.token)).body;
   neg(!JSON.stringify(sp).includes('Track for six months'), 'raw scout reasoning never reaches the player through the Passport');
   neg(!JSON.stringify(theirs.body).includes('Track for six months'), 'raw scout reasoning never reaches other orgs either');
 }
 
-section('H6 — coach reference: snapshot provenance survives departure (§26/§23)');
+section('H6 — coach reference: snapshot provenance survives departure');
 {
   const aff = await j('POST', '/org/verification/affiliation', { role: 'Coach' }, sam.token);
   await j('POST', '/org/verification/work-email', { email: 'sam.cole@eastportfc.com' }, sam.token);
   const code = await mailWith('sam.cole@eastportfc.com', /code is ([A-Za-z0-9_-]{8,})/);
   await j('POST', '/org/verification/work-email/confirm', { code }, sam.token);
   let r = await j('POST', `/org/verification/requests/${aff.body.affiliation.id}/decide`, { action: 'confirm' }, maria.token);
-  ok(r.status === 200, 'coach affiliation verified (M14 flow)');
+  ok(r.status === 200, 'coach affiliation verified');
   r = await j('POST', '/org/verification/references', { playerId: 'pl-adeyemi', relationship: 'Head coach, two seasons', capacity: 'U23s', fromYear: 2023, toYear: 2025, strengths: 'Pressing triggers', development: 'Weak-foot delivery', summary: 'Reliable, coachable forward.' }, sam.token);
   ok(r.status === 201, 'verified coach submits a structured reference');
   let sp = (await j('GET', '/player/football-passport', undefined, kola.token)).body;
@@ -385,15 +384,15 @@ section('H6 — coach reference: snapshot provenance survives departure (§26/§
   r = await j('POST', `/org/verification/staff/${sam.userId}/departed`, {}, maria.token);
   ok(r.status === 200, 'coach recorded as departed');
   sp = (await j('GET', '/player/football-passport', undefined, kola.token)).body;
-  ok(sp.references[0]?.provenanceCopy === 'Coach affiliation was verified when this reference was submitted.', 'after departure the SNAPSHOT copy displays — the historical truth is never rewritten (§23/§85)');
+  ok(sp.references[0]?.provenanceCopy === 'Coach affiliation was verified when this reference was submitted.', 'after departure the SNAPSHOT copy displays — the historical truth is never rewritten');
   ok(sp.timeline.some((e) => e.type === 'reference_received' && e.provenance === 'verified_coach_confirmed'), 'reference event keeps coach-confirmed provenance');
 }
 
-section('H7 — conflict engine over HTTP: confirmed club vs player claim (§57)');
+section('H7 — conflict engine over HTTP: confirmed club vs player claim');
 {
   const inv = await j('POST', '/org/verification/player-invites', { name: 'Kola Adeyemi', playerId: 'pl-adeyemi' }, maria.token);
   const r = await j('POST', '/player/invites/accept', { code: inv.body.code }, kola.token);
-  ok(r.status === 200, 'player accepts the club squad invitation (M14 flow)');
+  ok(r.status === 200, 'player accepts the club squad invitation');
   const sp = (await j('GET', '/player/football-passport', undefined, kola.token)).body;
   eastportName = sp.status.currentClub?.orgName;
   ok(!!eastportName && sp.status.currentClub.provenance === 'verified_club_confirmed', 'confirmed relationship becomes the displayed current club');
@@ -404,16 +403,16 @@ section('H7 — conflict engine over HTTP: confirmed club vs player claim (§57)
   const fold = await j('POST', '/player/football-passport/career', { orgName: eastportName, from: '2024' }, kola.token);
   ok(fold.status === 201, 'player also logs the same club as a career entry');
   const sp2 = (await j('GET', '/player/football-passport', undefined, kola.token)).body;
-  ok(sp2.foldedConflicts.length >= 1 && sp2.clubHistory.filter((x) => x.orgName === eastportName).length === 1, 'duplicate self entry folds into the authoritative row — one row, flagged fold (§10)');
+  ok(sp2.foldedConflicts.length >= 1 && sp2.clubHistory.filter((x) => x.orgName === eastportName).length === 1, 'duplicate self entry folds into the authoritative row — one row, flagged fold');
 }
 
-section('H8 — achievements: forged provenance inert, confirmation upgrades (§27/§56)');
+section('H8 — achievements: forged provenance inert, confirmation upgrades');
 let confirmedAchEvId;
 {
   let r = await j('POST', '/player/football-passport/achievements', {}, kola.token);
   neg(r.status === 400 && r.body.error === 'TITLE_REQUIRED', 'empty achievement refused');
   r = await j('POST', '/player/football-passport/achievements', { title: 'County Cup Winner 2024', when: '2024', provenance: 'verified_club_confirmed', confirmation: { provenance: 'authoritative_registry', orgName: 'FA' } }, kola.token);
-  neg(r.status === 201 && r.body.provenance === 'player_submitted' && r.body.achievement.confirmation === null, 'client-asserted provenance/confirmation is IGNORED — new achievements are player-submitted (§79#16)');
+  neg(r.status === 201 && r.body.provenance === 'player_submitted' && r.body.achievement.confirmation === null, 'client-asserted provenance/confirmation is IGNORED — new achievements are player-submitted');
   const achId = r.body.achievement.id;
   confirmedAchEvId = evId('achievement', achId, 'achievement');
   r = await j('POST', '/player/football-passport/achievements', { title: "Players' Player 2023", when: '2023' }, kola.token);
@@ -425,12 +424,12 @@ let confirmedAchEvId;
   r = await j('POST', `/org/players/pl-adeyemi/football-passport/achievements/${achId}/confirm`, {}, maria.token);
   neg(r.status === 409, 'double confirmation conflicts');
   r = await j('POST', `/player/football-passport/achievements/${achId}/withdraw`, {}, kola.token);
-  neg(r.status === 403 && r.body.error === 'CONFIRMED_RECORD', 'a CONFIRMED achievement cannot be deleted by the player — corrections instead (§21, §79#10)');
+  neg(r.status === 403 && r.body.error === 'CONFIRMED_RECORD', 'a CONFIRMED achievement cannot be deleted by the player — corrections instead');
   r = await j('POST', `/player/football-passport/achievements/${ach2}/withdraw`, {}, kola.token);
   ok(r.status === 200, 'an unconfirmed self achievement remains withdrawable');
 }
 
-section('H9 — corrections: dispute flow, never direct edits (§22)');
+section('H9 — corrections: dispute flow, never direct edits');
 {
   let r = await j('POST', '/player/football-passport/corrections', { targetType: 'weird' }, kola.token);
   neg(r.status === 400 && r.body.error === 'TARGET_INVALID', 'unknown correction target refused');
@@ -440,7 +439,7 @@ section('H9 — corrections: dispute flow, never direct edits (§22)');
   ok(r.status === 201 && r.body.note.includes('never silently edited'), 'correction filed — the record itself is untouched');
   const corrId = r.body.correction.id;
   r = await j('POST', `/player/football-passport/career/${corrId}/withdraw`, {}, kola.token);
-  neg(r.status === 404, 'withdraw route only reaches OWN career entries — other records are out of scope (§79#11)');
+  neg(r.status === 404, 'withdraw route only reaches OWN career entries — other records are out of scope');
   let list = await j('GET', '/admin/passport/corrections', undefined, null, A);
   ok(list.body.items.some((c) => c.id === corrId), 'T&S queue lists the open correction');
   ok(list.body.nextCursor === null, 'the queue is paged by cursor and this is its only page');
@@ -456,12 +455,11 @@ section('H9 — corrections: dispute flow, never direct edits (§22)');
 section('H10 — representation (adults only) + signing');
 let signingDone = false;
 {
-  // M23 P5.6E: the representation HEADLINE on the Passport now comes from the
-  // canonical P5.6B lane, so the fixture builds a canonical relationship — a
-  // named licensed agent requests and the client confirms. The legacy F10
-  // writer is closed (E-1) and is asserted closed below.
+  // The representation HEADLINE on the Passport comes from the canonical agent
+  // lane, so the fixture builds a canonical relationship — a named licensed agent
+  // requests and the client confirms. The legacy writer is asserted closed below.
   const closed = await j('POST', '/org/representation/propose', { playerId: 'pl-adeyemi', scope: 'contracts_only' }, alex.token);
-  neg(closed.status === 404, 'the legacy representation writer is gone (P5.6E E-1, removed in S11a)');
+  neg(closed.status === 404, 'the legacy representation writer is gone');
   await j('POST', '/org/agent/agency/team', { name: 'Ana Agent', tiers: ['licensed_agent'] }, alex.token);
   const ana = await login('org-northstar', 'Ana Agent', 'Agent', 'agent');
   await j('POST', '/org/agent/profile', { displayName: 'Ana Agent', jurisdictions: ['ENG'] }, ana.token);
@@ -481,7 +479,7 @@ let signingDone = false;
   neg(r.status === 403 && r.body.error === 'NOT_YOUR_CHILD', "a guardian cannot open an unrelated adult's passport");
 }
 
-section('H11 — public selections + public share (§17/§18/§46)');
+section('H11 — public selections + public share');
 let kolaPublicUrl;
 {
   const sp = (await j('GET', '/player/football-passport', undefined, kola.token)).body;
@@ -491,7 +489,7 @@ let kolaPublicUrl;
   let r = await j('PATCH', '/player/football-passport/prefs', { publicSelections: [trialEv, confirmedAchEvId, refEv, assEv, 'hist:Sunday Kings FC'] }, kola.token);
   ok(r.status === 200, 'player selects what may go public (including two ids that are NOT public-eligible)');
   r = await j('POST', '/player/football-passport/shares', { mode: 'public', expiresDays: 365 }, kola.token);
-  neg(r.status === 400 && r.body.field === 'expiresDays', 'a share lifetime outside 1–90 days is refused, not clamped (S10b)');
+  neg(r.status === 400 && r.body.field === 'expiresDays', 'a share lifetime outside 1–90 days is refused, not clamped');
   r = await j('POST', '/player/football-passport/shares', { mode: 'public', expiresDays: 30 }, kola.token);
   ok(r.status === 201 && r.body.url.startsWith('/passport/shared/') && !JSON.stringify(r.body.share).match(/tokenHash|[a-f0-9]{64}/), 'share minted — the secret appears ONCE, never the stored hash');
   kolaPublicUrl = r.body.url;
@@ -499,40 +497,40 @@ let kolaPublicUrl;
   ok(pub.status === 200 && pub.body.viewer === 'public', 'anonymous link resolves to the SAFE PUBLIC projection');
   ok(typeof pub.body.player.age === 'number', 'public shows age…');
   const raw = JSON.stringify(pub.body);
-  neg(!raw.includes('"dob"'), '…never the raw date of birth (§17/§87)');
+  neg(!raw.includes('"dob"'), '…never the raw date of birth');
   neg(!/guardian/i.test(raw), 'no guardian details in the public passport');
-  neg(!raw.match(/mediaIds|\/media\/|dataUrl/), 'no media URLs or file references leak publicly (§79#21/#22)');
+  neg(!raw.match(/mediaIds|\/media\/|dataUrl/), 'no media URLs or file references leak publicly');
   neg(!raw.includes('Track for six months') && !pub.body.timeline.some((e) => e.type === 'assessment_completed'), 'no assessments and no scout reasoning publicly');
   neg(!pub.body.timeline.some((e) => e.type === 'reference_received'), 'selecting a reference id did NOT make it public (not public-eligible)');
   ok(pub.body.timeline.some((e) => e.type === 'trial_attended'), 'the explicitly selected trial participation IS public (opt-in)');
   ok(pub.body.achievements.some((a) => a.title.includes('County Cup') && a.provenance === 'verified_club_confirmed'), 'selected CONFIRMED achievement is public with its provenance');
   ok(pub.body.status.currentClub?.orgName === eastportName && Object.keys(pub.body.status).join(',') === 'currentClub', 'public status card = confirmed current club, nothing else');
   ok(pub.body.clubHistory.some((x) => x.orgName === 'Sunday Kings FC' && x.provenance === 'player_submitted'), 'opted-in self history row appears publicly WITH its honest provenance');
-  neg(!raw.includes('agencyName'), 'representation never appears publicly (§17)');
+  neg(!raw.includes('agencyName'), 'representation never appears publicly');
   const shares = await j('GET', '/player/football-passport/shares', undefined, kola.token);
   ok(shares.body.items.length >= 1 && shares.body.items[0].views >= 1, 'player sees their shares and view counts');
 }
 
-section('H12 — recruitment share re-runs every gate; blocks hold (§20/§50)');
+section('H12 — recruitment share re-runs every gate; blocks hold');
 let kolaRecSecret;
 {
   let r = await j('POST', '/player/football-passport/shares', { mode: 'recruitment' }, kola.token);
   kolaRecSecret = r.body.url.split('/').pop();
   const anon = await j('GET', `/passport/shared/${kolaRecSecret}`);
-  neg(anon.status === 404, 'a recruitment link resolves NOWHERE anonymously (mode concealment, §79#24)');
+  neg(anon.status === 404, 'a recruitment link resolves NOWHERE anonymously (mode concealment)');
   r = await j('GET', `/org/passport/shared/${kolaRecSecret}`, undefined, alex.token);
   ok(r.status === 200 && r.body.viewer === 'agency' && r.body.shareMode === 'recruitment', 'authenticated agency opens the recruitment share for an ADULT');
   r = await j('GET', `/org/passport/shared/${kolaRecSecret}?viewer=self&orgId=org-eastport`, undefined, ruth.token);
-  neg(r.status === 200 && r.body.viewer === 'pro_club', 'query-string viewer/org forging on a share is inert — session decides (§79#25)');
+  neg(r.status === 200 && r.body.viewer === 'pro_club', 'query-string viewer/org forging on a share is inert — session decides');
   r = await j('POST', '/player/block', { orgId: 'org-harbour' }, kola.token);
   ok(r.status === 201, 'player blocks Harbour (existing route)');
   r = await j('GET', '/org/players/pl-adeyemi/football-passport', undefined, ruth.token);
-  neg(r.status === 403 && r.body.error === 'NOT_VISIBLE', 'blocked org loses the recruitment passport instantly (§79#4)');
+  neg(r.status === 403 && r.body.error === 'NOT_VISIBLE', 'blocked org loses the recruitment passport instantly');
   r = await j('GET', `/org/passport/shared/${kolaRecSecret}`, undefined, ruth.token);
   neg(r.status === 403, 'the share link does NOT bypass the block — it locates, it never authorises');
 }
 
-section('H13 — minors: guardian control, agency wall, radius, redaction (§38–§40)');
+section('H13 — minors: guardian control, agency wall, radius, redaction');
 {
   let r = await j('GET', '/guardian/children/pl-guni/football-passport', undefined, amara.token);
   ok(r.status === 200 && r.body.viewer === 'guardian' && r.body.identity?.assurance === 'scoutbox_document_review', "guardian sees the child's full passport");
@@ -541,16 +539,16 @@ section('H13 — minors: guardian control, agency wall, radius, redaction (§38�
   r = await j('GET', '/guardian/children/pl-guni/football-passport', undefined, amara.token);
   ok(r.body.temporalConflicts.some((f) => f.kind === 'before_dob'), 'an entry before the child was born is flagged for correction, not silently accepted');
   r = await j('POST', '/player/football-passport/shares', { mode: 'public' }, guni.token);
-  neg(r.status === 403 && r.body.error === 'GUARDIAN_MANAGED', "a minor cannot mint share links — sharing is guardian-controlled (§18, §79#12)");
+  neg(r.status === 403 && r.body.error === 'GUARDIAN_MANAGED', "a minor cannot mint share links — sharing is guardian-controlled");
   r = await j('GET', '/org/players/pl-guni/football-passport', undefined, alex.token);
-  neg(r.status === 403 && r.body.error === 'UNDER_18_WALL', 'agency NEVER reaches a minor passport (§40, §79#1)');
+  neg(r.status === 403 && r.body.error === 'UNDER_18_WALL', 'agency NEVER reaches a minor passport');
   r = await j('GET', '/org/players/pl-guni/football-passport', undefined, ruth.token);
-  neg(r.status === 403 && r.body.error === 'NOT_VISIBLE', 'unverified club never reaches a minor passport (§79#2)');
+  neg(r.status === 403 && r.body.error === 'NOT_VISIBLE', 'unverified club never reaches a minor passport');
   r = await j('GET', '/org/players/pl-guni/football-passport', undefined, dee.token);
   ok(r.status === 200 && r.body.viewer === 'grassroots_club', 'verified LOCAL grassroots club sees the minor (standing rule, unchanged)');
   neg(r.body.player.location === null && !JSON.stringify(r.body).includes('"dob"'), "minor's location and DOB are stripped from every org view");
   r = await j('GET', '/org/players/pl-adeyemi/football-passport', undefined, dee.token);
-  neg(r.status === 403, 'the 50 km grassroots radius holds for passports too (§39, §79#3)');
+  neg(r.status === 403, 'the 50 km grassroots radius holds for passports too');
   r = await j('GET', '/org/players/pl-guni/football-passport', undefined, maria.token);
   ok(r.status === 200 && r.body.player.location === null, 'verified pro club sees the minor — still without location');
 
@@ -559,7 +557,7 @@ section('H13 — minors: guardian control, agency wall, radius, redaction (§38�
   r = await j('POST', '/guardian/children/pl-guni/football-passport/shares', { mode: 'recruitment' }, amara.token);
   const guniRec = r.body.url.split('/').pop();
   r = await j('GET', `/org/passport/shared/${guniRec}`, undefined, alex.token);
-  neg(r.status === 403 && r.body.error === 'UNDER_18_WALL', 'a guardian-minted share still NEVER opens a minor to an agency (§79#7)');
+  neg(r.status === 403 && r.body.error === 'UNDER_18_WALL', 'a guardian-minted share still NEVER opens a minor to an agency');
   r = await j('GET', `/org/passport/shared/${guniRec}`, undefined, ruth.token);
   neg(r.status === 403, 'nor to an unverified club');
   r = await j('GET', `/org/passport/shared/${guniRec}`, undefined, dee.token);
@@ -575,10 +573,10 @@ section('H13 — minors: guardian control, agency wall, radius, redaction (§38�
   ok(r.status === 200, 'guardian revokes');
   const revoked = await j('GET', guniPub);
   const bogus = await j('GET', '/passport/shared/definitely-not-a-real-token-000');
-  neg(revoked.status === 404 && bogus.status === 404 && JSON.stringify(revoked.body) === JSON.stringify(bogus.body), 'revoked link is INDISTINGUISHABLE from an unknown token (§79#6)');
+  neg(revoked.status === 404 && bogus.status === 404 && JSON.stringify(revoked.body) === JSON.stringify(bogus.body), 'revoked link is INDISTINGUISHABLE from an unknown token');
 }
 
-section('H14 — suspended organisation lends no current relationship (§79#20)');
+section('H14 — suspended organisation lends no current relationship');
 {
   await j('POST', '/admin/clubs/org-eastport/verification', { suspended: true }, null, A);
   let sp = (await j('GET', '/player/football-passport', undefined, kola.token)).body;
@@ -592,7 +590,7 @@ section('H14 — suspended organisation lends no current relationship (§79#20)'
   ok(sp.status.currentClub?.orgName === eastportName && sp.status.currentClub.provenance === 'verified_club_confirmed', 'lifting the suspension restores the confirmed current club — nothing was destroyed');
 }
 
-section('H15 — batch summaries: light, gated, measured (§62/§63/§84)');
+section('H15 — batch summaries: light, gated, measured');
 {
   const seedIds = ['pl-adeyemi', 'pl-carvalho', 'pl-okafor', 'pl-svensson', 'pl-martin', 'pl-tanaka', 'pl-alvarez', 'pl-nowak', 'pl-mensah', 'pl-kim', 'pl-guni', 'pl-imani', 'pl-tomasz', 'pl-osei', 'pl-fake'];
   const t0 = Date.now();
@@ -609,7 +607,7 @@ section('H15 — batch summaries: light, gated, measured (§62/§63/§84)');
   neg(!r.body.items.some((i) => ['pl-guni', 'pl-tomasz'].includes(i.playerId)), 'agency batch NEVER contains minors — same wall, no error leak');
 }
 
-section('H16 — deletion: shares die with the subject (§79#19/§89)');
+section('H16 — deletion: shares die with the subject');
 {
   const signup = await j('POST', '/auth/player/signup', { name: 'Bob Forward', dob: '1995-05-05', country: 'GB', position: 'ST', password: 'longenough1' });
   const bob = signup.body?.token ? signup.body : (await j('POST', '/auth/player/login', { playerId: signup.body.playerId })).body;
@@ -620,30 +618,30 @@ section('H16 — deletion: shares die with the subject (§79#19/§89)');
   r = await j('GET', bobUrl);
   ok(r.status === 200 && r.body.player.name === 'Bob Forward', "Bob's token resolves to Bob");
   const crossed = await j('GET', `${bobUrl}?playerId=pl-adeyemi&viewer=self`);
-  neg(crossed.body.player.id === r.body.player.id && crossed.body.viewer === 'public', "token A can never be steered to player B or a wider view (§79#8)");
+  neg(crossed.body.player.id === r.body.player.id && crossed.body.viewer === 'public', "token A can never be steered to player B or a wider view");
   r = await j('DELETE', '/player/account', undefined, guni.token);
   neg(r.status === 403 && r.body.error === 'GUARDIAN_MANAGED', 'a minor cannot delete the account (existing guardian-managed rule)');
   r = await j('DELETE', '/player/account', undefined, bob.token);
   ok(r.status === 200, 'adult deletes their account (existing route)');
   const gone = await j('GET', bobUrl);
   const bogus = await j('GET', '/passport/shared/also-not-a-token-1234567890');
-  neg(gone.status === 404 && JSON.stringify(gone.body) === JSON.stringify(bogus.body), "a removed subject's share is dead AND indistinguishable from unknown (§79#19)");
+  neg(gone.status === 404 && JSON.stringify(gone.body) === JSON.stringify(bogus.body), "a removed subject's share is dead AND indistinguishable from unknown");
 }
 
-section('H17 — audit + metrics honesty (§51/§52/§64)');
+section('H17 — audit + metrics honesty');
 {
   const ledger = await j('GET', '/org/ledger', undefined, maria.token);
   ok(ledger.body.items.some((l) => l.type === 'passport_recruitment_view' && l.playerId === 'pl-adeyemi'), 'recruitment passport views land in the existing ledger');
   const m = await j('GET', '/admin/metrics', undefined, null, A);
   const p = m.body.passport;
   ok(p && p.views_self > 0 && p.views_recruitment > 0 && p.share_created >= 4 && p.share_opened_public > 0 && p.correction_filed > 0 && p.achievement_confirmed > 0, 'passport product metrics count events');
-  neg(!JSON.stringify(p).includes('pl-') && Object.values(p).every((v) => typeof v === 'number'), 'metrics are pure counters — no player ids, no recruiter identities (§51/§52)');
+  neg(!JSON.stringify(p).includes('pl-') && Object.values(p).every((v) => typeof v === 'number'), 'metrics are pure counters — no player ids, no recruiter identities');
   const sp = (await j('GET', '/player/football-passport', undefined, kola.token)).body;
   neg(!JSON.stringify(sp).match(/scoutName|Maria Keane|Ruth Vane/), 'the player never learns WHICH scout viewed them through the Passport');
 }
 
 // Token enumeration LAST — it deliberately exhausts the per-IP rate window.
-section('H18 — share token enumeration hits the rate limit (§79#5)');
+section('H18 — share token enumeration hits the rate limit');
 {
   const statuses = [];
   for (let i = 0; i < 40; i++) {

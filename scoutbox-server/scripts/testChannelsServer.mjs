@@ -1,5 +1,5 @@
 // Message threads through the REAL server (server.mjs booted as a child process on temporary data directories,
-// synthetic seed records only; S7d, explicit since S14c): both acceptance paths (an adult player accepts; a guardian
+// synthetic seed records only): both acceptance paths (an adult player accepts; a guardian
 // accepts for a minor), messages from all three sender kinds, both attachment shapes, the duplicate-clientMsgId
 // answer, the three read-receipt routes, typing, the per-audience views (the player's and the guardian's carry no
 // orgId/guardianId; the org's carries orgId; the admin's both), the export, the SSE lookup, the blocked-organisation
@@ -55,11 +55,11 @@ async function boot(dir, env = {}, server = SERVER) {
 const snap = (dir, fn) => { const s = new DatabaseSync(path.join(dir, 'scoutbox.db'), { readOnly: true }); try { s.exec('BEGIN'); try { return fn({ get: (sql, ...p) => { const r = s.prepare(sql).get(...p); return r ? { ...r } : r; }, all: (sql, ...p) => s.prepare(sql).all(...p).map((r) => ({ ...r })) }); } finally { s.exec('COMMIT'); } } finally { s.close(); } };
 const q1 = (dir, sql, ...p) => snap(dir, (c) => c.get(sql, ...p));
 const live = (dir) => !!q1(dir, 'SELECT 1 AS one FROM data_migrations WHERE id = ?', MIGRATION);
-/** Whether the file still has the retired blob table (dropped by migration 0039, S14a). */
+/** Whether the file still has the retired blob table (dropped by migration 0039). */
 const hasBlobTable = (dir) => !!q1(dir, "SELECT 1 AS one FROM sqlite_master WHERE type = 'table' AND name = 'collections'");
-// S6b: the ledger is a table since 0013 — read in the writer's literal through the repository's own reader.
+// The ledger, read in the writer's literal through the repository's own reader.
 const ledgerRows = (dir) => { const s = new DatabaseSync(path.join(dir, 'scoutbox.db'), { readOnly: true }); try { return createSafetyAuditRepository({ sqlite: s }).exportAll().ledger ?? []; } finally { s.close(); } };
-// S8a: the requests are rows of recruitment_requests since 0015 — read the columns the assertions need.
+// The requests: the recruitment_requests columns the assertions need.
 const requestRows = (c) => c.all('SELECT id, status, contact_channel_id AS contactChannel FROM recruitment_requests ORDER BY rowid');
 const requestsOf = (dir) => snap(dir, (c) => requestRows(c) ?? []);
 const attachmentOf = (r) => (r.kind === 'clip' ? { kind: 'clip', mediaId: r.media_id, title: r.title, url: r.url, verifiedClip: r.verified_clip === 1 } : { kind: 'trial_report', reportId: r.report_id, orgName: r.org_name, summary: r.summary });
@@ -85,7 +85,7 @@ const readStored = (c) => {
 };
 const stored = (dir) => snap(dir, readStored);
 const storedIds = (dir) => stored(dir).map((c) => [c.id, c.messages.map((m) => m.id)]);
-/** S14c: the admin audit and the org's list page most recently active first; the first page, put in insertion order to compare with the file. */
+/** The admin audit and the org's list page most recently active first; the first page, put in insertion order to compare with the file. */
 const inStoredOrder = (dir, items) => { const order = stored(dir).map((c) => c.id); return [...items].sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id)); };
 const adminAudit = async (S) => { const r = await S.j('GET', '/admin/channels', undefined, null, A); assert.equal(r.status, 200, r.text); assert.equal(r.body.nextCursor, null); return inStoredOrder(S.dir, r.body.items); };
 
@@ -119,7 +119,7 @@ async function stream(S, token) {
   return { frames, close: () => ctrl.abort() };
 }
 
-// ============================================================= [compat] the behaviour the storage move must preserve
+// ============================================================= [compat] the routes' behaviour
 await test('[compat] both acceptance paths, all three sender kinds, both attachment shapes, the duplicate clientMsgId, the three receipt routes, typing, the per-audience views, the export and the admin audit: a contact request accepted by the ADULT player opens a player thread; one for the MINOR is routed to the guardian and opens a guardian thread; the org, the player and the guardian each post (sender kind, id and composed name as before); a clip attachment of the player\'s media and a filed trial report attach in their two shapes; a retried send with the same clientMsgId answers 201 with the SAME stored message and stores it once; receipts stamp readBy.org / readBy.counterparty and answer { readBy }; the player\'s and the guardian\'s views carry neither orgId nor guardianId, the org\'s carries orgId, the admin audit carries both; the stored threads equal the views in order and content; a restart serves the same', async () => {
   const dir = tempDir('s7d-compat'); let S = await boot(dir);
   const maria = await orgLogin(S); let kola = await playerLogin(S, 'pl-adeyemi'); const amara = await guardianLogin(S, 'gd-amara');
@@ -129,7 +129,7 @@ await test('[compat] both acceptance paths, all three sender kinds, both attachm
   assert.equal(Object.hasOwn(adult, 'orgId'), false, 'the player\'s view holds no orgId'); assert.equal(Object.hasOwn(adult, 'guardianId'), false, 'nor a guardianId');
   const { requestId: reqG, channel: guardian } = await guardianThread(S, maria, amara);
   assert.equal(guardian.counterparty, 'guardian'); assert.equal(guardian.playerId, 'pl-guni'); assert.equal(Object.hasOwn(guardian, 'orgId'), false); assert.equal(Object.hasOwn(guardian, 'guardianId'), false, 'the guardian\'s view holds no guardianId either');
-  // The thread and the request's answer are durable together (the acceptance route's one save).
+  // The thread and the request's answer are durable together (the acceptance route's one unit).
   const st = snap(dir, (c) => ({ threads: readStored(c), requests: requestRows(c) }));
   assert.deepEqual(st.threads.map((c) => [c.id, c.requestId, c.playerId, c.orgId, c.counterparty, c.guardianId]), [[adult.id, reqA, 'pl-adeyemi', 'org-eastport', 'player', null], [guardian.id, reqG, 'pl-guni', 'org-eastport', 'guardian', 'gd-amara']], 'stored in insertion order with the ids the views withhold');
   assert.deepEqual(st.requests.filter((r) => [reqA, reqG].includes(r.id)).map((r) => [r.status, r.contactChannel]), [['accepted', adult.id], ['accepted', guardian.id]], 'the request\'s status and contactChannel in the same committed state');
@@ -241,13 +241,13 @@ await test('[compat] account deletion reproduces today\'s behaviour (D-B, as app
   await S.stop(); rm(dir);
 });
 
-// ============================================================= [cutover] the tables, the save points, the crash windows
+// ============================================================= [cutover] the tables, the durable points, the crash windows
 await test('[cutover] the cutover and the save points: a fresh boot records 0012_channels after 0011 and creates channels, messages and message_attachments and the file has no blob table (the data layer reports the domain); the thread opened by an acceptance is committed with the request\'s answer and survives a SIGKILL right after the response; a message is in the file before the sender hears 201 (SIGKILL right after); a message whose unit fails at the REAL COMMIT (internal:unit.sqlite_commit) is answered 500 and leaves no message and no ledger row, and the retry lands once at the next position; a receipt is in the file when its route answers', async () => {
   const dir = tempDir('s7d-cutover'); let S = await boot(dir, { M13_FAST_RETRY: '' });
-  assert.ok(live(dir), 'the boot recorded 0012'); // fails on b67bce5: no such record
-  assert.deepEqual(snap(dir, (c) => c.all('SELECT id FROM data_migrations ORDER BY applied_at, id').map((r) => r.id).filter((id) => id < '0019').slice(-8)), ['0011_outbox_push', MIGRATION, '0013_safety_audit', '0014_player_erasure', '0015_recruitment', '0016_recruitment_cases', '0017_recruitment_contacts_offers', '0018_signings_follow_ups']); // S6b: 0013 follows on the same boot; S4b-R, S8a, S8b and S8c after it
+  assert.ok(live(dir), 'the boot recorded 0012');
+  assert.deepEqual(snap(dir, (c) => c.all('SELECT id FROM data_migrations ORDER BY applied_at, id').map((r) => r.id).filter((id) => id < '0019').slice(-8)), ['0011_outbox_push', MIGRATION, '0013_safety_audit', '0014_player_erasure', '0015_recruitment', '0016_recruitment_cases', '0017_recruitment_contacts_offers', '0018_signings_follow_ups']); // 0013–0018 follow on the same boot
   for (const t of ['channels', 'messages', 'message_attachments']) assert.ok(q1(dir, "SELECT 1 AS one FROM sqlite_master WHERE type = 'table' AND name = ?", t), `${t} exists`);
-  assert.equal(hasBlobTable(dir), false, 'no blob table (rewritten in S14a)');
+  assert.equal(hasBlobTable(dir), false, 'no blob table');
   const cap = (await S.j('GET', '/capabilities')).body; const domains = cap?.persistence?.dataLayer?.domains ?? cap?.dataLayer?.domains ?? {}; assert.ok(domains.channels, `the data layer reports the channels domain (${Object.keys(domains).join(', ')})`);
   const maria = await orgLogin(S); let kola = await playerLogin(S, 'pl-adeyemi');
   const req = await S.j('POST', '/org/players/pl-adeyemi/request', { type: 'contact', message: 'Synthetic contact request.' }, maria); assert.equal(req.status, 201);
@@ -262,7 +262,7 @@ await test('[cutover] the cutover and the save points: a fresh boot records 0012
   await S.kill();
   assert.deepEqual(snap(dir, (c) => c.all('SELECT id, position FROM messages WHERE channel_id = ? ORDER BY position', channelId)), [{ id: m1.body.id, position: 0 }], 'the message is in the file when the sender hears 201');
   assert.equal(q1(dir, 'SELECT kind FROM message_attachments WHERE message_id = ?', m1.body.id).kind, 'clip');
-  // The real COMMIT failure (S14c: a message is one unit with its ledger row and notifications).
+  // The real COMMIT failure (a message is one unit with its ledger row and notifications).
   S = await boot(dir, { M13_FAST_RETRY: '' }); kola = await playerLogin(S, 'pl-adeyemi'); const maria3 = await orgLogin(S);
   assert.equal((await S.j('POST', '/__faults', { rules: 'internal:unit.sqlite_commit:1' })).status, 200);
   const ledgerBefore = ledgerRows(dir).filter((l) => l.type === 'message').length;

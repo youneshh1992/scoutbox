@@ -1,4 +1,4 @@
-// M17 acceptance suite — Recruitment Rooms.
+// Acceptance suite — Recruitment Rooms.
 //
 // A Room is the CLUB's decision layer. The Football Passport remains the
 // PLAYER's truth layer. Almost everything worth proving here is a negative:
@@ -40,17 +40,15 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // ======================================================= U1 state machine
 section('U1 — the room state machine is explicit, total and mapped onto M12');
 {
-  // M23 note: this asserted `length === 13`, which was a census of the set on
-  // the day it was written rather than an invariant about it. The invariant —
-  // the one that makes the room a facet and not a second pipeline — is that
-  // EVERY status is labelled and maps into both M12 vocabularies, which the
-  // loop below checks exhaustively. A count additionally breaks every time the
-  // lifecycle legitimately grows, for a reason that has nothing to do with M17.
+  // No count of the statuses: a count is a census, not an invariant. The
+  // invariant — the one that makes the room a facet and not a second pipeline —
+  // is that EVERY status is labelled and maps into both case vocabularies, which
+  // the loop below checks exhaustively.
   ok(ROOM_STATUSES.length >= 13, `the room state machine is defined (${ROOM_STATUSES.length} statuses)`);
   ok(new Set(ROOM_STATUSES).size === ROOM_STATUSES.length, 'no status is declared twice');
   ok(ROOM_STATUSES.every((s) => ROOM_STATUS_LABELS[s]), 'every status has a human label');
 
-  // Every status maps onto a stage the M12 case vocabulary actually has —
+  // Every status maps onto a stage the case vocabulary actually has —
   // this is what makes the room a facet rather than a second pipeline.
   let mapped = 0;
   for (const s of ROOM_STATUSES) {
@@ -118,11 +116,11 @@ section('U1 — the room state machine is explicit, total and mapped onto M12');
     && TERMINAL_ROOM_STATUSES.every((s) => !OPEN_ROOM_STATUSES.includes(s)),
     'open and terminal statuses partition the set exactly');
 
-  // ---- U1b — the five states M23 added get the same scrutiny as the first
+  // ---- U1b — the five later states get the same scrutiny as the first
   // thirteen. The whole value of this table is that it has no escape hatch, and
   // a new state is exactly where one would appear.
   //
-  // These are here rather than in the M23 suite because the table is here: a
+  // These are here rather than in the lifecycle suite because the table is here: a
   // negative assertion about a transition belongs beside the transition.
   neg(!canTransition('watching', 'contacted'), 'a club cannot have contacted a player it never planned to contact');
   neg(!canTransition('watching', 'offer_accepted'), 'no jump from watching to an accepted offer');
@@ -160,7 +158,7 @@ section('U1 — the room state machine is explicit, total and mapped onto M12');
   neg(!canTransition('signed', 'offer_accepted'), 'a signing does not revert to an acceptance');
   neg(!canTransition('signed', 'on_hold'), 'a signing cannot be put on hold');
   neg(!canTransition('on_hold', 'signed'), 'a held case is not signed without going back through the work');
-  // M23 P8.1 (D-P81-1): these stay refused AS TABLE EDGES — a paused case is
+  // These stay refused AS TABLE EDGES — a paused case is
   // not answered, claimed or moved into an evidence-bearing state by anything
   // but `resumeCase`, which returns it to where it was held from through the
   // ONE validator (domains/recruitment/lifecycle/lifecycle.mjs), never through this table.
@@ -683,8 +681,7 @@ section('R7 — decision memory, archive and reopen');
 }
 
 // -------------------------------------------------- R6 trials, R11 signing
-// Two defects found while building M18 on top of this milestone, both fixed
-// and locked in here so they cannot come back.
+// Two fixed defects, locked in here so they cannot come back.
 section('Regressions — the evidence tab, and the archive event stays private');
 {
   // 1. The club Passport projection returns `evidence` as a SUMMARY object, so
@@ -692,8 +689,8 @@ section('Regressions — the evidence tab, and the archive event stays private')
   //    made "recent full match" permanently false in every room.
   const before = (await j('GET', `/org/rooms/${ROOM}`, undefined, maria.token)).body.room;
   ok(Array.isArray(before.evidence), 'the room evidence tab returns a list');
-  // The seeded fixture holds no db.evidence rows — evidence is created through
-  // the canonical M12 routes — so prove the fix end to end by adding one.
+  // The seeded fixture holds no evidence rows — evidence is created through
+  // the canonical evidence routes — so prove the fix end to end by adding one.
   ok(before.readiness.items.find((i) => i.key === 'recent_full_match').value === 'Not available',
     'with no footage on record, recent full-match readiness reads as unavailable');
   const added = await j('POST', `/org/players/${ADULT.id}/evidence`, {
@@ -847,10 +844,10 @@ section('Ownership, and the score-is-not-authorization boundary');
   neg(rivalTrust.status === 403, '[36] holding a room does not restore a blocked club’s access to the Trust Score');
   neg(!JSON.stringify(rivalTrust.body ?? {}).match(/"score"\s*:\s*\d/), '[36] the refused response carries no score at all');
 
-  // §152 — the product must never fuse the three numbers into a player rating.
+  // The product must never fuse the three numbers into a player rating.
   const roomBlob = JSON.stringify((await j('GET', `/org/rooms/${ROOM}`, undefined, maria.token)).body.room);
   {
-    // Flag only AFFIRMATIVE uses: M16.1's own honest copy legitimately contains
+    // Flag only AFFIRMATIVE uses: the product's own honest copy legitimately contains
     // "Real numbers, not a talent score", and a denial is the opposite of a claim.
     const banned = /player\s*score|overall\s*rating|talent\s*score|signing\s*probability|potential\s*score|decision\s*score/gi;
     const claims = [...roomBlob.matchAll(banned)].filter((m) => !/\b(not|never|no|isn.t|rather than)\b[^.]{0,20}$/i.test(roomBlob.slice(Math.max(0, m.index - 24), m.index)));
@@ -912,7 +909,7 @@ section('Pagination and bounded payloads');
     ok(next.body.items.every((c) => !page.body.items.some((p) => p.id === c.id)), 'the next comment page does not repeat the first');
   } else ok(true, 'the comment thread fits one page in this fixture');
   const huge = await j('GET', '/org/rooms?limit=100000', undefined, maria.token);
-  // §4.3 step 2: the one paging convention refuses junk instead of clamping it (domains/platform/paging.mjs).
+  // The one paging convention refuses junk instead of clamping it (domains/platform/paging.mjs).
   neg(huge.status === 400 && huge.body.error === 'PAGE_LIMIT_INVALID' && !Array.isArray(huge.body.items), 'an absurd page size is refused rather than honoured');
   const act = await j('GET', `/org/rooms/${ROOM}/activity?limit=3`, undefined, maria.token);
   ok(act.body.items.length <= 3, 'activity pages are bounded');

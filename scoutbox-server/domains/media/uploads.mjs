@@ -1,14 +1,10 @@
-// F12A — Resumable uploads (moved from m12/operations.mjs; registered by m12/index.mjs before the operations module,
-// whose sweep calls `sweepUploads`).
+// Resumable uploads: a persistent session, integrity-checked chunks, an explicit finalisation step. Nothing reports
+// success early; abandoned sessions are swept (m12/index.mjs registers this before the operations module, whose sweep
+// calls `sweepUploads`). Data URLs remain the small-file fast path.
 //
-// A persistent session, integrity-checked chunks, an explicit finalisation step. Nothing reports success early;
-// abandoned sessions are swept. Data URLs remain the small-file fast path.
-//
-// S13e: a session is a row of `upload_sessions` (repositories/operations.mjs), the chunk numbers received rows of
-// `upload_session_chunks`; every change is an explicit repository write. The chunk bytes live on disk under
-// DATA_DIR/upload-tmp/<id>/ and are removed after the write that ends the session (finalise, abort, the 24-hour sweep,
-// the player's deletion). Junk is refused (400, naming the field) where it was coerced: a size that is not a whole
-// number of bytes, a title that is not text, a sha256 that is not 64 hexadecimal characters. Over-long titles are still
+// Sessions are rows of `upload_sessions` (repositories/operations.mjs), received chunk numbers rows of
+// `upload_session_chunks`. The chunk bytes live on disk under DATA_DIR/upload-tmp/<id>/ and are removed only after the
+// write that ends the session commits (finalise, abort, the 24-hour sweep, the player's deletion). Over-long titles are
 // shortened to 120 characters.
 import fs from 'node:fs';
 import path from 'node:path';
@@ -110,8 +106,8 @@ export function registerUploads(ctx) {
     const item = { id: nextId('media'), title: up.title, kind: up.mime.startsWith('video') ? 'video' : 'image', uploadedAt: new Date().toISOString(), url: null, views: 0, tags: {}, verifiedClip: null, captions: null, sizeBytes: up.size };
     storage.saveDataUrl(item.id, `data:${up.mime};base64,${buf.toString('base64')}`);
     item.url = `/media/${item.id}`;
-    // ONE unit of work: the clip row, the upload session's state (S13e: a row) and the activity commit together before
-    // the 201; the chunks go after.
+    // ONE unit of work: the clip row, the upload session's state and the activity commit together before the 201; the
+    // chunks go after.
     const done = unlessEnded(res, up.id, () => unit(() => {
       players.addItem(req.player.id, 'media', item);
       const fresh = uploads.finalise(up.id, item.id);

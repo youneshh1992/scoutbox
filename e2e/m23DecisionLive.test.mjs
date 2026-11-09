@@ -1,4 +1,4 @@
-// M23 P5 LIVE — the formal recruitment decision, driven through the real Pro
+// Live: the formal recruitment decision, driven through the real Pro
 // workspace against a real server, with the player app watching for leaks.
 //
 //   A  ADULT PROGRESS  lead opens a room for Kola (adult) → the Decision tab
@@ -166,7 +166,7 @@ async function openRoomFor(page, playerName) {
   if (!/^case-/.test(id)) fail(`could not read the room id from the deep link (${hash})`);
   return id;
 }
-// M24B — the Room is category → subcategory; the helper opens the category that holds the page, then the page.
+// The Room is category → subcategory; the helper opens the category that holds the page, then the page.
 const tab = async (page, name) => { await roomTab(page, name); };
 const dw = (page) => page.locator('[data-testid="decision-workflow"]');
 const headerStatus = async (page) => (await page.locator('[aria-label="Room header"] .badges').innerText());
@@ -224,7 +224,7 @@ say('A1: a recruitment lead signs in through the real client');
 const ROOM_A = await openRoomFor(lead.page, 'Kola Adeyemi');
 say(`A2: the lead opens a Recruitment Room for an adult player (${ROOM_A})`);
 {
-  // M24B — the pages of every category, read off the category buttons (only the open category's pages are in the tablist).
+  // The pages of every category, read off the category buttons (only the open category's pages are in the tablist).
   const tabs = await lead.page.locator('[data-casenav="room"] .casenav-cat').evaluateAll((els) => els.flatMap((e) => (e.dataset.subs ?? '').split(' ')));
   ok(tabs.includes('decision'), 'A2b: the room offers the existing Decision tab — no new tab was added');
 }

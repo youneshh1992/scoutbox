@@ -1,16 +1,13 @@
-// M16.2 demo spotcheck — drives the self-contained demo bundles (the exact
+// Demo spotcheck — drives the self-contained demo bundles (the exact
 // artifact HTML) through every Trust Score surface and fails on any page
 // error. The demo story: Kola has a broad, attributable record (Strong
 // evidence); Elias has less on record (Developing evidence) and the UI must
 // present that as LIMITED EVIDENCE, never as a lesser or riskier player.
-// Requires `node serve.mjs` on :8099.
+// Needs freshly built demo bundles (buildDemos.mjs).
 import { chromium } from 'playwright-core';
 import { ensureDemoHost } from './demoHost.mjs';
 
-// D7 (M22 §74-§76): own the demo host instead of assuming one is up.
-// These files hard-coded the URL inline, so the earlier pass imported the
-// helper without ever calling it — the import looked like the fix and was
-// not one.
+// This test owns its demo host: it starts one if none is running (see demoHost.mjs).
 const demo = await ensureDemoHost();
 
 const EXE = process.env.CHROMIUM || '/opt/pw-browsers/chromium';
@@ -46,7 +43,7 @@ await player.waitForSelector('text=ScoutBox Trust Score', { timeout: 20000 });
   say('player demo: the demo player reads 79 — Strong evidence');
   if (FORBIDDEN.test(body)) fail('player demo: prohibited ability/character language on the Trust surface');
   say('player demo: no ability or character language appears');
-  // §17/§58 — a simulated evidence context must say so wherever it is shown.
+  // A simulated evidence context must say so wherever it is shown.
   if (!/[Dd]emo|simulated/.test(body)) fail('player demo: simulated evidence is not labelled');
   say('player demo: simulated evidence is labelled on the score');
 
@@ -59,7 +56,7 @@ await player.waitForSelector('text=ScoutBox Trust Score', { timeout: 20000 });
   say('player demo: "Why this score?" explains all six components');
   if (!/Policy version/.test(why)) fail('player demo: the policy version is not shown');
   say('player demo: the derivation names its policy version');
-  // §26 — a gap is an evidence gap, never an accusation.
+  // A gap is an evidence gap, never an accusation.
   if (!/provided by the player and not independently confirmed/.test(why)) fail('player demo: player-submitted history is not honestly labelled');
   say('player demo: an unconfirmed entry is labelled as unconfirmed, not as dishonest');
 }
@@ -87,12 +84,12 @@ await club.waitForSelector('[aria-label="Trust Profile"]', { timeout: 15000 });
   say('pro demo: the club panel states ScoutBox never ranks players by Trust Score');
   if (FORBIDDEN.test(panel)) fail('pro demo: prohibited language in the club panel');
   say('pro demo: no ability or character language reaches the club');
-  // §54/§76 — the club never sees the player's own derivation or sources.
+  // The club never sees the player's own derivation or sources.
   if (/What could strengthen it further/i.test(panel)) fail('pro demo: the player\'s evidence gaps leaked to the club');
   if (/gd-|vclm-|identityVerified/.test(panel)) fail('pro demo: source identifiers leaked to the club');
   say('pro demo: neither the evidence gaps nor any source identifier reaches the club');
 }
-// §27/§29 — the player with less on record is presented as limited evidence.
+// The player with less on record is presented as limited evidence.
 await club.click('.drawer button.close');
 await club.waitForSelector('.drawer-veil', { state: 'detached', timeout: 10000 });
 await club.click('.player-card:has-text("Elias Svensson")');
@@ -132,14 +129,14 @@ await grass.close();
 // ============================================== T&S demo: derivation only
 const admin = await page(`${demo.host}/admin/`);
 await admin.waitForSelector('text=Report queue', { timeout: 20000 });
-await admin.click('nav.sidebar button:has-text("Evidence")'); // M24D: Passport, Box Cam and Trust left Cases for Evidence
+await admin.click('nav.sidebar button:has-text("Evidence")'); // Passport, Box Cam and Trust left Cases for Evidence
 await admin.click('nav.subnav button:has-text("Trust")');
 await admin.waitForSelector('text=ScoutBox Trust Score', { timeout: 15000 });
 {
   const body = await admin.locator('body').innerText();
   if (!DISCLAIMER.test(body)) fail('T&S demo: the mandatory disclaimer is missing');
   say('T&S demo: the inspector carries the mandatory disclaimer');
-  // §50 — T&S can inspect a derivation but can never type a score.
+  // T&S can inspect a derivation but can never type a score.
   if (!/cannot set or adjust a score/i.test(body)) fail('T&S demo: the no-write notice is missing');
   say('T&S demo: the inspector states that a score cannot be set or adjusted');
   if (!/correct the underlying evidence or the policy/i.test(body)) fail('T&S demo: the remedy is not stated');

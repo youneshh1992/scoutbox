@@ -20,7 +20,7 @@ type Step =
 
 /* ---- presentation helpers (visual only — every flow string is unchanged) */
 
-// M24D — a choice is a row: a title, an optional quiet line, an arrow, a
+// A choice is a row: a title, an optional quiet line, an arrow, a
 // hairline above. No icon, no circle, no card.
 function ChoiceRow({ title, subtitle, onPress, testID }: { title: string; subtitle?: string; onPress: () => void; testID?: string }) {
   const styles = useStyles(makeStyles);
@@ -41,7 +41,7 @@ function ChoiceRow({ title, subtitle, onPress, testID }: { title: string; subtit
   );
 }
 
-// M24D — a plain list: the brand square as the marker, one line per promise.
+// A plain list: the brand square as the marker, one line per promise.
 function PromiseList({ items }: { items: readonly string[] }) {
   const colors = useColors();
   return (
@@ -70,14 +70,14 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
 
 export default function Onboarding() {
   const colors = useColors();
-  // M24C — the screen's own styles are built from the authentication panel's
+  // The screen's own styles are built from the authentication panel's
   // palette: everything the screen lays out itself sits inside that panel,
   // whatever appearance the player saved. The sub-components read the same
   // palette through the ThemeOverride below.
   const styles = useMemo(() => makeStyles(AUTH_PANEL), []);
   const router = useRouter();
   const { loginPlayer, loginGuardian, mode } = useSession();
-  // M24E — "Switch account" lands on Sign in; everything else on Sign up.
+  // "Switch account" lands on Sign in; everything else on Sign up.
   const params = useLocalSearchParams<{ mode?: string }>();
   const [step, setStep] = useState<Step>(params.mode === 'signin' ? 'signin' : 'welcome');
   const [identities, setIdentities] = useState<DemoIdentity[]>([]);
@@ -120,7 +120,7 @@ export default function Onboarding() {
   // child device pairing
   const [pairCode, setPairCode] = useState('');
 
-  // M24C — sign in with the credentials the backend already accepts: a
+  // Sign in with the credentials the backend already accepts: a
   // guardian's email + password (/auth/guardian/login) or a player's id +
   // password (/auth/player/login). Nothing new is minted here; a failed
   // attempt keeps the non-sensitive input and shows the server's reason.
@@ -130,7 +130,7 @@ export default function Onboarding() {
   const [siPlayerPassword, setSiPlayerPassword] = useState('');
   const [showPw, setShowPw] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
-  // M24D — one form, one primary action: the person says who is signing in first.
+  // One form, one primary action: the person says who is signing in first.
   const [siKind, setSiKind] = useState<'guardian' | 'player'>('guardian');
   const signInGuardian = async () => {
     if (busy) return;
@@ -316,15 +316,15 @@ export default function Onboarding() {
     'g-account': 'Guardian account', 'g-email': 'Email verification', 'g-verify': 'ID verification', 'g-disclaimer': 'Safeguarding disclaimer', 'g-child': 'Your child',
   };
 
-  // M24C — the authentication composition (reference B, stacked for a phone):
+  // The authentication composition (reference B, stacked for a phone):
   // the ScoutBox Player mark near the top, a compact green introduction, then
   // the deep-green form panel. The panel keeps its brand colours whatever
   // appearance the player saved; every existing step renders inside it.
-  // M24D — fewer, larger elements: the introduction is a headline and one
+  // Fewer, larger elements: the introduction is a headline and one
   // sentence; choices are rows; every step has one primary action.
   return (
     <SafeAreaView style={styles.safe} testID="auth-screen">
-      {/* M24C.1 — the approved pitch behind the entry screen, in the
+      {/* The approved pitch behind the entry screen, in the
           authentication palette (white lines at 8%), behind every surface,
           never in front of a tap, hidden from assistive technology. */}
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
@@ -711,8 +711,8 @@ export default function Onboarding() {
 }
 
 const makeStyles = (colors: Palette) => StyleSheet.create({
-  // M24C — the page is the brand green; the form panel is the deep green.
-  // M24D — 24px gutters, 32–48px between sections, 16–24px between fields.
+  // The page is the brand green; the form panel is the deep green.
+  // 24px gutters, 32–48px between sections, 16–24px between fields.
   safe: { flex: 1, backgroundColor: AUTH_PAGE.page },
   scroll: { paddingHorizontal: 24, paddingTop: 12, paddingBottom: 36, gap: 24 },
   topRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', minHeight: 48 },

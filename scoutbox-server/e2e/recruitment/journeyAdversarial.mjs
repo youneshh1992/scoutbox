@@ -1,4 +1,4 @@
-// M23 P8.1 — Full Lifecycle Adversarial Hardening: the server-side attack suite.
+// Adversarial suite for the full recruitment lifecycle, server side.
 //
 // The whole recruitment journey attacked as ONE system: stale clients, races,
 // cross-case / cross-player / cross-org confusion, current-resource
@@ -33,7 +33,7 @@ import { LIFECYCLE_ACTIONS, canTransitionRecruitmentCase, heldFromStatus, lifecy
 import { memoryRateLimitProvider } from '../../domains/platform/rateLimit.mjs';
 import { journeyEvidenceFunnel } from '../../m20/funnels.mjs';
 import { isAdult } from '../../domain.mjs';
-const LATEST_SCHEMA = Number(DATA_MIGRATIONS.map((m) => m.id).sort().at(-1).slice(0, 4)); // S14a: the latest table migration's number
+const LATEST_SCHEMA = Number(DATA_MIGRATIONS.map((m) => m.id).sort().at(-1).slice(0, 4)); // the latest table migration's number
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SERVER = path.join(HERE, '..', '..', 'server.mjs');
@@ -113,12 +113,12 @@ const removeRequest = (L, id) => removeRows(L, [['DELETE FROM case_request_links
 const removeContact = (L, id) => removeRows(L, [['DELETE FROM contact_history WHERE contact_id = ?', id], ['DELETE FROM recruitment_contacts WHERE id = ?', id]]);
 const removeOffer = (L, id) => removeRows(L, [['DELETE FROM offer_history WHERE offer_id = ?', id], ['DELETE FROM recruitment_offers WHERE id = ?', id]]);
 /**
- * S8c (typed since §4.3): a contact or an offer planted offline is the writers' whole literal — the tables refuse a
+ * A contact or an offer planted offline is the writers' whole literal — the tables refuse a
  * partial record. Every field is valid; what the plant makes wrong is the STATE (drift against the case), not the shape.
  */
 const staffOf = (db) => { const u = db.users.find((x) => x.orgId === 'org-eastport' && x.name === 'Maria Keane'); return { contact: { kind: 'org', userId: u.id, name: u.name }, offer: { kind: 'org', id: u.id, name: u.name, role: u.role ?? null } }; };
 const plantedContact = (db, k, id, at) => { const by = staffOf(db).contact; return { id, orgId: 'org-eastport', caseId: k.id, playerId: k.playerId, status: 'delivered', channel: 'in_app', recipient: { type: 'player', playerId: k.playerId, guardianId: null, minor: false }, contactMode: 'player_only', routingSnapshot: null, subject: 'x', body: 'x', summary: null, createdBy: by, createdAt: at, updatedAt: at, sentBy: by, sentAt: at, deliveredAt: at, failedAt: null, failureCode: null, attempts: [{ at, ok: true, code: null }], requestId: null, emailCopy: null, lifecycle: null, occurredAt: null, recordedBy: null, recordedAt: null, respondedAt: null, response: null, cancelledAt: null, cancelledBy: null, keys: { create: null, send: null, record: null }, history: [], rev: 1, revAt: at, revBy: null, policyVersion: 1 }; };
-/** S8a (typed since §4.3): a request and a completed trial planted offline are issueRecruitmentRequest's and issueAcceptedTrial's whole literals; what the plant makes wrong is the STATE, not the shape. */
+/** A request and a completed trial planted offline are issueRecruitmentRequest's and issueAcceptedTrial's whole literals; what the plant makes wrong is the STATE, not the shape. */
 const plantedRequest = (db, k, id, at) => { const u = db.users.find((x) => x.orgId === 'org-eastport' && x.name === 'Maria Keane'); return { id, playerId: k.playerId, playerName: k.playerName, orgId: 'org-eastport', orgName: 'Eastport FC', orgType: 'club', orgVerified: true, orgSafeguardingCertified: true, userId: u.id, scoutName: u.name, scoutRole: u.role ?? 'Scout', type: 'trial', message: 'Come and train.', trialDetails: { proposedDate: '2027-01-01', altSlots: [], venue: null, notes: '' }, status: 'accepted', createdAt: at, respondedAt: at + H, respondedBy: 'player', routedTo: 'player', guardianId: null, contactChannel: null, caseId: k.id, trialId: null }; };
 const plantedCompletedTrial = (db, k, id, requestId, sessionId, now) => { const u = db.users.find((x) => x.orgId === 'org-eastport' && x.name === 'Maria Keane'); return { id, requestId, caseId: k.id, playerId: k.playerId, playerName: k.playerName, orgId: 'org-eastport', orgName: 'Eastport FC', scoutName: u.name, acceptedAt: now - 3 * H, acceptedBy: 'player', guardianApproved: false, proposedDate: null, venue: null, notes: '', reportDueAt: now + 7 * 24 * H, status: 'awaiting_report', workflowState: 'completed', recipient: { type: 'player', playerId: k.playerId, guardianId: null, minor: false, at: now - 3 * H }, schedule: { timezone: 'Europe/London', revision: 1, proposedAt: now - 3 * H, proposedBy: { kind: 'org', userId: u.id, name: u.name }, confirmedAt: now - 2 * H, confirmedBy: { kind: 'player', id: k.playerId, name: k.playerName }, sessions: [{ id: sessionId, kind: 'training', startsAt: now - 2 * H, endsAt: now - H, venue: null, instructions: null, evidence: [] }], revisions: [] }, completion: { state: 'completed', at: now - H, by: { kind: 'org', userId: u.id, name: u.name }, reason: null, phase: 'scheduled' }, history: [], attendance: [], rev: 2, keys: {} }; };
 const plantedOffer = (db, k, status, respond, now) => {
@@ -254,7 +254,7 @@ async function toSigning(playerId, base) {
 }
 
 // ================================================================ A — stale clients
-section('A — stale clients: a stale mutation never overwrites newer truth (§5)');
+section('A — stale clients: a stale mutation never overwrites newer truth');
 const A = {};
 {
   const pid = 'pl-carvalho';
@@ -302,7 +302,7 @@ const A = {};
   const heldSign = await clubSign(A.SID, { expectedRev: sv(r2).rev, revisionId: A.S2, documentSha256: SHA2, clientKey: key() });
   neg(holdA.status === 200 && expect(heldSign, 409, 'SIGNING_LIFECYCLE_CONFLICT'), 'A9 a signature on a held case is refused: the package waits');
   const res = await lifecycle(A.RID, 'resumeCase');
-  ok(res.status === 200 && res.body.to === 'offer_accepted' && (await stage(A.RID)) === 'offer_accepted', 'A9b (D-P81-1) the resume returns the case to offer_accepted, where it was held from');
+  ok(res.status === 200 && res.body.to === 'offer_accepted' && (await stage(A.RID)) === 'offer_accepted', 'A9b the resume returns the case to offer_accepted, where it was held from');
   const wd = await j('POST', `/org/offers/${A.OID}/withdraw`, { expectedRev: (await j('GET', `/org/offers/${A.OID}`, undefined, maria.token)).body.offer.rev, clientKey: key() }, maria.token, at(T0));
   neg(expect(wd, 409, 'OFFER_ALREADY_RESPONDED'), 'A10 the club cannot withdraw an accepted revision from a stale Offer tab');
   const cs = await clubSign(A.SID, { expectedRev: (await sGet(A.SID)).body.signing.rev, revisionId: A.S2, documentSha256: SHA2, clientKey: key() });
@@ -310,7 +310,7 @@ const A = {};
 }
 
 // ================================================================ B — adjacent-stage races
-section('B — adjacent-stage races: one authoritative result (§6)');
+section('B — adjacent-stage races: one authoritative result');
 {
   const pid = 'pl-okafor';
   const RID = await reviewed(maria.token, pid);
@@ -416,7 +416,7 @@ section('B — adjacent-stage races: one authoritative result (§6)');
 }
 
 // ================================================================ C — cross-case
-section('C — cross-case: a resource of case A never advances case B (§7, §11, §12)');
+section('C — cross-case: a resource of case A never advances case B');
 {
   const B = globalThis.__B;
   // Case A: Carvalho (A.RID, signing in progress). Case B: Okafor (B.RID, trial cancelled or rescheduled).
@@ -452,7 +452,7 @@ section('C — cross-case: a resource of case A never advances case B (§7, §11
 }
 
 // ================================================================ D — cross-player
-section('D — cross-player: no player A resource may advance player B\'s case (§8)');
+section('D — cross-player: no player A resource may advance player B\'s case');
 {
   const B = globalThis.__B;
   const pA = 'pl-carvalho'; const pB = 'pl-okafor';
@@ -470,13 +470,13 @@ section('D — cross-player: no player A resource may advance player B\'s case (
   const pjB = await playerJourneys(P[pB].token);
   neg(!has(pjB, A.OID) && !has(pjB, A.SID) && !has(pjB, A.TID), 'D5 player B\'s journeys carry none of player A\'s ids');
   neg((await jb(B.RID)).resources.offerId !== A.OID && (await jb(B.RID)).resources.signingPackageId !== A.SID, 'D6 player B\'s case selects none of player A\'s resources');
-  // D7 — a Room's evidence request reaches its own player only (D-P81-6).
+  // D7 — a Room's evidence request reaches its own player only.
   const sugg = (await j('GET', '/org/evidence-gaps', undefined, maria.token)).body;
   const items = Array.isArray(sugg) ? sugg : (sugg?.items ?? sugg?.suggestions ?? []);
   const other = items.find((s) => s.playerId && s.playerId !== pB && s.status === 'suggested');
   if (other) { const r = await j('POST', `/org/rooms/${B.RID}/evidence-requests`, { suggestionId: other.id }, maria.token); neg(r.status === 404 && r.body?.error === 'SUGGESTION_NOT_FOUND', `D7 an evidence suggestion about another player, posted from this Room: SUGGESTION_NOT_FOUND (${r.status})`); }
   else { negatives += 1; passed += 1; console.log('✓ [neg] D7 (no other player\'s suggestion exists in this store; the scope check is proven by source in Z)'); }
-  // D8 — a case task cannot be given to a user of another org (D-P81-13).
+  // D8 — a case task cannot be given to a user of another org.
   const cases = (await j('GET', '/org/cases', undefined, maria.token)).body;
   const anyCase = (Array.isArray(cases) ? cases : cases?.items ?? []).find((c) => c.playerId === pB) ?? null;
   const ritaStaff = (await j('GET', '/org/staff', undefined, rita.token)).body;
@@ -485,7 +485,7 @@ section('D — cross-player: no player A resource may advance player B\'s case (
 }
 
 // ================================================================ E — cross-org
-section('E — cross-org: foreign real ids and fabricated ids are the same answer; a blocked player reads as absent (§9)');
+section('E — cross-org: foreign real ids and fabricated ids are the same answer; a blocked player reads as absent');
 {
   const B = globalThis.__B;
   const pairs = [
@@ -501,17 +501,17 @@ section('E — cross-org: foreign real ids and fabricated ids are the same answe
     neg(r1.status === r2.status && r1.status === 404 && JSON.stringify(r1.body) === JSON.stringify(r2.body), `E1 ${name}: Harbour reads Eastport\'s real id and a fabricated id identically (${r1.status} ${r1.body?.error})`);
   }
   neg(!has(await j('GET', `/org/rooms/${A.RID}`, undefined, rita.token), 'pl-carvalho'), 'E2 the foreign refusal carries no player identity');
-  // A blocked player reads as absent on every discovery route (D-P81-8).
+  // A blocked player reads as absent on every discovery route.
   const pid = 'pl-okafor';
   await j('POST', '/player/block', { orgId: 'org-harbour', reason: 'test' }, P[pid].token);
   const routes = [['GET', `/org/players/${pid}`], ['POST', `/org/players/${pid}/notes`, { text: 'hi' }], ['GET', `/org/players/${pid}/morelike`], ['POST', `/org/players/${pid}/save`, {}], ['POST', `/org/players/${pid}/shortlist`, {}], ['GET', `/org/players/${pid}/proofpack`]];
   for (const [m, u, b] of routes) { const r = await j(m, u, b, rita.token); neg(r.status === 404 && r.body?.error === 'PLAYER_NOT_FOUND', `E3 blocked: ${m} ${u.replace(pid, ':id')} → 404 PLAYER_NOT_FOUND`); }
   const room = await j('POST', '/org/rooms', { playerId: pid, sourceContext: 'search' }, rita.token);
-  neg((room.status === 404 && room.body?.error === 'PLAYER_NOT_FOUND') || (room.status === 403 && room.body?.error === 'NOT_VISIBLE'), `E4 a blocked player cannot be watched (${room.status} ${room.body?.error}: the standing-rules refusal, N-P81-2)`);
+  neg((room.status === 404 && room.body?.error === 'PLAYER_NOT_FOUND') || (room.status === 403 && room.body?.error === 'NOT_VISIBLE'), `E4 a blocked player cannot be watched (${room.status} ${room.body?.error}: the standing-rules refusal)`);
   const blocks = (await j('GET', '/admin/blocks?limit=100', undefined, undefined, ADMIN)).body.items;
   for (const b of blocks.filter((x) => x.playerId === pid && x.orgId === 'org-harbour')) await j('POST', `/admin/blocks/${b.id}/lift`, {}, undefined, ADMIN);
   ok((await j('GET', `/org/players/${pid}`, undefined, rita.token)).status === 200, 'E5 after the lift the profile reads again');
-  // Box Cam link: consent before existence (D-P81-9).
+  // Box Cam link: consent before existence.
   const link1 = await j('POST', `/org/rooms/${B.RID}/trials/${B.TID}/sessions/x/evidence`, { boxSessionId: 'bx-nope', expectedRev: 1 }, maria.token, at(T0));
   neg(link1.status >= 400 && link1.body?.error !== 'EVIDENCE_CONSENT_REQUIRED' || link1.body?.error === 'EVIDENCE_CONSENT_REQUIRED', `E6 a Box Cam link answers by consent before it admits whether a session exists (${link1.status} ${link1.body?.error})`);
   const agentRoom = await j('POST', '/org/rooms', { playerId: 'pl-guni', sourceContext: 'search' }, alex.token);
@@ -519,7 +519,7 @@ section('E — cross-org: foreign real ids and fabricated ids are the same answe
 }
 
 // ================================================================ F — current selectors
-section('F — current-resource selectors: deterministic whatever the storage order (§10)');
+section('F — current-resource selectors: deterministic whatever the storage order');
 {
   const shuffle = (xs) => xs.slice().reverse();
   const t = (id, state, tt) => ({ id, acceptedAt: tt, workflowState: state, schedule: state === 'scheduled' || state === 'completed' ? { confirmedAt: tt, sessions: [{ id: 's', startsAt: tt, endsAt: tt + H }] } : null, completion: state === 'completed' ? { state: 'completed', at: tt + 2 } : null });
@@ -547,7 +547,7 @@ section('F — current-resource selectors: deterministic whatever the storage or
 }
 
 // ================================================================ G — lifecycle / evidence drift
-section('G — lifecycle ahead of evidence and evidence ahead of the lifecycle: named, blocked, never repaired (§13, §14)');
+section('G — lifecycle ahead of evidence and evidence ahead of the lifecycle: named, blocked, never repaired');
 const G = {};
 {
   // Four planted live cases: evidence ahead of the lifecycle in four shapes; one lifecycle-ahead claim.
@@ -561,7 +561,7 @@ const G = {};
     layer.recruitmentContactsOffers.contacts.create(plantedContact(db, k1, 'rct-drift-1', now));
     // G2: a completed Trial on a case whose history never reached trial_completed.
     const k2 = kase(G.trial);
-    // S8a: the trial and its accepted request are the writers' whole literals (planted request first: the trial names it by a real key).
+    // The trial and its accepted request are the writers' whole literals (planted request first: the trial names it by a real key).
     layer.recruitment.requests.create({ ...plantedRequest(db, k2, 'req-drift-2', now - 4 * H), trialId: 'trial-drift-2' });
     layer.recruitment.trials.create(plantedCompletedTrial(db, k2, 'trial-drift-2', 'req-drift-2', 's-d2', now));
     // G3: an ISSUED revision on a case whose history never reached offer_made.
@@ -590,7 +590,7 @@ const G = {};
 }
 
 // ================================================================ H — rollback
-section('H — rollback: no partial authoritative state after a writer failure (§15, §16, §34)');
+section('H — rollback: no partial authoritative state after a writer failure');
 {
   const pid = 'pl-carvalho'; const RID = A.RID;
   // H1: the lifecycle writer's own seam — status written, then a throw before the history entry.
@@ -604,7 +604,7 @@ section('H — rollback: no partial authoritative state after a writer failure (
   ok(retry.status === 200 && (await stage(RID)) === 'on_hold', 'H1b without the fault the same move succeeds');
   await lifecycle(RID, 'resumeCase');
   ok((await stage(RID)) === 'offer_accepted', 'H1c and resumes to offer_accepted');
-  // H2: a signing completion that fails after the row: nothing recorded, the retry succeeds (P8 Q, re-proved on this case).
+  // H2: a signing completion that fails after the row: nothing recorded, the retry succeeds (journey.mjs Q, re-proved on this case).
   const prev = await pRev(A.SID, P[pid].token);
   const ps = await pSign(A.SID, { revisionId: prev.currentRevision.id, documentSha256: SHA2, method: 'PLATFORM_ACKNOWLEDGMENT', clientKey: key() }, P[pid].token);
   ok(ps.status === 200 && (await jb(RID)).nextAction.code === 'COMPLETE_SIGNING', 'H2 both parties signed');
@@ -639,7 +639,7 @@ section('H — rollback: no partial authoritative state after a writer failure (
 }
 
 // ================================================================ I — block mid-journey
-section('I — a block inserted mid-stage stops what comes next and erases nothing (§17)');
+section('I — a block inserted mid-stage stops what comes next and erases nothing');
 {
   const pid = 'pl-alvarez'; const RID = G.contact;
   await offline((db, L) => { removeContact(L, 'rct-drift-1'); });
@@ -700,7 +700,7 @@ section('I — a block inserted mid-stage stops what comes next and erases nothi
 }
 
 // ================================================================ J — role loss
-section('J — club role loss mid-journey: no stale role survives a request (§18, §19)');
+section('J — club role loss mid-journey: no stale role survives a request');
 {
   const B = globalThis.__B;
   const RID = B.R3; // Kim: offer withdrawn or accepted (B9)
@@ -739,7 +739,7 @@ section('J — club role loss mid-journey: no stale role survives a request (§1
 }
 
 // ================================================================ K — agent authority loss
-section('K — agent authority loss mid-journey: the projection narrows or closes at once (§20)');
+section('K — agent authority loss mid-journey: the projection narrows or closes at once');
 {
   const K = { RID: null };
   K.RID = await reviewed(maria.token, 'pl-adeyemi');
@@ -783,7 +783,7 @@ section('K — agent authority loss mid-journey: the projection narrows or close
 }
 
 // ================================================================ L — same-agency privacy
-section('L — same-agency privacy: a colleague, the agency admin, an analyst (§21)');
+section('L — same-agency privacy: a colleague, the agency admin, an analyst');
 {
   const K = globalThis.__K;
   const surfaces = [['journey', `/org/agent/clients/${REP}/journey`], ['offers', `/org/agent/clients/${REP}/offers`], ['signings', `/org/agent/clients/${REP}/signings`], ['contacts', `/org/agent/clients/${REP}/contacts`], ['trials', `/org/agent/clients/${REP}/trials`], ['detail', `/org/agent/clients/${REP}`]];
@@ -803,7 +803,7 @@ section('L — same-agency privacy: a colleague, the agency admin, an analyst (�
 }
 
 // ================================================================ M — minors and DOB
-section('M — minors through the chain; malformed DOB fails closed (§23, §24)');
+section('M — minors through the chain; malformed DOB fails closed');
 {
   const cases = [null, false, 0, 'not-a-date', '2026-02-31', '2099-01-01', '', 'NaN', 12];
   neg(cases.every((dob) => isAdult({ dob, country: 'GB' }) === false), 'M7 null, false, 0, a malformed string, an impossible date, a future date, "", "NaN" and a number are each NOT adult');
@@ -821,20 +821,20 @@ section('M — minors through the chain; malformed DOB fails closed (§23, §24)
   neg(s.status === 200 && (gInbox ?? []).some((r) => r.type === 'contact') && !(kInbox ?? []).some((r) => r.orgId === 'org-eastport' && r.type === 'contact' && r.routedTo === 'player'), 'M2 a Contact to a minor routes to the guardian, never to the child');
   const gj = await j('GET', '/guardian/children/pl-guni/journeys', undefined, amara.token);
   neg(gj.status === 200 && !has(gj.body, 'offer') || gj.status === 200, 'M4 the guardian\'s view of the child carries no Offer (none may exist)');
-  // S4a: a malformed DOB can no longer be STORED. Players are table-backed and the players repository types every
-  // write, so the offline edit that used to plant `dob: 'not-a-date'` is refused as a whole (the unit rolls back
-  // naming the player and the field; the stored record stays the readable minor it was). The route-level claims
-  // (an unreadable age is never an adult) are kept by the sign-up refusals of §24 and by the wall below.
+  // A malformed DOB cannot be STORED: the players repository types every write, so an offline edit planting
+  // `dob: 'not-a-date'` is refused as a whole (the unit rolls back naming the player and the field; the stored record
+  // stays the readable minor it was). The route-level claim (an unreadable age is never an adult) is kept by the
+  // sign-up refusals and by the wall below.
   await down(server, 'SIGTERM');
   let refusal = null;
   { const L = openLayer(DATA_DIR); try { L.unit(() => L.layer.players.update('pl-guni', (pl) => { pl.dob = 'not-a-date'; })); } catch (e) { refusal = e; } finally { L.close(); } }
   server = await boot(); await relogin();
-  neg(refusal?.code === 'PLAYER_RECORD_INVALID' && /player pl-guni\): dob must be a YYYY-MM-DD date/.test(String(refusal?.message)) && (await j('GET', '/guardian/children', undefined, amara.token)).body.find((k) => k.id === 'pl-guni')?.dob === '2012-02-10', 'M8a (S4a) a malformed DOB cannot be stored: the write is refused naming the player and the field, the stored date is unchanged');
+  neg(refusal?.code === 'PLAYER_RECORD_INVALID' && /player pl-guni\): dob must be a YYYY-MM-DD date/.test(String(refusal?.message)) && (await j('GET', '/guardian/children', undefined, amara.token)).body.find((k) => k.id === 'pl-guni')?.dob === '2012-02-10', 'M8a a malformed DOB cannot be stored: the write is refused naming the player and the field, the stored date is unchanged');
   const wall2 = await j('GET', '/org/players/pl-guni', undefined, alex.token);
   neg(wall2.status === 403 && wall2.body?.error === 'UNDER_18_WALL', 'M8 the wall for an agency holds (the minor is still a minor)');
   const av = await j('POST', '/player/availability', { availability: 'available_now' }, P['pl-guni'].token);
   neg(av.status === 403 || av.status === 401, `M9 a guardian-managed minor cannot act as an adult (${av.status})`);
-  // Guardian block names its child (D-P81-7).
+  // Guardian block names its child.
   const wrong = await j('POST', '/guardian/block', { orgId: 'org-harbour', playerId: 'pl-adeyemi' }, amara.token);
   neg(expect(wrong, 404, 'CHILD_NOT_FOUND'), 'M13 a guardian block naming another guardian\'s child: CHILD_NOT_FOUND');
   const noOrg = await j('POST', '/guardian/block', { orgId: 'org-nope', playerId: 'pl-guni' }, amara.token);
@@ -845,7 +845,7 @@ section('M — minors through the chain; malformed DOB fails closed (§23, §24)
 }
 
 // ================================================================ N — deep links
-section('N — deep links reauthorize against current state (§25)');
+section('N — deep links reauthorize against current state');
 {
   const K = globalThis.__K; const B = globalThis.__B;
   const foreign = await j('GET', `/org/rooms/${K.RID}/journey`, undefined, rita.token); const fab = await j('GET', '/org/rooms/case-000/journey', undefined, rita.token);
@@ -868,7 +868,7 @@ section('N — deep links reauthorize against current state (§25)');
 }
 
 // ================================================================ O — notifications
-section('O — notifications: late ones resurrect nothing; retries duplicate nothing (§26, §30)');
+section('O — notifications: late ones resurrect nothing; retries duplicate nothing');
 {
   const B = globalThis.__B; const Hh = globalThis.__H;
   const pKim = await notifs('/player/notifications', P['pl-kim'].token);
@@ -893,7 +893,7 @@ section('O — notifications: late ones resurrect nothing; retries duplicate not
 }
 
 // ================================================================ P — events
-section('P — events: registry-minimized, org-private, replayable; the timeline never duplicates (§27, §28, §29)');
+section('P — events: registry-minimized, org-private, replayable; the timeline never duplicates');
 {
   const t1 = await j('POST', '/events/ticket', {}, maria.token);
   ok(t1.status === 200 && t1.body.ticket, 'P0 the lead mints a stream ticket');
@@ -921,7 +921,7 @@ section('P — events: registry-minimized, org-private, replayable; the timeline
 }
 
 // ================================================================ Q — restart
-section('Q — restart: idempotency converges, nothing duplicates (§33, §34)');
+section('Q — restart: idempotency converges, nothing duplicates');
 {
   const Hh = globalThis.__H; const K = globalThis.__K;
   const before = JSON.stringify((await journey(Hh.R5)).journey);
@@ -942,15 +942,15 @@ section('Q — restart: idempotency converges, nothing duplicates (§33, §34)')
 }
 
 // ================================================================ R — persistence corruption
-section('R — corrupt current pointers and unknown states fail closed (§35, §36)');
+section('R — corrupt current pointers and unknown states fail closed');
 {
   const Hh = globalThis.__H; const K = globalThis.__K;
-  // S8d: the package's status is a CHECKed column — the unknown word is refused at the save, naming the package; it is planted in its own save so the two other corruptions land
+  // The package's status is a CHECKed column — the unknown word is refused at the save, naming the package; it is planted in its own save so the two other corruptions land
   let bogusPkg = null; const bogus = await offline((db, { layer }) => { const pkg = db.signingPackages.find((p) => p.caseId === Hh.R5); bogusPkg = pkg?.id ?? null; if (pkg) layer.signingsFollowUps.signingPackages.patch(pkg.id, { status: 'BOGUS' }); });
-  // S8c (typed since §4.3): a current-revision pointer naming a revision the Offer does not hold is refused at the
+  // A current-revision pointer naming a revision the Offer does not hold is refused at the
   // save, naming the Offer (planted in its own save, like R2); the Offer reads as before.
   let gone = null; const goneRefused = await offline((db, { layer }) => { const o = db.recruitmentOffers.find((x) => x.id === K.OID); gone = o ?? null; layer.recruitmentContactsOffers.offers.update(K.OID, (x) => { x.currentRevisionId = 'rofr-gone'; }); });
-  // S8b (typed since §4.3): the room status is a CHECKed column — an unknown word is refused at the save, naming the
+  // The room status is a CHECKed column — an unknown word is refused at the save, naming the
   // case (planted in its own save, like R1 and R2); the case reads as before.
   let r4Status = null; const unknownRefused = await offline((db, { layer }) => {
     const k = db.recruitmentCases.find((x) => x.id === globalThis.__B.R4); r4Status = k?.room?.status ?? null; if (k) layer.recruitmentCases.cases.update(k.id, (c) => { c.room.status = 'SIGNEDX'; });
@@ -960,7 +960,7 @@ section('R — corrupt current pointers and unknown states fail closed (§35, §
   const issue = await j('POST', `/org/offers/${K.OID}/issue`, { expectedRev: 1, clientKey: key() }, maria.token, at(T0));
   neg(issue.status >= 400, `R1b the domain route still answers by its own rules (${issue.status} ${issue.body?.error})`);
   const jN = await jb(Hh.R5);
-  neg(bogusPkg === null || (bogus && /SIGNINGS_INPUT_INVALID/.test(bogus.message) && bogus.message.includes(bogusPkg) && bogus.message.includes('status must be one of') && jN.classification !== 'integrity_error'), `R2 (S8d) an unknown status word cannot be stored: the save refuses it, naming the package; the package reads as before (${bogusPkg ?? 'no package'}: ${String(bogus?.message ?? 'no refusal').slice(0, 80)}…)`);
+  neg(bogusPkg === null || (bogus && /SIGNINGS_INPUT_INVALID/.test(bogus.message) && bogus.message.includes(bogusPkg) && bogus.message.includes('status must be one of') && jN.classification !== 'integrity_error'), `R2 an unknown status word cannot be stored: the save refuses it, naming the package; the package reads as before (${bogusPkg ?? 'no package'}: ${String(bogus?.message ?? 'no refusal').slice(0, 80)}…)`);
   const j4 = await jb(globalThis.__B.R4);
   neg(unknownRefused && /RECRUITMENT_CASES_INPUT_INVALID/.test(unknownRefused.message) && unknownRefused.message.includes(`${globalThis.__B.R4}.room.status must be one of`) && j4.classification !== 'integrity_error', `R3 an unknown lifecycle word cannot be stored: the save refuses it, naming the case; the case reads as before (${String(unknownRefused?.message ?? 'no refusal').slice(0, 80)}…)`);
   const verdict = canTransitionRecruitmentCase({ id: globalThis.__B.R4, room: { status: 'SIGNEDX' }, history: [] }, 'startReview', { role: 'recruitment_admin' });
@@ -969,7 +969,7 @@ section('R — corrupt current pointers and unknown states fail closed (§35, §
 }
 
 // ================================================================ S — legacy / canonical mix
-section('S — partial legacy / canonical mixes: nothing invented (§37)');
+section('S — partial legacy / canonical mixes: nothing invented');
 {
   const mk = async (pid) => reviewed(maria.token, pid);
   const S1 = await mk('pl-imani'); // will carry the drift Offer from G; reset it
@@ -985,7 +985,7 @@ section('S — partial legacy / canonical mixes: nothing invented (§37)');
     // S1: legacy contacted + a canonical completed Trial (a Trial row that names the case, with an accepted request).
     const k1 = plant(S1, ['contacted', 'trial_requested', 'trial_scheduled', 'trial_completed'], { trialId: 'trial-p81-s1' });
     const now = Date.now();
-    layer.recruitment.requests.create({ ...plantedRequest(db, k1, 'req-p81-s1', now - 4 * H), trialId: 'trial-p81-s1' }); // S8a: the writers' whole literals, as above
+    layer.recruitment.requests.create({ ...plantedRequest(db, k1, 'req-p81-s1', now - 4 * H), trialId: 'trial-p81-s1' }); // the writers' whole literals, as above
     layer.recruitment.trials.create(plantedCompletedTrial(db, k1, 'trial-p81-s1', 'req-p81-s1', 's-s1', now));
     // S2: canonical Contact lifecycle claim + legacy trial_completed (no Trial).
     const k2 = plant(S2, ['contact_planned', 'contacted', 'trial_requested', 'trial_scheduled', 'trial_completed']);
@@ -1007,7 +1007,7 @@ section('S — partial legacy / canonical mixes: nothing invented (§37)');
 }
 
 // ================================================================ T — analytics
-section('T — analytics: retries, revisions, reopening, second cases and legacy data never inflate the funnel (§38–§40)');
+section('T — analytics: retries, revisions, reopening, second cases and legacy data never inflate the funnel');
 {
   const dash = async () => (await j('GET', '/org/recruitment-analytics?window=last_90_days', undefined, maria.token)).body;
   const find = (d) => { const m = JSON.stringify(d); return m; };
@@ -1030,7 +1030,7 @@ section('T — analytics: retries, revisions, reopening, second cases and legacy
   ok(jbS.stage !== 'signed', 'T3 the second case is not signed (its own stages only)');
   const d3 = await dash(); const m3 = metric(d3);
   ok(Number.isInteger(signedBefore) && signedBefore >= 1 && val(stageRow(m3, 'signed')) === signedBefore, `T4 the second case did not add to signed (${signedBefore})`);
-  // T7 (pure, D-P81-18): the ended case's assessment is not the second case's `assessed`.
+  // T7 (pure): the ended case's assessment is not the second case's `assessed`.
   {
     const now = Date.now(); const day = (n) => now - n * DAY;
     const hist = (from, to, at) => ({ at, action: 'room_status_changed', detail: { from, to } });
@@ -1039,7 +1039,7 @@ section('T — analytics: retries, revisions, reopening, second cases and legacy
     const ctx = { window: { from: '1970-01-01', to: '2999-12-31' }, rooms: [ended, second], contacts: [], requests: [], trials: [], assessments: [{ id: 'ass-t7', playerId: 'pl-t7', state: 'submitted', submittedAt: day(15), context: {} }], decisions: [], offers: [], packages: [], signings: [] };
     const f = journeyEvidenceFunnel(ctx);
     const assessedRow = f.rows.find((r) => r.stage === 'assessed');
-    neg(assessedRow.value === 1 && f.cohort.value === 2, `T7 (pure) an assessment written while the first case was open counts for that case only: assessed=${assessedRow.value} of ${f.cohort.value} cases (D-P81-18)`);
+    neg(assessedRow.value === 1 && f.cohort.value === 2, `T7 (pure) an assessment written while the first case was open counts for that case only: assessed=${assessedRow.value} of ${f.cohort.value} cases`);
     const late = journeyEvidenceFunnel({ ...ctx, assessments: [{ id: 'ass-t7b', playerId: 'pl-t7', state: 'submitted', submittedAt: day(3), context: {} }] });
     ok(late.rows.find((r) => r.stage === 'assessed').value === 1, 'T7b (pure) an assessment written after the first case ended counts for the second case');
     const trialCtx = journeyEvidenceFunnel({ ...ctx, trials: [{ id: 'trial-t7', caseId: 'case-t7-a' }], assessments: [{ id: 'ass-t7c', playerId: 'pl-t7', state: 'submitted', submittedAt: day(3), context: { trialId: 'trial-t7' } }] });
@@ -1051,15 +1051,15 @@ section('T — analytics: retries, revisions, reopening, second cases and legacy
 }
 
 // ================================================================ U — rate limits
-section('U — rate limits: legacy routes carry the canonical budgets; the store evicts, never resets (§43)');
+section('U — rate limits: legacy routes carry the canonical budgets; the store evicts, never resets');
 {
-  // U1–U2: legacy signing recording dedupes (D-P81-3).
+  // U1–U2: legacy signing recording dedupes.
   const first = await j('POST', '/org/players/pl-okafor/signing', { note: 'legacy' }, rita.token);
   const second = await j('POST', '/org/players/pl-okafor/signing', { note: 'legacy again' }, rita.token);
   neg(first.status === 201 && expect(second, 409, 'SIGNING_ALREADY_RECORDED') && second.body?.signingId === first.body?.signing?.id, 'U1 a second legacy recording while one stands: SIGNING_ALREADY_RECORDED naming the row');
   const rows = (await signings(rita.token)).filter((s) => s.playerId === 'pl-okafor' && !s.signingPackageId);
   neg(rows.length === 1, `U2 one legacy row, one invoice (${rows.length})`);
-  // U3–U4: legacy requests dedupe (D-P81-4).
+  // U3–U4: legacy requests dedupe.
   const r1 = await j('POST', '/org/players/pl-kim/request', { type: 'contact', message: 'Hello from Harbour' }, rita.token);
   const r2 = await j('POST', '/org/players/pl-kim/request', { type: 'contact', message: 'Hello again' }, rita.token);
   neg(r1.status === 201 && expect(r2, 409, 'REQUEST_PENDING'), 'U3 a second pending contact request through the legacy route: REQUEST_PENDING');
@@ -1074,10 +1074,10 @@ section('U — rate limits: legacy routes carry the canonical budgets; the store
 }
 
 // ================================================================ V — idempotency
-section('V — idempotency: a key is never a cross-stage or post-authority capability (§44)');
+section('V — idempotency: a key is never a cross-stage or post-authority capability');
 {
   const I = globalThis.__I;
-  // V1: contact send replay reports current truth (D-P81-10).
+  // V1: contact send replay reports current truth.
   const RID = I.RID;
   if ((await stage(RID)) !== 'contact_planned') { /* the Alvarez case is at trial stage now; use a fresh case */ }
   const pid = 'pl-imani'; const R = await reviewed(maria.token, pid);
@@ -1088,13 +1088,13 @@ section('V — idempotency: a key is never a cross-stage or post-authority capab
   const s1 = await j('POST', `/org/rooms/${R}/contacts/${d.body.contact.id}/send`, { expectedRev: d.body.contact.rev, clientKey: k1 }, maria.token);
   const s2 = await j('POST', `/org/rooms/${R}/contacts/${d.body.contact.id}/send`, { expectedRev: d.body.contact.rev, clientKey: k1 }, maria.token);
   ok(s1.status === 200 && s2.status === 200 && s2.body.idempotent === true && s2.body.delivered === true, 'V1 a replayed send answers idempotent with delivered: true for a delivered Contact');
-  // V2: M17 advisory decision replay with different content conflicts (D-P81-11).
+  // V2: advisory decision replay with different content conflicts.
   const kd = key();
   const d1 = await j('POST', `/org/rooms/${R}/decisions`, { recommendation: 'shortlist', reasonCodes: [], clientKey: kd, expectedRev: await caseRev(R) }, maria.token);
   const d2 = await j('POST', `/org/rooms/${R}/decisions`, { recommendation: 'archive', reasonCodes: [], clientKey: kd, expectedRev: await caseRev(R) }, maria.token);
   const d3 = await j('POST', `/org/rooms/${R}/decisions`, { recommendation: 'shortlist', reasonCodes: [], clientKey: kd, expectedRev: await caseRev(R) }, maria.token);
   neg(d1.status === 201 && expect(d2, 409, 'DECISION_IDEMPOTENCY_CONFLICT') && d3.status === 200 && d3.body.idempotent === true, 'V2 the same key with a different recommendation conflicts; the same content replays');
-  // V3: a party signature key dies with its revision (D-P81-12).
+  // V3: a party signature key dies with its revision.
   const S2 = globalThis.__J.S2;
   if (S2) {
     const kp = key();
@@ -1105,7 +1105,7 @@ section('V — idempotency: a key is never a cross-stage or post-authority capab
     neg(oldSign.status !== 200, `V3 a signature naming the superseded revision is refused (${oldSign.status} ${oldSign.body?.error})`);
     const newSign = await clubSign(S2.SID, { expectedRev: sv(r2).rev, revisionId: revOf(r2).id, documentSha256: SHA2, clientKey: key() });
     ok(newSign.status === 200, 'V3b the current revision is signed with a new key');
-  } else { negatives += 1; passed += 1; console.log('✓ [neg] V3 (no second signing fixture; D-P81-12 is proved by source in Z)'); }
+  } else { negatives += 1; passed += 1; console.log('✓ [neg] V3 (no second signing fixture; proved by source in Z)'); }
   // V4: an Offer's issue key does not act as a signing key or a lifecycle key.
   const K = globalThis.__K;
   const kIssue = key();
@@ -1113,7 +1113,7 @@ section('V — idempotency: a key is never a cross-stage or post-authority capab
   const asLife = await j('POST', `/org/rooms/${K.RID}/lifecycle`, { action: 'holdCase', expectedRev: 0, clientKey: kIssue }, maria.token);
   neg(asLife.status === 409 && asLife.body?.error === 'ROOM_VERSION_CONFLICT', `V4 an Offer key replayed on the lifecycle route is just a stale request there (${asLife.status} ${asLife.body?.error}), never a replay of the issue (${iss.status})`);
   // V5: a key survives no authority loss: a demoted user's replay is refused before the key is read.
-  // Maria is the room's LEAD whatever her typed role says (the frozen room-role model, N-P81-1), so the replay comes from a colleague who holds no room role: an analyst who never sat in this room.
+  // Maria is the room's LEAD whatever her typed role says (the frozen room-role model), so the replay comes from a colleague who holds no room role: an analyst who never sat in this room.
   const analyst = await login('org-eastport', 'Sam Analyst', 'Analyst');
   const replayDemoted = await j('POST', `/org/rooms/${R}/contacts/${d.body.contact.id}/send`, { expectedRev: d.body.contact.rev, clientKey: k1 }, analyst.token);
   neg(replayDemoted.status === 403 && replayDemoted.body?.error === 'CONTACT_NOT_PERMITTED', `V5 a replay by a user without the room role is refused before the key is looked up (${replayDemoted.status} ${replayDemoted.body?.error})`);
@@ -1121,7 +1121,7 @@ section('V — idempotency: a key is never a cross-stage or post-authority capab
 }
 
 // ================================================================ W — terminal and held states
-section('W — terminal cases expose no action; a hold pauses and a resume returns (§47–§54)');
+section('W — terminal cases expose no action; a hold pauses and a resume returns');
 {
   const B = globalThis.__B; const Hh = globalThis.__H;
   const signedCase = Hh.R5;
@@ -1140,7 +1140,7 @@ section('W — terminal cases expose no action; a hold pauses and a resume retur
   neg(wd.status === 200 && (await jb(V.R)).nextAction.code === 'CASE_ENDED' && (await j('POST', `/org/rooms/${V.R}/contacts`, { subject: 'x', body: 'y', clientKey: key() }, maria.token)).status === 409, 'W7 a withdrawn case: ended, no Contact');
   const cl = await lifecycle(V.R, 'closeCase', { reasonCodes: ['case_closed'] });
   neg(cl.status === 200 && (await jb(V.R)).nextAction.code === 'CASE_ENDED' && (await lifecycle(V.R, 'shortlist')).status === 409, 'W9 a closed case: ended, no reactivation but reopen');
-  // Holds (D-P81-1): trial_scheduled and contacted resume where they were held from; a withdrawn Offer's hold falls back.
+  // Holds: trial_scheduled and contacted resume where they were held from; a withdrawn Offer's hold falls back.
   const pid = 'pl-carvalho';
   const R2 = await openRoom(maria.token, pid); // Carvalho signed → new case? signed case is open (signed is terminal) → a new room
   ok(R2 !== A.RID, 'W1 a new case after signed');
@@ -1171,7 +1171,7 @@ section('W — terminal cases expose no action; a hold pauses and a resume retur
 }
 
 // ================================================================ X — Second Look
-section('X — Second Look / reopen: history kept, the next action derived (§55)');
+section('X — Second Look / reopen: history kept, the next action derived');
 {
   const B = globalThis.__B; const archived = B.R4;
   const before = (await journey(archived)).history.entries.length;
@@ -1186,7 +1186,7 @@ section('X — Second Look / reopen: history kept, the next action derived (§55
 }
 
 // ================================================================ Y — privacy
-section('Y — privacy sweep of every journey payload (§22, §62, §63)');
+section('Y — privacy sweep of every journey payload');
 {
   const K = globalThis.__K;
   const clubWords = ['priority', 'shortlist', 'under_review', 'watching', 'case-', 'rct-', S_NOTE, S_DEC, S_ASSESS, S_OFFER_NOTE, 'sha256', 'internalNote'];
@@ -1210,26 +1210,26 @@ section('Z — boundary invariants, read from the source');
 {
   const src = (rel) => readFileSync(path.join(ROOT, rel), 'utf8');
   const strip = (s) => s.replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, '');
-  neg(/resolveTo: resumeTargetFor/.test(src('domains/recruitment/lifecycle/lifecycle.mjs')) && /ownEdge/.test(src('domains/recruitment/lifecycle/lifecycle.mjs')), 'Z1 resumeCase resolves its target in the ONE validator (D-P81-1)');
+  neg(/resolveTo: resumeTargetFor/.test(src('domains/recruitment/lifecycle/lifecycle.mjs')) && /ownEdge/.test(src('domains/recruitment/lifecycle/lifecycle.mjs')), 'Z1 resumeCase resolves its target in the ONE validator');
   neg(!/'offer_made'|'offer_accepted'|'contacted'|'trial_scheduled'/.test(strip(src('domains/recruitment/rooms/shared.mjs')).match(/on_hold: \[[^\]]*\]/)?.[0] ?? ''), 'Z2 the on_hold table row names no evidence-bearing state');
-  neg(/EVIDENCE_AHEAD_OF_LIFECYCLE/.test(src('domains/recruitment/lifecycle/journeyModel.mjs')) && /INTEGRITY_ERROR/.test(src('domains/recruitment/lifecycle/journey.mjs')), 'Z3 drift detection and the blocked act are in the projector (D-P81-2)');
-  neg(/SIGNING_ALREADY_RECORDED/.test(src('server.mjs')) && /rateLimit\.limited\('signing_closure', req\.org\.id\)/.test(src('server.mjs')), 'Z4 the legacy recording route dedupes and draws on the closure budget (D-P81-3)');
-  neg(/REQUEST_PENDING/.test(src('server.mjs')) && /'trial_invite' : 'contact_send'/.test(src('server.mjs')), 'Z5 the legacy request route dedupes and draws on the canonical budgets (D-P81-4)');
-  neg(!/buckets\.clear\(\)/.test(src('domains/platform/rateLimit.mjs')), 'Z6 the limiter never clears every bucket (D-P81-5)');
-  neg(/playerId: room\.playerId/.test(src('domains/recruitment/rooms/rooms.mjs')) && /found\.playerId === playerId/.test(src('domains/insight/insight.mjs')), 'Z7 a Room\'s evidence request is scoped to its player (D-P81-6)');
-  neg(/CHILD_NOT_FOUND/.test(src('server.mjs').slice(src('server.mjs').indexOf("guardianRouter.post('/block'"), src('server.mjs').indexOf("guardianRouter.post('/block'") + 900)), 'Z8 a guardian block names its child (D-P81-7)');
+  neg(/EVIDENCE_AHEAD_OF_LIFECYCLE/.test(src('domains/recruitment/lifecycle/journeyModel.mjs')) && /INTEGRITY_ERROR/.test(src('domains/recruitment/lifecycle/journey.mjs')), 'Z3 drift detection and the blocked act are in the projector');
+  neg(/SIGNING_ALREADY_RECORDED/.test(src('server.mjs')) && /rateLimit\.limited\('signing_closure', req\.org\.id\)/.test(src('server.mjs')), 'Z4 the legacy recording route dedupes and draws on the closure budget');
+  neg(/REQUEST_PENDING/.test(src('server.mjs')) && /'trial_invite' : 'contact_send'/.test(src('server.mjs')), 'Z5 the legacy request route dedupes and draws on the canonical budgets');
+  neg(!/buckets\.clear\(\)/.test(src('domains/platform/rateLimit.mjs')), 'Z6 the limiter never clears every bucket');
+  neg(/playerId: room\.playerId/.test(src('domains/recruitment/rooms/rooms.mjs')) && /found\.playerId === playerId/.test(src('domains/insight/insight.mjs')), 'Z7 a Room\'s evidence request is scoped to its player');
+  neg(/CHILD_NOT_FOUND/.test(src('server.mjs').slice(src('server.mjs').indexOf("guardianRouter.post('/block'"), src('server.mjs').indexOf("guardianRouter.post('/block'") + 900)), 'Z8 a guardian block names its child');
   neg(!/childIds\[0\]/.test(src('server.mjs').slice(src('server.mjs').indexOf("guardianRouter.post('/block'"), src('server.mjs').indexOf("guardianRouter.post('/block'") + 900)) || /childIds\.length === 1/.test(src('server.mjs')), 'Z8b never a silent first-child fallback');
-  neg(['/players/:id/notes', '/players/:id/morelike', '/players/:id/proofpack'].every((r) => { const i = src('server.mjs').indexOf(`orgRouter.${r.includes('morelike') || r.includes('proofpack') ? 'get' : 'post'}('${r}'`); return i > 0 && /isBlocked\(p\.id, req\.org\.id\)/.test(src('server.mjs').slice(i, i + 700)); }), 'Z9 notes, morelike and proofpack check the block (D-P81-8)');
-  neg(/combineOrgMaySeeResults[\s\S]*boxCamReads\.sessions\.byId/.test(src('domains/recruitment/lifecycle/trialRoutes.mjs').slice(src('domains/recruitment/lifecycle/trialRoutes.mjs').indexOf('function linkAuthorisation'))), 'Z10 consent is decided before the session lookup (D-P81-9; S12b: the lookup reads the table)');
-  neg(/\['delivered', 'responded'\]\.includes\(c\.status\)/.test(src('domains/recruitment/lifecycle/contactRoutes.mjs')), 'Z11 the send replay reports current truth (D-P81-10)');
-  neg(/DECISION_IDEMPOTENCY_CONFLICT/.test(src('domains/recruitment/rooms/rooms.mjs')), 'Z12 the M17 decision replay fingerprints content (D-P81-11)');
-  neg(/pkg\.currentRevisionId \?\? null\)\) return res\.json\(\{ \.\.\.view\(\), idempotent: true/.test(src('domains/recruitment/signings/index.mjs')), 'Z13 a party signature key replays only for the current revision (D-P81-12)');
-  neg(/USER_NOT_IN_ORG/.test(src('domains/scouting/scouting.mjs')), 'Z14 an M12 case task requires an org member (D-P81-13)');
-  neg(/lifecycle\.after_status/.test(src('domains/recruitment/rooms/rooms.mjs')) && /offer\.respond\.after_persist/.test(src('domains/recruitment/offers/index.mjs')), 'Z15 the two P8.1 fault seams sit inside the writers they prove');
+  neg(['/players/:id/notes', '/players/:id/morelike', '/players/:id/proofpack'].every((r) => { const i = src('server.mjs').indexOf(`orgRouter.${r.includes('morelike') || r.includes('proofpack') ? 'get' : 'post'}('${r}'`); return i > 0 && /isBlocked\(p\.id, req\.org\.id\)/.test(src('server.mjs').slice(i, i + 700)); }), 'Z9 notes, morelike and proofpack check the block');
+  neg(/combineOrgMaySeeResults[\s\S]*boxCamReads\.sessions\.byId/.test(src('domains/recruitment/lifecycle/trialRoutes.mjs').slice(src('domains/recruitment/lifecycle/trialRoutes.mjs').indexOf('function linkAuthorisation'))), 'Z10 consent is decided before the session lookup');
+  neg(/\['delivered', 'responded'\]\.includes\(c\.status\)/.test(src('domains/recruitment/lifecycle/contactRoutes.mjs')), 'Z11 the send replay reports current truth');
+  neg(/DECISION_IDEMPOTENCY_CONFLICT/.test(src('domains/recruitment/rooms/rooms.mjs')), 'Z12 the M17 decision replay fingerprints content');
+  neg(/pkg\.currentRevisionId \?\? null\)\) return res\.json\(\{ \.\.\.view\(\), idempotent: true/.test(src('domains/recruitment/signings/index.mjs')), 'Z13 a party signature key replays only for the current revision');
+  neg(/USER_NOT_IN_ORG/.test(src('domains/scouting/scouting.mjs')), 'Z14 an M12 case task requires an org member');
+  neg(/lifecycle\.after_status/.test(src('domains/recruitment/rooms/rooms.mjs')) && /offer\.respond\.after_persist/.test(src('domains/recruitment/offers/index.mjs')), 'Z15 the two fault seams sit inside the writers they prove');
   neg(['../scoutbox-club/src/App.tsx', '../scoutbox-grassroots/src/App.tsx', '../scoutbox-agent/src/App.tsx'].every((f) => /visibilitychange/.test(src(f)) && /'pageshow'/.test(src(f))), 'Z16 the three web apps re-read on focus, pageshow and visibility');
   neg(['../scoutbox-club/src/App.tsx', '../scoutbox-grassroots/src/App.tsx', '../scoutbox-agent/src/App.tsx'].every((f) => { const s = strip(src(f)); const i = s.indexOf('api.onChange(session'); const block = s.slice(i, i + 400); return !/payload\.(status|to|from|stage)/.test(block); }), 'Z17 no app reads a status, a stage or a target state off an event payload');
   neg(!/room\.status\s*=[^=]/.test(strip(src('domains/recruitment/offers/index.mjs'))) && !/room\.status\s*=[^=]/.test(strip(src('domains/recruitment/signings/index.mjs'))) && !/room\.status\s*=[^=]/.test(strip(src('domains/recruitment/lifecycle/contactRoutes.mjs'))) && !/room\.status\s*=[^=]/.test(strip(src('domains/recruitment/lifecycle/trialRoutes.mjs'))) && !/room\.status\s*=[^=]/.test(strip(src('domains/recruitment/lifecycle/decisionRoutes.mjs'))), 'Z18 no domain assigns a lifecycle status');
-  neg(JOURNEY_INTEGRITY_CODES.includes('EVIDENCE_AHEAD_OF_LIFECYCLE') && NEXT_ACTION_CODES.length === 24 && ROOM_STATUSES.length === 18 && DATA_MIGRATIONS.length === LATEST_SCHEMA, 'Z19 one new integrity code; still 24 next actions, 18 states, every table migration'); // the migration count rewritten in S14a: it compared the blob's schema numbers
+  neg(JOURNEY_INTEGRITY_CODES.includes('EVIDENCE_AHEAD_OF_LIFECYCLE') && NEXT_ACTION_CODES.length === 24 && ROOM_STATUSES.length === 18 && DATA_MIGRATIONS.length === LATEST_SCHEMA, 'Z19 one new integrity code; still 24 next actions, 18 states, every table migration');
   neg(Object.keys(LIFECYCLE_ACTIONS).length === 19 && TERMINAL_ROOM_STATUSES.length === 4, 'Z20 nineteen semantic actions, four terminal states — nothing added');
   neg(!/recruitmentJourneyStates|db\.recruitmentJourneys\b(?!`)/.test(strip(src('domains/recruitment/lifecycle/journey.mjs')).replace(/there is no `db\.recruitmentJourneys`/, '')), 'Z21 no journey store');
   const files = readdirSync(path.join(ROOT, 'domains', 'recruitment', 'lifecycle')).filter((f) => f.endsWith('.mjs'));

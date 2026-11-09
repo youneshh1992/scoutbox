@@ -1,4 +1,4 @@
-// M24B LIVE — the recruitment case navigation, driven through the real Pro,
+// LIVE — the recruitment case navigation, driven through the real Pro,
 // Grassroots, Agent and Player interfaces against a real server.
 //
 //   R  ROOM (Pro)        every category, every subcategory renders its panel;
@@ -393,7 +393,7 @@ for (const width of [390, 360]) {
   await kola.goto(`http://localhost:${PORTS.player}/opportunities?cat=signing&tab=signing-contract`);
   await kola.waitForSelector('[data-testid="case-panel-signing-contract"]', { timeout: 30000 });
   ok((await playerTabs(kola).getByRole('tab', { selected: true }).allInnerTexts()).join() === 'Contract', `P4 ${width}: "?cat=signing&tab=signing-contract" lands on Signing › Contract`);
-  // M24D — a link written for the old Board category still lands.
+  // A link written for the old Board category still lands.
   await kola.goto(`http://localhost:${PORTS.player}/opportunities?cat=board&tab=board-invites`);
   await kola.waitForSelector('[data-testid="case-panel-board"]', { timeout: 30000 });
   ok((await playerTabs(kola).getByRole('tab', { selected: true }).allInnerTexts()).join() === 'Board' && (await kola.evaluate(() => document.querySelector('[data-testid="cat-journey"]')?.getAttribute('aria-selected'))) === 'true', `P5 ${width}: "?cat=board&tab=board-invites" (pre-M24D) lands on My journey › Board`);

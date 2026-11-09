@@ -1,4 +1,4 @@
-// M22 — a deterministic camera for the live browser suite (§106).
+// A deterministic camera for the live browser suite.
 //
 // Chromium can be handed a Y4M file as its fake webcam
 // (--use-file-for-fake-video-capture), so `getUserMedia` returns a REAL
@@ -14,7 +14,7 @@
 // A NOTE ON WHAT THIS DOES AND DOES NOT PROVE
 //
 // It proves the pipeline: camera → capture → encode → transport → engine →
-// result → UI. It does NOT make the observation real football, and §43's
+// result → UI. It does NOT make the observation real football, and Box Cam's
 // honest statement stands unchanged — a virtual camera replaying a file is
 // exactly what a spoofer would use, and this fixture IS that spoof, used
 // deliberately. The live suite therefore asserts transport and UI behaviour,
@@ -44,7 +44,7 @@ export async function writeY4m({
     still: () => stationaryPath({ x: 0.567, y: 0.83 }),
   };
 
-  // Low light for the §105 refusal journey: the scene is legitimate, the
+  // Low light for the refusal journey: the scene is legitimate, the
   // capture is simply too dark to observe reliably.
   const dark = scene === 'lowlight';
   const frames = sequence({

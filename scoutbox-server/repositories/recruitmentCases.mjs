@@ -1,44 +1,26 @@
 /**
- * Recruitment cases (the M12 case with its M17 Room facet, M23 decision draft, M27 transaction handoff and F9 budget),
- * room comments, room snapshots, room decisions and room evidence states as typed tables with EXPLICIT writes
- * (migration `0016_recruitment_cases`, docs/architecture/migration.md §4.3; S8a, S8c and S8d are the template).
+ * Recruitment cases (with the Room facet, decision draft, transaction handoff and budget), room comments, room
+ * snapshots, room decisions and room evidence states.
  *
- * Tables (file 02):
- *   recruitment_cases, case_room_tags, case_assignments, case_tasks, case_approvals, case_history,
- *   case_request_links, case_trial_links, case_decision_drafts, case_decision_draft_reason_codes,
- *   case_decision_draft_evidence_refs, case_transaction_handoffs, case_budget_scenarios, case_budget_lines,
- *   case_budget_fx_assumptions, case_budget_actuals                                     → db.recruitmentCases
- *   room_comments, room_comment_mentions                                                → db.roomComments
- *   room_snapshots, room_snapshot_source_refs                                           → db.roomSnapshots
- *   room_decisions, room_decision_reason_codes, room_decision_evidence_refs,
- *   room_decision_assessment_ids                                                        → db.roomDecisions
- *   room_evidence_states                                                                → db.roomEvidenceState
- *
- * EVERY FIELD IS A TYPED COLUMN with the vocabulary CHECKs of the domain rules (domains/recruitment/rooms/shared.mjs, domains/recruitment/lifecycle/decision.mjs,
- * m13/shared.mjs, m27/integration.mjs). There is no `absent_keys_json`, `offtype_json`, `extra_json` or `raw_json`.
- * A record the columns cannot hold — an unknown field at any level included — is REFUSED with its id, at a repository
- * write (the unit rolls back). An `undefined` field is an absent one;
- * an absent field reads back as null, an absent list as empty. Two model changes: a case's history has ONE entry
- * shape (`{ id, at, byKind, byId, byName, action, detail }`), and a decision's `snapshot` is read from the
+ * Every field is a typed column with the vocabulary CHECKs of the domain rules (domains/recruitment/rooms/shared.mjs,
+ * domains/recruitment/lifecycle/decision.mjs, m13/shared.mjs, m27/integration.mjs). A record the columns cannot hold, an
+ * unknown field at any level included, is refused with its id at a repository write (the unit rolls back). An
+ * `undefined` field is an absent one; an absent field reads back as null, an absent list as empty. A case's history has
+ * one entry shape (`{ id, at, byKind, byId, byName, action, detail }`), and a decision's `snapshot` is read from the
  * room_snapshots row it names (it is that row, never a second copy). The idempotency keys are columns of their owner
  * (a draft's create key, a decision's finalize and draft keys, a handoff's invite key).
  *
- * EXPLICIT WRITES, SQL READS (§4.3 step 2). There are no mirrors and no `db.*` views (each of the five names throws);
- * readers call the repository's queries, and every record they get is a fresh, deep-frozen decode, so an in-place edit
- * throws. A route changes a record by calling an operation:
- * `cases.create(record)`, `cases.update(id, (draft) => { … })`, the same for comments, decisions and evidence states,
- * `snapshots.create(record)`, and the deletion unit's `redactPlayer`. `update` hands the caller a plain copy, types
- * the result whole, writes the record's rows at once and returns it read back from the tables. An update of a record
- * from inside its own update is refused (the outer write would overwrite the inner one). An operation joins the open
- * unit of work (store.unit) or runs a transaction of its own.
+ * `update` hands the caller a plain copy, types the result whole, writes the record's rows at once and returns it read
+ * back. An update of a record from inside its own update is refused (the outer write would overwrite the inner one).
  *
- * References. org_id → orgs and the staff ids (owner, lead scout, M12 decision maker, assignee, comment author) →
+ * References. org_id → orgs and the staff ids (owner, lead scout, decision maker, assignee, comment author) →
  * org_users, RESTRICT. Every room row's room_id → recruitment_cases RESTRICT; a decision's snapshot_id →
  * room_snapshots RESTRICT. case_request_links → recruitment_requests and case_trial_links → trials RESTRICT. Player
- * ids: no key, tolerant and counted (Q8a). The decision chain (supersedes / superseded by) and a decision's snapshot
- * must stay inside the decision's room, checked at every write. The children cascade with their owner.
+ * ids: no key, tolerant and counted (Q8a in docs/decisions.md). The decision chain (supersedes / superseded by) and a
+ * decision's snapshot must stay inside the decision's room, checked at every write. The children cascade with their
+ * owner.
  *
- * Refusals name tables, fields and ids — never a name, a note, a body or a message.
+ * Refusals name tables, fields and ids, never a name, a note, a body or a message.
  */
 import { transaction, migrationApplied, newestHistory, childRowsOf } from './database.mjs';
 import { pageOf } from '../domains/platform/paging.mjs';
@@ -58,7 +40,7 @@ const refusal = (code, message, extra = {}) => Object.assign(new Error(`${code}:
 const clone = (v) => (v === undefined ? undefined : JSON.parse(JSON.stringify(v)));
 
 // ------------------------------------------------------------------ vocabulary
-/** Who a case history entry names: a club user (`org`, M13's `org_user`), a family member, the platform, an agent. */
+/** Who a case history entry names: a club user (`org` or `org_user`), a family member, the platform, an agent. */
 export const CASE_ACTOR_KINDS = Object.freeze(['org', 'org_user', 'player', 'guardian', 'system', 'admin', 'agent']);
 /** A handoff's stored status (`expired` is read from its age, never stored). */
 const HANDOFF_STORED = HANDOFF_STATUSES.filter((s) => s !== 'expired');
@@ -646,7 +628,7 @@ function typeBudget(v, L) {
   return scenarios.length ? { scenarios } : null;
 }
 
-/** A case as M12, M13, M17, M23 and M27 write it, typed. */
+/** A case, typed. */
 export const typeCase = typed((raw, L) => {
   onlyKeys(raw, CASE_KEYS, L, 'record');
   const assignments = list(raw.assignments, L, 'assignments').map((a, i) => {
@@ -841,7 +823,7 @@ function statements(sqlite) {
 }
 
 /**
- * The statements `decodeCase` reads children through, answered for many cases at once (§4.3 step 4): one query per
+ * The statements `decodeCase` reads children through, answered for many cases at once: one query per
  * child table for the whole list (in chunks of ids), grouped by case, instead of about sixteen queries a case. The
  * rows and their order are the per-case statements' own, so a batch decode is the same record.
  */
@@ -869,7 +851,7 @@ function batchDecisionStatements(sqlite, st, rows) {
   };
 }
 
-/** Write a typed case whole: the row upserted (its rowid, and so its place in the mirror, kept), every child replaced. `links: false` leaves the link rows to `writeCaseLinks` (the snapshot path writes them after the requests and trials). */
+/** Write a typed case whole: the row upserted (its rowid, and so its insertion order, kept), every child replaced. `links: false` leaves the link rows to `writeCaseLinks`. */
 function writeCase(st, c, { links = true } = {}) {
   st.ins.recruitment_cases.run(caseRow(c));
   for (const t of CASE_CHILDREN) if (links || !LINK_TABLES.includes(t)) st.caseChildDel[t].run(c.id);
@@ -1029,28 +1011,19 @@ export function retainedPlayerReferences(sqlite) {
 
 
 // ------------------------------------------------------------------ the whole-domain read
-/**
- * `begin` types the supplied collections (an omitted one is retained whole; an array is the whole final collection),
- * names every reference it can with ids against the FINAL state, and writes the cases (without their link rows) and
- * the room rows; `links` writes the supplied cases' link rows after the requests and trials; `pruneRooms` and
- * `pruneCases` remove what a supplied collection no longer lists, room rows before their case and a case only when
- * nothing retained names it; `assert` checks the final state.
- */
+/** The whole domain read back as plain records (`readAllRecords` in index.mjs: the test suites' read-back). */
 export const RECRUITMENT_CASES_RECORDS = {
   names: RECRUITMENT_CASES_COLLECTIONS,
   read(sqlite) { if (!recruitmentCasesLive(sqlite)) return null; return Object.fromEntries(RECRUITMENT_CASES_COLLECTIONS.map((n) => [n, readAll(sqlite, n)])); },
 };
 
-// ------------------------------------------------------------------ the repository (explicit writes; SQL reads)
+// ------------------------------------------------------------------ the repository
 const deepFreeze = (v) => { if (v !== null && typeof v === 'object' && !Object.isFrozen(v)) { Object.freeze(v); for (const k of Object.keys(v)) deepFreeze(v[k]); } return v; };
 /**
  * `createRecruitmentCasesRepository({ sqlite, unit, now, log })`. Every operation joins the open unit of work (a
  * failure poisons it), the caller's open raw transaction, or runs a transaction of its own; it writes its rows and
- * returns the record read back from the tables.
- *
- * READS ARE SQL (§4.3 step 2): no mirror and no db.recruitmentCases / db.roomComments / db.roomSnapshots /
- * db.roomDecisions / db.roomEvidenceState (each throws). Every query decodes fresh, deep-frozen records in insertion
- * (rowid) order and runs on the one connection, so a read inside a unit of work sees the unit's own writes.
+ * returns the record read back from the tables. Every query decodes fresh, deep-frozen records in insertion (rowid)
+ * order and runs on the one connection, so a read inside a unit of work sees the unit's own writes.
  */
 export function createRecruitmentCasesRepository({ sqlite, unit = null, now = Date.now, log = () => {} } = {}) {
   if (!sqlite) throw new TypeError('the recruitment-cases repository needs a SQLite connection (node:sqlite)');
@@ -1129,7 +1102,7 @@ export function createRecruitmentCasesRepository({ sqlite, unit = null, now = Da
       return Object.fromEntries(sqlite.prepare(`SELECT c.room_status AS status, COUNT(*) AS n FROM recruitment_cases c WHERE c.org_id = ? AND c.room_status IS NOT NULL AND ${a.sql} GROUP BY c.room_status`).all(orgId, ...a.params).map((r) => [r.status, r.n]));
     },
     /**
-     * The club's cases list (§4.3 step 4): the cases `viewer` may open, optionally at one stage, newest first by
+     * The club's cases list: the cases `viewer` may open, optionally at one stage, newest first by
      * cursor ([createdAt, id]), filtered and paged in SQL; only the page is decoded.
      */
     pageForViewer(orgId, viewer, { stage = null } = {}, page) {
@@ -1138,7 +1111,7 @@ export function createRecruitmentCasesRepository({ sqlite, unit = null, now = Da
       return keyset({ where, params: [orgId, ...a.params, ...(stage === null ? [] : [stage])], page, order: 'c.created_at DESC, c.id DESC', after: '(c.created_at < ? OR (c.created_at = ? AND c.id < ?))', rowKey: (r) => [r.created_at, r.id], key: (c) => [c.createdAt, c.id] });
     },
     /**
-     * The club's Rooms list (§4.3 step 4): the Rooms `viewer` may open, filtered (`roomFilter`) and paged in SQL by
+     * The club's Rooms list: the Rooms `viewer` may open, filtered (`roomFilter`) and paged in SQL by
      * most recent activity ([room.updatedAt, id]); only the page is decoded. `accept(light)` is a filter SQL cannot
      * express (the search, which needs the player's visibility): it sees `{ id, playerId, playerName, status, tags }`
      * and the rows are read in chunks until the page is full.
@@ -1227,7 +1200,7 @@ export function createRecruitmentCasesRepository({ sqlite, unit = null, now = Da
     cases, comments, snapshots, decisions, evidenceStates,
     /** The queries alone, for the pure projectors and providers that must not write. */
     reads: Object.freeze({ cases: readOnly(cases), comments: readOnly(comments), snapshots: readOnly(snapshots), decisions: readOnly(decisions), evidenceStates: readOnly(evidenceStates) }),
-    /** The deletion unit (M23 P4A-D14): a deleted player's cases keep their ids, states and history and lose the name. */
+    /** The deletion unit: a deleted player's cases keep their ids, states and history and lose the name. */
     redactPlayer(playerId, at) {
       return operation(() => {
         let n = 0;
@@ -1235,7 +1208,7 @@ export function createRecruitmentCasesRepository({ sqlite, unit = null, now = Da
         return n;
       });
     },
-    /** Check the tables are authoritative (0016 recorded); there is nothing to load. */
+    /** Check migration 0016 is recorded; there is nothing to load. */
     attach() {
       if (!recruitmentCasesLive(sqlite)) throw new Error(`the recruitment-cases repository needs ${RECRUITMENT_CASES_MIGRATION} recorded; it never imports an in-memory array`);
       return { counts: this.counts() };

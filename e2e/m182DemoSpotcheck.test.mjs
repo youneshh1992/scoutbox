@@ -1,27 +1,23 @@
-// M18.2 demo spotcheck — the cleanup, as it appears in the SHIPPED bundles.
+// Demo spotcheck — the cleanup, as it appears in the SHIPPED bundles.
 //
-// The demo bundles are the artifact HTML. What this asserts is the M18.2
-// surface work, in the real single-file builds:
-//   • every bundle boots with zero page errors after the client changes
+// The demo bundles are the artifact HTML. What this asserts, in the real
+// single-file builds:
+//   • every bundle boots with zero page errors
 //   • Discover states its ordering, and says it is not a ranking
 //   • the Organisation screen carries the notification preferences and the
 //     audit log, the mandatory category is locked, email is a local outbox
-//   • no raw M18.2 i18n key leaks (prefs., audit., conflict., prov., confirm.)
+//   • no raw i18n key leaks (prefs., audit., conflict., prov., confirm.)
 //   • the provenance vocabulary never renders "Player-provided" for an
 //     unknown source
 //   • the destructive confirm states a consequence and declining does nothing
 //   • the new panels fit 390px
 //   • the player bundle is unaffected and still says it is a demo
 //
-// Requires `node serve.mjs` on :8099.
+// Needs freshly built demo bundles (buildDemos.mjs).
 import { chromium } from 'playwright-core';
 import { ensureDemoHost } from './demoHost.mjs';
 
-// D7 (M22 §74-§76): this test OWNS its demo host rather than assuming one
-// is already listening. The old comment above said "Requires node
-// serve.mjs on :8099" — an instruction nobody followed, because
-// crosstab and demoOffline happened to leave a host behind. They no
-// longer do.
+// This test owns its demo host: it starts one if none is running (see demoHost.mjs).
 const demo = await ensureDemoHost();
 const BASE = demo.host.replace('localhost', '127.0.0.1');
 const EXE = process.env.CHROMIUM || '/opt/pw-browsers/chromium';
@@ -76,7 +72,7 @@ for (const [name, path] of [['club', 'club/'], ['grassroots', 'grassroots/']]) {
 
   // Organisation: the two panels
   await p.evaluate(() => { window.location.hash = '#/organisation'; });
-  for (let i = 0; i < 20 && !(await p.locator('details.settings-row').count()); i++) await p.waitForTimeout(250); await p.evaluate(() => document.querySelectorAll('details.settings-row').forEach((d) => { d.open = true; })); // M24F.5 — Staff & Security sections are rows; open them, then assert the same
+  for (let i = 0; i < 20 && !(await p.locator('details.settings-row').count()); i++) await p.waitForTimeout(250); await p.evaluate(() => document.querySelectorAll('details.settings-row').forEach((d) => { d.open = true; })); // Staff & Security sections are rows; open them, then assert the same
   await p.waitForTimeout(1400);
   const prefs = await p.locator('[data-panel="notification-preferences"]').count();
   const audit = await p.locator('[data-panel="audit-log"]').count();
@@ -122,7 +118,7 @@ for (const [name, path] of [['club', 'club/'], ['grassroots', 'grassroots/']]) {
   // 390px: the new panels
   await p.setViewportSize({ width: 390, height: 844 });
   await p.evaluate(() => { window.location.hash = '#/organisation'; });
-  for (let i = 0; i < 20 && !(await p.locator('details.settings-row').count()); i++) await p.waitForTimeout(250); await p.evaluate(() => document.querySelectorAll('details.settings-row').forEach((d) => { d.open = true; })); // M24F.5 — Staff & Security sections are rows; open them, then assert the same
+  for (let i = 0; i < 20 && !(await p.locator('details.settings-row').count()); i++) await p.waitForTimeout(250); await p.evaluate(() => document.querySelectorAll('details.settings-row').forEach((d) => { d.open = true; })); // Staff & Security sections are rows; open them, then assert the same
   await p.waitForTimeout(1200);
   const overflow = await p.evaluate(() => Math.max(
     document.documentElement.scrollWidth - document.documentElement.clientWidth,
@@ -136,7 +132,7 @@ for (const [name, path] of [['club', 'club/'], ['grassroots', 'grassroots/']]) {
   await p.close();
 }
 
-// ---- 3. the player bundle is untouched by M18.2 and still a demo
+// ---- 3. the player bundle is still a demo
 {
   const { p, errors } = await open(`${BASE}/player/`, { width: 420, height: 900 });
   await p.waitForTimeout(1800);

@@ -1,4 +1,4 @@
-// F8 — Multi-club and federation workspaces.
+// Multi-club and federation workspaces.
 // The one rule everything here enforces: effective access is the
 // INTERSECTION of (actor is a live group member) ∧ (a live, unexpired,
 // unrevoked grant names them) ∧ (the resource still exists and its owner
@@ -7,8 +7,7 @@
 // itself shares nothing, and no group administrator can hand out access the
 // receiving club could not hold on its own.
 //
-// S13c: groups and grants are rows of repositories/groups.mjs, written through its explicit operations and read
-// through `groupReads`. Responses are built from the allowlists below, never by spreading a stored record.
+// Groups and grants are rows of repositories/groups.mjs, read through `groupReads`.
 import { readPage, sendPageError } from '../platform/paging.mjs';
 import { GRANT_RESOURCE_KINDS, GROUP_LIMITS as L, typeExpiresDays, grantExpiry } from '../../repositories/groups.mjs';
 
@@ -31,7 +30,6 @@ export function registerGroups(ctx) {
     orgCanSee, requireLead, suppress, groups, groupReads,
   } = ctx;
   if (!groups || !groupReads) throw new TypeError('registerGroups needs the groups repository (ctx.groups, ctx.groupReads)');
-  // §4.3 step 2: the signings are read through SQL (the signings repository's queries).
   const reads = ctx.recruitmentReads;
   if (typeof reads?.signings?.forPlayer !== 'function') throw new TypeError('registerGroups needs recruitmentReads (signings) from the data layer');
   const G = groupReads.groups;

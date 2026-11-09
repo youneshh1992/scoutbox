@@ -6,9 +6,8 @@
  * The privileged "lead" tier — approvals, staff management, signings, SSO and
  * audit exports — is derived from that text by a documented pattern.
  *
- * The pattern used to be copied into seven modules. One copy drifting would
- * have meant one route granting lead powers that the others refuse, so the
- * rule lives here and nowhere else. The role text itself is only ever set by
+ * One copy of the pattern drifting would mean one route granting lead powers
+ * that the others refuse, so the rule lives here and nowhere else. The role text itself is only ever set by
  * server-controlled flows (registration, invitations, the development
  * shortcut on unprovisioned demo organisations); a login never changes it on
  * an organisation that holds real credentials.

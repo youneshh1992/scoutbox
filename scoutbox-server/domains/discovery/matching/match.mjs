@@ -1,5 +1,5 @@
 /**
- * M19 — the explainable match engine. There is exactly one of these.
+ * The explainable match engine. There is exactly one of these.
  *
  * `matchPlayerToCriteria(facts, criteria)` answers two questions and nothing
  * else:
@@ -7,15 +7,13 @@
  *   does this player satisfy every REQUIRED criterion?
  *   which PREFERRED criteria are met?
  *
- * It returns one line per criterion, each with the criterion's id, whether it
- * was met, and the words a person reads. There is no score, no weight, no
- * ordering hint and no summary number — a caller cannot derive one from the
- * output because nothing here is graded.
+ * There is no score, no weight, no ordering hint and no summary number — a
+ * caller cannot derive one from the output because nothing here is graded.
  *
- * M18's `playerMatchesBrief` delegates to this function with every criterion
- * in the required class (see `briefCriteriaToCanonical`), so Nobody Missed and
- * Matching evaluate the same facts through the same code. Adding a second
- * engine would let the two disagree about what a club asked for.
+ * `playerMatchesBrief` (briefs, Nobody Missed) delegates to this function with
+ * every criterion in the required class (see `briefCriteriaToCanonical`), so
+ * Nobody Missed and Matching evaluate the same facts through the same code. A
+ * second engine would let the two disagree about what a club asked for.
  *
  * Fail closed, always: a fact that is missing does not satisfy a criterion
  * about it. An unknown age is not "probably fine", and a distance that could
@@ -34,11 +32,9 @@ const bandRank = () => (BAND_RANK_MEMO ??= Object.fromEntries(TRUST_BANDS.map((b
 const LEVEL_RANK = { amateur: 0, semi_pro: 1, pro: 2 };
 
 /**
- * Evaluate one criterion. Returns `{ key, met, text }` where `key` is the
- * legacy-compatible reason key (so M18 consumers see exactly what they always
- * saw) and `text` is the sentence shown to the person.
- *
- * `now` is passed in rather than read, so an explanation is reproducible.
+ * Evaluate one criterion. `key` is the reason key the brief consumers read,
+ * `text` the sentence shown to the person. `now` is passed in rather than
+ * read, so an explanation is reproducible.
  */
 function evaluate(c, facts, { now = Date.now() } = {}) {
   switch (c.type) {
@@ -74,18 +70,17 @@ function evaluate(c, facts, { now = Date.now() } = {}) {
           ? { key: 'level', met: true, text: 'Within the level criteria' }
           : { key: 'level', met: false, text: 'Plays at a level outside the criteria' };
       }
-      // `lte`: M18 semantics preserved exactly — only a pro player against a
-      // semi-pro ceiling fails, and an unknown level does not block.
+      // `lte`: only a pro player against a semi-pro ceiling fails, and an
+      // unknown level does not block.
       if (c.value === 'semi_pro' && facts.level === 'pro') return { key: 'level', met: false, text: 'Plays at a level above the criteria' };
       if (facts.level && LEVEL_RANK[facts.level] > LEVEL_RANK[c.value]) return { key: 'level', met: false, text: 'Plays at a level above the criteria' };
       return { key: 'level', met: true, text: 'Within the level criteria' };
     }
     case 'foot': {
       if (!facts.foot) return { key: 'foot', met: false, text: 'Preferred foot is not on record' };
-      // Case-insensitive on purpose. The vocabulary is written "Right" and the
-      // stored fact has always been "right"; comparing them literally made the
-      // foot criterion unsatisfiable for every real player while still passing
-      // every synthetic test, which is the worst shape a bug can take.
+      // Case-insensitive on purpose: the vocabulary is written "Right" and the
+      // stored fact "right", and a literal comparison would make the foot
+      // criterion unsatisfiable for every real player while passing synthetic tests.
       const want = c.values.map((v) => String(v).toLowerCase());
       const have = String(facts.foot).toLowerCase();
       // "Both" satisfies a criterion for either foot.
@@ -148,7 +143,7 @@ function evaluate(c, facts, { now = Date.now() } = {}) {
 }
 
 /**
- * S14j: the SAME test as `evaluate`, as an SQL condition over a match query's row (`players p` joined to
+ * The SAME test as `evaluate`, as an SQL condition over a match query's row (`players p` joined to
  * `player_match_facts f`, repositories/matchFacts.mjs), so a match set is a query instead of a loop. One case per
  * criterion type, each the JS rule above restated; scripts/testMatchFacts.mjs runs both over generated facts and
  * criteria and requires them to agree. Fail closed exactly as `evaluate` does: an unknown fact meets nothing.
@@ -181,7 +176,7 @@ export function criterionSql(c, { now, org }) {
       return { sql: 'distance_tenths(?, ?, p.lat, p.lng) IS NOT NULL AND distance_tenths(?, ?, p.lat, p.lng) / 10.0 <= ?', args: [org.location.lat, org.location.lng, org.location.lat, org.location.lng, c.value] };
     case 'level':
       if (c.operator === 'in') return { sql: 'p.level IN (SELECT value FROM json_each(?))', args: [json(c.values)] };
-      // An unknown level does not block (the M18 rule); a known one above the ceiling does.
+      // An unknown level does not block; a known one above the ceiling does.
       return { sql: `${LEVEL_RANK_SQL} <= ?`, args: [LEVEL_RANK[c.value] ?? -1] };
     case 'foot':
       return { sql: "p.foot IS NOT NULL AND (lower_js(p.foot) IN (SELECT value FROM json_each(?)) OR lower_js(p.foot) = 'both')", args: [json(c.values.map((v) => String(v).toLowerCase()))] };
@@ -207,8 +202,7 @@ export function criterionSql(c, { now, org }) {
 
 /**
  * The engine's facts for one row of a match query (repositories/matchFacts.mjs `query(...).page`) and its child rows
- * (`childrenOf`): exactly the projection nobodyMissed.mjs assembled per player before S14j, the organisation's part
- * (age, the Grassroots distance) worked out here as the org view does.
+ * (`childrenOf`), the organisation's part (age, the Grassroots distance) worked out here as the org view does.
  */
 export function factsOfRow(row, children, { org, now }) {
   const age = ageOn(row.birth_date, now);
@@ -266,9 +260,8 @@ export function matchPlayerToCriteria(facts, criteria = {}, { now = Date.now() }
 }
 
 /**
- * Translate an M18 Recruitment Brief's criteria into the canonical vocabulary.
- * Everything a brief carries is REQUIRED — that is what a brief has always
- * meant, and M18's behaviour must not change because M19 exists.
+ * Translate a Recruitment Brief's criteria into the canonical vocabulary.
+ * Everything a brief carries is REQUIRED: that is what a brief means.
  */
 export function briefCriteriaToCanonical(criteria = {}) {
   const required = [];
@@ -293,9 +286,9 @@ export function briefCriteriaToCanonical(criteria = {}) {
 }
 
 /**
- * M18's contract, computed by the M19 engine. The order of the reasons follows
- * the brief's own order, exactly as before, and each carries the same key,
- * `met` flag and words.
+ * The brief contract (`matchBrief`), computed by the match engine. The order
+ * of the reasons follows the brief's own order, and each carries the brief's
+ * key, `met` flag and words.
  */
 export function matchBrief(facts, briefCriteria = {}, opts = {}) {
   const canonical = briefCriteriaToCanonical(briefCriteria);

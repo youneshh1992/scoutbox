@@ -1,4 +1,4 @@
-// M14 Trust & Safety additions: the Verification review centre — human-review
+// Trust & Safety tabs: the Verification review centre — human-review
 // queue, root organisation requests, domain requests, disputes, expiring and
 // suspended claims, and the authority cascade tool. Every consequential
 // decision requires a written reason (audited server-side). VITE_DEMO=1 runs

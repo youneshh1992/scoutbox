@@ -1,4 +1,4 @@
-// M24B — the two-row case navigation for the portals.
+// The two-row case navigation for the portals.
 //
 //   Row 1 — the categories: a segmented control. The current one is marked
 //           by weight, a dot and `aria-current`, never by colour alone.

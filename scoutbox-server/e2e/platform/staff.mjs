@@ -1,5 +1,5 @@
-// Staff accounts (S14f: the staff repository's explicit writes and SQL reads; the Founder's two rules on names),
-// against a real server on a temporary data directory with the synthetic seed.
+// Staff accounts (with the Founder's two rules on names, docs/decisions.md), against a real server on a temporary
+// data directory with the synthetic seed.
 //
 //   A removal: a lead removes a colleague in one step — the account stays (history attributable), its sessions die,
 //     its name no longer signs in, a second removal is refused

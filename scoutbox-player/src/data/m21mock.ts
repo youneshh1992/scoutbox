@@ -1,4 +1,4 @@
-// M21 demo mirror — the Development Hub with no server.
+// Demo mirror — the Development Hub with no server.
 //
 // It reproduces the server's rules rather than approximating them, because a
 // demo that behaves better than the product is a lie told in a nicer font.
@@ -7,7 +7,7 @@
 //   • completing an action never completes its goal;
 //   • the demo Combine result is SIMULATED, so the objective target reads
 //     `no_current_valid_measurement` and says why — a demo number crossing a
-//     production threshold is exactly the dishonesty §149 forbids;
+//     production threshold would be dishonest;
 //   • the club's internal review note is not in this file's player payload at
 //     all. It is not hidden by the UI; it is absent, the way the server sends
 //     it;

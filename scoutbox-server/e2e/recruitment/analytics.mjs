@@ -1,6 +1,6 @@
-// M20 acceptance suite — Recruitment Analytics and the Director Dashboard.
+// Recruitment Analytics and the Director Dashboard.
 //
-// The whole milestone rests on one sentence:
+// The whole feature rests on one sentence:
 //
 //     Measure the recruitment process, not the worth of the player
 //     or the scout.
@@ -12,9 +12,9 @@
 // where ScoutBox only sees association. Twelve positive cases (P1–P12) prove
 // the thing actually works while all of that stays true.
 //
-// Structure:  §1–§8   in-process — the registry, the pure statistics, source sweeps
-//             §9–§18  HTTP against a fresh server
-//             §19     a second boot: migration idempotence and the upgrade path
+// Structure:  in-process first — the registry, the pure statistics, source sweeps;
+//             then HTTP against a fresh server;
+//             then a second boot: migration idempotence and the upgrade path
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import { mkdtempSync } from 'node:fs';
@@ -43,7 +43,7 @@ import { CATEGORIES } from '../../domains/platform/notificationPrefs.mjs';
 import { DATA_MIGRATIONS } from '../../repositories/index.mjs';
 import { openLayer } from '../../scripts/dataLayerFixture.mjs';
 import { RATE_LIMIT_POLICY } from '../../domains/platform/rateLimit.mjs';
-import { buildReportingContext } from '../../scripts/recruitmentReadsFixture.mjs'; // §4.3 step 2: the contacts/offers queries over the plain arrays
+import { buildReportingContext } from '../../scripts/recruitmentReadsFixture.mjs'; // the contacts/offers queries over plain arrays
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SERVER_DIR = path.join(HERE, '..', '..');
@@ -59,7 +59,7 @@ const seenNeg = new Set();
 const fail = (msg) => { console.error(`✗ ${msg}`); process.exitCode = 1; };
 const ok = (cond, msg) => { if (cond) { passed++; console.log(`✓ ${msg}`); } else fail(msg); };
 const neg = (cond, msg) => { negatives++; ok(cond, `[neg] ${msg}`); };
-/** A numbered negative case. The number is the contract with the mandate. */
+/** A numbered negative case. The numbers are stable: the summary checks that all sixty ran. */
 const N = (n, cond, msg) => { seenNeg.add(n); neg(cond, `N${n} — ${msg}`); };
 /** A numbered positive case: the feature works, with everything above true. */
 const P = (n, cond, msg) => ok(cond, `P${n} — ${msg}`);
@@ -75,7 +75,7 @@ const DAY = DAY_MS;
 const NOW = Date.UTC(2026, 5, 15, 12);
 
 // =========================================================================
-section('§1 — the metric registry is internally consistent');
+section('the metric registry is internally consistent');
 
 {
   const shape = assertMetricRegistry();
@@ -132,7 +132,7 @@ section('§1 — the metric registry is internally consistent');
   // run with no server. A caveat that says something different in the demo is
   // worse than no caveat, so both copies are compared word for word.
   const clients = ['scoutbox-club/src/m20Demo.ts', 'scoutbox-grassroots/src/m20Demo.ts'];
-  // M23 P4B (D-29): the Trial process metric is counts only — no ratio, no
+  // The Trial process metric is counts only — no ratio, no
   // rate, and it never declares a read of the club's notes, instructions,
   // attendance notes or assessments.
   neg(METRICS.trial_process.ratio === false && METRICS.trial_process.distribution !== true, 'trial_process offers no rate and no distribution — a completion count beside an invitation count is not a conversion');
@@ -147,7 +147,7 @@ section('§1 — the metric registry is internally consistent');
 }
 
 // =========================================================================
-section('§2 — no person is a dimension');
+section('no person is a dimension');
 
 {
   N(11, !GROUP_DIMENSIONS.some((d) => PERSON_DIMENSIONS.includes(d)), 'GROUP_DIMENSIONS contains no person');
@@ -162,7 +162,7 @@ section('§2 — no person is a dimension');
 }
 
 // =========================================================================
-section('§3 — private text and personal identity are not analytics data');
+section('private text and personal identity are not analytics data');
 
 {
   for (const [file, src] of M20_FILES) {
@@ -195,7 +195,7 @@ section('§3 — private text and personal identity are not analytics data');
 }
 
 // =========================================================================
-section('§4 — the pure statistics are honest');
+section('the pure statistics are honest');
 
 {
   // Empty, zero and too-few are three different answers.
@@ -233,7 +233,7 @@ section('§4 — the pure statistics are honest');
 }
 
 // =========================================================================
-section('§5 — windows are inclusive UTC calendar days');
+section('windows are inclusive UTC calendar days');
 
 {
   const w = resolveWindow({ preset: 'last_30_days' }, NOW);
@@ -256,7 +256,7 @@ section('§5 — windows are inclusive UTC calendar days');
   ok(cohortIncomplete(young, 5, NOW) === false, '…and is not flagged when the journey is short');
   ok(cohortIncomplete(young, null, NOW) === false, 'with no typical journey known, nothing is claimed');
 
-  // The mandate's shortest window must exist, and every preset must resolve.
+  // The shortest window (seven days) must exist, and every preset must resolve.
   ok(Object.keys(WINDOW_PRESETS).includes('last_7_days'), 'a seven-day window is offered');
   for (const preset of Object.keys(WINDOW_PRESETS)) {
     const r = resolveWindow({ preset }, NOW);
@@ -288,7 +288,7 @@ section('§5 — windows are inclusive UTC calendar days');
 }
 
 // =========================================================================
-section('§6 — the funnel is not a conversion funnel');
+section('the funnel is not a conversion funnel');
 
 /** A synthetic room. Nothing here comes from the database. */
 const room = (id, createdAt, steps, extra = {}) => {
@@ -348,7 +348,7 @@ const room = (id, createdAt, steps, extra = {}) => {
 }
 
 // =========================================================================
-section('§7 — stage visits exclude the visit that has not finished');
+section('stage visits exclude the visit that has not finished');
 
 {
   const r = room('r4', NOW - 30 * DAY, [[NOW - 20 * DAY, 'under_review'], [NOW - 10 * DAY, 'shortlisted']]);
@@ -372,7 +372,7 @@ section('§7 — stage visits exclude the visit that has not finished');
 }
 
 // =========================================================================
-section('§8 — a dashboard read writes nothing, and sees only one organisation');
+section('a dashboard read writes nothing, and sees only one organisation');
 
 {
   const db = {
@@ -444,7 +444,7 @@ section('§8 — a dashboard read writes nothing, and sees only one organisation
 }
 
 // =========================================================================
-section('§9 — nothing new is emitted, notified or stored');
+section('nothing new is emitted, notified or stored');
 
 {
   const eventCount = EVENT_NAMES.length;
@@ -453,8 +453,7 @@ section('§9 — nothing new is emitted, notified or stored');
   ok(eventCount === EVENT_NAMES.length && Object.keys(CATEGORIES).length >= 13,
     `the event registry (${eventCount}) and notification categories (${Object.keys(CATEGORIES).length}) are untouched by M20`);
 
-  // Rewritten in S14a: N30–N33 ran migrateM20 and the blob's runMigrations in memory; the same claims are now made of
-  // the table migrations on a fresh file.
+  // N30–N33 are claims about the table migrations on a fresh file.
   const MIG_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-m20-mig-'));
   const readFile = () => { const st = openLayer(MIG_DIR); try { return { tables: st.sqlite.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((r) => r.name), ledger: st.sqlite.prepare('SELECT id, applied_at FROM data_migrations ORDER BY id').all() }; } finally { st.close(); } };
   const first = readFile();
@@ -476,7 +475,7 @@ section('§9 — nothing new is emitted, notified or stored');
 }
 
 // ============================================================ HTTP boot
-section('§10 — a clean database boots with M20 in place');
+section('a clean database boots with M20 in place');
 const ENV = { ...process.env, PORT: String(PORT), DATA_DIR, M13_QUIET_LOGS: '1', M13_FAST_RETRY: '1', BOX_CAM_TEST_PROVIDER: '1' };
 const children = [];
 process.on('exit', () => { for (const c of children) { try { c.kill('SIGKILL'); } catch { /* gone */ } } });
@@ -512,7 +511,7 @@ ok([maria, tom, rita, kola].every((x) => x?.token), 'HTTP actors logged in');
 }
 
 // =========================================================================
-section('§11 — only a lead reads the organisation’s recruitment analytics');
+section('only a lead reads the organisation’s recruitment analytics');
 
 {
   const paths = ['/org/recruitment-analytics', '/org/recruitment-analytics/catalogue', '/org/recruitment-analytics/rows?metric=stalled_rooms'];
@@ -529,7 +528,7 @@ section('§11 — only a lead reads the organisation’s recruitment analytics')
 }
 
 // =========================================================================
-section('§12 — the catalogue explains every number before showing one');
+section('the catalogue explains every number before showing one');
 
 {
   const c = await j('GET', '/org/recruitment-analytics/catalogue', undefined, maria.token);
@@ -545,7 +544,7 @@ section('§12 — the catalogue explains every number before showing one');
 }
 
 // =========================================================================
-section('§13 — the dashboard refuses what it cannot answer honestly');
+section('the dashboard refuses what it cannot answer honestly');
 
 {
   const cases = [
@@ -577,7 +576,7 @@ section('§13 — the dashboard refuses what it cannot answer honestly');
 }
 
 // =========================================================================
-section('§14 — real recruitment work, measured');
+section('real recruitment work, measured');
 
 /** Every room this organisation already has, plus the ones this suite opens. */
 async function roomsFor(token) {
@@ -591,7 +590,7 @@ const roomIds = [];
   const list = Array.isArray(players) ? players : (players.items ?? players.players ?? []);
   for (const p of list.slice(0, 8)) {
     const r = await j('POST', '/org/rooms', { playerId: p.id, sourceContext: 'search' }, maria.token);
-    // M17 names it `roomId` on the room projection, and `existingRoomId` when
+    // The room projection names it `roomId`, and the refusal names it `existingRoomId` when
     // the club already has one open for this player.
     if (r.status < 300) roomIds.push(r.body.room?.roomId ?? r.body.roomId);
     else if (r.body?.existingRoomId) roomIds.push(r.body.existingRoomId);
@@ -601,8 +600,8 @@ const roomIds = [];
   const move = (id, status, extra = {}) => j('POST', `/org/rooms/${id}/status`, { status, ...extra }, maria.token);
   for (const id of roomIds) await move(id, 'under_review');
   for (const id of roomIds.slice(0, 5)) await move(id, 'shortlisted');
-  // M23 P4B: `trial_requested` is evidence-gated on a live Trial invitation
-  // (D-3). The invitation itself advances the case; the explicit move that
+  // `trial_requested` is evidence-gated on a live Trial invitation.
+  // The invitation itself advances the case; the explicit move that
   // follows is kept for rooms whose invitation could not be issued (the
   // recipient may be unresolvable for a fixture minor) and is not asserted.
   {
@@ -617,7 +616,7 @@ const roomIds = [];
   await move(roomIds[2], 'withdrawn', { reasonCodes: ['squad_space'] });
   await move(roomIds[3], 'withdrawn', { reasonCodes: ['insufficient_full_match'] });
   await move(roomIds[4], 'archived', { reasonCodes: ['timing'] });
-  // A code from a NEIGHBOURING vocabulary is not a room reason. M17 refuses
+  // A code from a NEIGHBOURING vocabulary is not a room reason. The room refuses
   // it, so the analytics layer never has to guess what an unknown code means.
   neg((await move(roomIds[6], 'archived', { reasonCodes: ['timing_not_right'] })).status === 400,
     'a Second Look dismissal reason is not a Recruitment Room reason, and the room refuses it');
@@ -678,7 +677,7 @@ const roomIds = [];
 }
 
 // =========================================================================
-section('§15 — association is never dressed as cause');
+section('association is never dressed as cause');
 
 {
   const d = (await j('GET', '/org/recruitment-analytics', undefined, maria.token)).body;
@@ -698,7 +697,7 @@ section('§15 — association is never dressed as cause');
 }
 
 // =========================================================================
-section('§16 — one organisation, one dataset');
+section('one organisation, one dataset');
 
 {
   const mine = (await j('GET', '/org/recruitment-analytics', undefined, maria.token)).body;
@@ -721,7 +720,7 @@ section('§16 — one organisation, one dataset');
 }
 
 // =========================================================================
-section('§17 — drill-down is bounded and stable');
+section('drill-down is bounded and stable');
 
 {
   const first = await j('GET', '/org/recruitment-analytics/rows?metric=stalled_rooms&limit=2&stallDays=14', undefined, maria.token);
@@ -747,7 +746,7 @@ section('§17 — drill-down is bounded and stable');
 }
 
 // =========================================================================
-section('§18 — the page survives a family that cannot be computed');
+section('the page survives a family that cannot be computed');
 
 {
   const partial = (await j('GET', '/org/recruitment-analytics?simulateFailure=coverage', undefined, maria.token));
@@ -767,7 +766,7 @@ section('§18 — the page survives a family that cannot be computed');
 }
 
 // =========================================================================
-section('§19 — a second boot changes nothing');
+section('a second boot changes nothing');
 
 {
   serverProc.kill('SIGTERM');

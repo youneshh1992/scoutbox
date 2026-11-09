@@ -1,4 +1,4 @@
-// M21 typed client (org side): the Development Hub, inside a player.
+// Typed client (org side): the Development Hub, inside a player.
 //
 // What this is: a club's structured record of what a player is working on, the
 // actions agreed, the evidence cited and the reviews written. Workflow.
@@ -10,7 +10,7 @@
 //   • A ranking. There is no endpoint that lists players by development and no
 //     parameter that sorts by it; the club's list is of plans it may read.
 //   • A recruitment signal. Development status is not a matching criterion and
-//     M19 does not read it.
+//     matching does not read it.
 //   • A second evidence store. An evidence link is a reference; what it points
 //     at is resolved live by the server, so an invalidated result reads as
 //     invalid now rather than as it was when someone linked it.
@@ -166,7 +166,7 @@ export type Result<T> = { ok: true; value: T } | Refusal;
 export interface M21Api {
   catalogue(s: Session): Promise<DevelopmentCatalogue>;
   linkable(s: Session, playerId: string): Promise<{ items: LinkableEvidence[]; note: string }>;
-  /** The first page (newest change first); `nextCursor` continues it (S12a). */
+  /** The first page (newest change first); `nextCursor` continues it. */
   plans(s: Session, playerId?: string): Promise<{ items: PlanListItem[]; total: number; nextCursor: string | null; note: string }>;
   plan(s: Session, id: string): Promise<DevelopmentPlanView>;
   createPlan(s: Session, body: Record<string, unknown>): Promise<Result<DevelopmentPlanView>>;
@@ -217,7 +217,7 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
 /**
  * A write that may be answered rather than thrown.
  *
- * 409 is deliberately NOT absorbed here: a conflict is the shared M18.2
+ * 409 is deliberately NOT absorbed here: a conflict is the shared
  * ConflictNotice's job, and swallowing it into a sentence would lose the
  * "someone else changed this" UX the whole codebase already has.
  */

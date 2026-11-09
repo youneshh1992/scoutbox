@@ -1,4 +1,4 @@
-// M23 P5.6D — the individual's side of a transaction workspace.
+// The individual's side of a transaction workspace.
 //
 // A transaction is a permissioned multi-party record: the player sees the
 // transactions they are actually party to, who represents whom, what the

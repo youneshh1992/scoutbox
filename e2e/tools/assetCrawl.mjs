@@ -1,8 +1,8 @@
-// M24F.5 freeze — asset / font / console crawl of the FINAL demo bundles.
+// Asset / font / console crawl of the FINAL demo bundles.
 // Usage (from e2e/, after buildDemos.mjs + buildConnectedDemo.mjs):
 //   node tools/assetCrawl.mjs            [CHROMIUM_PATH=…] [DEMO_DIR=…] [LAUNCHER_HTML=…] [CRAWL_OUT=…]
 // Serves each bundle from a local server, records every request, response, failed
-// request, console message and page error, walks the approved M24F.5 screens, and
+// request, console message and page error, walks the approved screens, and
 // checks fonts (document.fonts status + computed face), images and background photos.
 import http from 'node:http'; import fs from 'node:fs'; import path from 'node:path';
 import { chromium } from 'playwright-core';

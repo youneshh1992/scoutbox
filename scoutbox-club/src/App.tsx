@@ -61,19 +61,17 @@ export type ScreenId =
   | 'matching' | 'watchlists'
   | 'dashboard';
 
-// M15-Nav: the sidebar no longer renders a flat list of every screen. The
-// full information architecture lives in src/nav.ts (sections → child tabs),
-// which also drives the command palette, active-route resolution and pinned
-// shortcuts. Every ScreenId above remains a live, deep-linkable destination
-// ("#/<screenId>") — nothing was removed or renamed.
+// The information architecture lives in src/nav.ts (sections → child tabs),
+// which also drives the sidebar, the command palette, active-route resolution
+// and pinned shortcuts. Every ScreenId above is a live, deep-linkable
+// destination ("#/<screenId>").
 
 
-// ---------------------------------------------------------------- M18.1 bell
+// ---------------------------------------------------------------- bell
 /**
  * Where a notification leads. A notification you cannot act on is only an
- * interruption: the bell rendered the sentence and a time and dropped both the
- * type and the refId, so "someone assigned you a task in the Recruitment Room
- * for X" left you to go and find it. Rows with a destination are now buttons.
+ * interruption: "someone assigned you a task in the Recruitment Room for X"
+ * should take you there, so rows with a destination are buttons.
  *
  * A type that is NOT in this table stays plain text. Sending someone to an
  * approximately-right screen is worse than not offering the jump, and this
@@ -129,11 +127,11 @@ export default function App() {
     setSession(s);
   };
   const logout = () => {
-    revokeSession(session); // PRE-M24 (PM-4): the server forgets the token too
+    revokeSession(session); // The server forgets the token too
     try {
       localStorage.removeItem(SESSION_KEY);
       // Offline drafts are identity-scoped and cleared on logout — nothing
-      // sensitive lingers on a shared device (F12C).
+      // sensitive lingers on a shared device.
       const stale = session ? Object.keys(localStorage).filter((k) => k.startsWith(`sbdraft:${session.org.id}:${session.userId}:`)) : [];
       for (const k of stale) localStorage.removeItem(k);
     } catch { /* private mode */ }
@@ -148,7 +146,7 @@ export default function App() {
     const restored = loadSession();
     if (!restored) return;
     api.getNotifications(restored).catch((e) => {
-      // M18.2 — only a 401 ends the session. A 403 is a permission answer
+      // Only a 401 ends the session. A 403 is a permission answer
       // about ONE request; treating it as "signed out" threw people out of
       // the workspace for opening a screen they were not allowed to see.
       if (e instanceof ApiError && e.status === 401) logout();
@@ -156,7 +154,7 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // PRE-M24 (PM-3): a sign-out (or a different sign-in) in ANOTHER tab of this
+  // A sign-out (or a different sign-in) in ANOTHER tab of this
   // browser ends this tab's workspace too, instead of leaving it acting on a
   // token the server no longer honours.
   useEffect(() => {
@@ -165,14 +163,14 @@ export default function App() {
     return () => window.removeEventListener('storage', onStorage);
   }, []);
 
-  // M24A — one appearance per application, persisted under its own key.
+  // One appearance per application, persisted under its own key.
   const { theme, toggle: toggleTheme } = useTheme('pro');
   return session
     ? <Workspace session={session} onLogout={logout} theme={theme} onToggleTheme={toggleTheme} />
     : <Login onLogin={login} />;
 }
 
-// M24F — presentation casing for the organisation metadata line ("Club · Grassroots · Verified"); the data value stays as it is.
+// Presentation casing for the organisation metadata line ("Club · Grassroots · Verified"); the data value stays as it is.
 const orgTypeLabel = (type: string) => type === 'club' ? 'Club' : type === 'academy' ? 'Academy' : type === 'agency' ? 'Agency' : type.charAt(0).toUpperCase() + type.slice(1);
 
 function Login({ onLogin }: { onLogin: (s: Session) => void }) {
@@ -190,7 +188,7 @@ function Login({ onLogin }: { onLogin: (s: Session) => void }) {
     api.listOrgs().then(setOrgs).catch(() => setError('We couldn’t load the available organisations. Please try again shortly.'));
   }, []);
 
-  // M24C — one submission at a time; a refusal keeps the name, organisation
+  // One submission at a time; a refusal keeps the name, organisation
   // and role so only the password needs retyping.
   const enter = async () => {
     if (busy) return;
@@ -237,23 +235,23 @@ function Workspace({ session, onLogout, theme, onToggleTheme }: { session: Sessi
   // Deep links: the hash IS the screen id ("#/verification"). Unknown or
   // absent hashes land on Home without highlighting a wrong section.
   const [screen, setScreenState] = useState<ScreenId>(() => screenFromHash(window.location.hash) ?? 'feed');
-  // M17: the first parameterised route. The room id lives beside the screen id
+  // The first parameterised route. The room id lives beside the screen id
   // so back/forward/refresh/deep-entry all land on exactly the same place.
   const [roomId, setRoomId] = useState<string | null>(() => roomFromHash(window.location.hash));
-  // M23 P8 — the tab a room link names, so a notification or a colleague's
+  // The tab a room link names, so a notification or a colleague's
   // link lands on the right function of the case.
   const [roomTab, setRoomTab] = useState<RoomTab | null>(() => roomTabFromHash(window.location.hash));
-  // M18 reuses that same mechanism for "#/recruitment/briefs/:briefId".
+  // Reuses that same mechanism for "#/recruitment/briefs/:briefId".
   const [briefId, setBriefId] = useState<string | null>(() => briefFromHash(window.location.hash));
-  // M19 reuses it a third time: one watchlist id, and the opaque criteria
+  // Reuses it a third time: one watchlist id, and the opaque criteria
   // state a matching link carries.
   const [watchlistId, setWatchlistId] = useState<string | null>(() => watchlistFromHash(window.location.hash));
   const [matchState, setMatchState] = useState<string | null>(() => criteriaFromHash(window.location.hash));
-  // M20 reuses it a fourth time: the Director Dashboard's window and filters
+  // Reuses it a fourth time: the Director Dashboard's window and filters
   // live in the hash so a director can send a colleague the exact view they
   // are reading. None of these filters names a person.
   const [dashFilters, setDashFilters] = useState<DashboardFilters>(() => (dashboardFromHash(window.location.hash) ?? {}) as DashboardFilters);
-  // M18.2 — every programmatic navigation asks the dirty-guard first. A form
+  // Every programmatic navigation asks the dirty-guard first. A form
   // with nothing unsaved never triggers it.
   const setScreen = useCallback((id: ScreenId) => {
     if (!confirmLeave(t('brief.unsaved'))) return;
@@ -276,7 +274,7 @@ function Workspace({ session, onLogout, theme, onToggleTheme }: { session: Sessi
     try { if (window.location.hash !== hashForRoom(id, tab)) window.history.pushState(null, '', hashForRoom(id, tab)); } catch { /* sandboxed */ }
     noteNavigated();
   }, []);
-  /** M23 P8 — a tab change inside a room REPLACES the hash (no history entry per tab). */
+  /** A tab change inside a room REPLACES the hash (no history entry per tab). */
   const onRoomTab = useCallback((id: string, tab: string) => {
     setRoomTab(tab as RoomTab);
     try { if (window.location.hash !== hashForRoom(id, tab)) window.history.replaceState(null, '', hashForRoom(id, tab)); } catch { /* sandboxed */ }
@@ -348,11 +346,11 @@ function Workspace({ session, onLogout, theme, onToggleTheme }: { session: Sessi
     } catch { /* sandboxed */ }
     noteNavigated();
   }, []);
-  // M18.2 — close/reload prompt while a form is dirty.
+  // Close/reload prompt while a form is dirty.
   useEffect(() => installDirtyGuard(), []);
   useEffect(() => {
     const onHash = () => {
-      // M18.2 — the dirty-guard decides BEFORE any state changes (see dirtyGuard.ts).
+      // The dirty-guard decides BEFORE any state changes (see dirtyGuard.ts).
       if (!guardHashChange(() => t('brief.unsaved'))) return;
       const id = screenFromHash(window.location.hash);
       if (id) setScreenState(id);
@@ -406,7 +404,7 @@ function Workspace({ session, onLogout, theme, onToggleTheme }: { session: Sessi
   const [safetyOpen, setSafetyOpen] = useState(false);
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [bellOpen, setBellOpen] = useState(false);
-  // PRE-M24 (PM-7): Escape closes the notification panel and the phone drawer,
+  // Escape closes the notification panel and the phone drawer,
   // and focus returns to the button that opened it (keyboard users were left
   // with an open panel and no way to dismiss it without a pointer).
   useEffect(() => {
@@ -431,12 +429,12 @@ function Workspace({ session, onLogout, theme, onToggleTheme }: { session: Sessi
     return () => window.removeEventListener('sb-lang', onLang);
   }, []);
   useEffect(() => api.onChange(session, (event, payload) => {
-    if (event === 'session_expired') { onLogout(); return; } // PRE-M24 (PM-3)
+    if (event === 'session_expired') { onLogout(); return; }
     if (event === 'sse_status') { setLive((payload as { connected?: boolean } | undefined)?.connected !== false); return; }
     if (event === 'typing') return; // transient — handled inside Messages
     setTick((t) => t + 1);
   }), [session]); // eslint-disable-line react-hooks/exhaustive-deps
-  // M23 P8.1 (§29, §71) — a missed event, a dropped stream or a tab left in the
+  // A missed event, a dropped stream or a tab left in the
   // background: every screen re-reads canonical state when the window regains
   // focus or becomes visible again. Nothing local is trusted over the server.
   useEffect(() => {
@@ -450,7 +448,7 @@ function Workspace({ session, onLogout, theme, onToggleTheme }: { session: Sessi
   }, [session]);
 
   useEffect(() => {
-    // PRE-M24 (PM-3): this read runs on every refresh signal, so it is where a
+    // This read runs on every refresh signal, so it is where a
     // session that died mid-use (expired, revoked, the user removed) is
     // noticed. Only a 401 ends the session; anything else is a transient
     // failure the workspace survives.
@@ -522,7 +520,7 @@ function Workspace({ session, onLogout, theme, onToggleTheme }: { session: Sessi
                   <option value="fr">Français (trad. automatique)</option>
                 </select>
               </label>
-              {/* M24E — the way out of the session, in the account block where the person is named. */}
+              {/* The way out of the session, in the account block where the person is named. */}
               <button data-exit="switch-org" data-testid="switch-org" onClick={onLogout} aria-label={t('common.switchOrg')}><Icon name="arrow-right" size={14} />{t('common.switchOrg')}</button>
               <button data-exit="sign-out" data-testid="sign-out" onClick={onLogout} aria-label={t('common.signOut')}><Icon name="log-out" size={14} />{t('common.signOut')}</button>
             </div></details>
@@ -549,7 +547,7 @@ function Workspace({ session, onLogout, theme, onToggleTheme }: { session: Sessi
           <div className="bell-panel" aria-label="Notifications"><div className="pro-alert-heading"><h3>Notifications</h3><button aria-label="Close notifications" onClick={() => setBellOpen(false)}><Icon name="x" size={17}/></button></div>
             {notifications.length === 0 && <div className="notice">Nothing yet — you'll hear the moment a player or guardian responds.</div>}
             {bellRows(notifications).slice(0, 20).map(({ n, count, unread }) => {
-              // M23 P8 — the server resolved the CURRENT resource this row
+              // The server resolved the CURRENT resource this row
               // points to (a room and its tab), re-authorized at read time. A
               // row with no target keeps the type-level destination, or stays
               // plain text.
@@ -572,7 +570,7 @@ function Workspace({ session, onLogout, theme, onToggleTheme }: { session: Sessi
         )}
         {activeSection && <SecondaryNav section={activeSection} activeItemId={loc.itemId} onNavigate={setScreen} />}
         <div className="content pro-content" data-screen={screen}>
-          {/* M24A — the reference page heading; the top bar keeps the document <h1>. */}
+          {/* The reference page heading; the top bar keeps the document <h1>. */}
           <div key={screen} className="pro-page-entry">{screen !== 'feed' && screen !== 'messages' && <ProMasthead screen={screen} title={screenLabel} section={breadcrumbSection ? t(breadcrumbSection.labelKey as Parameters<typeof t>[0]) : null}/>}</div>
           {screen === 'feed' && <ProOverview session={session} tick={tick} navigate={setScreen} />}
           {screen === 'feed' && (

@@ -1,4 +1,4 @@
-// M18 acceptance suite — Second Look + Nobody Missed.
+// Second Look + Nobody Missed battery.
 //
 // Two systems that must never become a talent recommender. Almost everything
 // worth proving is a negative: unrelated evidence must not resolve a reason,
@@ -54,7 +54,7 @@ const dec = (reasonCodes, agoDays = 10) => ({ id: 'd1', createdAt: NOW - agoDays
 section('U1 — the policy is total, versioned and internally consistent');
 {
   ok(SECOND_LOOK_POLICY_VERSION === 1 && EVALUATION_COVERAGE_POLICY_VERSION === 1, 'both policies are versioned');
-  ok(CHANGE_TYPES.length === 17, 'seventeen normalized change types (M18.1 added combine_verified_restored)');
+  ok(CHANGE_TYPES.length === 17, 'seventeen normalized change types (including combine_verified_restored)');
   ok(CHANGE_TYPES.every((t) => CHANGE_COPY[t]), 'every change type has human copy');
   ok(NEGATIVE_CHANGE_TYPES.every((t) => CHANGE_TYPES.includes(t)), 'every negative type is a real type');
   for (const [reason, types] of Object.entries(REASON_CHANGE_MAP)) {
@@ -98,7 +98,7 @@ section('U3 — fingerprints, deduplication and the change window');
   neg(a.fingerprint !== mk('combine_verified_added', 'box_juggle@1', 1, 'combine').fingerprint, 'a different protocol is a different fingerprint');
   ok(changeFingerprint({ type: 'x', sourceSystem: 'y', sourceId: null }) === 'x:y:none', 'a missing source id still yields a stable fingerprint');
 
-  // The §23 requirement: one real change reaching M18 through several
+  // One real change reaching Second Look through several
   // projections must produce ONE change, not three alerts.
   const viaThree = dedupeMaterialChanges([a, b, mk('combine_verified_added', 'box_touch_60@1', 3, 'combine')]);
   neg(viaThree.length === 1, 'the same Combine result seen through three projections deduplicates to one change');
@@ -114,7 +114,7 @@ section('U3 — fingerprints, deduplication and the change window');
 }
 
 // ======================================== U4 candidate assembly, S1–S8
-section('U4 — candidate assembly, the mandate scenarios S1–S8');
+section('U4 — candidate assembly, the scenarios S1–S8');
 {
   // S1
   const s1 = buildSecondLookCandidate({ room: archivedRoom, decision: dec(['insufficient_recent_evidence']), changes: [mk('full_match_added', 'evd-9', 5)] });
@@ -173,7 +173,7 @@ section('U5 — lifecycle, cooldown and the fingerprint rule');
   const cand = buildSecondLookCandidate({ room: archivedRoom, decision: dec(['insufficient_recent_evidence']), changes: [mk('full_match_added', 'evd-1', 5)] });
   ok(secondLookStatus({ existing: null, candidate: cand }).action === 'create', 'a new candidate creates an item');
 
-  // §13: the same evidence must never regenerate a handled item, no matter
+  // The same evidence must never regenerate a handled item, no matter
   // which projection it arrives through.
   const dismissed = { status: 'dismissed', changeFingerprints: cand.changeFingerprints, dismissedAt: NOW };
   neg(secondLookStatus({ existing: dismissed, candidate: cand }).action === 'suppress', 'the SAME evidence does not resurface a dismissed item');
@@ -290,7 +290,7 @@ section('U8 — deterministic matching and Evaluation Coverage');
   ok(playerMatchesBrief({ ...facts, trustBand: 'very_strong_evidence' }, { ...crit, minTrustBand: 'established_evidence' }).matched, 'evidence confidence above the criteria passes');
   neg(TRUST_BANDS.length === 5 && !TRUST_BANDS.some((b) => /good|great|elite|talent/i.test(b)), 'trust bands describe evidence, never ability');
 
-  // §41/§42: previously evaluated and active-room players are not "missed".
+  // Previously evaluated and active-room players are not "missed".
   const brief = { id: 'brf-1', version: 1 };
   neg(buildNobodyMissedCandidate({ facts, brief, match: m, evaluation: { evaluated: true }, roomOpen: false }) === null, 'an already-evaluated player is never a Nobody Missed candidate');
   neg(buildNobodyMissedCandidate({ facts, brief, match: m, evaluation: { evaluated: false }, roomOpen: true }) === null, 'a player with an open room is never a Nobody Missed candidate');
@@ -299,7 +299,7 @@ section('U8 — deterministic matching and Evaluation Coverage');
   neg(/not football ability/i.test(cand.trustNote), 'the candidate carries the Trust disclaimer');
   neg(!JSON.stringify(cand).match(/dob|guardian|medical|email|phone/i), 'the candidate explanation exposes no private field');
 
-  // N1 arithmetic, exactly as the mandate states it.
+  // N1 arithmetic, worked exactly.
   const cov = evaluationCoverageState({ eligible: 42, evaluated: 30 });
   ok(cov.eligible === 42 && cov.evaluated === 30 && cov.notYetEvaluated === 12 && cov.coveragePercent === 71, 'N1: 42 eligible, 30 evaluated gives 12 not yet evaluated and 71% coverage');
   ok(evaluationCoverageState({ eligible: 8, evaluated: 5 }).coveragePercent === 63, 'the demo brief arithmetic gives 63%');
@@ -365,24 +365,11 @@ await j('POST', `/org/rooms/${room.roomId}/status`, { status: 'archived', reason
   ok(/relates to the reason recorded/i.test(item.summary), 'S1: it explains the relationship');
   neg(!FORBIDDEN_COPY.some((f) => JSON.stringify(after.body).toLowerCase().includes(f)), 'S1: nothing in the response says the decision was wrong');
   neg(/never judges that decision/i.test(after.body.note), 'S1: the queue states it does not judge the decision');
-  // THE FLAKE THAT WAS, AND WHAT IT ACTUALLY WAS.
-  //
-  // This failed intermittently — about 1 run in 30 — and the diagnostic named
-  // the cause exactly: ONE evidence record produced TWO material changes,
-  //
-  //   full_match_added:evidence:evd-1016          at +11ms
-  //   evidence_quality_improved:evidence:evd-1016 at +12ms
-  //
-  // `newEvidence` read the clock three times for one creation, so `recordedAt`
-  // and `verification.reviewedAt` were usually equal and occasionally 1ms
-  // apart. M18 tests `reviewedAt > recordedAt` to tell a LATER upgrade from a
-  // tier the record was born with, so a 1ms drift made a brand-new upload look
-  // like a later upgrade of itself — and a club was told its evidence had
-  // improved when nothing had been reviewed.
-  //
-  // A product defect, not a test defect: same action, different output,
-  // depending on where a clock tick fell. Fixed at the writer (one event, one
-  // clock read), not here.
+  // Second Look tests `reviewedAt > recordedAt` to tell a LATER upgrade from a
+  // tier the record was born with, so the evidence writer must read the clock
+  // once per creation: a 1ms drift between the two would make a brand-new upload
+  // look like a later upgrade of itself (two material changes for one record),
+  // and a club would be told its evidence had improved when nothing was reviewed.
   if (item.changeCount !== 1) {
     console.error(`   changeCount=${item.changeCount} decisionAt=${item.decisionAt}`);
     for (const c of item.changes ?? []) console.error(`   change: ${c.fingerprint} at=${c.occurredAt} (+${c.occurredAt - item.decisionAt}ms)`);
@@ -451,8 +438,8 @@ section('Abuse — forged changes, forged flags, invalid codes');
   neg(roomNow.status === 'archived', '[18/19] reading Second Look never reopened the room or changed its status');
 }
 
-// ------------------------------------------- §13 the fingerprint regression
-section('§13 — the same evidence cannot resurface through another projection');
+// ------------------------------------------- the fingerprint regression
+section('the same evidence cannot resurface through another projection');
 {
   await j('POST', `/org/second-look/${ITEM.id}/review`, {}, maria.token);
   const reviewed = await j('GET', '/org/second-look?status=reviewed', undefined, maria.token);
@@ -484,7 +471,7 @@ section('§13 — the same evidence cannot resurface through another projection'
 }
 
 // ------------------------------------------------- S7/S8 reopen and cycles
-section('S7/S8 — reopen through M17, then a second archive cycle');
+section('S7/S8 — reopen through the Recruitment Room, then a second archive cycle');
 {
   const item = global.__item2;
   const ro = await j('POST', `/org/second-look/${item.id}/reopen-room`, {}, maria.token);
@@ -531,14 +518,14 @@ section('N — Recruitment Briefs and Nobody Missed');
   neg((await j('POST', '/org/recruitment-briefs', { title: 'x', minAge: 20, maxAge: 16 }, maria.token)).status === 400, '[45] an inverted age range is refused');
   neg((await j('POST', '/org/recruitment-briefs', { title: 'x', positions: ['SWEEPER'] }, maria.token)).status === 400, '[46] an unsupported position is refused');
   neg((await j('POST', '/org/recruitment-briefs', { title: 'x', evidenceRequirements: ['is_talented'] }, maria.token)).status === 400, '[47] an unsupported evidence criterion is refused');
-  // S12c: a field of the wrong type is refused, naming it, where it used to be dropped or coerced into the record.
+  // A field of the wrong type is refused, naming it, rather than dropped or coerced into the record.
   const field = (r) => r.body?.details?.map((d) => `${d.field}:${d.error}`) ?? [r.body?.error, r.body?.field];
-  neg(field(await j('POST', '/org/recruitment-briefs', { title: 'x', foot: 'left' }, maria.token)).includes('foot:BRIEF_FOOT_UNKNOWN'), 'S12c: an unknown foot is refused, not dropped');
-  neg(field(await j('POST', '/org/recruitment-briefs', { title: 'x', positions: 'CB' }, maria.token)).includes('positions:FIELD_INVALID'), 'S12c: positions that are not a list are refused, not read as none');
-  neg(field(await j('POST', '/org/recruitment-briefs', { title: 'x', combineProtocols: ['made-up-drill'] }, maria.token)).includes('combineProtocols:BRIEF_COMBINE_PROTOCOL_UNKNOWN'), 'S12c: an unknown Combine protocol is refused');
-  neg(field(await j('POST', '/org/recruitment-briefs', { title: { text: 'x' } }, maria.token)).includes('title:FIELD_INVALID'), 'S12c: a title that is not text is refused');
-  neg(field(await j('POST', '/org/recruitment-briefs', { title: 'x', availability: 7 }, maria.token)).includes('availability:FIELD_INVALID'), 'S12c: an availability that is not text is refused');
-  { const r = await j('POST', '/org/recruitment-briefs', { title: 'x', roleId: { id: 'r1' } }, maria.token); neg(r.status === 400 && r.body.error === 'FIELD_INVALID' && r.body.field === 'roleId', 'S12c: a role reference that is not a short id is refused, not stored as it came'); }
+  neg(field(await j('POST', '/org/recruitment-briefs', { title: 'x', foot: 'left' }, maria.token)).includes('foot:BRIEF_FOOT_UNKNOWN'), 'an unknown foot is refused, not dropped');
+  neg(field(await j('POST', '/org/recruitment-briefs', { title: 'x', positions: 'CB' }, maria.token)).includes('positions:FIELD_INVALID'), 'positions that are not a list are refused, not read as none');
+  neg(field(await j('POST', '/org/recruitment-briefs', { title: 'x', combineProtocols: ['made-up-drill'] }, maria.token)).includes('combineProtocols:BRIEF_COMBINE_PROTOCOL_UNKNOWN'), 'an unknown Combine protocol is refused');
+  neg(field(await j('POST', '/org/recruitment-briefs', { title: { text: 'x' } }, maria.token)).includes('title:FIELD_INVALID'), 'a title that is not text is refused');
+  neg(field(await j('POST', '/org/recruitment-briefs', { title: 'x', availability: 7 }, maria.token)).includes('availability:FIELD_INVALID'), 'an availability that is not text is refused');
+  { const r = await j('POST', '/org/recruitment-briefs', { title: 'x', roleId: { id: 'r1' } }, maria.token); neg(r.status === 400 && r.body.error === 'FIELD_INVALID' && r.body.field === 'roleId', 'a role reference that is not a short id is refused, not stored as it came'); }
   // permissions
   const notLead = await j('POST', '/org/recruitment-briefs', { title: 'Scout brief', positions: ['CM'] }, tom.token);
   neg(notLead.status === 403, 'a non-lead scout cannot create a brief');
@@ -548,11 +535,11 @@ section('N — Recruitment Briefs and Nobody Missed');
   const BRIEF = created.body.brief.id;
   neg(/no hidden criteria/i.test(created.body.brief.note), 'the brief states it has no hidden criteria, weights or ranking');
 
-  // S12c: everything is checked before anything is written — a refused criteria change does not half-apply the status
+  // Everything is checked before anything is written — a refused criteria change does not half-apply the status
   // change that came with it.
   const half = await j('PATCH', `/org/recruitment-briefs/${BRIEF}`, { status: 'active', foot: 'sideways' }, maria.token);
   const still = await j('GET', `/org/recruitment-briefs/${BRIEF}`, undefined, maria.token);
-  neg(half.status === 400 && still.body.brief.status === 'draft' && still.body.brief.rev === created.body.brief.rev, 'S12c: a refused PATCH leaves the brief exactly as it was (still draft, same rev)');
+  neg(half.status === 400 && still.body.brief.status === 'draft' && still.body.brief.rev === created.body.brief.rev, 'a refused PATCH leaves the brief exactly as it was (still draft, same rev)');
 
   // A draft produces nothing.
   const draftQ = await j('GET', `/org/nobody-missed?briefId=${BRIEF}`, undefined, maria.token);
@@ -580,7 +567,7 @@ section('N — Recruitment Briefs and Nobody Missed');
     const afterView = await j('GET', `/org/nobody-missed?briefId=${BRIEF}`, undefined, maria.token);
     neg(afterView.body.items.some((c) => c.playerId === CAND.playerId), '[43] N3: after viewing the profile the player is STILL not yet evaluated');
 
-    // N8: add to room via the canonical M17 creator.
+    // N8: add to room via the canonical Recruitment Room creator.
     const add = await j('POST', '/org/nobody-missed/add-to-room', { briefId: BRIEF, playerId: CAND.playerId }, maria.token);
     ok(add.status === 201 && add.body.roomId, 'N8: the candidate is added to a canonical Recruitment Room');
     ok(add.body.room.sourceContext === 'nobody_missed', 'N8: the room records nobody_missed as its source context');
@@ -588,7 +575,7 @@ section('N — Recruitment Briefs and Nobody Missed');
     neg(!afterAdd.body.items.some((c) => c.playerId === CAND.playerId), 'N8: the candidate leaves the queue immediately');
     ok(afterAdd.body.coverage.evaluated === nm.body.coverage.evaluated + 1, 'N8: coverage updates — one more player has entered the workflow');
 
-    // §22: archiving that room must NOT put them back into Nobody Missed.
+    // Archiving that room must NOT put them back into Nobody Missed.
     await j('POST', `/org/rooms/${add.body.roomId}/status`, { status: 'under_review' }, maria.token);
     await j('POST', `/org/rooms/${add.body.roomId}/status`, { status: 'archived', reasonCodes: ['squad_space'] }, maria.token);
     const afterArchive = await j('GET', `/org/nobody-missed?briefId=${BRIEF}`, undefined, maria.token);
@@ -648,12 +635,12 @@ section('Gates run before matching, never after');
   // #39 removed player
   const ghost = await j('POST', '/org/nobody-missed/add-to-room', { briefId: BRIEF, playerId: 'pl-does-not-exist' }, maria.token);
   neg(ghost.status === 403, '[39] a player who does not exist can never be added');
-  // #60 add-to-room cannot bypass M17 visibility
+  // #60 add-to-room cannot bypass the Recruitment Room's visibility
   const hidden = players.find((p) => p.level === 'pro');
   if (hidden) {
     const bypass = await j('POST', '/org/nobody-missed/add-to-room', { briefId: BRIEF, playerId: hidden.id }, dee.token);
-    neg([403, 404].includes(bypass.status), '[60] add-to-room runs M17’s own visibility check and cannot bypass it');
-  } else neg(true, '[60] add-to-room delegates visibility to M17');
+    neg([403, 404].includes(bypass.status), '[60] add-to-room runs the Recruitment Room’s own visibility check and cannot bypass it');
+  } else neg(true, '[60] add-to-room delegates visibility to the Recruitment Room');
 
   // #8/#40 suspended org
   await j('POST', '/admin/clubs/org-harbour/verification', { suspended: true }, undefined, A);
@@ -667,7 +654,7 @@ section('Gates run before matching, never after');
 // -------------------------------------------- privacy: nothing reaches out
 section('Privacy — nothing reaches the player, the guardian or a rival');
 {
-  // #44 player-facing surfaces carry no M18 anything
+  // #44 player-facing surfaces carry no Second Look or Nobody Missed anything
   const passport = await j('GET', '/player/football-passport', undefined, kola.token);
   const trust = await j('GET', '/player/trust-profile', undefined, kola.token);
   const notifs = await j('GET', '/player/notifications', undefined, kola.token);
@@ -675,9 +662,9 @@ section('Privacy — nothing reaches the player, the guardian or a rival');
   neg(!/second.?look|nobody.?missed|recruitment.?brief|evaluation.?coverage/i.test(blob), 'no player-facing API mentions Second Look, Nobody Missed, a brief or coverage');
   neg(!/insufficient_recent_evidence|combine_missing|squad_space|archived/i.test(blob), 'no archive reason reaches the player');
   const gBlob = JSON.stringify((await j('GET', '/guardian/children', undefined, amara.token)).body ?? {});
-  neg(!/second.?look|nobody.?missed|brief/i.test(gBlob), 'no guardian surface mentions any M18 concept');
+  neg(!/second.?look|nobody.?missed|brief/i.test(gBlob), 'no guardian surface mentions any Second Look or Nobody Missed concept');
 
-  // SSE: an M18 org-private event must not reach the player's stream.
+  // SSE: an org-private Second Look event must not reach the player's stream.
   const ticket = await j('POST', '/events/ticket', {}, kola.token);
   const ac = new AbortController();
   const frames = [];
@@ -699,7 +686,7 @@ section('Privacy — nothing reaches the player, the guardian or a rival');
   ac.abort();
   await streamed;
   const seen = frames.join('');
-  neg(!seen.includes('recruitment_room_archived') && !seen.includes('second_look'), 'no organisation-private M18 or M17 event reaches the player’s stream');
+  neg(!seen.includes('recruitment_room_archived') && !seen.includes('second_look'), 'no organisation-private Second Look or Recruitment Room event reaches the player’s stream');
   neg(!seen.includes('budget') && !seen.includes('org-harbour'), 'no archive reason and no organisation id reaches the player’s stream');
 }
 
@@ -707,9 +694,9 @@ section('Privacy — nothing reaches the player, the guardian or a rival');
 section('Trust & Safety, metrics and pagination');
 {
   const metrics = await j('GET', '/admin/metrics', undefined, undefined, A);
-  ok(metrics.body.secondLook?.second_look_created >= 1, 'M18 metrics count created items');
+  ok(metrics.body.secondLook?.second_look_created >= 1, 'Second Look metrics count created items');
   const mblob = JSON.stringify(metrics.body.secondLook);
-  neg(!mblob.includes(ADULT.id) && !mblob.includes('Kola') && !mblob.includes('Eastport'), 'M18 metrics carry no player id, player name or organisation name');
+  neg(!mblob.includes(ADULT.id) && !mblob.includes('Kola') && !mblob.includes('Eastport'), 'Second Look metrics carry no player id, player name or organisation name');
   ok(metrics.body.secondLook.policyVersion === SECOND_LOOK_POLICY_VERSION, 'metrics record the policy version');
 
   const page = await j('GET', '/org/second-look?status=all&limit=1', undefined, maria.token);
@@ -735,7 +722,7 @@ section('Staff removal keeps attribution');
     await j('POST', `/org/second-look/${target.id}/review`, {}, temp.token);
     await j('POST', `/org/staff/${temp.userId}/remove`, {}, maria.token);
     const gone = await j('GET', '/org/second-look', undefined, temp.token);
-    neg(gone.status === 401, '[25] the removed reviewer’s session no longer reaches M18');
+    neg(gone.status === 401, '[25] the removed reviewer’s session no longer reaches Second Look');
     const still = await j('GET', '/org/second-look?status=reviewed', undefined, maria.token);
     ok(still.body.items.some((i) => i.reviewedBy?.name === 'Temp Reviewer'), '[25] their historical review attribution is preserved');
   } else {
@@ -753,8 +740,7 @@ section('A second archived room for the same player does not double the alert');
   // Re-read the list here rather than reusing the one from the top of the
   // suite: sections above have blocked and hidden players, and the position a
   // given player lands in the list is a Discover ordering detail this test has
-  // no business depending on (it did, until M18.2 added a stable tie-break and
-  // the "third" player became one an earlier section had made invisible).
+  // no business depending on.
   const visibleNow = (await j('GET', '/org/players', undefined, maria.token)).body.items;
   const THIRD = visibleNow.find((p) => p.id !== ADULT.id && p.id !== OTHER.id && p.name);
   const olderRes = await j('POST', '/org/rooms', { playerId: THIRD.id }, maria.token);

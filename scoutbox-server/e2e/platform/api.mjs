@@ -1,4 +1,4 @@
-// Live API end-to-end. Exercises the full M6+M7 surface: token auth,
+// Live API end-to-end. Exercises the core surface: token auth,
 // safeguarding gates, trials, exports, billing, verification, moderation
 // escalation and persistence.
 //
@@ -90,10 +90,9 @@ const EASTPORT = orgLogin.body.token;
 ok(!!(KOLA && GUNI && AMARA && EASTPORT), 'seed identities log in (passwordless demo seeds)');
 
 // ---- 1. guardian signup: email verification is a hard gate
-// The address is unique per run. It used to be a constant, which made the
-// whole suite pass only against a freshly seeded database: a second run hit
-// EMAIL_IN_USE here and, had it got past that, would have read the FIRST
-// matching verification code out of the outbox rather than this run's.
+// The address is unique per run, so a second run against the same database
+// neither hits EMAIL_IN_USE here nor reads an earlier run's verification code
+// out of the outbox.
 const nadiaEmail = `nadia+${Date.now().toString(36)}@testfamily.co.uk`;
 r = await j('/auth/guardian/signup', { method: 'POST', body: JSON.stringify({ name: 'Nadia Test', email: nadiaEmail, password: 'longenough1' }) });
 ok(r.status === 201 && r.body.emailVerificationSent, 'guardian signup sends the verification email');
@@ -156,7 +155,7 @@ const newPlayerId = r.body.playerId;
 const newPlayerToken = r.body.token;
 let notifs = await j('/org/notifications', {}, bearer(EASTPORT));
 ok(notifs.body.some((n) => n.type === 'saved_search' && /Young strikers GB/.test(n.text)), 'saved-search alert fires for the new signup');
-// S13e: a saved search is a row with typed filters; junk filters are refused naming the field, an empty value means no filter.
+// A saved search is a row with typed filters; junk filters are refused naming the field, an empty value means no filter.
 r = await j('/org/searches', {}, bearer(EASTPORT));
 const savedYoung = r.body.find((x) => x.name === 'Young strikers GB');
 ok(savedYoung && savedYoung.scoutName && JSON.stringify(savedYoung.filters) === JSON.stringify({ position: 'ST', country: 'GB' }), 'the saved search reads back with its filters and the scout\'s name');
@@ -301,7 +300,7 @@ const LEYTON = r.body.token; // London grassroots club, ~2km from Hackney Marsh
 gsearch = await j('/org/players', {}, bearer(LEYTON));
 ok(gsearch.body.items.every((p) => !p.guardianManaged && p.distanceKm <= 50), 'freshly registered club: local adults only until verification');
 
-// ---- 13. the Grassroots player journey (M9)
+// ---- 13. the Grassroots player journey
 // Kola became semi-pro via the Moss Side signing above — the level-up moment
 // should have fired: badge, pathway, timeline.
 me = await j('/player/me', {}, bearer(KOLA));
@@ -325,7 +324,7 @@ ok(r.status === 200 && /not competition/.test(r.body.note) && Array.isArray(r.bo
 
 // Opportunity radar: Moss Side (Manchester) is in Kola's radius.
 r = await j('/org/looking-for', { method: 'POST', body: JSON.stringify({ positions: ['striker'] }) }, bearer(MOSS));
-ok(r.status === 400 && r.body.field === 'positions[0]', 'S9c looking-for takes position codes only (the radar could never match "striker")');
+ok(r.status === 400 && r.body.field === 'positions[0]', 'looking-for takes position codes only (the radar could never match "striker")');
 r = await j('/org/looking-for', { method: 'POST', body: JSON.stringify({ positions: ['ST', 'CDM'] }) }, bearer(MOSS));
 ok(r.status === 200 && r.body.lookingFor.join() === 'ST,CDM', 'the club says what it is looking for');
 r = await j('/org/open-trials', {
@@ -360,7 +359,7 @@ r = await j('/vouch/submit', { method: 'POST', body: JSON.stringify({ code: vouc
 ok(r.status === 400 && r.body.error === 'MODERATION_BLOCKED', 'vouch text passes through the same moderation screen');
 r = await j('/vouch/submit', { method: 'POST', body: JSON.stringify({ code: vouchCode, text: 'Two seasons with me — never missed a session, leads the line brilliantly.', seasons: '2024–2026' }) });
 ok(r.status === 201, 'clean vouch publishes');
-// S10c: the code is single use (stored only as its hash, cleared on publish); junk is refused, not coerced.
+// The code is single use (stored only as its hash, cleared on publish); junk is refused, not coerced.
 r = await j('/vouch/submit', { method: 'POST', body: JSON.stringify({ code: vouchCode, text: 'A second go with the same code.' }) });
 ok(r.status === 404 && r.body.error === 'CODE_INVALID', 'a used reference code is refused');
 r = await j('/player/vouches/request', { method: 'POST', body: JSON.stringify({ coachName: { first: 'Ade' }, coachEmail: 'ade@sundayleague.org.uk' }) }, bearer(KOLA));
@@ -393,7 +392,7 @@ ok(r.body.items.find((t) => t.id === hackneyTrialId)?.registrations.some((x) => 
 r = await j('/player/season-wrap', {}, bearer(KOLA));
 ok(r.status === 200 && r.body.badges.includes('First Club') && /ledger/.test(r.body.note), 'season wrap assembles the verified year');
 
-// ---- 13b. M10: the grassroots club toolkit
+// ---- 13b. the grassroots club toolkit
 
 // Squad: the Moss Side signing (section 12) auto-rostered Kola; gap analysis
 // flags uncovered position groups and suggests what to look for.
@@ -485,7 +484,7 @@ ok(r.body.items.find((o) => o.id === 'org-mossside')?.pathwayClub === true, 'the
 r = await j('/org/verification/federation', { method: 'POST', body: JSON.stringify({ federation: 'Manchester FA', registrationId: 'MFA-2210', contactEmail: 'mosssideathletic@gmail.com' }) }, bearer(MOSS));
 ok(r.status === 201 && r.body.submitted, 'grassroots club files federation verification (free-mail contact allowed)');
 r = await j('/org/verification/federation', { method: 'POST', body: JSON.stringify({ federation: 'Manchester FA', registrationId: 'MFA-2210', contactEmail: 'not an address' }) }, bearer(MOSS));
-ok(r.status === 400 && r.body.field === 'contactEmail', 'S9c a federation contact that is not an e-mail address is refused');
+ok(r.status === 400 && r.body.field === 'contactEmail', 'a federation contact that is not an e-mail address is refused');
 r = await j('/admin/clubs', {}, admin);
 ok(r.body.items.find((o) => o.id === 'org-mossside')?.federationCheck?.status === 'pending', 'the federation check lands in the Trust & Safety queue');
 
@@ -506,64 +505,64 @@ ok(r.status === 409 && r.body.error === 'ALREADY_RESPONDED', 'double responses r
 r = await j('/org/friendlies', {}, bearer(HACKNEY));
 ok(r.body.items.find((f) => f.id === friendlyId)?.responses.some((x) => /happy to travel/.test(x.message)), 'the poster sees who is up for it');
 
-// ---- 13c. S13d: open days, match days and friendlies are typed tables. Junk is refused naming the field (it was
-// filtered, stringified or cut off); the clubs' lists page by cursor; deleting an open day takes it off every list.
+// ---- 13c. open days, match days and friendlies are typed tables. Junk is refused naming the field; the clubs'
+// lists page by cursor; deleting an open day takes it off every list.
 r = await j('/org/open-trials', { method: 'POST', body: JSON.stringify({ title: 'Keepers only', date: '2099-06-08', venue: 'Hackney Marshes', positions: 'GK' }) }, bearer(HACKNEY));
-ok(r.status === 400 && r.body.error === 'FIELD_INVALID' && r.body.field === 'positions', 'S13d positions that are not a list are refused (were read as none)');
+ok(r.status === 400 && r.body.error === 'FIELD_INVALID' && r.body.field === 'positions', 'positions that are not a list are refused (were read as none)');
 r = await j('/org/open-trials', { method: 'POST', body: JSON.stringify({ title: 'Keepers only', date: '2099-06-08', venue: 'Hackney Marshes', positions: ['GK', 7] }) }, bearer(HACKNEY));
-ok(r.status === 400 && r.body.field === 'positions', 'S13d a position that is not text is refused (was dropped)');
+ok(r.status === 400 && r.body.field === 'positions', 'a position that is not text is refused (was dropped)');
 r = await j('/org/open-trials', { method: 'POST', body: JSON.stringify({ title: 'Keepers only', date: '2099-06-08', venue: 'Hackney Marshes', positions: ['GK', ' GK '] }) }, bearer(HACKNEY));
-ok(r.status === 201 && r.body.openTrial.positions.join() === 'GK' && typeof r.body.openTrial.orgName === 'string', 'S13d a repeated position is kept once; the club\'s name is read live');
+ok(r.status === 201 && r.body.openTrial.positions.join() === 'GK' && typeof r.body.openTrial.orgName === 'string', 'a repeated position is kept once; the club\'s name is read live');
 const keepersId = r.body.openTrial?.id;
 r = await j('/org/open-trials?limit=1', {}, bearer(HACKNEY));
-ok(r.status === 200 && r.body.items.length === 1 && r.body.items[0].id === keepersId && typeof r.body.nextCursor === 'string', 'S13d a club\'s open days page newest first');
+ok(r.status === 200 && r.body.items.length === 1 && r.body.items[0].id === keepersId && typeof r.body.nextCursor === 'string', 'a club\'s open days page newest first');
 r = await j(`/org/open-trials?limit=1&cursor=${r.body.nextCursor}`, {}, bearer(HACKNEY));
-ok(r.status === 200 && r.body.items[0]?.id === hackneyTrialId, 'S13d the cursor continues where the page stopped');
+ok(r.status === 200 && r.body.items[0]?.id === hackneyTrialId, 'the cursor continues where the page stopped');
 r = await j('/org/open-trials?cursor=junk', {}, bearer(HACKNEY));
-ok(r.status === 400 && r.body.error === 'PAGE_CURSOR_INVALID', 'S13d a junk cursor is refused');
+ok(r.status === 400 && r.body.error === 'PAGE_CURSOR_INVALID', 'a junk cursor is refused');
 r = await j('/org/coverage/fixtures?limit=100', {}, bearer(LEYTON));
-ok(r.status === 200 && r.body.items.some((f) => f.id === `tr-${keepersId}` && f.source === 'open_trial' && f.home) && r.body.items.some((f) => f.id === `fr-${friendlyId}` && f.source === 'friendly_board'), 'S13d the observable fixtures union lists open days and friendlies');
+ok(r.status === 200 && r.body.items.some((f) => f.id === `tr-${keepersId}` && f.source === 'open_trial' && f.home) && r.body.items.some((f) => f.id === `fr-${friendlyId}` && f.source === 'friendly_board'), 'the observable fixtures union lists open days and friendlies');
 r = await j('/org/coverage/fixtures?limit=1', {}, bearer(LEYTON));
-ok(r.status === 200 && r.body.items.length === 1 && typeof r.body.nextCursor === 'string', 'S13d the fixture list pages by cursor');
+ok(r.status === 200 && r.body.items.length === 1 && typeof r.body.nextCursor === 'string', 'the fixture list pages by cursor');
 r = await j(`/org/open-trials/${keepersId}`, { method: 'DELETE' }, bearer(LEYTON));
-ok(r.status === 404, 'S13d only the host deletes its open day');
+ok(r.status === 404, 'only the host deletes its open day');
 r = await j(`/org/open-trials/${keepersId}`, { method: 'DELETE' }, bearer(HACKNEY));
-ok(r.status === 200 && r.body.deleted === true, 'S13d the host deletes its open day');
+ok(r.status === 200 && r.body.deleted === true, 'the host deletes its open day');
 r = await j('/org/open-trials', {}, bearer(HACKNEY));
-ok(!r.body.items.some((t) => t.id === keepersId), 'S13d a deleted open day leaves the club\'s list');
+ok(!r.body.items.some((t) => t.id === keepersId), 'a deleted open day leaves the club\'s list');
 r = await j('/org/coverage/fixtures?limit=100', {}, bearer(LEYTON));
-ok(!r.body.items.some((f) => f.id === `tr-${keepersId}`), 'S13d … and the observable fixtures');
+ok(!r.body.items.some((f) => f.id === `tr-${keepersId}`), '… and the observable fixtures');
 r = await j(`/guardian/open-trials/${keepersId}/register`, { method: 'POST', body: JSON.stringify({ childId: 'pl-guni' }) }, bearer(AMARA));
-ok(r.status === 404 && r.body.error === 'OPEN_TRIAL_NOT_FOUND', 'S13d … and cannot be registered for');
+ok(r.status === 404 && r.body.error === 'OPEN_TRIAL_NOT_FOUND', '… and cannot be registered for');
 r = await j(`/org/open-trials/${keepersId}`, { method: 'DELETE' }, bearer(HACKNEY));
-ok(r.status === 404, 'S13d deleting twice answers 404');
+ok(r.status === 404, 'deleting twice answers 404');
 
 r = await j('/org/matchday', { method: 'POST', body: JSON.stringify({ fixture: 7, date: '2026-09-06' }) }, bearer(MOSS));
-ok(r.status === 400 && r.body.field === 'fixture', 'S13d a fixture that is not text is refused (was stringified)');
+ok(r.status === 400 && r.body.field === 'fixture', 'a fixture that is not text is refused (was stringified)');
 r = await j('/org/matchday', { method: 'POST', body: JSON.stringify({ fixture: 'Moss Side vs Hulme', date: '2026-09-06', result: '3-1 after extra time and penalties' }) }, bearer(MOSS));
-ok(r.status === 400 && r.body.field === 'result', 'S13d a result over 20 characters is refused (was cut off)');
+ok(r.status === 400 && r.body.field === 'result', 'a result over 20 characters is refused (was cut off)');
 r = await j('/org/matchday', { method: 'POST', body: JSON.stringify({ fixture: 'Moss Side vs Hulme', date: '2026-09-06', playerIds: 'pl-adeyemi' }) }, bearer(MOSS));
-ok(r.status === 400 && r.body.field === 'playerIds', 'S13d playerIds that is not a list is refused (was read as none)');
+ok(r.status === 400 && r.body.field === 'playerIds', 'playerIds that is not a list is refused (was read as none)');
 r = await j('/org/squad', { method: 'POST', body: JSON.stringify({ name: 'Guni', playerId: 'pl-guni' }) }, bearer(HACKNEY));
-ok(r.status === 201, 'S13d Hackney rosters a local player it can see');
+ok(r.status === 201, 'Hackney rosters a local player it can see');
 r = await j('/org/matchday', { method: 'POST', body: JSON.stringify({ fixture: 'Hackney Marsh vs Clapton', date: '2026-09-06', playerIds: ['pl-guni', 'pl-guni'] }) }, bearer(HACKNEY));
-ok(r.status === 201 && r.body.credited === 1, 'S13d a player listed twice is credited once');
+ok(r.status === 201 && r.body.credited === 1, 'a player listed twice is credited once');
 r = await j('/org/matchdays?limit=1', {}, bearer(HACKNEY));
-ok(r.status === 200 && r.body.items.length === 1 && r.body.items[0].playerIds.join() === 'pl-guni', 'S13d … and the match day names them once');
+ok(r.status === 200 && r.body.items.length === 1 && r.body.items[0].playerIds.join() === 'pl-guni', '… and the match day names them once');
 r = await j('/org/matchdays?limit=1', {}, bearer(MOSS));
-ok(r.status === 200 && r.body.items.length === 1 && r.body.items[0].fixture === 'Moss Side vs Ancoats Rovers' && r.body.nextCursor === null, 'S13d match days page; the last page has no cursor');
+ok(r.status === 200 && r.body.items.length === 1 && r.body.items[0].fixture === 'Moss Side vs Ancoats Rovers' && r.body.nextCursor === null, 'match days page; the last page has no cursor');
 
 r = await j(`/org/friendlies/${friendlyId}/respond`, { method: 'POST', body: JSON.stringify({ message: { text: 'hi' } }) }, bearer(MOSS));
-ok(r.status === 400 && r.body.error === 'FIELD_INVALID' && r.body.field === 'message', 'S13d a response message that is not text is refused (was stringified)');
+ok(r.status === 400 && r.body.error === 'FIELD_INVALID' && r.body.field === 'message', 'a response message that is not text is refused (was stringified)');
 r = await j('/org/friendlies?limit=0', {}, bearer(HACKNEY));
-ok(r.status === 400 && r.body.error === 'PAGE_LIMIT_INVALID', 'S13d the board refuses a junk limit');
+ok(r.status === 400 && r.body.error === 'PAGE_LIMIT_INVALID', 'the board refuses a junk limit');
 r = await j('/org/friendlies?limit=1', {}, bearer(LEYTON));
-ok(r.status === 200 && r.body.items.length === 1 && r.body.items[0].status === 'open' && r.body.items[0].responses.every((x) => x.message === ''), 'S13d the board pages; another club never sees responders\' messages');
+ok(r.status === 200 && r.body.items.length === 1 && r.body.items[0].status === 'open' && r.body.items[0].responses.every((x) => x.message === ''), 'the board pages; another club never sees responders\' messages');
 
 r = await j('/player/opportunity-board?limit=1', {}, bearer(KOLA));
-ok(r.status === 200 && Array.isArray(r.body.items) && r.body.items.length <= 1 && 'nextCursor' in r.body, 'S13d the opportunity board pages by cursor');
+ok(r.status === 200 && Array.isArray(r.body.items) && r.body.items.length <= 1 && 'nextCursor' in r.body, 'the opportunity board pages by cursor');
 r = await j('/player/opportunity-board?cursor=junk', {}, bearer(KOLA));
-ok(r.status === 400 && r.body.error === 'PAGE_CURSOR_INVALID', 'S13d … and refuses a junk cursor');
+ok(r.status === 400 && r.body.error === 'PAGE_CURSOR_INVALID', '… and refuses a junk cursor');
 
 // ---- 14. storage + SQLite persistence on disk
 // DATA_DIR is the server's own directory (see serverUnderTest), never a guess.

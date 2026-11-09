@@ -1,19 +1,19 @@
-// M22 — the observation engine: an ORCHESTRATOR over three separated layers.
+// The observation engine: an ORCHESTRATOR over three separated layers.
 //
 //   frames ─▶ [1] detect.mjs ─▶ [2] track.mjs ─▶ [3] protocol.mjs ─▶ result
 //                                     │
 //                                     └──▶ quality.mjs ─▶ sufficient? refuse?
 //
-// Almost nothing is decided in this file. That is deliberate: after the fix
-// pack, detection, tracking and protocol interpretation are independently
-// testable and independently replaceable (§23–§27), and this file's only job
-// is to run them in order, apply the quality gate, and choose one refusal
-// reason deterministically.
+// Almost nothing is decided in this file. That is deliberate: detection,
+// tracking and protocol interpretation are independently testable and
+// independently replaceable, and this file's only job is to run them in
+// order, apply the quality gate, and choose one refusal reason
+// deterministically.
 //
 // Determinism: no clock, no randomness, no module-level mutable state. The
 // same frames in the same order produce byte-identical output. Session
 // isolation is therefore structural — two runs cannot interfere because
-// there is nothing shared for them to interfere through (§10, §11).
+// there is nothing shared for them to interfere through.
 
 import { CV_ENGINE_VERSION, CONFIDENCE, DETECTION, EVENT_RULES, CAPTURE_REQUIREMENTS } from './policy.mjs';
 import { detectFrame } from './detect.mjs';
@@ -73,7 +73,7 @@ export class ObservationRun {
     };
   }
 
-  /** Release every retained reference (§12, §153). */
+  /** Release every retained reference. */
   dispose() {
     this.prev = null;
     this.detections = [];
@@ -86,7 +86,7 @@ export class ObservationRun {
    *
    * Conditions are COLLECTED, then one primary reason is chosen by the
    * precedence table — rather than returning at the first failing check,
-   * which would make the reported reason depend on check order (§34, §36).
+   * which would make the reported reason depend on check order.
    */
   finish({ protocolWindowMs = null } = {}) {
     this.finished = true;
@@ -157,7 +157,7 @@ export class ObservationRun {
       ? usable.reduce((a, e) => a + e.confidence, 0) / usable.length
       : (withBoth.length ? withBoth.reduce((a, x) => a + x.ball.confidence, 0) / withBoth.length : 0);
 
-    // §28–§33 — observation quality. Its inputs are properties of the
+    // Observation quality. Its inputs are properties of the
     // CAPTURE; the count is not among them and cannot rescue a bad capture.
     const quality = observationQuality({
       continuity: c,
@@ -169,7 +169,7 @@ export class ObservationRun {
     });
     if (quality.state !== 'sufficient') conditions.push(...qualityToRefusalConditions(quality));
 
-    // §30 — never knowingly mint an exact measurement with a known recall
+    // Never knowingly mint an exact measurement with a known recall
     // limitation. If a large share of the strikes the tracker actually saw
     // had to be discarded by the refractory window, the attempt is running
     // faster than the validated envelope and the honest answer is a refusal,

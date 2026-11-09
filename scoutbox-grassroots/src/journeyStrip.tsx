@@ -1,4 +1,4 @@
-// M23 P8 — the Journey strip at the head of a Room: where the case is on the
+// The Journey strip at the head of a Room: where the case is on the
 // canonical journey, which stages are done, and the ONE next action the
 // server derived for this person. Nothing here computes a stage or an action:
 // the strip renders `journey` from GET /org/rooms/:id/journey and re-reads it
@@ -27,8 +27,8 @@ export const journeyEventLabel = (kind: string) => t(`jn.ev.${kind}`, t(`rm.ev.$
 
 /**
  * The journey for a room, re-read whenever the room's revision or the app's
- * server-event tick changes, when the window regains focus or becomes visible
- * (§55), and whenever `bump()` is called after an act.
+ * server-event tick changes, when the window regains focus or becomes visible,
+ * and whenever `bump()` is called after an act.
  */
 export function useRoomJourney(session: Session, room: Room, tick: number) {
   const [journey, setJourney] = useState<RoomJourney | null>(null);

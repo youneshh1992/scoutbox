@@ -1,9 +1,5 @@
 /**
- * S14a: the blob store is retired. The `collections` table (one JSON row per collection, the snapshot store's record
- * since before the data layer) is dropped: every domain lives in its own tables. The id counter, the one value the
- * blob's `meta` rows still carried, becomes a row of `counters`; the snapshot bookkeeping (`savedAt`, `saveSeq`) goes
- * with the blob. REGISTERED in DATA_MIGRATIONS. Nothing is carried over but the counter (no production data; rollback
- * means re-seed).
+ * Drops the `collections` table and moves the id counter from `meta` into `counters`.
  */
 import { OPERATIONS_MIGRATION } from '../operations.mjs';
 import { migrationApplied } from '../database.mjs';

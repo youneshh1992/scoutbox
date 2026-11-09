@@ -1,7 +1,6 @@
 /**
  * The evidence passport (records, media links, disputes, history), coach affiliations (history) and squad
- * invitations (S9a) get their own typed tables. REGISTERED in DATA_MIGRATIONS. `up()` is the DDL only: the tables start
- * empty and are written through the repository (repositories/scoutingEvidence.mjs).
+ * invitations (repositories/scoutingEvidence.mjs).
  */
 import { migrationApplied } from '../database.mjs';
 import { SIGNINGS_FOLLOWUPS_MIGRATION } from '../signingsFollowUps.mjs';

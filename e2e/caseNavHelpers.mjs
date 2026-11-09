@@ -1,4 +1,4 @@
-// M24B — how a suite reaches a page of a recruitment case now that the flat
+// How a suite reaches a page of a recruitment case now that the flat
 // tab strips are category → subcategory. A page is addressed by its stable
 // sub id; the helper opens the category that holds it (reading `data-subs`
 // off the category buttons, so a page that moves category needs no test

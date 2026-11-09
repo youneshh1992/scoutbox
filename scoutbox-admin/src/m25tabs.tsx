@@ -1,6 +1,6 @@
 import { Hint } from '../../design-system/About';
 import { fmtClock, fmtStamp } from '../../design-system/time';
-// M23 P5.6C — the attributed compliance review console (gate G-C0).
+// The attributed compliance review console.
 //
 // The whole point of this panel: an authoritative compliance decision is made
 // by a NAMED, authenticated reviewer. The shared admin key that opens the rest
@@ -40,10 +40,10 @@ interface Review {
 }
 interface SubjectDetail { [k: string]: unknown }
 /**
- * M23 P5.6D — the Trust & Safety read of a transaction. Deliberately thin: ids,
+ * The Trust & Safety read of a transaction. Deliberately thin: ids,
  * party ROLES, states, counts. The parties' documents, notes, messages and
- * working particulars are theirs and are not exposed to this console at all
- * (§40/§34), so there is nothing here to leak and no action to take.
+ * working particulars are theirs and are not exposed to this console at all,
+ * so there is nothing here to leak and no action to take.
  */
 interface TsTransaction {
   id: string; type: string; status: string; jurisdictions: string[];
@@ -163,7 +163,7 @@ const demoMetrics: Metrics = {
   note: 'Process metrics only. No agent is ranked and no subscription or payment status enters any compliance outcome.',
 };
 
-// M23 P5.6D — synthetic transactions for the demo build. Roles and states only,
+// Synthetic transactions for the demo build. Roles and states only,
 // exactly as the real T&S read gives them: no names, no documents, no notes.
 const demoTxs: TsTransaction[] = [
   {
@@ -267,7 +267,7 @@ export function M25Panel({ tab, say }: { tab: M25Tab; adminKey: string; say: (t:
     try {
       if (tab === 'agentreview') {
         // Filtered here: a decision changes an item's status, and an item you are
-        // deciding must not vanish out from under you mid-decision. Since S11b-2 the
+        // deciding must not vanish out from under you mid-decision. The
         // queue is paged (open items first, oldest first): this reads the first page of
         // 50. TODO: "load more" (follow `nextCursor`) is still to be built.
         const all = (await call<{ items: Review[]; nextCursor: string | null }>('/ts/compliance/reviews')).items;
@@ -520,7 +520,7 @@ export function M25Panel({ tab, say }: { tab: M25Tab; adminKey: string; say: (t:
     );
   }
 
-  // ------------------------------------------------------- transactions (P5.6D)
+  // ------------------------------------------------------- transactions
   // A READ, not a console. Trust & Safety sees states, ids, party ROLES and
   // process counts; it cannot confirm a party, write a note, read a document or
   // move a transaction, because none of those are Trust & Safety's to do. A

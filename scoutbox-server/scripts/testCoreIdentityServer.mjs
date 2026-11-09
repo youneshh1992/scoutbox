@@ -1,11 +1,10 @@
-// S4a through the REAL server (server.mjs booted as a child process on
-// temporary data directories with synthetic records only): every boot case of
-// the readiness review §9 — a new installation, a previously saved file, an
-// intentionally empty domain, an interrupted first installation, stale blobs,
-// the Founder's legacy-minor refusal — each restarted; the converted writers through their real routes and
-// after a restart; the audience allowlists on actual HTTP responses; the
-// crash-safe media-deletion queue; the admin backup and a restore into a fresh
-// directory. Nothing here touches DATA_DIR or any real data. Run with: npm test
+// Core identity through the REAL server (server.mjs booted as a child process on
+// temporary data directories with synthetic records only): every boot case (a new
+// installation, a previously saved file, an intentionally empty domain, an
+// interrupted first installation, a stale legacy table, the Founder's legacy-minor
+// refusal), the identity writers through their real routes and after a restart,
+// the audience allowlists on actual HTTP responses, the crash-safe media-deletion
+// queue, and backup/restore. Nothing here touches DATA_DIR or any real data. Run with: npm test
 import crypto from 'node:crypto';
 import assert from 'node:assert/strict';
 import { spawnChild } from './testChildren.mjs';
@@ -47,7 +46,7 @@ function boot(dir, port, env = {}) {
 const raw = (dir) => { const s = new DatabaseSync(path.join(dir, 'scoutbox.db'), { readOnly: true }); return s; };
 const q1 = (dir, sql, ...p) => { const s = raw(dir); try { return s.prepare(sql).get(...p); } finally { s.close(); } };
 const qAll = (dir, sql, ...p) => { const s = raw(dir); try { return s.prepare(sql).all(...p).map((r) => ({ ...r })); } finally { s.close(); } };
-/** Whether the data directory's file still has the retired blob table (rewritten in S14a: the blob-name checks described the blob). */
+/** Whether the data directory's file still has the retired blob table. */
 const blobTable = (dir) => { const s = raw(dir); try { return hasBlobTable(s); } finally { s.close(); } };
 const identityCounts = (dir) => ({ players: q1(dir, 'SELECT COUNT(*) AS n FROM players').n, guardians: q1(dir, 'SELECT COUNT(*) AS n FROM guardians').n, links: q1(dir, 'SELECT COUNT(*) AS n FROM guardian_children').n });
 /** A saved database, as a fixture writes one: the records written through their repositories (the identity pair as the first installation's). */
@@ -88,13 +87,13 @@ await test('new installation: the seed is initialised once (never again), served
   await S.stop(); rm(dir);
 });
 
-// ------------------------------------------------------------- a previously saved file (the cutover at boot)
+// ------------------------------------------------------------- a previously saved file
 await test('previously saved file: a database a fixture wrote (the seed in its tables) boots without initialising — rows and links served, no identity blob — and a restart attaches to the tables; a file a tool wrote from other records boots the same way (no seed fallback)', async () => {
   const dir = tempDir('s4srv-saved');
   writeFixture(dir, SEED, { now: NOW, idCounter: 2000 });
   assert.equal(blobTable(dir), false, 'the fixture wrote the tables');
   let S = await boot(dir, await freePort());
-  assert.doesNotMatch(S.log(), /initialised from the first installation/); // S14a: the 'snapshot loaded … table-backed' boot line went with the blob
+  assert.doesNotMatch(S.log(), /initialised from the first installation/);
   let cap = (await S.j('GET', '/capabilities')).body;
   assert.equal(cap.dataLayer.identity.initState, 'done'); assert.equal(cap.dataLayer.domains.players.rows, seedCounts.players);
   assert.deepEqual(identityCounts(dir), seedCounts); assert.equal(blobTable(dir), false);
@@ -150,8 +149,8 @@ await test('interrupted first installation: a database where migration 0005 reco
   await S.stop(); rm(dir);
 });
 
-// ------------------------------------------------------------- stale blobs after the cutover
-// Rewritten in S14a: there is no blob table, so the stale rows sit in a hand-made legacy `collections` table.
+// ------------------------------------------------------------- a stale legacy table
+// The stale rows sit in a hand-made legacy `collections` table.
 await test('stale blobs: a players/guardians blob row put by hand into a saved file (in a legacy collections table) is ignored at boot and never imported', async () => {
   const dir = tempDir('s4srv-stale'); savedFile(dir);
   { const s = new DatabaseSync(path.join(dir, 'scoutbox.db')); s.exec('CREATE TABLE collections (name TEXT PRIMARY KEY, value TEXT NOT NULL)'); s.prepare('INSERT INTO collections (name, value) VALUES (?, ?)').run('players', JSON.stringify([{ ...adult(), id: 'pl-stale', name: 'Stale Blob Player' }])); s.prepare('INSERT INTO collections (name, value) VALUES (?, ?)').run('guardians', JSON.stringify([{ ...gSignup(), id: 'gd-stale', email: 'stale@example.test' }])); s.close(); }
@@ -177,7 +176,7 @@ await test('the legacy-minor rule: a first installation holding a minor who has 
   await S.stop(); rm(orphan);
 });
 
-// ------------------------------------------------------------- the converted writers, through their routes
+// ------------------------------------------------------------- the identity writers, through their routes
 await test('writers (the ones exercised here, not every writer): guardian sign-up, e-mail verification, ID verification, disclaimer and child creation write rows and the link; football category (m12), the audited level review (m13), medical sharing and aging-up write columns; each of these is a committed row before the response and is there after a restart — the coupled writers (a column together with a facet, a blob, an audit entry or another domain) are proven with SIGKILL and injected failures in scripts/testWriterAtomicity.mjs', async () => {
   const dir = tempDir('s4srv-writers'); savedFile(dir); // FIXTURE: pl-grown is an adult still linked to gd-primary
   let S = await boot(dir, await freePort());
@@ -240,7 +239,7 @@ await test('writers (the ones exercised here, not every writer): guardian sign-u
 });
 
 // ------------------------------------------------------------- audience allowlists on the wire
-await test('allowlists (actual HTTP responses): a verified club sees the adult and the minor fields of §6.1 and never dob/location/password/guardianId/notificationPrefs/attendance GPS/other clubs\' reports; an agency and an unverified club are walled from a minor; a blocked club reads absent; grassroots gets its own surface; the guardian, the player and Trust & Safety get theirs without hashes or codes', async () => {
+await test('allowlists (actual HTTP responses): a verified club sees the adult and the minor fields and never dob/location/password/guardianId/notificationPrefs/attendance GPS/other clubs\' reports; an agency and an unverified club are walled from a minor; a blocked club reads absent; grassroots gets its own surface; the guardian, the player and Trust & Safety get theirs without hashes or codes', async () => {
   const dir = tempDir('s4srv-views');
   const S = await boot(dir, await freePort()); // the seed: a verified pro club, an unverified academy, an agency, two grassroots clubs
   const pro = await orgLogin(S, 'org-eastport');
@@ -309,13 +308,13 @@ await test('deletion: the player row, the links, the sessions and the media-remo
   // (a) the clean path: the file is gone right after the response, nothing queued.
   assert.equal((await S.j('DELETE', '/player/account', undefined, a.token)).status, 200);
   assert.equal(fs.existsSync(path.join(dir, 'media', `${a.mediaId}.webm`)), false);
-  assert.equal(q1(dir, 'SELECT COUNT(*) AS n FROM players WHERE id = ? AND deleted_at IS NULL', a.id).n, 0, 'the live row went (S4b-R: the retained record stays, with deleted_at)'); assert.equal(q1(dir, 'SELECT COUNT(*) AS n FROM media_deletions').n, 0);
+  assert.equal(q1(dir, 'SELECT COUNT(*) AS n FROM players WHERE id = ? AND deleted_at IS NULL', a.id).n, 0, 'the live row went (the retained record stays, with deleted_at)'); assert.equal(q1(dir, 'SELECT COUNT(*) AS n FROM media_deletions').n, 0);
   assert.equal((await S.j('GET', '/player/me', undefined, a.token)).status, 401, 'the session was revoked in the same unit');
   assert.equal((await S.j('GET', `/media/${a.mediaId}`, undefined, pro)).status, 401, 'no owner: not served');
   // (b) the stuck path: a directory sits where the file was (unlink fails with something other than ENOENT).
   const stuck = path.join(dir, 'media', `${b.mediaId}.webm`); fs.rmSync(stuck); fs.mkdirSync(stuck);
   assert.equal((await S.j('DELETE', '/player/account', undefined, b.token)).status, 200);
-  assert.equal(q1(dir, 'SELECT COUNT(*) AS n FROM players WHERE id = ? AND deleted_at IS NULL', b.id).n, 0, 'the live row went (the unit committed; the retained record stays — S4b-R)');
+  assert.equal(q1(dir, 'SELECT COUNT(*) AS n FROM players WHERE id = ? AND deleted_at IS NULL', b.id).n, 0, 'the live row went (the unit committed; the retained record stays)');
   assert.deepEqual(qAll(dir, 'SELECT media_id, player_id, attempts FROM media_deletions'), [{ media_id: b.mediaId, player_id: b.id, attempts: 1 }], 'the entry stays with the failed attempt');
   assert.match(S.log(), /could not be removed \(attempt 1\)/);
   assert.equal((await S.j('GET', `/media/${b.mediaId}`, undefined, pro)).status, 404, '404 while queued, whatever the session');
@@ -372,7 +371,7 @@ await test('backup/restore through the real admin routes: a backup taken after c
   rm(dir, restored);
 });
 
-// ------------------------------------------------------------- a backup taken while a media removal is pending (review of 9656a4b)
+// ------------------------------------------------------------- a backup taken while a media removal is pending
 await test('backup/restore keeps the intent of a pending media removal: a committed queue entry whose file is still on disk is in the copied database and its file is left OUT of the backup (never a file without its removal intent); a live clip is copied; the restored server serves nothing for the id, finishes the removal at boot (a file put back by hand included) and stays clean across a restart', async () => {
   const dir = tempDir('s4srv-backup-queue');
   let S = await boot(dir, await freePort());
@@ -417,7 +416,7 @@ await test('backup/restore keeps the intent of a pending media removal: a commit
   rm(dir, restored, restored2);
 });
 
-// ------------------------------------------------------------- the ownership guard of the media queue (review of 4ef9345)
+// ------------------------------------------------------------- the ownership guard of the media queue
 await test('ownership guard: a conflicting entry stored in a data directory (a queue entry naming a clip a live player still references) is retained with a diagnostic at boot and at every sweep — the file and the live reference survive, /capabilities counts it, the backup route refuses rather than omit a live-owned clip — and once resolved the backup and a legitimate pending removal work as before', async () => {
   const dir = tempDir('s4srv-own');
   let S = await boot(dir, await freePort());
@@ -455,7 +454,7 @@ await test('ownership guard: a conflicting entry stored in a data directory (a q
   await S.stop(); rm(dir);
 });
 
-// ------------------------------------------------------------- S5: the player sub-record tables through the real routes
+// ------------------------------------------------------------- the player sub-record tables through the real routes
 const subCounts = (dir, pid) => Object.fromEntries(SUBRECORD_TABLES.map((t) => [t, t === 'player_media_tags'
   ? q1(dir, 'SELECT COUNT(*) AS n FROM player_media_tags WHERE media_id IN (SELECT id FROM player_media WHERE player_id = ?)', pid).n
   : q1(dir, `SELECT COUNT(*) AS n FROM ${t} WHERE player_id = ?`, pid).n]));
@@ -466,7 +465,7 @@ const pick = (rec) => Object.fromEntries(SUB_KEYS.map((k) => [k,
     // /player/me projects the programme (progress per session); the record and the export hold the completions — compared as the ids of the completed sessions
     : k === 'programme' ? (rec.programme?.completed ? rec.programme.completed.map((c) => c.sessionId) : (rec.programme?.sessions ?? []).filter((s) => s.done).map((s) => s.id))
       : rec[k]]));
-await test('S5 sub-records through the real routes: clips (a file and a null url), a club\'s view count and tags, timeline, badges with a legal duplicate, a season in the history, a medical record, a drill with its result, a programme completion, a Box Cam clip, an import link, a trial check-in and the derived trial report are rows of the twelve tables (no facet storage since S14h); the club view keeps the private ones private (activity, drill results, external ids, programme, attendance GPS, medical records until shared); a SIGKILL and a restart serve the same record; the admin backup carries every array inline and a restore into a new directory re-imports them with the same ids and order; the account deletion removes every child row in the same unit and the file after COMMIT', async () => {
+await test('sub-records through the real routes: clips (a file and a null url), a club\'s view count and tags, timeline, badges with a legal duplicate, a season in the history, a medical record, a drill with its result, a programme completion, a Box Cam clip, an import link, a trial check-in and the derived trial report are rows of the twelve tables (no facet storage); the club view keeps the private ones private (activity, drill results, external ids, programme, attendance GPS, medical records until shared); a SIGKILL and a restart serve the same record; the admin backup carries every array inline and a restore into a new directory re-imports them with the same ids and order; the account deletion removes every child row in the same unit and the file after COMMIT', async () => {
   const dir = tempDir('s5srv-sub');
   let S = await boot(dir, await freePort(), { BOX_CAM_TEST_PROVIDER: '1' }); // the test-only Box Cam observation provider (simulated observations, labelled so; cannot exist in production)
   const su = await S.j('POST', '/auth/player/signup', { name: 'Sub Records', dob: '2000-01-01', country: 'GB', position: 'ST', password: 'subrec-pass-1' }); assert.equal(su.status, 201, JSON.stringify(su.body));
@@ -512,7 +511,7 @@ await test('S5 sub-records through the real routes: clips (a file and a null url
   const review = (await S.j('GET', '/org/identity-reviews', undefined, pro)).body.items.find((r) => r.candidatePlayerId === pid); assert.ok(review, 'the review names this player');
   assert.equal((await S.j('POST', `/org/identity-reviews/${review.id}/resolve`, { action: 'link' }, pro)).body.review.resolution, 'linked');
   assert.deepEqual(qAll(dir, 'SELECT provider, external_id, source, linked_by_name FROM player_external_ids WHERE player_id = ?', pid), [{ provider: 'statsprovider', external_id: 'SP-S5', source: `import:${imp.body.batch.id}`, linked_by_name: 'Maria Keane' }]);
-  assert.equal(q1(dir, 'SELECT review_id FROM player_external_ids WHERE player_id = ?', pid).review_id, review.id, 'S14h: the link names the identity review it came from (the review keeps the imported row)');
+  assert.equal(q1(dir, 'SELECT review_id FROM player_external_ids WHERE player_id = ?', pid).review_id, review.id, 'the link names the identity review it came from (the review keeps the imported row)');
   // A trial: the check-in writes the coach-signed attendance (no GPS) with the activity and the Turnstile badge; the report is served from the trial, never copied.
   const future = new Date(Date.now() + 21 * 86_400_000).toISOString().slice(0, 10);
   const rq = await S.j('POST', `/org/players/${pid}/request`, { type: 'trial', message: 'Trial with the U23s?', proposedDate: future, venue: 'Eastport Training Ground' }, pro); assert.equal(rq.status, 201, JSON.stringify(rq.body));
@@ -529,22 +528,22 @@ await test('S5 sub-records through the real routes: clips (a file and a null url
   const rep = await S.j('POST', `/org/trials/${trial.id}/report`, { acceleration: 8, sprintSpeedKmh: 33.4, distanceKm: 9.1, passCompletionPct: 81, duelSuccessPct: 63, coachRating: 8 }, pro); assert.equal(rep.status, 201, JSON.stringify(rep.body));
   const live = await me();
   assert.deepEqual(live.trialReports.map((r) => r.id), [rep.body.report.id], 'trialReports is derived from the trials collection');
-  // S14h: there is no facet storage left to hold a stale copy; the lists are rows only.
+  // The lists are rows only: there is no facet storage to hold a stale copy.
   assert.equal(qAll(dir, "SELECT name FROM pragma_table_info('players') WHERE name = 'facets_json'").length, 0, 'no facets_json column');
   const counts = subCounts(dir, pid);
   assert.deepEqual({ ...counts, player_activity_log: 'n' }, { player_season_history: 1, player_badges: 4, player_drills: 1, player_attendance: 1, player_timeline: 2, player_media: 2, player_media_tags: 2, player_medical_records: 1, player_drill_results: 1, player_activity_log: 'n', player_external_ids: 1, player_programme_completions: 1 });
   assert.ok(counts.player_activity_log >= 4 && counts.player_activity_log === live.activityLog.length, 'every recorded activity is a row');
   // The club's view: the private sub-records stay private; medical records appear only while shared; attendance carries no GPS.
   const clubView = (await S.j('GET', `/org/players/${pid}`, undefined, pro)).body;
-  expectKeys(clubView, ['media', 'timeline', 'badges', 'attendance', 'medical', 'trialReports'], ['activityLog', 'drillResults', 'externalIds', 'importClaims', 'programme'], 'club view of the S5 arrays');
+  expectKeys(clubView, ['media', 'timeline', 'badges', 'attendance', 'medical', 'trialReports'], ['activityLog', 'drillResults', 'externalIds', 'importClaims', 'programme'], 'club view of the sub-record arrays');
   assert.ok(clubView.attendance.every((a) => !('gps' in a))); assert.deepEqual(clubView.medical.records, []); assert.equal(clubView.media[0].tags.pace, 1);
   assert.equal((await S.j('POST', '/player/medical/share', { shared: true }, token)).status, 200);
   assert.equal((await S.j('GET', `/org/players/${pid}`, undefined, pro)).body.medical.records.length, 1, 'shared: the record is served');
   assert.equal((await S.j('POST', '/player/medical/share', { shared: false }, token)).status, 200);
   assert.deepEqual((await S.j('GET', `/org/players/${pid}`, undefined, pro)).body.medical.records, [], 'unshared again: private');
-  // A SIGKILL and a restart: the same record, from the rows. (The report lives on the trial — since S8a a row of trial_reports, still persisted by the ordinary, debounced save — so its save is awaited before the kill; every sub-record row above was committed before its response.)
+  // A SIGKILL and a restart: the same record, from the rows. (The report is a row of trial_reports, awaited in the database before the kill; every sub-record row above was committed before its response.)
   const snapshotMe = pick(await me());
-  const reportSaved = () => !!q1(dir, 'SELECT 1 AS one FROM trial_reports WHERE id = ?', rep.body.report.id); // S8a: the report is a row of trial_reports (written by the same debounced save that carried the trials blob before)
+  const reportSaved = () => !!q1(dir, 'SELECT 1 AS one FROM trial_reports WHERE id = ?', rep.body.report.id);
   for (let i = 0; i < 200 && !reportSaved(); i++) await new Promise((r) => setTimeout(r, 50));
   assert.ok(reportSaved(), 'the trial report reached the database through the ordinary save');
   await S.kill();
@@ -570,7 +569,7 @@ await test('S5 sub-records through the real routes: clips (a file and a null url
   await S.stop(); rm(dir, restored);
 });
 
-// ------------------------------------------------------------- review of 132eda2, finding 2: a report filed for a legacy-shaped account appears at once
+// ------------------------------------------------------------- a report filed for a legacy-shaped account appears at once
 await test('a trial report filed through the real route for an accepted LEGACY-shaped account — a record saved without any trialReports key, and one saved with null — appears on /player/me, in the CV and on the club\'s view at once, without a restart, exactly as for an ordinary sign-up (trialReports: []); a restart serves the same', async () => {
   const dir = tempDir('s5srv-legacy-report');
   // A saved file whose adults were written without the key and with null (the first installation's import accepts both).
@@ -593,10 +592,10 @@ await test('a trial report filed through the real route for an accepted LEGACY-s
     return { token: login.body.token, before: me0.trialReports, reportId: rep.body.report.id, me: (me.trialReports ?? []).map((r) => r.id), cv: cv.trialReports.map((r) => r.orgName), club: (club.trialReports ?? []).map((r) => r.id), trust: me.trustScore };
   };
   const absent = await file('pl-legacy-absent');
-  assert.deepEqual(absent.before, [], 'S14h: every record carries trialReports (a record saved without the key reads an empty list)');
+  assert.deepEqual(absent.before, [], 'every record carries trialReports (a record saved without the key reads an empty list)');
   assert.deepEqual(absent.me, [absent.reportId], 'the report is on /player/me at once (no restart)'); assert.deepEqual(absent.cv, ['Eastport FC']); assert.deepEqual(absent.club, [absent.reportId]);
   const nul = await file('pl-legacy-null');
-  assert.deepEqual(nul.before, [], 'S14h: a record saved with trialReports: null reads an empty list too');
+  assert.deepEqual(nul.before, [], 'a record saved with trialReports: null reads an empty list too');
   assert.deepEqual(nul.me, [nul.reportId]); assert.deepEqual(nul.cv, ['Eastport FC']); assert.deepEqual(nul.club, [nul.reportId]);
   // The ordinary sign-up control.
   const su = await S.j('POST', '/auth/player/signup', { name: 'Control Signup', dob: '2000-01-01', country: 'GB', password: 'control-pass-1' }); assert.equal(su.status, 201);

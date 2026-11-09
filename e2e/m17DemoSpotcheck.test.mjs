@@ -1,16 +1,13 @@
-// M17 demo spotcheck — drives the self-contained demo bundles (the exact
+// Demo spotcheck — drives the self-contained demo bundles (the exact
 // artifact HTML) through every Recruitment Room surface and fails on any page
 // error. The boundary this asserts hardest: the Room exists in Pro and
 // Grassroots and does NOT exist in the player app.
-// Requires `node serve.mjs` on :8099.
+// Needs freshly built demo bundles (buildDemos.mjs).
 import { chromium } from 'playwright-core';
 import { roomTab, roomPanelLabel } from './caseNavHelpers.mjs';
 import { ensureDemoHost } from './demoHost.mjs';
 
-// D7 (M22 §74-§76): own the demo host instead of assuming one is up.
-// These files hard-coded the URL inline, so the earlier pass imported the
-// helper without ever calling it — the import looked like the fix and was
-// not one.
+// This test owns its demo host: it starts one if none is running (see demoHost.mjs).
 const demo = await ensureDemoHost();
 
 const EXE = process.env.CHROMIUM || '/opt/pw-browsers/chromium';
@@ -90,7 +87,7 @@ async function driveClub(url, label, { enterprise }) {
     say(`${label}: room health is a word, never a number`);
   }
 
-  // A room task is staff work and says so (M24B: Overview › Tasks).
+  // A room task is staff work and says so (Overview › Tasks).
   {
     await roomTab(app, 'Tasks');
     const panel = await app.locator('[role="tabpanel"][aria-label="Tasks"]').innerText();

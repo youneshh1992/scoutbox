@@ -1,8 +1,7 @@
 /**
- * The development domain gets its own typed tables (S12a): development objectives (items, exercise references,
- * baseline evidence, progress, shares, reassessments), drill-guidance reviews, and the Development Hub's plans, goals,
- * actions, evidence links and reviews with one history table. REGISTERED in DATA_MIGRATIONS. `up()` is the DDL only:
- * nothing is carried over (no production data; rollback means re-seed).
+ * The development domain: development objectives (items, exercise references, baseline evidence, progress, shares,
+ * reassessments), drill-guidance reviews, and the Development Hub's plans, goals, actions, evidence links and reviews
+ * with one history table.
  */
 import { migrationApplied } from '../database.mjs';
 import { AGENT_TRANSACTIONS_MIGRATION } from '../agentTransactions.mjs';

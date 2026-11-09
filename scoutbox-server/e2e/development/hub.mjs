@@ -1,6 +1,6 @@
-// M21 acceptance suite — Development Hub 2.0.
+// Development Hub 2.0.
 //
-// The whole milestone rests on one sentence:
+// The whole Hub rests on one sentence:
 //
 //     ScoutBox should document and coordinate development — not claim to
 //     measure a player's worth, ceiling or future.
@@ -12,11 +12,12 @@
 // rewritten. Fifteen positive cases (G1–G15) prove the thing works while all
 // of that stays true.
 //
-// Structure:  §1–§5   in-process — vocabulary, transitions, targets, evidence,
+// Structure:  §1–§8   in-process — vocabulary, transitions, targets, evidence,
 //                     access, migration and the clean-boot proof
-//             §6–§16  HTTP against a fresh server
-//             §17     G1–G15, the mandate's positive journeys
-//             §18     a second boot: migration idempotence
+//             §9–§16b HTTP against a fresh server
+//             §17     G1–G15, the positive journeys
+//             §18–§19 notifications, events and the demo mirrors
+//             §20     a second boot: migration idempotence
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import { mkdtempSync } from 'node:fs';
@@ -55,7 +56,7 @@ import { EVENT_NAMES, EVENT_REGISTRY, assertEventRegistry } from '../../domains/
 import { CATEGORIES, TYPE_CATEGORY, categoryOf } from '../../domains/platform/notificationPrefs.mjs';
 import { openLayer, readRecords } from '../../scripts/dataLayerFixture.mjs';
 import { RATE_LIMIT_POLICY } from '../../domains/platform/rateLimit.mjs';
-import { resolveEvidenceLink, recordBelongsToPlayer } from '../../scripts/recruitmentReadsFixture.mjs'; // §4.3 step 2: the recruitment queries over the plain arrays
+import { resolveEvidenceLink, recordBelongsToPlayer } from '../../scripts/recruitmentReadsFixture.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SERVER_DIR = path.join(HERE, '..', '..');
@@ -71,7 +72,7 @@ const seenNeg = new Set();
 const fail = (msg) => { console.error(`✗ ${msg}`); process.exitCode = 1; };
 const ok = (cond, msg) => { if (cond) { passed++; console.log(`✓ ${msg}`); } else fail(msg); };
 const neg = (cond, msg) => { negatives++; ok(cond, `[neg] ${msg}`); };
-/** A numbered negative case. The number is the contract with the mandate. */
+/** A numbered negative case. The number is its stable id. */
 const N = (n, cond, msg) => { seenNeg.add(n); neg(cond, `N${n} — ${msg}`); };
 /** A numbered positive journey. */
 const G = (n, cond, msg) => ok(cond, `G${n} — ${msg}`);
@@ -92,7 +93,7 @@ section('§1 — the vocabulary is internally consistent, and refuses a rating')
   ok(DEVELOPMENT_POLICY_VERSION === 1, 'DEVELOPMENT_POLICY_VERSION is 1');
   ok(/does not measure/i.test(DEVELOPMENT_PRINCIPLE), 'the principle is carried in the code, not only in a document');
 
-  // ---- the seven names the mandate forbids by name (§3)
+  // ---- the seven forbidden names
   const forbidden = [
     [58, 'development score'], [59, 'potential score'],
   ];
@@ -119,7 +120,7 @@ section('§1 — the vocabulary is internally consistent, and refuses a rating')
     ok(Object.isFrozen(table), 'every vocabulary table is frozen, so a runtime tamper is not possible in the first place');
   }
 
-  // ---- the two vocabularies §13 and §48 offered conditionally, and why not
+  // ---- two health vocabularies deliberately left out, and why
   ok(!GOAL_CATEGORIES.includes('availability_rehabilitation'),
     'there is no availability/rehabilitation goal category — the repository has no safe health vocabulary');
   ok(!BLOCK_REASONS.includes('injury_or_unavailable'),
@@ -139,7 +140,7 @@ section('§1 — the vocabulary is internally consistent, and refuses a rating')
     'the lifecycle a plan actually has is expressible');
 
   ok(/plan owner or reviewer marked/i.test(ACHIEVED_MEANING) && /not a ScoutBox finding/i.test(ACHIEVED_MEANING),
-    'achieved carries the sentence that says it is not a verified ability (§16)');
+    'achieved carries the sentence that says it is not a verified ability');
 
   // ---- ownership and visibility cannot be crossed
   ok(PLAN_OWNER_KINDS.length === 2, 'a plan is owned by a player or an organisation, and by exactly one of them');
@@ -230,7 +231,7 @@ section('§3 — objective targets: one comparison, three states, no formula');
 
   const met = evaluateTarget({ target: T, attempts: [attempt({})], sessions });
   ok(met.state === 'target_met' && met.measured.value === 165, 'a production-valid result above the threshold reads target_met');
-  ok(/decision for the plan owner or reviewer/i.test(met.note), '…and says the goal is still a human decision (§97/§98)');
+  ok(/decision for the plan owner or reviewer/i.test(met.note), '…and says the goal is still a human decision');
   N(56, !('goalStatus' in met) && !('achieved' in met), 'the target evaluation cannot mark a goal achieved — it has no field for it');
 
   const notMet = evaluateTarget({ target: T, attempts: [attempt({ value: 141 })], sessions });
@@ -251,7 +252,7 @@ section('§3 — objective targets: one comparison, three states, no formula');
     'measurements are not compared across protocol versions');
   for (const r of NO_MEASUREMENT_REASONS) ok(typeof r === 'string', `"${r}" is a distinct absence a coach can act on`);
 
-  // ---- the production-validity predicate is M16.1's, not a second copy
+  // ---- the production-validity predicate is the Combine module's, not a second copy
   const src = code('scoutbox-server/domains/development/hub/targets.mjs') + code('scoutbox-server/domains/development/hub/evidence.mjs');
   N(13, !/combineState\s*===\s*'combine_verified'/.test(src.replace(/liveCombineState[^\n]*/g, '')),
     'M21 does not re-implement the Combine-verified test; it calls M16.1’s');
@@ -262,7 +263,7 @@ section('§3 — objective targets: one comparison, three states, no formula');
   ok(compare(5, 'gte', 5) && !compare(4, 'gt', 4) && compare(3, 'lt', 4), 'the comparison itself is one pure function');
   ok(bestValidAttempt({ attempts: [attempt({ id: 'a', value: 161 }), attempt({ id: 'b', value: 170 })], sessions, target: T }).id === 'b',
     'best means best in the protocol’s own direction');
-  ok(TARGET_OPERATORS.length === 5, 'five operators, and no expression language (§30)');
+  ok(TARGET_OPERATORS.length === 5, 'five operators, and no expression language');
   neg(!/\beval\(|new Function|Function\s*\(\s*['"`]/.test(code('scoutbox-server/domains/development/hub/targets.mjs')), 'no formula is executed anywhere in target evaluation');
 }
 
@@ -298,7 +299,7 @@ section('§4 — evidence links hold references, and nothing else');
 
   ok(R({ sourceType: 'passport_evidence', sourceId: 'evd-ok' }, self).available === true, 'live Passport evidence resolves');
   ok(R({ sourceType: 'passport_evidence', sourceId: 'evd-ok' }, self).provenance === 'verified_coach_confirmed',
-    'provenance comes from the canonical M15 vocabulary — no new labels (§24)');
+    'provenance comes from the canonical M15 vocabulary — no new labels');
   N(9, R({ sourceType: 'passport_evidence', sourceId: 'evd-theirs' }, self).reason === 'evidence_not_found',
     'evidence belonging to a different player cannot be resolved onto this plan');
   N(10, recordBelongsToPlayer({ db, sourceType: 'passport_evidence', sourceId: 'evd-theirs', playerId: 'p1' }) === null,
@@ -427,7 +428,7 @@ section('§6 — the timeline is meaningful events, and the stores are workflow'
   const goals = [{ id: 'g1', title: 'Goal', history: [{ id: 'a4', at: NOW + 3, action: 'goal_created', byKind: 'org', byName: 'Coach' }] }];
   const openTl = buildTimeline({ plan, goals, actions: [], reviews: [], access: { readInternal: true } });
   const shutTl = buildTimeline({ plan, goals, actions: [], reviews: [], access: { readInternal: false } });
-  N(42, !openTl.some((e) => e.action === 'plan_read'), 'a read is not a timeline event — the Hub is not an activity feed (§42)');
+  N(42, !openTl.some((e) => e.action === 'plan_read'), 'a read is not a timeline event — the Hub is not an activity feed');
   N(75, !shutTl.some((e) => e.action === 'plan_visibility_changed'),
     'an organisation-internal timeline entry does not reach a viewer without internal access');
   ok(openTl.length === 3 && openTl[0].at >= openTl[1].at, 'the timeline is newest-first and complete for the club');
@@ -443,7 +444,7 @@ section('§6 — the timeline is meaningful events, and the stores are workflow'
   });
   ok(snaps[0].completion.phrase === '1 of 2 actions completed', 'a snapshot records what the reviewer saw of the plan');
   N(74, !('passport' in snaps[0]) && !('evidence' in snaps[0]) && Array.isArray(snaps[0].evidenceRefs),
-    'a review snapshot holds evidence REFERENCES, never a copy of the Passport (§35)');
+    'a review snapshot holds evidence REFERENCES, never a copy of the Passport');
   N(74, snaps[0].evidenceRefs.every((r) => Object.keys(r).length === 2), 'and each reference is a type and an id, nothing else');
 
   const paged = pageReviews([{ id: 'r1', reviewedAt: 3 }, { id: 'r2', reviewedAt: 2 }, { id: 'r3', reviewedAt: 1 }], { limit: 2 });
@@ -456,8 +457,8 @@ section('§6 — the timeline is meaningful events, and the stores are workflow'
 // =========================================================================
 section('§7 — migration, stores and the clean-boot proof');
 {
-  // S12a: the stores are tables created by data migration 0030. Rewritten in S14a: the blob step (m210_001) and its
-  // registry are retired; the checks read the table migrations recorded in a fresh file.
+  // The stores are tables created by data migration 0030; the checks read the table migrations recorded in a fresh
+  // file.
   ok(DATA_MIGRATIONS.filter((m) => m.id === DEVELOPMENT_MIGRATION).length === 1, `the development tables come from data migration ${DEVELOPMENT_MIGRATION}, registered once`);
   ok(SCHEMA_VERSION >= 30, `the schema is at or beyond 30 (${SCHEMA_VERSION})`);
   const freshDir = mkdtempSync(path.join(tmpdir(), 'sbx-m21-fresh-'));
@@ -468,9 +469,9 @@ section('§7 — migration, stores and the clean-boot proof');
   ok(first.length === 1 && recorded(freshDir).join() === first.join(), 'a second open applies no migration again');
   ok(M21_STORES.every((s) => DEVELOPMENT_COLLECTIONS.includes(s)), 'every M21 store is a collection of the development repository');
 
-  // §156/§157: the whole point. `db.trials` existed only because the seed made
-  // it, so a restored snapshot without it threw. Prove no M21 store depends on
-  // the seed — the seed must not mention them at all.
+  // The whole point: a store that exists only because the seed made it breaks
+  // every database the seed did not write. Prove no M21 store depends on the
+  // seed — the seed must not mention them at all.
   const seedSrc = code('scoutbox-server/seed.mjs');
   for (const s of M21_STORES) {
     ok(!new RegExp(`\\b${s}\\b`).test(seedSrc), `the demo seed never creates db.${s} — the migration is its only source`);
@@ -492,7 +493,7 @@ section('§7 — migration, stores and the clean-boot proof');
     const def = EVENT_REGISTRY[e];
     N(65, def.audience === 'org_private', `${e} is organisation-private`);
     N(66, def.payload.every((k) => /Id$/.test(k)), `${e} carries ids only, never content`);
-    neg(def.analyticsEligible === false, `${e} is not analytics-eligible — M20 gains no development ranking (§63)`);
+    neg(def.analyticsEligible === false, `${e} is not analytics-eligible — M20 gains no development ranking`);
   }
   N(66, assertEventRegistry({ emitted: m21Events, mode: 'production' }).length === 0, 'the registry assertion passes for the M21 names');
   N(66, assertEventRegistry({ emitted: ['development_made_up'], mode: 'production' }).length > 0, 'an unregistered development event fails closed');
@@ -500,7 +501,7 @@ section('§7 — migration, stores and the clean-boot proof');
   // Notifications: one category, and mandatory categories untouched.
   ok(!!CATEGORIES.development_updates && CATEGORIES.development_updates.mandatory === false,
     'one development notification category, and it can be turned off');
-  ok(Object.keys(CATEGORIES).filter((c) => c.startsWith('development')).length === 1, 'exactly one, not three (§81)');
+  ok(Object.keys(CATEGORIES).filter((c) => c.startsWith('development')).length === 1, 'exactly one, not three');
   ok(TYPE_CATEGORY.development === 'development_updates' && categoryOf('development') === 'development_updates',
     'the development notification type maps to it');
   ok(CATEGORIES.security_account.mandatory === true, 'security_account is still mandatory — M21 changed nothing there');
@@ -558,7 +559,7 @@ ok([maria, tom, rita, alex, dee, kola, guni, amara].every((a) => a?.token), 'HTT
   ok(h.body.schemaVersion === SCHEMA_VERSION, `/healthz reports schema ${SCHEMA_VERSION} with the M21 migration applied`);
 }
 
-// §157 — the clean-boot proof against a REAL boot, not an in-process object.
+// The clean-boot proof against a REAL boot, not an in-process object.
 // Every one of these reads a store before anything has written to it; a store
 // that existed only because the seed made it would throw here.
 {
@@ -580,14 +581,14 @@ let CAT = null;
   ok(c.body.goal.categories.length === 7 && c.body.action.types.length === 9, 'categories and action types come from the server, not a client copy');
   N(58, (c.body.neverBuilt?.names ?? []).includes('Development Score'), 'the catalogue names what will never be built');
   ok(/no background scheduler/i.test(c.body.reminders.note) && c.body.reminders.scheduler === 'none',
-    'the catalogue is honest that there is no scheduler and no reminders while the app is closed (§84/§85)');
+    'the catalogue is honest that there is no scheduler and no reminders while the app is closed');
   ok(/no safe vocabulary/i.test(c.body.goal.omitted.reason), 'and honest about the two vocabularies it declined to offer');
   ok(c.body.goalLibrary.items.length === GOAL_LIBRARY.length && /not a recommendation/i.test(c.body.goalLibrary.note),
-    'the goal library is a fixed list that says it is not a recommendation (§67)');
+    'the goal library is a fixed list that says it is not a recommendation');
   N(58, !/AI|recommend(ed|s)? for you|suggested for/i.test(JSON.stringify(c.body.goalLibrary)),
-    'nothing in the library is presented as a personalised recommendation (§68)');
+    'nothing in the library is presented as a personalised recommendation');
   ok(c.body.templates.items.length === PLAN_TEMPLATES.length && /does not know what a good development plan/i.test(c.body.templates.note),
-    'templates are empty structure and say so (§66)');
+    'templates are empty structure and say so');
   N(58, scanPayloadForForbiddenFields(c.body).length === 0, 'the catalogue payload carries no forbidden field name');
 }
 
@@ -759,7 +760,7 @@ let clubPlan = null; let clubGoal = null; let clubReview = null;
   N(44, !JSON.stringify((await j('GET', '/org/audit', undefined, maria.token)).body).includes('SECRET-CLUB-NOTE'),
     'the organisation audit log carries no review text');
   ok((await j('GET', '/org/audit', undefined, maria.token)).body.items.some((i) => i.domain === 'development'),
-    '…but it does record that a plan was created and a review submitted (§88)');
+    '…but it does record that a plan was created and a review submitted');
   N(43, !JSON.stringify((await j('GET', `/org/development/plans/${clubPlan}/history`, undefined, maria.token)).body).includes('SECRET-CLUB-NOTE'),
     'the development timeline carries no note text either');
 
@@ -851,7 +852,7 @@ section('§16 — concurrency, archive, and the plan that stops accepting writes
     'and cannot be edited at all');
   N(22, (await j('POST', `/org/development/plans/${clubPlan}/reviews`, { summary: 'late' }, maria.token)).body.error === 'PLAN_ARCHIVED', 'nor take a new review');
   ok((await j('GET', `/org/development/plans/${clubPlan}/history`, undefined, maria.token)).body.items.length > 0,
-    'archiving preserves the history — the record is kept, the plan leaves the active view (§90)');
+    'archiving preserves the history — the record is kept, the plan leaves the active view');
   ok((await j('GET', `/org/development/plans/${clubPlan}`, undefined, maria.token)).body.reviews.length > 0, 'and its reviews are still readable');
 }
 
@@ -930,21 +931,21 @@ section('§16b — a longer adversarial pass over the whole surface');
     'and so is a made-up review cursor');
   N(67, (await j('GET', '/org/development/plans?status=imaginary', undefined, maria.token)).body.error === 'PLAN_STATUS_UNKNOWN',
     'an unknown status filter is refused, not ignored');
-  // S12a: the plan list pages by cursor (domains/platform/paging.mjs): an out-of-range limit is refused, not clamped.
+  // The plan list pages by cursor (domains/platform/paging.mjs): an out-of-range limit is refused, not clamped.
   const big = await j('GET', '/org/development/plans?limit=9999', undefined, maria.token);
   N(67, big.status === 400 && big.body.error === 'PAGE_LIMIT_INVALID', `a list page is bounded: a limit over ${PAGE_LIMITS.max} is refused`);
   const all = await j('GET', '/org/development/plans', undefined, maria.token);
   const p1 = await j('GET', '/org/development/plans?limit=1', undefined, maria.token);
   ok(all.body.total >= 2 && p1.status === 200 && p1.body.items.length === 1 && p1.body.total === all.body.total && typeof p1.body.nextCursor === 'string',
-    'S12a the club plan list pages by cursor, newest change first, and still counts every plan it may read');
+    'the club plan list pages by cursor, newest change first, and still counts every plan it may read');
   const p2 = await j('GET', `/org/development/plans?limit=1&cursor=${p1.body.nextCursor}`, undefined, maria.token);
-  ok(p2.status === 200 && p2.body.items[0]?.id === all.body.items[1].id, 'S12a …the next page continues where the first stopped');
-  N(67, (await j('GET', '/org/development/plans?cursor=made-up', undefined, maria.token)).body.error === 'PAGE_CURSOR_INVALID', 'S12a a made-up list cursor is refused');
-  N(67, (await j('POST', '/player/development/plans', { title: 42, visibility: 'private' }, kola.token)).body.error === 'FIELD_INVALID', 'S12a a title that is not text is refused, not turned into text');
+  ok(p2.status === 200 && p2.body.items[0]?.id === all.body.items[1].id, '…the next page continues where the first stopped');
+  N(67, (await j('GET', '/org/development/plans?cursor=made-up', undefined, maria.token)).body.error === 'PAGE_CURSOR_INVALID', 'a made-up list cursor is refused');
+  N(67, (await j('POST', '/player/development/plans', { title: 42, visibility: 'private' }, kola.token)).body.error === 'FIELD_INVALID', 'a title that is not text is refused, not turned into text');
   const datePlan = (await j('POST', '/player/development/plans', { title: 'S12a dates', visibility: 'private' }, kola.token)).body.plan.id;
-  N(67, (await j('PATCH', `/player/development/plans/${datePlan}`, { endDate: 1e20 }, kola.token)).body.error === 'DATE_INVALID', 'S12a an instant beyond the safe range is refused (400, not a server error)');
+  N(67, (await j('PATCH', `/player/development/plans/${datePlan}`, { endDate: 1e20 }, kola.token)).body.error === 'DATE_INVALID', 'an instant beyond the safe range is refused (400, not a server error)');
   const emptied = await j('PATCH', `/player/development/plans/${datePlan}`, { startDate: '' }, kola.token);
-  ok(emptied.status === 200 && Number.isSafeInteger(emptied.body.plan.startDate), 'S12a an emptied start date keeps the stored start (a plan always has one)');
+  ok(emptied.status === 200 && Number.isSafeInteger(emptied.body.plan.startDate), 'an emptied start date keeps the stored start (a plan always has one)');
   const hBig = await j('GET', `/org/development/plans/${clubPlan}/history?limit=9999`, undefined, maria.token);
   N(67, hBig.body.items.length <= M21_LIMITS.historyPageMax, 'and so is a history page');
 
@@ -989,7 +990,7 @@ section('§16b — a longer adversarial pass over the whole surface');
 }
 
 // =========================================================================
-section('§17 — G1–G15, the mandate’s positive journeys');
+section('§17 — G1–G15, the positive journeys');
 {
   // ---- G1: an adult player's own plan, invisible to a club
   const p = await j('POST', '/player/development/plans', {
@@ -1061,18 +1062,17 @@ section('§17 — G1–G15, the mandate’s positive journeys');
 
   // ---- G6/G7/G8: objective targets and Combine honesty
   //
-  // A finding this suite made, recorded rather than worked around: NO protocol
-  // in this build can be Combine Verified by a production provider.
-  // `production_cv` is not_configured, and `web_client` observes presence and
-  // active duration only — every ball protocol also needs `ball_presence`. So
-  // an objective target can never honestly read `target_met` in this
-  // deployment, and the suite asserts the honest outcome rather than reaching
-  // for the test provider to manufacture a green tick.
+  // NO protocol in this build can be Combine Verified by a production
+  // provider: `web_client` observes presence and active duration only (every
+  // ball protocol also needs `ball_presence`), and `production_cv` is not
+  // real-world validated. So an objective target can never honestly read
+  // `target_met` in this deployment, and the suite asserts the honest outcome
+  // rather than reaching for the test provider to manufacture a green tick.
   //
   // G6 is therefore proven where it can be proven truthfully: against the pure
   // engine, with a production-valid measurement (§3 above), and here against
-  // the live server by showing that the ONLY thing standing between the target
-  // and `target_met` is the absent detector — which /capabilities states.
+  // the live server by showing what stands between the target and
+  // `target_met` — which /capabilities states.
   const t6 = await j('PATCH', `/org/development/goals/${c3Goal}`, {
     target: { sourceType: 'combine_attempt', protocolId: 'combine-box-control-60', operator: 'gte', value: 30 },
   }, maria.token);
@@ -1114,11 +1114,10 @@ section('§17 — G1–G15, the mandate’s positive journeys');
   const cvState = caps?.computerVision?.state ?? caps?.capabilities?.computer_vision?.state ?? JSON.stringify(caps).match(/"state":"(test_only|not_configured|configured)"/)?.[1];
   G(6, web.status === 422 && web.body.error === 'MEASUREMENT_NOT_SUPPORTED',
     'a production target can only be met by a production measurement — and this build refuses to produce one it cannot make');
-  // M22: the detector now EXISTS. The honest outcome is unchanged and the
-  // reason is better — the target stays un-met not because nothing can see
-  // the activity, but because seeing it is not the same as being permitted to
-  // publish a standardised measurement of it. §64: an unvalidated
-  // production_cv result must not satisfy a production Combine target.
+  // The production detector exists, but the target stays un-met: seeing the
+  // activity is not the same as being permitted to publish a standardised
+  // measurement of it. An unvalidated production_cv result must not satisfy a
+  // production Combine target.
   const prodCv = caps?.capabilities?.production_cv ?? {};
   ok(prodCv.state === 'configured' && prodCv.realWorldValidation === 'not_completed',
     `the capability report says the detector is configured but not real-world validated (${prodCv.state}/${prodCv.realWorldValidation})`);
@@ -1249,20 +1248,20 @@ section('§18 — notifications, events and what M21 must not touch');
   // The regression promises, checked against the live server rather than asserted.
   const matching = await j('GET', '/org/matching/criteria-schema', undefined, maria.token);
   N(62, matching.status !== 200 || !JSON.stringify(matching.body).toLowerCase().includes('development'),
-    'no matching criterion reads development status (§62)');
+    'no matching criterion reads development status');
   const dash = await j('GET', '/org/recruitment-analytics/catalogue', undefined, maria.token);
   N(63, dash.status !== 200 || !(dash.body.metrics ?? []).some((m) => /development|goal|plan/i.test(m.id)),
-    'the Director Dashboard has gained no development metric or ranking (§63)');
+    'the Director Dashboard has gained no development metric or ranking');
   N(60, dash.status !== 200 || !(dash.body.metrics ?? []).some((m) => /coach/i.test(m.id)), 'and no coach ranking');
   N(59, dash.status !== 200 || !(dash.body.metrics ?? []).some((m) => /player_rank|ranking/i.test(m.id)), 'and no player ranking');
 
   const trust = await j('GET', `/org/players/pl-adeyemi/trust`, undefined, maria.token);
   N(61, trust.status !== 200 || !JSON.stringify(trust.body).toLowerCase().includes('developmentplan'),
-    'the Trust projection does not read development plans (§60/§164)');
+    'the Trust projection does not read development plans');
 
   const secondLook = await j('GET', '/org/second-look', undefined, maria.token);
   N(64, secondLook.status !== 200 || !(secondLook.body.items ?? []).some((i) => /goal|development plan/i.test(JSON.stringify(i.reasons ?? i))),
-    'a completed goal alone raises no Second Look item (§61/§165)');
+    'a completed goal alone raises no Second Look item');
 
   const cap = await j('GET', '/capabilities');
   ok(cap.status === 200, 'the capability report still answers');
@@ -1278,7 +1277,7 @@ section('§19 — the demo mirrors say what the code says');
   for (const app of ['scoutbox-club', 'scoutbox-grassroots']) {
     const demo = read(`${app}/src/m21Demo.ts`);
     ok(demo.includes(ACHIEVED_MEANING), `${app}: the demo carries the server's achieved sentence word for word`);
-    ok(/no_production_valid_attempt/.test(demo), `${app}: the demo's Combine target is unsatisfied because the result is simulated (§149)`);
+    ok(/no_production_valid_attempt/.test(demo), `${app}: the demo's Combine target is unsatisfied because the result is simulated`);
     ok(!/target_met/.test(demo.replace(/'target_met'[,\]]/g, '').replace(/states:[^\]]*\]/g, '')),
       `${app}: no demo goal is shown with a met target it did not honestly earn`);
     for (const name of FORBIDDEN_DEVELOPMENT_NAMES) {

@@ -1,15 +1,11 @@
 /**
- * M18.1 — operator-facing capability reporting and boot assertions.
+ * Operator-facing capability reporting and boot assertions: what this
+ * deployment can and cannot do (is a real identity provider configured? is CV
+ * production-grade?), and which configurations refuse to boot in production.
  *
- * ScoutBox is deliberately honest inside the product about what it cannot do:
- * "Measurement not yet supported on this device", "No production computer-vision
- * provider is configured", "Combine Confidence is 0 in a production profile".
- * None of that was visible to whoever DEPLOYS it. An operator could not answer
- * "is a real identity provider configured here?" without reading the source.
- *
- * `/capabilities` answers it. It reports state, never secrets: no keys, no
- * hostnames, no connection strings — only whether a capability is configured,
- * and one sentence on what its absence means.
+ * `/capabilities` reports state, never secrets: no keys, no hostnames, no
+ * connection strings — only whether a capability is configured, and one
+ * sentence on what its absence means.
  */
 
 import { combineVerifiedProtocols } from '../development/boxcam/cv/eligibility.mjs';
@@ -41,8 +37,8 @@ export const liveMailConfigured = (env = process.env) => isSet(env.SENDGRID_API_
 /** The push adapter sends through Expo when this holds; otherwise it writes the local push log. */
 export const livePushConfigured = (env = process.env) => isSet(env.EXPO_ACCESS_TOKEN);
 
-// M22: the Combine gate is read here, not restated. If eligibility ever
-// changes it changes in one place and every surface follows.
+// The Combine gate is read from eligibility.mjs, not restated, so every
+// surface follows one definition.
 export function buildCapabilityReport({ env = process.env, rateLimit = null, providers = [], trustProxy = null, extra = {} } = {}) {
   const flag = (v) => !!v && String(v).trim() !== '';
   const proxy = trustProxy ?? parseTrustProxy(env.SCOUTBOX_TRUST_PROXY);
@@ -70,7 +66,7 @@ export function buildCapabilityReport({ env = process.env, rateLimit = null, pro
         note: productionCv.length
           ? 'Box Cam uses server-side computer vision to observe supported activity. Combine verification for these CV protocols remains disabled pending real-world validation.'
           : `No production computer-vision provider is configured.${limitedOnly ? ' Web capture observes player presence and active duration only — it cannot count repetitions or classify technique.' : ''} Combine metrics that need a real detector are reported as unsupported, never estimated.`,
-        // §29 — the four facts that must never collapse into one word. A
+        // The four facts that must never collapse into one word. A
         // reader who sees only `state: configured` would reasonably conclude
         // that CV measurements are available; these say otherwise, in the
         // same object, without needing a second request.
@@ -83,7 +79,7 @@ export function buildCapabilityReport({ env = process.env, rateLimit = null, pro
         // already carries the reason, and the canonical code
         // (REAL_WORLD_VALIDATION_NOT_COMPLETED) is 35 characters of
         // underscore-separated capitals — which is exactly the shape the
-        // §36 secret-scan heuristic looks for on this unauthenticated
+        // secret-scan heuristic looks for on this unauthenticated
         // endpoint. Repeating it here bought nothing and tripped a real
         // guard, so the guard wins.
       },
@@ -97,7 +93,7 @@ export function buildCapabilityReport({ env = process.env, rateLimit = null, pro
         note: 'Without one, the strongest identity a player can hold is a ScoutBox document review, which is scored below authoritative.',
       },
       email_transport: {
-        // M18.2: "not_configured" undersold what exists and "configured" would
+        // "not_configured" would undersell what exists and "configured" would
         // oversell it. Mail is written to a local outbox that the delivery
         // centre can read; nothing leaves the machine.
         state: liveMailConfigured(env) ? 'configured' : 'local_outbox',
@@ -129,10 +125,8 @@ export function buildCapabilityReport({ env = process.env, rateLimit = null, pro
       // attempts, sharing links) key on it, so a deployment behind a proxy
       // that leaves this unset has effectively one shared client.
       proxy_trust: { state: proxy.state, note: proxy.note },
-      // The data layer (plan steps S0–S4a): staff, sessions, organisations,
-      // players, guardians and their links are live tables owned by
-      // repositories; the S1 shadow projection is retired. Counts and states
-      // are on /capabilities → dataLayer, never subjects.
+      // Counts and states of the data layer are on /capabilities → dataLayer,
+      // never subjects.
       core_identity_storage: {
         state: 'live',
         note: 'Players, guardians and guardian–child links are table-backed (migration 0005); writes go through the identity repositories and multi-domain operations run inside the store\'s unit of work.',
@@ -143,15 +137,10 @@ export function buildCapabilityReport({ env = process.env, rateLimit = null, pro
   };
 }
 
-/**
- * Refuse to boot on configuration that would be actively unsafe in production,
- * while leaving development exactly as it was. Returns the list of problems;
- * the caller decides whether to throw (it does, in production mode).
- */
 export const MEDIA_SECRET_MIN_LENGTH = 32;
 
 /**
- * Variables that once relabelled a stub adapter as a real provider. No such
+ * Variables that name a real provider. No such
  * integration exists (adapters.mjs), so setting one is refused in production
  * rather than letting a deployment believe it verifies identity, bills or
  * stores media off the instance.
@@ -162,6 +151,11 @@ export const UNIMPLEMENTED_PROVIDER_VARIABLES = Object.freeze({
   S3_BUCKET: 'object storage (media is stored on this instance\'s disk)',
 });
 
+/**
+ * Refuse to boot on configuration that would be actively unsafe in production,
+ * while leaving development alone. Returns the list of problems; the caller
+ * decides whether to throw (it does, in production mode).
+ */
 export function productionConfigProblems({ env = process.env, trustWeightsTotal = null } = {}) {
   const problems = [];
   const production = env.NODE_ENV === 'production';
@@ -207,9 +201,9 @@ export function productionConfigProblems({ env = process.env, trustWeightsTotal 
       fatal: true,
     });
   }
-  // Passwordless logins have no production override. The variable was one
-  // once; an environment that still sets it expects behaviour that no longer
-  // exists, so it is refused rather than silently ignored.
+  // Passwordless logins have no production override. An environment that sets
+  // the variable expects behaviour that does not exist, so it is refused
+  // rather than silently ignored.
   if (production && flagged(env.ALLOW_DEV_LOGINS)) {
     problems.push({
       code: 'DEV_LOGIN_IN_PRODUCTION',
@@ -217,7 +211,7 @@ export function productionConfigProblems({ env = process.env, trustWeightsTotal 
       fatal: true,
     });
   }
-  // M18.2: fault injection is a development instrument. Its middleware is
+  // Fault injection is a development instrument. Its middleware is
   // already inert in production; asking for it there is still a mistake
   // worth refusing to boot over, because it means someone copied a dev env.
   if (production && env.SCOUTBOX_FAULTS) {
@@ -227,11 +221,9 @@ export function productionConfigProblems({ env = process.env, trustWeightsTotal 
       fatal: true,
     });
   }
-  // PRE-M24 (PM-1): the Trust & Safety API is guarded by one shared key. It
-  // used to fall back to the public development value `scoutbox-admin`
-  // whenever ADMIN_KEY was unset, so forgetting one variable handed full T&S
-  // access to anyone who has read this repository. Production must name its
-  // own key, and it must not be the development default or trivially short.
+  // The Trust & Safety API is guarded by one shared key. Production must name
+  // its own key, and it must not be the publicly known development value
+  // `scoutbox-admin` or trivially short.
   if (production && (!env.ADMIN_KEY || env.ADMIN_KEY === 'scoutbox-admin' || String(env.ADMIN_KEY).length < 16)) {
     problems.push({
       code: 'ADMIN_KEY_UNSAFE',
@@ -239,7 +231,7 @@ export function productionConfigProblems({ env = process.env, trustWeightsTotal 
       fatal: true,
     });
   }
-  // PRE-M24 (PM-2): the synthetic agent-verification provider verifies any
+  // The synthetic agent-verification provider verifies any
   // `TEST-VERIFIED-*` reference. Like the Box Cam simulator above, it must
   // never be reachable in production — an agent could self-verify a licence.
   if (production && env.AGENT_VERIFICATION_TEST_PROVIDER === '1') {

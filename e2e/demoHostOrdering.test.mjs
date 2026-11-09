@@ -1,4 +1,4 @@
-// Regression for the harness-ordering defect (§75, §76).
+// Regression for the harness-ordering defect.
 //
 // The original failure: `crosstab` and `demoOffline` assumed a demo host was
 // already listening on :8099. Run in an order where nothing had started one,
@@ -9,10 +9,10 @@
 // So there are two properties to hold, and this file checks both directly
 // rather than checking that the battery "works":
 //
-//   §75  With :8099 EMPTY, a test that needs the host starts one and gets the
+//   1.  With :8099 EMPTY, a test that needs the host starts one and gets the
 //        current bundles. No ambient state, no ordering dependency.
 //
-//   §76  With a host listening that serves DIFFERENT bundles, the caller
+//   2.  With a host listening that serves DIFFERENT bundles, the caller
 //        REFUSES rather than proceeding. Without this, "start the server if
 //        it's missing" is the original bug with an extra branch.
 //
@@ -39,7 +39,7 @@ const get = (url) => new Promise((resolve) => {
 
 console.log('demo host ordering (§74–§76)');
 
-// -------------------------------------------------- §75: empty port
+// -------------------------------------------------- 1: empty port
 {
   const before = await get(`http://localhost:${PORT}/__buildmarker`);
   check(!before.ok, `nothing is listening on :${PORT} to begin with`);
@@ -61,7 +61,7 @@ console.log('demo host ordering (§74–§76)');
   check(!after.ok, 'stop() released the port — the test leaves no host behind for the next one to inherit');
 }
 
-// ------------------------------------- §76: stale host must be refused
+// ------------------------------------- 2: stale host must be refused
 {
   // A host that answers on the port but reports a DIFFERENT build. This is
   // precisely the shape of the process that made the battery look green.

@@ -156,14 +156,14 @@ export interface TrialSlotDetails {
   altSlots?: string[];
   venue: string | null;
   notes: string;
-  /** M23 P4B: concrete slots (UTC instants in the organiser's zone). The exact address and instructions are shared only after acceptance. */
+  /** Concrete slots (UTC instants in the organiser's zone). The exact address and instructions are shared only after acceptance. */
   slots?: TrialSlot[];
 }
 
 export interface InboxRequest {
   id: string;
   trialDetails?: TrialSlotDetails | null;
-  /** M23 P4B: the trial the recipient's own acceptance created. */
+  /** The trial the recipient's own acceptance created. */
   trialId?: string | null;
   type: 'contact' | 'trial';
   orgName: string;
@@ -172,7 +172,7 @@ export interface InboxRequest {
   trustedPartner: boolean;
   scoutName: string;
   scoutRole?: string;
-  /** M23 P3: a Contact sent from a recruitment case carries a subject line. */
+  /** A Contact sent from a recruitment case carries a subject line. */
   subject?: string | null;
   message: string;
   status: 'pending' | 'accepted' | 'declined' | 'suspended';

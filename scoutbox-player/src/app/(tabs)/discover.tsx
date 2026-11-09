@@ -1,11 +1,10 @@
 import { PlayerMeta, AvailabilityBadge, PlayerName } from '../../components/PlayerIdentity';
-// Home — M24F.4 hard reset. The player, one thing to do, recent events on demand,
+// Home. The player, one thing to do, recent events on demand,
 // one content section, then everything else one tap away. No greeting, no
 // date, no sentence about who can see you: the identity header is the name,
 // the football line, the availability word and the month the account was
-// opened. Every value is read from the session and the same client calls as
-// before; nothing is fabricated, and nothing the old Home said is lost — the
-// weekly figures and the scouting stream moved to the Activity page.
+// opened. Every value is read from the session and the client; nothing is
+// fabricated. The weekly figures and the scouting stream are on the Activity page.
 import { useCallback, useEffect, useState } from 'react';
 import { Pressable, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
 import { Text } from '../../components/Text';

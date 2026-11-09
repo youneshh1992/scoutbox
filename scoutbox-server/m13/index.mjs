@@ -1,8 +1,8 @@
-// Milestone 13 registration point. Same architecture as m12/: focused domain
+// Registration point for these feature modules. Same architecture as m12/: focused domain
 // modules receive the shared server context and register on the EXISTING
 // authenticated routers, so every standing gate (bearer sessions, org
 // suspension, guardian ownership, visibleToOrg, blocks, moderation) runs
-// before any M13 handler. Order matters only where a module publishes a hook
+// before any of their handlers. Order matters only where a module publishes a hook
 // another consumes (delivery exposes notifyAction; imports exposes
 // emitWebhook; enterprise exposes the exposure hook).
 import { buildSharedM13 } from './shared.mjs';
@@ -18,15 +18,15 @@ import { registerGroups } from '../domains/groups/groups.mjs';
 
 export function registerM13(ctx) {
   const full = { ...ctx, ...buildSharedM13(ctx) };
-  registerImports(full);     // F1  imports · identity · API keys · webhooks
-  registerDelivery(full);    // F11 dispatch centre · callbacks · acks (exposes notifyAction)
-  registerEnterprise(full);  // F12 onboarding · MFA · SSO · audit/support · backup · metrics
-  registerSuitability(full); // F3  private preferences · verdicts · approved summaries
-  registerTransitions(full); // F2  transition cases · F10 adult representation
-  registerInsight(full);     // F4  exposure funnel · F5 calibration · F6 evidence gaps
-  registerCoverage(full);    // F7  fixtures/coverage
-  registerBudgets(full);     // F9  deal scenarios
-  registerGroups(full);      // F8  federation workspaces · grants
+  registerImports(full);     // imports · identity · API keys · webhooks
+  registerDelivery(full);    // dispatch centre · callbacks · acks (exposes notifyAction)
+  registerEnterprise(full);  // onboarding · MFA · SSO · audit/support · backup · metrics
+  registerSuitability(full); // private preferences · verdicts · approved summaries
+  registerTransitions(full); // transition cases · adult representation
+  registerInsight(full);     // exposure funnel · calibration · evidence gaps
+  registerCoverage(full);    // fixtures/coverage
+  registerBudgets(full);     // deal scenarios
+  registerGroups(full);      // federation workspaces · grants
   // One shared slow tick for the m13 sweeps that are not already covered by
   // the delivery module's own timer.
   const tick = () => { full.transitionSweep?.(); full.insightSweep?.(); };

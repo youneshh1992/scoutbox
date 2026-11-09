@@ -1,5 +1,5 @@
 import { RecordFacts } from './RecordDetails';
-// M23 P5 — the formal recruitment decision, inside the Room's Decision tab.
+// The formal recruitment decision, inside the Room's Decision tab.
 //
 // Evidence informs assessment; assessment informs discussion; discussion
 // informs a formal HUMAN decision; that decision is not an offer and is never
@@ -257,7 +257,7 @@ export function DecisionWorkflow({ session, room, notify, reload }: Props) {
         </div>
       )}
 
-      {/* ---- M23 P5.6E: the transaction handoff ---- */}
+      {/* ---- the transaction handoff ---- */}
       <HandoffSection session={session} room={room} notify={notify} />
 
       {/* ---- history ---- */}
@@ -275,7 +275,7 @@ export function DecisionWorkflow({ session, room, notify, reload }: Props) {
 }
 
 /**
- * M23 P5.6E §32/§38 — the club's transaction-handoff entrypoint.
+ * The club's transaction-handoff entrypoint.
  *
  * It sits below the decision because it FOLLOWS one, and it is a separate,
  * explicit act: ScoutBox never opens a workspace because a decision said

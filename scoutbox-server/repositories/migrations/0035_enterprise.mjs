@@ -1,9 +1,7 @@
 /**
- * Enterprise gets its own typed tables (S13b): staff invites (the emailed code stored only as its hash), SSO
- * configurations, SSO sign-in states (state and nonce stored only as hashes), support tickets (references and replies
- * as rows) and support access grants (the access log as rows).
- * REGISTERED in DATA_MIGRATIONS. `up()` is the DDL only: nothing is carried over (no production data; rollback means
- * re-seed).
+ * Enterprise: staff invites (the emailed code stored only as its hash), SSO configurations, SSO sign-in states (state
+ * and nonce stored only as hashes), support tickets (references and replies as rows) and support access grants (the
+ * access log as rows).
  */
 import { migrationApplied } from '../database.mjs';
 import { INTEGRATIONS_MIGRATION } from '../integrations.mjs';

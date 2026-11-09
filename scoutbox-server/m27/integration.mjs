@@ -1,6 +1,5 @@
-// M23 P5.6E — the ONE cross-app integration authorization layer.
-//
-// §47: "Do not implement five app-specific copies of 'can Agent see this?'".
+// The ONE cross-app integration authorization layer: no app-specific copies of
+// "can this agent see this?".
 // Every integration seam — the Player's My Agent projection, the Club's Agent
 // presence badge, Contact routing, Trial visibility, an opportunity share, a
 // Passport projection, an evidence projection — asks THIS module, and this
@@ -12,8 +11,8 @@
 //   1. The canonical basis is the ONLY basis. A decision starts from
 //      `agentClientBasis`, which is `agreementGrantsAccess` — a named licensed
 //      individual on an active, client-confirmed, unexpired agreement. A legacy
-//      M13 F10 row names no individual and therefore can never produce a basis
-//      (see M23_P56E_REPRESENTATION_SEAM_AUDIT.md).
+//      adult-representation row names no individual and therefore can never
+//      produce a basis.
 //
 //   2. Every surface fails closed. An unknown surface, a missing fact, a
 //      malformed agreement and an unrecognised scope all deny. A decision is
@@ -41,25 +40,25 @@ const nullProto = (o) => Object.freeze(Object.assign(Object.create(null), o));
  * one of them must be on the agreement.
  */
 export const SURFACES = nullProto({
-  // The agent reading their own client's private record. P5.6B's own lane; here
+  // The agent reading their own client's private record. The agent core's own lane; here
   // so cross-app callers have one predicate rather than re-deriving it.
   client_private: { regulated: false, scopes: null, adultOnly: true },
   // The identity/football basics a represented client's agent may see without
-  // any further share. Deliberately narrow (§10).
+  // any further share. Deliberately narrow.
   passport_basic: { regulated: false, scopes: null, adultOnly: true },
-  // Anything beyond the basics needs an explicit, separate player share (§11).
+  // Anything beyond the basics needs an explicit, separate player share.
   passport_shared: { regulated: false, scopes: null, adultOnly: true, needsShare: true },
-  // Evidence the player intentionally shared (§74). Never raw Box Cam.
+  // Evidence the player intentionally shared. Never raw Box Cam.
   evidence_shared: { regulated: false, scopes: null, adultOnly: true, needsShare: true },
-  // Being a routable party on a canonical Contact (§20–§24).
+  // Being a routable party on a canonical Contact.
   contact_participation: { regulated: true, scopes: ['employment', 'transfer'], adultOnly: true, needsDisclosure: true },
-  // Seeing that a Trial exists and its scheduling, never its assessment (§26–§29).
+  // Seeing that a Trial exists and its scheduling, never its assessment.
   trial_projection: { regulated: false, scopes: ['employment', 'transfer'], adultOnly: true, needsDisclosure: true },
-  // Coordinating a Trial where scope allows (§28). Never confirming for the player.
+  // Coordinating a Trial where scope allows. Never confirming for the player.
   trial_coordination: { regulated: true, scopes: ['employment', 'transfer'], adultOnly: true, needsDisclosure: true },
-  // Sharing an opportunity with a represented client (§18).
+  // Sharing an opportunity with a represented client.
   opportunity_share: { regulated: true, scopes: ['employment', 'transfer'], adultOnly: true },
-  // Opening a transaction for a client. P5.6D owns the rest of the decision.
+  // Opening a transaction for a client. The transactions module owns the rest of the decision.
   transaction_initiation: { regulated: true, scopes: ['employment', 'transfer'], adultOnly: true },
   // The Club-facing "represented by" badge. Asked about a PLAYER, answered from
   // the player's own disclosure choice — not from the agent's wish to be seen.
@@ -78,7 +77,7 @@ export const RULE_ORDER = Object.freeze([
   'BLOCK', 'SCOPE', 'DISCLOSURE', 'SHARE', 'LICENCE', 'COMPLIANCE',
 ]);
 
-/** Reason codes. One meaning each (§88) — no surface invents its own wording. */
+/** Reason codes. One meaning each — no surface invents its own wording. */
 export const DENY_CODES = Object.freeze([
   'SURFACE_UNKNOWN',           // fail closed on an unrecognised surface
   'NO_REPRESENTATION',         // no canonical basis at all
@@ -179,7 +178,7 @@ export function agentSurfaceDecision({
 
   // Adulthood, then the minor pathway. A regulatory minor is refused unless the
   // encoded pathway is production-enabled — and it is not, so this fails closed
-  // for every surface (§56/§57).
+  // for every surface.
   if (spec.adultOnly && isAdult !== true) {
     if (!minorPathwayOpen) return deny('MINOR_PATHWAY_DISABLED', 'MINOR_PATHWAY');
   }
@@ -188,7 +187,7 @@ export function agentSurfaceDecision({
   }
 
   // Safety outranks every convenience, and a compliance answer never overrides
-  // it (§55).
+  // it.
   if (blocked === true) return deny('BLOCKED', 'BLOCK');
 
   if (Array.isArray(spec.scopes)) {
@@ -218,8 +217,8 @@ export function agentSurfaceDecision({
  * The client's disclosure choices are a FIELD OF THE AGREEMENT, so they are
  * defined with the agreement (`domains/agents/core/shared.mjs`) and re-exported here: this layer
  * is where they are read as permissions, not where they are stored. Each
- * defaults to false — §21 says do not automatically replace the player with the
- * agent, and §15 says a club does not get agent data merely because the player
+ * defaults to false — the player is never automatically replaced with the
+ * agent, and a club does not get agent data merely because the player
  * exists, so silence is never permission.
  */
 export { DISCLOSURE_KEYS, DISCLOSURE_DEFAULT, normaliseDisclosure };
@@ -233,7 +232,7 @@ export const SURFACE_DISCLOSURE = nullProto({
 });
 
 /**
- * Which regulated action each regulated surface is, in the P5.6C policy engine's
+ * Which regulated action each regulated surface is, in the compliance policy engine's
  * vocabulary (`POLICY_ACTIONS`). A surface that is not regulated has no action
  * and asks the compliance layer nothing.
  */
@@ -245,18 +244,18 @@ export const POLICY_ACTION_FOR_SURFACE = nullProto({
 });
 
 /**
- * Contact routing (§21). Given the canonical recipient the P3 resolver produced
+ * Contact routing. Given the canonical recipient the Contact resolver produced
  * and the agent decision, say who is validly routable NOW.
  *
  * `mode` is what the club chose and is honoured only where it is permitted.
  *
  * THERE IS NO `agent_only`. A club may ask for the player alone or for the
  * player AND the agent; it may not ask for the agent INSTEAD of the player.
- * §21 says do not automatically replace the player with the agent, and a mode
+ * The player is never automatically replaced with the agent, and a mode
  * that removed them would do exactly that — the player whose ScoutBox Inbox the
  * message lands in would never learn a club had approached them, and an
  * intercepted approach is precisely the "broader authority than the current
- * relationship permits" this milestone exists to prevent. The player is
+ * relationship permits" this layer exists to prevent. The player is
  * therefore always a target; an agent is added BESIDE them, or not at all.
  */
 export const CONTACT_ROUTING_MODES = Object.freeze(['player_only', 'both']);
@@ -266,7 +265,7 @@ export function contactRouting({ recipient = null, agentDecision = null, request
   const mode = CONTACT_ROUTING_MODES.includes(requestedMode) ? requestedMode : 'player_only';
   const agentOk = agentDecision?.allowed === true;
   // A minor's route is the guardian's, and an agent is never substituted for a
-  // guardian (§60). The requested mode is ignored rather than partially honoured.
+  // guardian. The requested mode is ignored rather than partially honoured.
   if (recipient.minor === true) {
     return { ok: true, mode: 'player_only', targets: [recipient], agent: null, agentRefusal: 'MINOR_PATHWAY_DISABLED' };
   }
@@ -295,7 +294,7 @@ export function contactRouting({ recipient = null, agentDecision = null, request
 }
 
 /**
- * The snapshot a recorded contact keeps (§22): who was validly routed at that
+ * The snapshot a recorded contact keeps: who was validly routed at that
  * moment, as roles and ids. History is not rewritten when the relationship
  * changes later, and a future contact re-resolves from scratch.
  */
@@ -312,8 +311,8 @@ export function contactTargetSnapshot(routing, at = Date.now()) {
 }
 
 /**
- * The Club-facing agent presence projection (§14/§63). Deliberately thin, and
- * built from named FACTS rather than a single green tick (§65/§66).
+ * The Club-facing agent presence projection. Deliberately thin, and
+ * built from named FACTS rather than a single green tick.
  *
  * Nothing about the agreement's terms, no commission, no other client, no
  * compliance evidence and no reviewer note has a field to arrive in.
@@ -345,19 +344,19 @@ export function clubAgentPresence({ decision = null, agent = null, agency = null
   });
 }
 
-// ---------------------------------------------- §32–§39 transaction handoff
+// ------------------------------------------------------ transaction handoff
 
 /**
  * The handoff's own states. A handoff is an INVITATION, not a transaction: it
  * records that an authorised club has explicitly decided to take a recruitment
  * case outside its own walls, and it is the thing an agent may then act on.
  *
- * It exists because of §33: a positive internal decision must NOT become a
- * transaction by itself. Nor may the club create the transaction — P5.6D's
- * frozen creation policy is that a licensed individual with current verification
+ * It exists because a positive internal decision must NOT become a
+ * transaction by itself. Nor may the club create the transaction — the transactions
+ * module's creation policy is that a licensed individual with current verification
  * opens one (`transactions.write`), and a club unilaterally opening a workspace
  * that names a player and their agent is exactly the internal-intent-becomes-
- * external-commitment move §33 forbids. So the club invites, and the agent (or,
+ * external-commitment move this forbids. So the club invites, and the agent (or,
  * for an unrepresented player, nobody yet) opens the canonical transaction.
  */
 export const HANDOFF_STATUSES = Object.freeze(['invited', 'accepted', 'withdrawn', 'expired']);
@@ -369,7 +368,7 @@ export const HANDOFF_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 export function effectiveHandoffStatus(h, now = Date.now()) {
   if (!h || !HANDOFF_STATUSES.includes(h.status)) return null;
   if (h.status === 'invited') {
-    // M23 P5.7: an invitation is dated by the server when it is made. One
+    // An invitation is dated by the server when it is made. One
     // whose clock cannot be read (NaN, a string, missing) has no TTL anyone
     // can compute and reads expired — never "standing for ever".
     const at = readInstant(h.invitedAt);
@@ -392,12 +391,12 @@ export const HANDOFF_BLOCKERS = Object.freeze([
 ]);
 
 /**
- * §34. THE precondition check, pure. Returns every blocker, in `HANDOFF_BLOCKERS`
+ * THE precondition check, pure. Returns every blocker, in `HANDOFF_BLOCKERS`
  * order, so a club sees the whole picture rather than one at a time — and so the
  * readiness view and the mutation cannot disagree, because they call this.
  *
  * What it deliberately does NOT take: the decision's reasons, its note, its
- * evidence or its author. "Do not expose internal rationale" (§34) is enforced
+ * evidence or its author. "Do not expose internal rationale" is enforced
  * by the signature: the rationale is not an argument, so it cannot leak into a
  * refusal, a projection or an event.
  */
@@ -428,7 +427,7 @@ export function handoffBlockers({
 }
 
 /**
- * §37. The duplicate rule, deterministic and deliberately narrow.
+ * The duplicate rule, deterministic and deliberately narrow.
  *
  * Two transactions are "the same context" only when the individual, the type,
  * the engaging entity AND the releasing entity all match and the earlier one is

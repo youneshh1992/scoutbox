@@ -1,17 +1,9 @@
 /**
- * M18.1 — canonical source-change events.
- *
- * M18 declared two change types it could never emit, because no honest clock
- * existed for them:
- *
- *   - `position_changed`: `positionHistory.from` is the FOOTBALL date the
- *     player started playing the position, and `prefs.updatedAt` moves when any
- *     preference is edited. Neither one dates the change.
- *   - `current_club_confirmed`: derivable, but only from rows that each already
- *     carry their own genuine clock.
- *
- * Rather than guess a timestamp from a record that means something else — the
- * single worst thing this store could do — M18.1 does two things:
+ * Canonical source-change events: an honest clock for changes whose records
+ * carry none. `positionHistory.from` is the FOOTBALL date the player started
+ * a position and `prefs.updatedAt` moves on any preference edit, so neither
+ * dates a `position_changed`. Rather than guess a timestamp from a record that
+ * means something else:
  *
  *   1. where a canonical row already carries an honest clock (a signing's `ts`,
  *      a squad row's `addedAt`, a verified claim's `verifiedAt`, a Box Cam

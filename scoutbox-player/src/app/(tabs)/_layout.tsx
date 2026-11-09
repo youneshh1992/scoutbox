@@ -8,11 +8,11 @@ import { Gradient } from '../../components/Vivid';
 import { Icon } from '../../components/Icon';
 import { PopupBanner } from '../../components/PopupBanner';
 
-// M23 P2.5 — five destinations. Home / Football / Opportunities / Inbox / You.
+// Five destinations. Home / Football / Opportunities / Inbox / You.
 // Profile and Upload keep their routes (deep links, back navigation, tests)
-// but no longer occupy a bar slot: Profile is the first page tab of You, and
+// but have no bar slot: Profile is the first page tab of You, and
 // Upload is the "+ Add evidence" action on Football.
-// M24A — the Player navigation: Phosphor icons over 11px labels, the
+// The Player navigation: Phosphor icons over 11px labels, the
 // active destination on a soft green pill.
 type TabDef = { name: string; titleKey: 'tabHome' | 'tabFootball' | 'tabOpportunities' | 'tabInbox' | 'tabYou' | 'tabProfile' | 'tabUpload'; icon: string; hidden?: boolean };
 const TABS: readonly TabDef[] = [

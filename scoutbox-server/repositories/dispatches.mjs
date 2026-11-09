@@ -1,29 +1,15 @@
 /**
- * Delivery dispatches and their attempts as typed tables with explicit writes (S7b, migration `0010_dispatches`;
- * explicit since S14d, docs/architecture/migration.md §4.6; sql/03_messaging_safety_audit.sql).
+ * Delivery dispatches and their attempts (`dispatches`, `dispatch_attempts`).
  *
  * A dispatch is one notification on one channel: every notification gets an `in_app` row (delivered at once) and an
- * `email` row (sent through the provider, skipped, or held for quiet hours). The delivery centre
- * (m13/delivery.mjs) creates them, records each send and moves them along the status ladder; the provider callback
- * and the acknowledgment move them further.
+ * `email` row (sent through the provider, skipped, or held for quiet hours). The delivery centre (m13/delivery.mjs)
+ * creates them, records each send and moves them along the status ladder; the provider callback and the
+ * acknowledgment move them further. An attempt is a send { at, ok, error } or a quiet-hours re-check note { at, note }
+ * (never counted as a send).
  *
- * Record (the keys every reader sees):
- *   { id, notificationId, audience: { kind, id }, orgId, channel, to, provider, status, skipReason,
- *     providerMessageId, attempts, nextAt, actionDeadline, createdAt, deliveredAt, openedAt, actionedAt, failedAt,
- *     failReason }
- *   attempt: a send { at, ok, error } or a quiet-hours re-check note { at, note } (never counted as a send).
- *
- * Tables: `dispatches` (vocabulary CHECKs for the channel, provider, status and audience kind; `org_id` is the
- * staff member's organisation for an `org_user` audience, set at creation; an e-mail dispatch that is not skipped
- * carries its address; the provider's message id is unique) and `dispatch_attempts` (ordered child rows).
- *
- * WRITES are explicit operations (`create`, `recordAttempt`, `patch`): each joins the open unit of work, the caller's
- * transaction or its own. READS are SQL: no mirror, no db.* view; fresh, deep-frozen records; a list decodes its
- * attempts in one batch.
- *
- * References. `org_id` is a RESTRICT key to `orgs`, DEFERRABLE INITIALLY DEFERRED because the organisations are still
- * written by their staged hook at COMMIT (§4.3 Keys). The notification reference and the audience carry no key: a
- * dispatch outlives its notification after an account deletion (option A of S7b; retention is open, Q6).
+ * `org_id` is the staff member's organisation for an `org_user` audience, a deferred RESTRICT key to `orgs`. The
+ * notification reference and the audience carry no key: a dispatch outlives its notification after an account
+ * deletion (retention is open, Q6 in docs/decisions.md).
  *
  * Refusals name tables, ids and fields, never an address or a provider text.
  */
@@ -187,7 +173,7 @@ function insertDispatch(sqlite, row) {
 }
 const readAll = (sqlite) => decode(sqlite, sqlite.prepare('SELECT * FROM dispatches ORDER BY seq').all());
 
-/** The whole domain read back as plain records (`readAllRecords` in index.mjs: the test suites' read-back); null before its migration. */
+/** The whole domain read back as plain records (`readAllRecords` in index.mjs: the test suites' read-back). */
 export const DISPATCHES_TABLE = {
   name: DISPATCHES_COLLECTION,
   read(sqlite) { return dispatchesLive(sqlite) ? readAll(sqlite) : null; },

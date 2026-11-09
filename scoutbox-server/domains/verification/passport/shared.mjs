@@ -1,9 +1,9 @@
-// M15 shared — Football Passport pure engine.
+// Football Passport pure engine.
 //
-// The Passport is a PROJECTION over existing ScoutBox records (M12 evidence,
-// M14 claims/references, trials, assessments, opportunities, objectives,
+// The Passport is a PROJECTION over existing ScoutBox records (evidence,
+// verification claims/references, trials, assessments, opportunities, objectives,
 // transitions, signings, representation) plus a handful of narrowly scoped
-// M15 records (self-submitted career entries, achievements, preferences,
+// Passport records (self-submitted career entries, achievements, preferences,
 // shares, corrections). Nothing here stores a second copy of a fact that
 // another system owns; nothing here scores a player.
 //
@@ -21,7 +21,7 @@ import { parseStrictDateOnly } from '../../../temporal.mjs';
 export const PROVENANCE = [
   'player_submitted', 'guardian_submitted', 'system_recorded',
   'historical_migration',
-  // M16: first-party observed training evidence — stronger than a player's
+  // First-party observed training evidence — stronger than a player's
   // own submission, deliberately weaker than a ScoutBox review or any
   // organisation confirmation. Never an authoritative current-club source.
   'box_cam_observed',
@@ -30,7 +30,7 @@ export const PROVENANCE = [
 ];
 export const provRank = (p) => PROVENANCE.indexOf(p);
 
-/** Map an M14 claim verification method onto Passport provenance. */
+/** Map a verification claim's method onto Passport provenance. */
 export function provenanceFromMethod(method) {
   switch (method) {
     case 'authoritative_registry':
@@ -91,7 +91,7 @@ export function normWhen(input) {
     if (!Number.isInteger(y) || y < 1900 || y > 2100) return null;
     const m = input.month ?? input.m;
     if (m != null && Number.isFinite(Number(m))) {
-      // M23 P5.7: a month that does not exist is not clamped to one that does.
+      // A month that does not exist is refused, not clamped to one that does.
       const mm = Number(m);
       if (!Number.isInteger(mm) || mm < 1 || mm > 12) return null;
       return { t: Date.UTC(y, mm - 1, 1), precision: 'month', y, m: mm };
@@ -101,7 +101,7 @@ export function normWhen(input) {
   if (typeof input === 'string') {
     const dm = /^(\d{4}-\d{2}-\d{2})/.exec(input);
     if (dm) {
-      // M23 P5.7: a day-precision history date is a day that exists (30 February used to roll to March).
+      // A day-precision history date is a day that exists (30 February does not roll to March).
       const d = parseStrictDateOnly(dm[1]);
       return d.ok ? normWhen(d.t) : null;
     }
@@ -134,7 +134,7 @@ export function buildTimeline(src) {
   const push = (e) => { if (e.when) events.push(e); };
   const org = (id, name) => (id || name ? { id: id ?? null, name: name ?? null } : null);
 
-  // M14 affiliation claims (already annotated with effective status).
+  // Affiliation claims (already annotated with effective status).
   for (const { claim, eff } of src.affiliations ?? []) {
     if (!eff.displayable) continue;
     const prov = provenanceFromMethod(claim.verificationMethod);
@@ -162,7 +162,7 @@ export function buildTimeline(src) {
     }
   }
 
-  // Self/guardian-submitted career entries (M15 records).
+  // Self/guardian-submitted career entries.
   for (const c of src.careerEntries ?? []) {
     if (c.withdrawnAt) continue;
     const o = org(null, c.orgName);
@@ -198,11 +198,11 @@ export function buildTimeline(src) {
   // visible only by explicit selection; outcomes stay private by default.
   for (const t of src.trials ?? []) {
     const o = org(t.orgId, t.orgName);
-    // M23 P4B: a row that carries the operational workflow says whether the
-    // player actually attended — the entry is keyed on a recorded attendance
+    // A row that carries the operational workflow says whether the player
+    // actually attended — the entry is keyed on a recorded attendance
     // (attended/partial), never on acceptance, and dated by the first
-    // attended session. A legacy row (`legacy_accepted`) predates attendance
-    // records; it still stands for its accepted day and says so (`legacy`).
+    // attended session. A legacy row (`legacy_accepted`) has no attendance
+    // records; it stands for its accepted day and says so (`legacy`).
     if (isLegacyTrial(t)) {
       push({
         id: evId('trial', t.id, 'trial_attended'), type: 'trial_attended',
@@ -228,8 +228,8 @@ export function buildTimeline(src) {
     if (t.report) {
       push({
         id: evId('trial', t.id, 'trial_outcome'), type: 'trial_outcome',
-        // P4A-D2: the report writer stamps `filedAt` (server.mjs); `at` is
-        // kept for rows and fixtures that predate that name.
+        // The report writer stamps `filedAt`; `at` is read for rows and
+        // fixtures that carry the older name.
         when: normWhen(t.report.filedAt ?? t.report.at ?? t.proposedDate ?? t.acceptedAt), title: { org: o?.name }, org: o,
         provenance: 'verified_club_confirmed', visibility: 'private_own_org',
         source: { type: 'trial', id: t.id },
@@ -248,7 +248,7 @@ export function buildTimeline(src) {
     });
   }
 
-  // Coach references (M14): snapshot provenance, never rewritten.
+  // Coach references: snapshot provenance, never rewritten.
   for (const r of src.references ?? []) {
     push({
       id: evId('reference', r.id, 'reference_received'), type: 'reference_received',
@@ -331,7 +331,7 @@ export function buildTimeline(src) {
     });
   }
 
-  // Achievements (M15): provenance follows confirmation state.
+  // Achievements: provenance follows confirmation state.
   for (const a of src.achievements ?? []) {
     if (a.withdrawnAt) continue;
     push({
@@ -342,7 +342,7 @@ export function buildTimeline(src) {
     });
   }
 
-  // M16 Box Cam: meaningful sessions only (the caller pre-filters — the
+  // Box Cam: meaningful sessions only (the caller pre-filters — the
   // career timeline is never flooded with every minor session; detailed
   // history lives in Box Training).
   for (const b of src.boxSessions ?? []) {
@@ -432,7 +432,7 @@ export function clubHistory(src) {
 }
 
 // --------------------------------------------------------- current status
-// Field-level precedence (§57): authoritative registry > verified club >
+// Field-level precedence: authoritative registry > verified club >
 // verified coach > ScoutBox review > guardian > player. Player input NEVER
 // silently wins over an authoritative current record — it becomes a flagged
 // conflict for the self view instead.
@@ -502,7 +502,7 @@ export function temporalConflicts({ events = [], history = [], dob = null }) {
 export const GAP_RULES_VERSION = 2;
 export const GAP_RULES = [
   { id: 'gap.full_match_recent', v: 1, category: 'match_evidence', test: (f) => !f.hasRecentFullMatch },
-  // v2 (M16): contextual and optional — never daily-training pressure.
+  // v2: contextual and optional — never daily-training pressure.
   { id: 'gap.training_evidence', v: 2, category: 'training', test: (f) => !f.hasRecentTrainingEvidence },
   { id: 'gap.coach_reference', v: 1, category: 'references', test: (f) => f.referenceCount === 0 },
   { id: 'gap.current_club_confirmed', v: 1, category: 'club_history', test: (f) => !f.hasConfirmedCurrentClub },
@@ -572,11 +572,10 @@ function eventVisibleTo(e, viewer, { orgId = null, publicSelections = new Set() 
 }
 
 /**
- * M18.1 — the Football Passport CONTENT revision.
+ * The Football Passport CONTENT revision.
  *
  * `passportVersion` is the projection SCHEMA version and is deliberately still
- * the constant 1. What was missing, and what a decision snapshot actually needs,
- * is a token that says *which Passport truth* a club was looking at when it
+ * the constant 1. What a decision snapshot needs is a token that says *which Passport truth* a club was looking at when it
  * decided. This is that token: a stable hash over the canonical inputs.
  *
  * Two properties matter more than the hash itself:
@@ -638,8 +637,8 @@ export function projectPassport(full, viewer, opts = {}) {
       provenance: e.provenance, provenanceCopy: PROVENANCE_COPY[e.provenance] ?? null,
       assurance: e.assurance ?? null, current: e.current ?? null,
       source: viewerKind === 'trust_safety' || viewerKind === 'self' || viewerKind === 'guardian' ? e.source : { type: e.source.type },
-      // M23 P4B (D-14): a trial_attended event says whether it is keyed on a
-      // recorded attendance (P4B) or on a pre-P4B acceptance (`legacy`).
+      // A trial_attended event says whether it is keyed on a recorded
+      // attendance or on an acceptance (`legacy`).
       ...(e.type === 'trial_attended' ? { legacy: e.legacy === true, attendedSessions: e.attendedSessions ?? null } : {}),
     }));
   const historyRows = (min) => full.history.rows
@@ -652,8 +651,8 @@ export function projectPassport(full, viewer, opts = {}) {
     }));
 
   const base = {
-    // Schema version of this projection (unchanged since M15) and, since
-    // M18.1, the CONTENT revision of the canonical facts behind it.
+    // Schema version of this projection and the CONTENT revision of the
+    // canonical facts behind it.
     passportVersion: 1,
     passportRevision: passportRevision(full),
     player: {
@@ -664,7 +663,7 @@ export function projectPassport(full, viewer, opts = {}) {
       location: full.player.city ?? null,
       level: full.player.level ?? null,
     },
-    identity: full.identity, // M14 structured identity assurance (or null)
+    identity: full.identity, // structured identity assurance (or null)
     status: full.status,
     note: 'A Football Passport describes evidence and provenance. It is not a rating of football ability and not a ScoutBox endorsement.',
   };

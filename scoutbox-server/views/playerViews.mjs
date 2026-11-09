@@ -1,31 +1,28 @@
 /**
- * The exact fields each audience may receive of a player or a guardian
- * (readiness review §6, reconciled against the code). Every view here is a
- * POSITIVE allowlist built field by field — never a spread of the record with
- * a few keys deleted — so a field added to the record later is not served to
- * anyone until a decision puts it on a list. The functions are pure: they take
+ * The exact fields each audience may receive of a player or a guardian.
+ * The organisation and Trust & Safety views are POSITIVE allowlists built field
+ * by field — never a spread of the record with a few keys deleted — so a field
+ * added to the record later is not served to them until a decision puts it on a
+ * list. The guardian's own views are the whole record minus its secrets: the
+ * guardian is the child's representative. The functions are pure: they take
  * the record (or its read-only view) and the helpers the rule needs, and
  * return a fresh object.
- *
- * Classification of every difference from the pre-S4a responses is in §6:
- * "kept" (as before), "intentional privacy fix" (named by the plan and the
- * PRIVACY_HARDENING suites), or "withdrawn" (a first-draft change not made).
  */
 
-/** §6.1 — what a club (any organisation) receives of a player, before the per-platform rules. */
+/** What a club (any organisation) receives of a player, before the per-platform rules. */
 export const ORG_PLAYER_FIELDS = Object.freeze([
   'id', 'name', 'position', 'foot', 'heightCm', 'weightKg', 'country', 'city', 'level', 'availability', 'contractStatus',
   'identityVerified', 'footballCategory', 'squadNumber', 'createdAt', 'firstTeamSeeker',
-  // the pro-market surface: deleted again for grassroots clubs below (kept, as before)
+  // the pro-market surface: deleted again for grassroots clubs below
   'academyPlus', 'marketValueRange', 'agentName', 'contractUntil',
-  // football record and evidence (kept)
+  // football record and evidence
   'stats', 'seasonHistory', 'badges', 'timeline', 'drills', 'media',
 ]);
-/** §6.1 — attendance items without the GPS fix (intentional privacy fix: attendance GPS leaked to clubs). */
+/** Attendance items without the GPS fix: a club never learns where a player was located. */
 export const ORG_ATTENDANCE_FIELDS = Object.freeze(['id', 'fixture', 'venue', 'date', 'verified', 'corroboratedBy', 'deviceConfirmed', 'trialId']);
-/** §6.1 — never served to an organisation, whatever the record holds. */
+/** Never served to an organisation, whatever the record holds. */
 export const ORG_PLAYER_NEVER = Object.freeze(['dob', 'location', 'programme', 'guardianId', 'password', 'activityLog', 'notificationPrefs', 'externalIds', 'drillResults', 'medical', 'trialReports', 'attendance']);
-/** §6.5 — what Trust & Safety receives of a guardian: never the password hash, never the e-mail code. */
+/** What Trust & Safety receives of a guardian: never the password hash, never the e-mail code. */
 export const ADMIN_GUARDIAN_FIELDS = Object.freeze(['id', 'name', 'email', 'emailVerified', 'idVerified', 'idvReference', 'disclaimerAccepted', 'childIds', 'coGuardianOf', 'coGuardians', 'notificationPrefs', 'createdAt']);
 
 const UNSHARED_MEDICAL = Object.freeze({ shared: false, records: [], conditionStatus: 'not_shared', note: 'Medical data is player-controlled and has not been shared.' });
@@ -33,7 +30,7 @@ const plain = (v) => (v === undefined ? undefined : JSON.parse(JSON.stringify(v)
 const pick = (record, fields) => { const out = {}; for (const f of fields) if (record[f] !== undefined) out[f] = plain(record[f]); return out; };
 
 /**
- * §6.1 Clubs — the organisation-facing view. `null` when the organisation may
+ * Clubs — the organisation-facing view. `null` when the organisation may
  * not see the player (visibility rule, block). `helpers` are the server's own
  * rules: visibleToOrg, isBlocked, isAdult, ageOn, computeTrustScore,
  * publishedVouchesFor, haversineKm.
@@ -46,7 +43,7 @@ export function orgPlayerView(player, org, helpers) {
   const minor = !isAdult(player);
   const view = pick(player, ORG_PLAYER_FIELDS);
   view.age = ageOn(player.dob);
-  // M18.1 — this number is PROFILE COMPLETENESS, not the Trust Score; `trustScore` stays on the wire as a deprecated alias.
+  // This number is PROFILE COMPLETENESS, not the Trust Score; `trustScore` stays on the wire as a deprecated alias.
   view.profileSignal = computeTrustScore(player);
   view.trustScore = computeTrustScore(player);
   view.guardianManaged = minor;
@@ -70,20 +67,20 @@ export function orgPlayerView(player, org, helpers) {
   return view;
 }
 
-/** §6.3 — a guardian's view of their child: the whole record minus the password hash, plus the derived numbers (kept; the guardian is the child's representative). */
+/** A guardian's view of their child: the whole record minus the password hash, plus the derived numbers (the guardian is the child's representative). */
 export function guardianChildView(player, helpers) {
   const { ageOn, computeTrustScore, trustBreakdown } = helpers;
   const { password, ...rest } = plain(player);
   return { ...rest, age: ageOn(player.dob), trustScore: computeTrustScore(player), trust: trustBreakdown(player) };
 }
 
-/** §6.3 — a guardian's own record: minus the password hash and the outstanding e-mail code or its hash. */
+/** A guardian's own record: minus the password hash and the outstanding e-mail code or its hash. */
 export function guardianSelfView(guardian) {
   const { password, emailCode, emailCodeHash, ...safe } = plain(guardian);
   return safe;
 }
 
-/** §6.5 — Trust & Safety: a positive allowlist; never the hash, never the code (intentional privacy fix). */
+/** Trust & Safety: a positive allowlist; never the hash, never the code. */
 export function adminGuardianView(guardian) {
   return pick(guardian, ADMIN_GUARDIAN_FIELDS);
 }

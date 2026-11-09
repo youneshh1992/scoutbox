@@ -1,4 +1,4 @@
-// M24F.3 — the one-line rule on the Player's root screens, in a real browser:
+// The one-line rule on the Player's root screens, in a real browser:
 //   Passport root (verified status, club, availability, evidence in one word,
 //   a four-row timeline), Trust Score root (score, band, "Evidence confidence
 //   only", "View breakdown"), the Timeline rows (provenance only when opened),
@@ -6,7 +6,7 @@
 //   Opportunity fit (one line + "Check fit", reasons behind "Why"), the club
 //   request detail (Accept / Decline visible, message behind "View full
 //   message") and the Inbox list — at 390 / 430 / 1024: fewer visible
-//   characters than the M24F.2 roots, every details control present and
+//   characters than the BEFORE baseline below, every details control present and
 //   working, no horizontal overflow, zero page errors.
 // The Passport / Trust / board / fit screens run on the demo bundle (fixed
 // data, so the numbers are stable); the request and the Inbox run live
@@ -27,7 +27,7 @@ const PORTS = { live: 8886, demo: 8887 };
 const DIST = 'dist-live24f3';
 const DATA = fs.mkdtempSync(path.join(os.tmpdir(), 'scoutbox-m24f3min-'));
 const KEEP = process.env.KEEP_DIST === '1';
-// M24F.2 roots at 390px, measured by the same crawler before M24F.3 (visible characters)
+// The earlier, denser roots at 390px, measured by the same crawler (visible characters)
 const BEFORE = { passport: 2730, inbox: 1272, board: 5892, fit: 6159 };
 let passed = 0; const failures = []; const errors = [];
 const ok = (c, m) => { if (c) { passed++; console.log(`✓ ${m}`); } else { failures.push(m); console.log(`✗ ${m}`); } };
@@ -104,7 +104,7 @@ for (const [w, h] of [[390, 844], [430, 932], [1024, 768]]) {
   const before = await chars(page); await about.click(); await sleep(400); const after = await chars(page);
   ok(after > before + 40, `${tag} Passport: About opens (${before} → ${after} characters)`);
   await about.click(); await sleep(300);
-  // Timeline — M24F.4: one root row ("Timeline · n events") opens the preview
+  // Timeline — one root row ("Timeline · n events") opens the preview
   ok((await page.locator('[data-testid^="passport-event-"]').count()) === 0, `${tag} Timeline: no event rows on the root`);
   await page.locator('[data-testid="passport-timeline"] > [role="button"]').first().click(); await sleep(400);
   const events = page.locator('[data-testid^="passport-event-"]');

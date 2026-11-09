@@ -1,14 +1,14 @@
 /**
- * M23 P5.6D — the transaction domain's audit projection.
+ * The transaction domain's audit projection.
  *
- * The platform audit is NOT the user-visible timeline (§40), and this file is
+ * The platform audit is NOT the user-visible timeline, and this file is
  * where that distinction lives: a timeline entry is filtered by the audience
  * tag its action carries, an audit row is filtered only by the tenant asking.
  * The audit therefore holds rows no party's timeline shows — a note being
  * added, an internal re-evaluation, a subject being tombstoned — and it names
  * the actor's role rather than repeating a person.
  *
- * What an audit row carries (§75): actor, transaction, party role, the
+ * What an audit row carries: actor, transaction, party role, the
  * compliance snapshot reference, old and new state, timestamp, reason code and
  * evidence references. What it never carries: a note's text, a document's
  * content, a term's numbers, a fee, a counterparty's name, a reviewer's
@@ -49,10 +49,10 @@ function safeDetail(detail) {
 }
 
 /**
- * Audit rows for a tenant or one transaction (S11c: read through the repository's queries, never a scan of a store).
+ * Audit rows for a tenant or one transaction.
  *
  * `agencyOrgId` gives the agency its own rows (they are merged into the agency
- * audit feed beside the P5.6B and P5.6C rows); `transactionId` gives the
+ * audit feed beside the agent core and compliance rows); `transactionId` gives the
  * attributed Trust & Safety read one transaction's rows. `snapshotOf(tx)` is the
  * transaction's compliance snapshot as the routes read it (the evaluation row it names).
  */

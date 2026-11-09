@@ -1,6 +1,5 @@
 /**
- * S12b — Box Cam, the At-Home Combine and the production CV results as typed tables (migration `0031_box_cam`;
- * docs/architecture/migration.md §4.5 S12; sql/07_development_boxcam_discovery.sql).
+ * Box Cam, the At-Home Combine and the production CV results.
  *
  * Records:
  *   - Box Cam privacy preferences, one per player who ever saved them. Reading never creates a row: a player with no
@@ -13,7 +12,7 @@
  *     creation response alone. The accepted observation stream is ordered child rows (`box_session_observations`),
  *     read only by finalize (`observationsOf`); the verification reasons and the append-only integrity history are child
  *     rows too. A session cites at most one challenge entry (a column). `integrity`, `captureMode` and the note's
- *     provenance were constants and are worked out by the view.
+ *     provenance are constants, worked out by the view.
  *   - Disputes of a session's result, with their resolution as columns.
  *   - Combine requests (the protocols as ordered rows) and Combine attempts (the reasons and the calibration checks as
  *     ordered rows; the calibration a protocol requires comes from its pinned version, never stored).
@@ -24,13 +23,12 @@
  * kept, a nested update refused), plus `sessions.recordBatch` (append accepted observations), `prefs.save` and
  * `cvResults.record`. Each joins the open unit of work, the caller's open transaction, or opens its own.
  *
- * READS are SQL: no mirror. Queries decode fresh, deep-frozen records, a list's child rows in one batch. Modules
- * receive them as `boxCamReads`.
+ * Queries decode deep-frozen records, a list's child rows in one batch. Modules receive them as `boxCamReads`.
  *
- * References. Player, guardian, media and staff-author ids on a player's own records carry no key (tolerant, as
- * before). Organisations → orgs, the assigning or requesting staff → org_users and an assignment's objective →
- * dev_objectives are immediate RESTRICT, as are the keys between this domain's tables. Child rows cascade with their
- * owner, which is never deleted.
+ * References. Player, guardian, media and staff-author ids on a player's own records carry no key (tolerant).
+ * Organisations → orgs, the assigning or requesting staff → org_users and an assignment's objective → dev_objectives
+ * are immediate RESTRICT, as are the keys between this domain's tables. Child rows cascade with their owner, which is
+ * never deleted.
  */
 import crypto from 'node:crypto';
 import { isPlainObject, ids, describe } from './recruitment.mjs';
@@ -90,7 +88,7 @@ export function nonceMatches(session, nonce) {
 }
 export const defaultPrefs = (playerId) => ({ playerId, shareDevelopmentActivity: 'private', retainClips: false, updatedAt: null, updatedBy: null });
 
-/** The ScoutBox challenges the migration inserts (before S12b, the first boot created them). */
+/** The ScoutBox challenges the migration inserts. */
 export function scoutboxChallenges(now) {
   return [
     { id: 'boxc-scoutbox-1000-touch', title: 'The 1,000 Touch Box Challenge', publisher: { kind: 'scoutbox' }, drillId: 'box-touches', metric: 'reps', targetTotal: 1000, startsAt: now, endsAt: now + 30 * 86_400_000, adultOnly: false, cap: null, status: 'active', createdAt: now },
@@ -347,7 +345,7 @@ function obsFromRows(rows) {
   }
   return obs;
 }
-/** The rows of an engine-shaped stream (snapshot import), in kind order. */
+/** The rows of an engine-shaped stream, in kind order. */
 function rowsFromObs(obs, label) {
   if (!isPlainObject(obs)) return bad(label, 'obs', `must be an object (got ${describe(obs)})`);
   const unknown = Object.keys(obs).filter((k) => !Object.values(OBS_KEYS).includes(k));
@@ -567,7 +565,7 @@ function decodeCv(sqlite, rows) {
 }
 const decodeWith = (spec) => (rows) => rows.map((r) => decode(spec, r));
 
-// ------------------------------------------------------------------ snapshot (fixtures and the persistence batteries)
+// ------------------------------------------------------------------ whole-domain read (the test suites)
 export const boxCamLive = (sqlite) => migrationApplied(sqlite, BOX_CAM_MIGRATION);
 function readAll(sqlite) {
   const all = (t, order = 'rowid') => sqlite.prepare(`SELECT * FROM ${t} ORDER BY ${order}`).all();
@@ -583,7 +581,7 @@ function readAll(sqlite) {
     boxCamCvResults: decodeCv(sqlite, all('box_cam_cv_results')),
   };
 }
-/** The whole domain read back as plain records (`readAllRecords` in index.mjs: the test suites' read-back); null before its migration. */
+/** The whole domain read back as plain records (`readAllRecords` in index.mjs: the test suites' read-back). */
 export const BOX_CAM_RECORDS = {
   names: BOX_CAM_COLLECTIONS,
   read(sqlite) { return boxCamLive(sqlite) ? readAll(sqlite) : null; },
@@ -735,7 +733,7 @@ export function createBoxCamRepository({ sqlite, unit = null, now = Date.now, lo
     }),
     /**
      * Append one accepted batch: `observations` (typed rows; a `{ kind: 'resume', atMs }` closes the earliest open
-     * pause, as the engine always did), then `lastSeq` and one more batch.
+     * pause, as the engine does), then `lastSeq` and one more batch.
      */
     recordBatch: (id, { observations, lastSeq }) => guard(`box_sessions ${id}`, () => operation(() => {
       const s = sessionById(id);

@@ -1,4 +1,4 @@
-// The Player's primitives. M24A: every colour comes from the active
+// The Player's primitives. Every colour comes from the active
 // palette (theme.ts) and UI text uses the platform system font (Text.tsx).
 //
 // Player refresh: grouped surfaces, rounded controls and semantic colours.
@@ -42,9 +42,9 @@ export function Button({ label, onPress, primary, danger, disabled, small, pill,
   danger?: boolean;
   disabled?: boolean;
   small?: boolean;
-  /** M24C — the authentication submit: a compact rounded pill. */
+  /** The authentication submit: a compact rounded pill. */
   pill?: boolean;
-  /** M24F — a text action, no border: for the third-level choice beside a primary. */
+  /** A text action, no border: for the third-level choice beside a primary. */
   tertiary?: boolean;
   /**
    * Optional stable handle for a live browser test. A label is the accessible
@@ -60,7 +60,7 @@ export function Button({ label, onPress, primary, danger, disabled, small, pill,
       testID={testID}
       onPress={onPress}
       disabled={disabled}
-      // M21 §115: the control announces itself as a button and carries its
+      // The control announces itself as a button and carries its
       // label, so it is reachable by keyboard and by a screen reader — and,
       // incidentally, by a test that drives the real interface.
       accessibilityRole="button"
@@ -96,7 +96,7 @@ export function Muted({ children, size = 13 }: { children: ReactNode; size?: num
 }
 
 /**
- * M18.1 — profile completeness, NOT the ScoutBox Trust Score. The name is kept
+ * Profile completeness, NOT the ScoutBox Trust Score. The name is kept
  * so call sites do not churn; the label says what the number actually is.
  */
 export function TrustBar({ score }: { score: number }) {
@@ -116,7 +116,7 @@ export function Row({ children, style }: { children: ReactNode; style?: ViewStyl
   return <View style={[{ flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' }, style]}>{children}</View>;
 }
 
-/** M24F — a list row: a label, an optional value line, a chevron when it leads somewhere. The Account page is made of these. */
+/** A list row: a label, an optional value line, a chevron when it leads somewhere. The Account page is made of these. */
 export function ListRow({ label, value, count, onPress, testID, icon, right, danger }: { label: string; value?: string; count?: string | number; onPress?: () => void; testID?: string; icon?: string; right?: ReactNode; danger?: boolean }) {
   const colors = useColors();
   const styles = useStyles(makeStyles);
@@ -141,7 +141,7 @@ export function ListRow({ label, value, count, onPress, testID, icon, right, dan
   );
 }
 
-/** M24F.2 — a fact row: a label (and an optional quiet line) on the left, the value on the right, a hairline below. The settings and the Clubs categories are made of these. */
+/** A fact row: a label (and an optional quiet line) on the left, the value on the right, a hairline below. The settings and the Clubs categories are made of these. */
 export function FactRow({ k, v, sub, testID }: { k: string; v?: string; sub?: string | null; testID?: string }) {
   const styles = useStyles(makeStyles);
   return (
@@ -155,7 +155,7 @@ export function FactRow({ k, v, sub, testID }: { k: string; v?: string; sub?: st
   );
 }
 
-/** M24F — progressive disclosure: a row that opens its detail under it. Nothing is hidden for good; it is one tap away. */
+/** Progressive disclosure: a row that opens its detail under it. Nothing is hidden for good; it is one tap away. */
 export function Disclosure({ label, children, testID, open: initial = false, hint, icon }: { icon?: string; label: string; children: ReactNode; testID?: string; open?: boolean; hint?: string }) {
   const colors = useColors();
   const styles = useStyles(makeStyles);
@@ -202,7 +202,7 @@ export function PreviewRow({ title, line, time, unread, accent, accentLabel, ini
   );
 }
 
-/** M24F.3 — the one way to say "there is more": a quiet text link with a chevron. */
+/** The one way to say "there is more": a quiet text link with a chevron. */
 export function DetailLink({ label, onPress, testID }: { label: string; onPress: () => void; testID?: string }) {
   const colors = useColors();
   return (
@@ -216,7 +216,7 @@ export function DetailLink({ label, onPress, testID }: { label: string; onPress:
 export { EventRow, TimelineItem } from './Timeline';
 export { RecordPanel, DetailFact, InfoNote, MetricTiles } from './RecordDetails';
 
-/** M24F — a small uppercase kicker: the kind of a thing, where a pill would be noise. */
+/** A small uppercase kicker: the kind of a thing, where a pill would be noise. */
 export function Kicker({ children, tone }: { children: ReactNode; tone?: 'urgent' | 'accent' | 'trial' }) {
   const colors = useColors();
   return <Text style={{ color: tone === 'urgent' ? colors.danger : tone === 'accent' ? colors.accentText : tone === 'trial' ? colors.trialInk : colors.muted, fontSize: 11, fontWeight: '600', letterSpacing: 0.6, textTransform: 'uppercase' }}>{children}</Text>;

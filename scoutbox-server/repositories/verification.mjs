@@ -1,13 +1,12 @@
 /**
- * S10a — verification claims as typed tables (migration `0023_verification`; docs/architecture/migration.md §4.3
- * "The pattern", §4.5 S10; sql/05_verification_passport.sql).
+ * Verification claims and the records around them.
  *
  * Records: staff and organisation claims (with their review-reason and risk-flag codes and their evidence links), the
  * append-only verification event log, evidence records (verification documents, email and registry proofs, and the
  * signing and transaction documents other domains file through the same vault), one-time tokens (hashes only),
  * verification administrators, root-authority transfers, root organisation applications (with their codes), claim
  * disputes, coach references, squad invitations by code, conflict-of-interest declarations, domain requests (with their
- * codes) and an organisation's verified domains (the former `orgs.verification.domains` facet). Every field is a typed
+ * codes) and an organisation's verified domains. Every field is a typed
  * column with its vocabulary and length CHECKs; there are no side columns and no JSON columns: a claim's `metadata` and
  * an evidence record's `meta` are fixed sets of optional typed columns, and an event's before/after payload is one line
  * of text (`detail`). A record the columns cannot hold is refused with its id.
@@ -19,8 +18,8 @@
  * a claim's `evidenceIds` are rewritten by its own update. A root application's evidence is the evidence whose
  * `meta.rootRequest` names it.
  *
- * READS are SQL: no mirror, and every db.ver* name throws, naming this repository. Queries decode fresh, deep-frozen
- * records in insertion (rowid) order unless they say otherwise. Modules receive them as `verificationReads`.
+ * Queries decode deep-frozen records in insertion (rowid) order unless they say otherwise. Modules receive them as
+ * `verificationReads`.
  *
  * References. Player ids (references, invitations, tokens) carry no key: tolerant, as recruitment and scouting. Org ids
  * → orgs and staff ids → org_users are immediate RESTRICT keys; claim, evidence, root-request and reference keys inside
@@ -438,7 +437,7 @@ function readAll(sqlite) {
   return out;
 }
 
-/** The whole domain read back as plain records (`readAllRecords` in index.mjs: the test suites' read-back); null before its migration. */
+/** The whole domain read back as plain records (`readAllRecords` in index.mjs: the test suites' read-back). */
 export const VERIFICATION_RECORDS = {
   names: VERIFICATION_COLLECTIONS,
   read(sqlite) { return verificationLive(sqlite) ? readAll(sqlite) : null; },
@@ -638,7 +637,7 @@ export function createVerificationRepository({ sqlite, unit = null, now = Date.n
     remove: (orgId, domain) => operation(() => prepared('DELETE FROM org_verified_domains WHERE org_id = ? AND domain = ?').run(orgId, domain).changes > 0),
   };
   const bootstrapMarker = {
-    /** Has the one-time M14 bootstrap (claims for organisations already verified) run on this database? */
+    /** Has the one-time bootstrap (claims for organisations already verified) run on this database? */
     ran: () => !!prepared("SELECT 1 FROM ver_migrations WHERE key = 'm14'").get(),
     recordBootstrap: (at, claimsCreated) => operation(() => { prepared("INSERT INTO ver_migrations (key, ran_at, claims_created) VALUES ('m14', ?, ?)").run(at, claimsCreated); }),
   };

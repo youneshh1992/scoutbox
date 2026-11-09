@@ -1,4 +1,4 @@
-// M16 demo mirror — an honest, self-contained Box Cam experience with a
+// Demo mirror — an honest, self-contained Box Cam experience with a
 // SIMULATED observation stream. Every simulated session is marked
 // simulated:true and labelled "Box Cam demo — simulated camera
 // observations" in the UI. Nothing here is presented as real live

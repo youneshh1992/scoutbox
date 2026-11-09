@@ -54,7 +54,7 @@ const NOTIFICATION_SCREEN: Record<string, ScreenId> = {
   regulatory_consent_granted: 'compliance',
   regulatory_consent_declined: 'compliance',
   regulatory_consent_revoked: 'compliance',
-  // M23 P5.6D: workspace traffic and its compliance half both land on the
+  // Workspace traffic and its compliance half both land on the
   // transaction, because that is where the person can act on either.
   agent_transaction: 'transactions',
   agent_transaction_action: 'transactions',
@@ -80,11 +80,11 @@ export default function App() {
     setSession(s);
   };
   const logout = () => {
-    revokeSession(session); // PRE-M24 (PM-4): the server forgets the token too
+    revokeSession(session); // The server forgets the token too
     try { localStorage.removeItem(SESSION_KEY); } catch { /* private mode */ }
     setSession(null);
   };
-  // PRE-M24 (PM-3): a sign-out (or another sign-in) in another tab of this browser ends this one too.
+  // A sign-out (or another sign-in) in another tab of this browser ends this one too.
   useEffect(() => {
     const onStorage = (e: StorageEvent) => { if (e.key === SESSION_KEY || e.key === null) setSession(loadSession()); };
     window.addEventListener('storage', onStorage);
@@ -120,12 +120,12 @@ function Login({ onLogin }: { onLogin: (s: Session) => void }) {
     setBusy(true);
     try { onLogin(await api.login(selected, asName, asRole, password || undefined)); } catch (e) { setError(e instanceof Error ? e.message : 'Login failed'); } finally { setBusy(false); }
   };
-  // M24C — invitation-only: an agency's administrator adds its members, so
+  // Invitation-only: an agency's administrator adds its members, so
   // there is no public sign-up control here, only the access note.
   return (
     <main className="a-login"><section className="a-login-story"><AgentBrand/><div className="a-login-copy"><span>THE BUSINESS BEHIND THE GAME</span><h1>Talent has potential.<br/><em>You build<br/>the future.</em></h1><p>The professional workspace for representation,<br/>relationships and the next opportunity.</p></div><div className="a-login-map"><AgentMap decorative/></div><footer><span>SCOUTBOX / AGENT</span><span>Represent. Connect. Progress.</span></footer></section><section className="a-login-form"><header><span>AGENCY ACCESS</span><span className="a-access-dot">Private workspace</span></header><h2>{accessHelp?'Join your agency.':'Welcome back.'}</h2><p>{accessHelp?'A personal account. One connected team.':'Sign in to your professional workspace.'}</p><nav className="a-access-tabs"><button aria-pressed={!accessHelp} onClick={()=>setAccessHelp(false)}>Sign in</button><button aria-pressed={accessHelp} onClick={()=>setAccessHelp(true)}>Get access</button></nav>{accessHelp?<div className="a-access-guide"><h3>Your agency manages access.</h3><ol><li><b>Contact your administrator</b><p>Ask to be added to your agency’s ScoutBox workspace.</p></li><li><b>Confirm your role</b><p>Your administrator assigns the permissions for your work.</p></li><li><b>Sign in with your details</b><p>Use your own account so your work is attributed to you.</p></li></ol><button className="primary" onClick={()=>setAccessHelp(false)}>Back to sign in</button></div>:<>
       <form className="auth-signin" onSubmit={(e) => { e.preventDefault(); void enter(); }} aria-label="Sign in" noValidate>
-        {/* M24D — one agency is named, several are chosen from; no badges either way. */}
+        {/* One agency is named, several are chosen from; no badges either way. */}
         <div className="auth-block" role="group" aria-labelledby="agent-org-label">
           <span className="auth-label" id="agent-org-label">Agency</span>
           {orgs.length === 1 && selected ? (
@@ -142,7 +142,7 @@ function Login({ onLogin }: { onLogin: (s: Session) => void }) {
           // The demo's roster, offered rather than guessed. A name that is not on
           // it is refused AGENCY_MEMBERSHIP_REQUIRED — correctly, because only an
           // administrator adds a member — and in a demo there is no administrator
-          // to ask, so an unlisted name used to be a dead end.
+          // to ask, so an unlisted name would be a dead end.
           <div className="auth-block">
             <p className="auth-lead">{t('login.chooseProfile')}</p>
             <div className="demo-identities" data-testid="demo-identities">
@@ -185,7 +185,7 @@ function Workspace({ session, onLogout }: { session: Session; onLogout: () => vo
   const [contextId, setContextId] = useState<string | null>(() => contextFromHash(window.location.hash));
   // The open transaction AND its tab, both read from the hash: a deep link to
   // #/transactions/atx-7/documents must open the documents tab, not whichever
-  // tab the screen happened to be on (D14).
+  // tab the screen happened to be on.
   const [transaction, setTransaction] = useState<{ id: string; tab: TransactionTab } | null>(() => transactionFromHash(window.location.hash));
 
   const setScreen = useCallback((id: ScreenId) => {
@@ -230,7 +230,7 @@ function Workspace({ session, onLogout }: { session: Session; onLogout: () => vo
   }, []);
   /** Opening a client PUSHES, so the browser Back button closes it again. */
   /**
-   * M23 P8 §30 — a contact, Offer or signing notification carries a server-
+   * A contact, Offer or signing notification carries a server-
    * resolved target naming the CLIENT (the player) and the tab; the agent's own
    * relationship with that client is looked up now, so a revoked mandate opens
    * nothing. Other rows keep their type-level destination.
@@ -292,8 +292,8 @@ function Workspace({ session, onLogout }: { session: Session; onLogout: () => vo
       setClient(clientFromHash(window.location.hash));
       setContextId(contextFromHash(window.location.hash));
       // The hash is the truth for an open transaction too. Without this, going
-      // back to #/transactions left the detail on screen, because the id lived
-      // only in state (D12).
+      // back to #/transactions would leave the detail on screen, because the id
+      // would live only in state.
       setTransaction(transactionFromHash(window.location.hash));
       setAgencyTab(agencyTabFromHash(window.location.hash) ?? 'overview');
     };
@@ -343,7 +343,7 @@ function Workspace({ session, onLogout }: { session: Session; onLogout: () => vo
   const [safetyOpen, setSafetyOpen] = useState(false);
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [bellOpen, setBellOpen] = useState(false);
-  // PRE-M24 (PM-7): Escape closes the notification panel and the phone drawer,
+  // Escape closes the notification panel and the phone drawer,
   // and focus returns to the button that opened it (keyboard users were left
   // with an open panel and no way to dismiss it without a pointer).
   useEffect(() => {
@@ -366,12 +366,12 @@ function Workspace({ session, onLogout }: { session: Session; onLogout: () => vo
     return () => window.removeEventListener('sb-lang', onLang);
   }, []);
   useEffect(() => api.onChange(session, (event, payload) => {
-    if (event === 'session_expired') { onLogout(); return; } // PRE-M24 (PM-3)
+    if (event === 'session_expired') { onLogout(); return; }
     if (event === 'sse_status') { setLive((payload as { connected?: boolean } | undefined)?.connected !== false); return; }
     if (event === 'typing') return;
     setTick((x) => x + 1);
   }), [session]); // eslint-disable-line react-hooks/exhaustive-deps
-  // M23 P8.1 (§20, §29) — an agent's authority is re-derived on every read;
+  // An agent's authority is re-derived on every read;
   // when the window regains focus or becomes visible every screen re-reads,
   // so a representation that ended or a licence that lapsed while the tab
   // sat in the background is not shown a moment longer than it must be.
@@ -444,7 +444,7 @@ function Workspace({ session, onLogout }: { session: Session; onLogout: () => vo
                   <option value="fr">Français (trad. automatique)</option>
                 </select>
               </label>
-              {/* M24E — the way out of the session: back to the agency / profile screen. */}
+              {/* The way out of the session: back to the agency / profile screen. */}
               <button data-exit="switch-org" data-testid="switch-org" onClick={onLogout} aria-label={t('common.switchOrg')}><Icon name="arrow-right" size={14} />{t('common.switchOrg')}</button>
               <button data-exit="sign-out" data-testid="sign-out" onClick={onLogout} aria-label={t('common.signOut')}><Icon name="log-out" size={14} />{t('common.signOut')}</button>
             </div></details>
@@ -481,7 +481,7 @@ function Workspace({ session, onLogout }: { session: Session; onLogout: () => vo
         )}
         {activeSection && <SecondaryNav section={activeSection} activeItemId={loc.itemId} onNavigate={setScreen} />}
         <div className="content" data-screen={screen}>
-          {/* M24A — the reference page heading; the top bar keeps the document <h1>. */}
+          {/* The reference page heading; the top bar keeps the document <h1>. */}
           <AgentHeading screen={screen}/>
           {meError && <div className="notice block" role="alert" data-testid="me-error">{meError}</div>}
           {screen === 'home' && homeCounts && (

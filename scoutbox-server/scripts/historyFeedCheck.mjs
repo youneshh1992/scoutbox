@@ -1,4 +1,4 @@
-// A test helper (§4.3 step 4): check a repository's history feed (`feed(orgId, actions, atMost, n)` →
+// A test helper: check a repository's history feed (`feed(orgId, actions, atMost, n)` →
 // `[{ …owner ids, entry }]`) against the records' own histories. For every organisation, action set, cut-off and size,
 // the feed is the matching entries at or before the cut-off, newest first, down to the instant of the (n + ties)th one
 // and including every entry at that instant; its count is every matching entry.

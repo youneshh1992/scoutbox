@@ -1,9 +1,6 @@
 /**
- * Delivery dispatch records and their attempts (S7b) get their own tables; the notification reference is indexed,
- * without a foreign key. Amended in place in S14d: vocabulary and length CHECKs, the staff audience's organisation
- * (a deferred RESTRICT key), integer callback clocks, a unique provider message id.
- * REGISTERED in DATA_MIGRATIONS. `up()` is the DDL only: the tables start empty and are written
- * through the repository.
+ * Delivery dispatch records and their attempts. The notification reference is indexed without a foreign key; the
+ * staff audience's organisation is a deferred RESTRICT key.
  */
 import { migrationApplied } from '../database.mjs';
 import { NOTIFICATIONS_MIGRATION } from '../notifications.mjs';

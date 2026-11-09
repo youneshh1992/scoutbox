@@ -1,5 +1,5 @@
 /**
- * M21 — objective targets.
+ * Objective targets.
  *
  * Some development goals define their own measurement. "Improve Box Touch 60
  * from 140 to 160+" is a goal whose objective is stated in the goal itself, so
@@ -8,16 +8,16 @@
  *
  * Three rules shape this file, and the third is the important one:
  *
- *   1. A target is a COMPARISON, not a formula (§30). One metric, one
+ *   1. A target is a COMPARISON, not a formula. One metric, one
  *      operator, one number. There is no expression language here and there
  *      will not be one: an evaluable formula is a score with extra steps.
  *
- *   2. Only production-valid evidence can satisfy a production target (§29).
- *      The predicate is M16.1's own `isProductionValidCombine` — a demo or
+ *   2. Only production-valid evidence can satisfy a production target.
+ *      The predicate is the Combine's own `isProductionValidCombine` — a demo or
  *      test-provider result is labelled simulated everywhere it appears and
  *      must never quietly cross a real threshold.
  *
- *   3. Meeting a target NEVER marks the goal achieved (§97/§98). Nothing in
+ *   3. Meeting a target NEVER marks the goal achieved. Nothing in
  *      this file writes anything. It answers one question — is the stated
  *      measurement currently met — and a human decides what that means for
  *      the wider football objective, which a single number does not contain.
@@ -27,7 +27,7 @@
  * sessions record observed training, not a verified metric; assessments record
  * an evaluator's opinion on a scale that is not comparable across templates.
  * Pretending either could satisfy a numeric threshold would be exactly the
- * fake quantification §31 forbids.
+ * fake quantification the hub forbids.
  */
 import {
   COMBINE_PROTOCOLS, combineProtocol, latestCombineProtocol, isProductionValidCombine,
@@ -55,7 +55,7 @@ export const NO_MEASUREMENT_REASONS = Object.freeze([
 const MAX_TARGET_VALUE = 100_000;
 
 /**
- * Validate a target a client asked to attach to a goal (§96).
+ * Validate a target a client asked to attach to a goal.
  *
  * Nothing is repaired. An unknown protocol, an operator pointing the wrong way
  * down the metric, a fractional value on an integer metric — each is a 400
@@ -197,12 +197,11 @@ export function bestValidAttempt({ attempts, sessions, target }) {
 /**
  * Evaluate a target against a player's Combine attempts, right now.
  *
- * Three states, three different sentences — the M20 discipline applied here:
- * "not met" and "not measured" are different facts and must never render the
- * same way. A target whose only supporting result was invalidated returns to
- * `no_current_valid_measurement`, and the reason says which of the four
- * situations it is, so history stays honest rather than preserving a success
- * the evidence has withdrawn (§99).
+ * Three states, three different sentences: "not met" and "not measured" are
+ * different facts and must never render the same way. A target whose only
+ * supporting result was invalidated returns to `no_current_valid_measurement`,
+ * and the reason says which of the four situations it is, so history stays
+ * honest rather than preserving a success the evidence has withdrawn.
  */
 export function evaluateTarget({ target, attempts, sessions }) {
   if (!target) return null;
@@ -259,8 +258,8 @@ export function evaluateTarget({ target, attempts, sessions }) {
       protocolVersion: best.protocolVersion,
       combineVerified: true,
     },
-    // §97/§98, on the payload rather than only in a document, because this is
-    // the exact moment somebody would otherwise tick the goal automatically.
+    // Meeting a target never marks the goal achieved: said on the payload rather than only in a document, because
+    // this is the exact moment somebody would otherwise tick the goal automatically.
     note: met
       ? 'The stated measurement has been reached. Whether the wider development goal is achieved is a decision for the plan owner or reviewer — one measurement is not the whole objective.'
       : 'The stated measurement has not been reached yet.',

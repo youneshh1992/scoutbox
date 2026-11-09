@@ -1,13 +1,12 @@
 /**
- * M23 P5.6C — the versioned jurisdiction policy content.
+ * The versioned jurisdiction policy content.
  *
- * These are DATA, reviewed against the primary sources the P5.6A regulatory
- * snapshot read on 18 September 2026 (M23_P56A_AGENT_REGULATORY_SNAPSHOT.md).
- * Migration 2306 seeds them into `db.jurisdictionPolicies`, from where every
- * evaluation reads them; a later version is published through the attributed,
- * dual-controlled Trust & Safety route (C7) — never by editing this file on a
- * live system. Nothing here is legal advice; every entry names its source,
- * version, effective date and retrieval date.
+ * These are DATA, reviewed against the primary sources read on 18 September
+ * 2026 (docs/reference/agent-regulatory-snapshot-2026-09.md). They seed the
+ * policy-version table every evaluation reads; a later version is published
+ * through the attributed, dual-controlled Trust & Safety route — never by
+ * editing this file on a live system. Nothing here is legal advice; every
+ * entry names its source, version, effective date and retrieval date.
  *
  * Two facts are stored separately on every rule, on purpose:
  *   - the TEXT exists in the current edition (`sourceRef`, `textStatus`), and
@@ -38,7 +37,7 @@ export const TIMING_FORMULAS = Object.freeze(['academic_year_16', 'six_months_be
 export const OVERRIDE_SCOPES = Object.freeze(['national']);
 
 /**
- * S11b: the rule parameters a policy version may carry, by name, with their type. The engine reads parameters by name
+ * The rule parameters a policy version may carry, by name, with their type. The engine reads parameters by name
  * (policy.mjs, conflict.mjs, the consent route), so a name it does not know is a typo that would silently change
  * nothing: publishing one is refused, like a value of the wrong type. A new parameter needs a build that reads it, and
  * is added here with it. Types:
@@ -185,7 +184,7 @@ export const JP_ENG_2026_27_1 = Object.freeze({
   },
 });
 
-/** U.S. Soccer — thin: licence, background check and SafeSport known; everything else UNKNOWN (P5.6A DR-44, L-8). */
+/** U.S. Soccer — thin: licence, background check and SafeSport known; everything else UNKNOWN (DR-44, L-8). */
 export const JP_USA_2024_1 = Object.freeze({
   id: 'jp-usa-2024-1', regulator: 'USSF', jurisdiction: 'USA', policyVersion: 1, supersedes: null,
   effectiveFrom: '2024-01-01', effectiveTo: null,

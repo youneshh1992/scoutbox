@@ -1,4 +1,4 @@
-// M18 LIVE browser journeys — Second Look + Nobody Missed against the real
+// LIVE browser journeys — Second Look + Nobody Missed against the real
 // backend, separate browser contexts per actor so tenants are genuinely
 // isolated.
 //
@@ -11,8 +11,8 @@
 // M6  a player with an active Room is not a Nobody Missed candidate
 // M7  a previously evaluated player returns through Second Look, never
 //     through Nobody Missed
-// M8  a second organisation reaches none of the first one's M18 state
-// M9  a block removes the player from every M18 projection on the next read
+// M8  a second organisation reaches none of the first one's Second Look / Nobody Missed state
+// M9  a block removes the player from every Second Look / Nobody Missed projection on the next read
 // M10 the grassroots ceilings and the visibility gates survive intact
 //
 // The exhaustive engine invariants, all 60 abuse cases and S1–S8 / N1–N8 live
@@ -157,7 +157,7 @@ say('M1: the scout opens a Recruitment Room from Discover');
 await scout.selectOption('[aria-label="Move to"]', 'under_review');
 await scout.click('button:has-text("Apply")');
 await scout.waitForTimeout(700);
-// M18.2: archiving asks for confirmation with its consequence stated; accept it.
+// Archiving asks for confirmation with its consequence stated; accept it.
 scout.on('dialog', (d) => d.accept());
 await scout.selectOption('[aria-label="Move to"]', 'archived');
 await scout.waitForTimeout(400);
@@ -386,7 +386,7 @@ const queue = (await j('GET', `/org/nobody-missed?briefId=${BRIEF_ID}`, undefine
 const CAND = queue.items?.[0];
 if (!CAND) fail('M5: the fixture produced no Nobody Missed candidate');
 {
-  await scout.locator(`[aria-label="Candidate: ${CAND.name}"] [data-testid="nm-row-toggle"]`).click(); // M24F.4 — the reasons and the actions open behind the row
+  await scout.locator(`[aria-label="Candidate: ${CAND.name}"] [data-testid="nm-row-toggle"]`).click(); // the reasons and the actions open behind the row
   await scout.waitForTimeout(300);
   const card = await scout.locator(`[aria-label="Candidate: ${CAND.name}"]`).innerText();
   if (!/Why shown/.test(card)) fail('M5: the candidate cannot say why it is here');

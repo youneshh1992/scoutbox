@@ -1,4 +1,4 @@
-// M15 typed client (org side): the recruitment Football Passport — the
+// Typed client (org side): the recruitment Football Passport — the
 // server-built, viewer-filtered projection for this organisation, batch
 // summaries for list surfaces, achievement confirmation and share-link
 // resolution. The server re-runs every standing gate on each call; the

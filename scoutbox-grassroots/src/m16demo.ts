@@ -1,4 +1,4 @@
-// M16 demo mirror (org side). Coaches see Box Training assignment results —
+// Demo mirror (org side). Coaches see Box Training assignment results —
 // never raw footage. Same honesty rules as live.
 import type { M16Api, BoxAssignments, BoxAssignmentRow, BoxDrill, BoxChallengeRow } from './m16api';
 

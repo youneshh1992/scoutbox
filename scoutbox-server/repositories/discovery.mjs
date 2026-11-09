@@ -1,16 +1,15 @@
 /**
- * S12c — discovery as typed tables (migration `0032_discovery`; docs/architecture/migration.md §4.5 S12;
- * sql/07_development_boxcam_discovery.sql).
+ * Discovery: Recruitment Briefs, Nobody Missed reviews, Second Look items and Dynamic Watchlists.
  *
  * Records:
- *   - A Recruitment Brief (M18): a club's explicit criteria as columns, its positions, evidence requirements and Combine
+ *   - A Recruitment Brief: a club's explicit criteria as columns, its positions, evidence requirements and Combine
  *     protocols as ordered rows (the position groups are worked out from the positions, never stored). `version` is the
  *     CRITERIA version Nobody Missed points at; `rev` the concurrency token. The audit trail `audit()` writes is rows,
  *     its detail typed columns (`version`, `from`, `to`, `criteriaChanged`).
  *   - A Nobody Missed review: what one organisation did with one player for one brief (unique), its trail as rows.
  *   - A Second Look item: one per (organisation, room, decision cycle), unique; its change fingerprints, the archive
  *     reasons the changes resolve and its trail are ordered rows.
- *   - A Dynamic Watchlist (M19): saved criteria, each criterion as typed columns by kind with its values as rows; a
+ *   - A Dynamic Watchlist: saved criteria, each criterion as typed columns by kind with its values as rows; a
  *     brief-sourced list names its brief by key (`brief_id`), any other carries a free reference (`source_ref`). The last
  *     derived membership is rows (`watchlist_members`, with the required criteria each member met), read and replaced
  *     only by `reconcile`. The lifecycle trail is rows; the membership transitions (`watchlistHistory`) are
@@ -21,10 +20,9 @@
  * and an update from inside its own update); `watchlists.reconcile(id, …)` replaces the membership and appends the new
  * transitions. Every write joins the open unit of work, the caller's open transaction, or a transaction of its own.
  *
- * READS are SQL: no mirror. Fresh, deep-frozen records; a list's child rows decode in one batch. Modules receive them
- * as `discoveryReads`.
+ * Deep-frozen records; a list's child rows decode in one batch. Modules receive them as `discoveryReads`.
  *
- * References. Player ids carry no key (tolerant: records outlive an account deletion, as before). Organisations, the
+ * References. Player ids carry no key (tolerant: records outlive an account deletion). Organisations, the
  * staff named, a review's or a watchlist's brief, and the room and decision a record names are immediate RESTRICT keys.
  * Child rows cascade with their owner, which is never deleted.
  */
@@ -681,7 +679,7 @@ function decodeMembers(sqlite, watchlistIds) {
 }
 const decodeEvent = (row) => decode(EVENT_SPEC, row);
 
-// ------------------------------------------------------------------ snapshot (fixtures and the persistence batteries)
+// ------------------------------------------------------------------ whole-domain read (the test suites)
 export const discoveryLive = (sqlite) => migrationApplied(sqlite, DISCOVERY_MIGRATION);
 function readAll(sqlite) {
   const all = (t) => sqlite.prepare(`SELECT * FROM ${t} ORDER BY rowid`).all();
@@ -691,12 +689,12 @@ function readAll(sqlite) {
     recruitmentBriefs: decodeBriefs(sqlite, all('recruitment_briefs')),
     nobodyMissedReviews: decodeReviews(sqlite, all('nobody_missed_reviews')),
     secondLookItems: decodeItems(sqlite, all('second_look_items')),
-    // A watchlist's last derived membership travels with it in the snapshot (`members`, empty until it was reconciled).
+    // A watchlist's last derived membership travels with it (`members`, empty until it was reconciled).
     dynamicWatchlists: decodeWatchlists(sqlite, wl).map((w) => ({ ...w, members: membersOf(w.id) })),
     watchlistHistory: all('watchlist_membership_events').map(decodeEvent),
   };
 }
-/** The whole domain read back as plain records (`readAllRecords` in index.mjs: the test suites' read-back); null before its migration. */
+/** The whole domain read back as plain records (`readAllRecords` in index.mjs: the test suites' read-back). */
 export const DISCOVERY_RECORDS = {
   names: DISCOVERY_COLLECTIONS,
   read(sqlite) { return discoveryLive(sqlite) ? readAll(sqlite) : null; },
@@ -885,7 +883,7 @@ export function createDiscoveryRepository({ sqlite, unit = null, now = Date.now,
       const next = typedOr(typeWatchlist, { ...clone(stored), lastCriteriaVersion: criteriaVersion, lastBriefVersion: briefVersion, lastReconciledAt: at }, 'dynamic_watchlists');
       const m = typeMembers(members, `dynamic_watchlists ${id}`); if (!m.ok) throw refusal('DISCOVERY_INPUT_INVALID', m.reason);
       const fresh = [];
-      const seen = new Set(); // S14j: membership is no longer capped, so the batch's own duplicates are found by key
+      const seen = new Set(); // membership is uncapped, so the batch's own duplicates are found by key
       for (const [i, raw] of events.entries()) {
         const e = typedOr(typeMembershipEvent, raw, `dynamic_watchlists ${id} events[${i}]`);
         if (e.watchlistId !== id || e.orgId !== stored.orgId) throw refusal('DISCOVERY_INPUT_INVALID', `dynamic_watchlists ${id}: event ${e.id} names another watchlist or organisation`);

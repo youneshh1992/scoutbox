@@ -1,4 +1,4 @@
-// ScoutBox Agent — the Agent domain client (M23 P5.6B).
+// ScoutBox Agent — the Agent domain client.
 //
 // Every method maps to one server route under /org/agent/*. The types below
 // are the server's projections, copied faithfully: what the server withholds
@@ -143,9 +143,9 @@ export interface ClientDetail {
   mode: 'own' | 'summary';
 }
 
-// ============================================ M23 P5.6E cross-app integration
+// ============================================ cross-app integration
 
-/** A club contact that was routed to this agent as well as to the client (§24). */
+/** A club contact that was routed to this agent as well as to the client. */
 export interface RoutedContact {
   id: string;
   club: { id: string; name: string | null };
@@ -160,8 +160,8 @@ export interface RoutedContact {
   responseKind: string | null;
 }
 
-/** A client's trial as an authorised agent may see it (§26–§29). */
-// M23 P6 — a client's Offer, read-only, only when the client shared it. Terms
+/** A client's trial as an authorised agent may see it. */
+// A client's Offer, read-only, only when the client shared it. Terms
 // and state; never the club's note, never documents, never an accept control.
 export interface ClientOfferRevision {
   id: string; revisionNumber: number; status: string; storedStatus: string; statusLabel: string | null;
@@ -175,7 +175,7 @@ export interface ClientOffer {
   responses: { id: string; revisionId: string; responseType: 'accepted' | 'declined'; actorType: 'player' | 'guardian'; occurredAt: number }[];
   sharedAt: number | null; honest: string;
 }
-// M23 P7 — a client's signing over an Offer the client shared: state and
+// A client's signing over an Offer the client shared: state and
 // progress only. No document bytes, no note, no signatory identity beyond
 // the kind, and no control: the agent never signs, acknowledges or completes.
 export interface ClientSigning {
@@ -201,7 +201,7 @@ export interface ClientTrial {
   reportObligation: 'outstanding' | 'filed' | null;
 }
 
-/** An opportunity this agent put in front of this client (§18). */
+/** An opportunity this agent put in front of this client. */
 export interface OpportunityShare {
   id: string;
   opportunityId: string;
@@ -217,7 +217,7 @@ export interface OpportunityShare {
   honest: string;
 }
 
-/** A club's invitation to open a transaction workspace (§32/§39). */
+/** A club's invitation to open a transaction workspace. */
 export interface TransactionHandoff {
   handoffId: string;
   recruitmentCaseId: string;
@@ -278,7 +278,7 @@ export interface PlayerHit { id: string; name: string; position: string | null; 
 export interface RequestInput { playerId: string; scope: Scope[]; termMonths: number; jurisdiction: Jurisdiction; exclusive: boolean; clientKey: string }
 
 
-// ------------------------------------------------------------ M23 P5.6C — compliance
+// ------------------------------------------------------------ compliance
 // The server's projections, copied faithfully. A reason carries a code, a
 // rule id, that rule's OPERATIVE status and the policy version it came from —
 // never prose, never a reviewer's note, never another agent's id.
@@ -359,7 +359,7 @@ export interface ClubHit { id: string; name: string; type: string; verified?: bo
 export interface ContextCreateInput { type: ContextType; jurisdictions: string[]; parties: { partyRole: PartyRole; subjectKind: 'player' | 'club'; subjectId: string }[]; clientKey: string }
 export interface ContextMutation { context: ComplianceContext; evaluation?: Clearance; representation?: { id: string; partyRole: PartyRole; status: string }; idempotent?: boolean }
 
-// ------------------------------------------------------------ M23 P5.6D — transactions
+// ------------------------------------------------------------ transactions
 // The multi-party transaction workspace, projected for ONE viewer by the
 // server. What a party may not see has no field here to arrive in: the agent's
 // agreement reference and the policy versions appear only in the agent's own
@@ -448,7 +448,7 @@ export interface TransactionCreateInput {
   clientKey: string;
 }
 
-// M23 P8 — the agent's factual journey view. Stage words are the recipient's vocabulary; no club process word ever appears.
+// The agent's factual journey view. Stage words are the recipient's vocabulary; no club process word ever appears.
 export type ClientJourneyStage = 'contacted' | 'trial_invited' | 'trial_scheduled' | 'trial_completed' | 'offer_received' | 'offer_accepted' | 'offer_declined' | 'signing' | 'signed' | 'none';
 export interface ClientJourneyItem { club: { id: string; name: string | null; level: string | null; verified: boolean }; journey: { policyVersion: number; stage: ClientJourneyStage; resources: Record<string, string | null>; timeline: { kind: string; at: number; [k: string]: unknown }[]; grants: string[] } }
 export interface ClientJourneyResult { relationshipId: string; clientId: string; grants: string[]; items: ClientJourneyItem[]; generatedAt: number }
@@ -473,13 +473,13 @@ export interface AgentApi {
   client(s: Session, id: string): Promise<ClientDetail>;
   terminate(s: Session, id: string, input: { reasonCode?: string; clientKey: string; expectedRev: number }): Promise<{ relationship: Relationship; idempotent?: boolean }>;
   clientOpportunities(s: Session, id: string): Promise<{ items: Opportunity[]; clientId: string; note: string }>;
-  // ---- M23 P5.6E cross-app integration
+  // ---- cross-app integration
   clientContacts(s: Session, id: string): Promise<{ items: RoutedContact[]; clientId: string; note: string }>;
   clientTrials(s: Session, id: string): Promise<{ items: ClientTrial[]; clientId: string; clientName: string | null; note: string; honest: string }>;
-  // M23 P6 — read-only projection of the Offers this client chose to share.
+  // Read-only projection of the Offers this client chose to share.
   clientOffers(s: Session, id: string): Promise<{ items: ClientOffer[]; clientId: string; clientName: string | null; note: string; honest: string }>;
   clientSignings(s: Session, id: string): Promise<{ items: ClientSigning[]; clientId: string; clientName: string | null; honest: string }>;
-  // M23 P8 — the client's journeys, one per club that shared something with this agent (server-derived stage; factual only).
+  // The client's journeys, one per club that shared something with this agent (server-derived stage; factual only).
   clientJourney(s: Session, id: string): Promise<ClientJourneyResult>;
   clientShares(s: Session, id: string): Promise<{ items: OpportunityShare[] }>;
   shareOpportunity(s: Session, id: string, oppId: string, input: { note?: string; clientKey: string }): Promise<{ share: OpportunityShare; idempotent?: boolean; note?: string }>;
@@ -487,7 +487,7 @@ export interface AgentApi {
   handoffs(s: Session): Promise<{ items: TransactionHandoff[]; note: string }>;
   opportunities(s: Session): Promise<{ items: Opportunity[]; note: string }>;
   inbox(s: Session): Promise<{ notifications: import('./api').Notification[]; pending: Relationship[]; note: string }>;
-  // ---- M23 P5.6C compliance
+  // ---- compliance
   complianceOverview(s: Session): Promise<ComplianceOverview>;
   compliancePolicies(s: Session): Promise<{ inEffect: PolicyVersionPublic[]; missing: string[]; ruleStatuses: string[]; honest: string }>;
   recheckFacet(s: Session, facet: Facet, memberAssociation?: string): Promise<{ facet: FacetView; provider: ProviderStatus }>;
@@ -502,7 +502,7 @@ export interface AgentApi {
   requestConsent(s: Session, id: string, input: { partyRole: PartyRole; fullParticularsProvided: boolean; legalAdviceOffered: boolean; proposedFeeDisclosed: boolean; clientKey: string }): Promise<{ consent: AgentConsent; idempotent?: boolean }>;
   /** Public club directory (names only) — the pool an engaging or releasing entity is picked from. */
   clubs(s: Session): Promise<ClubHit[]>;
-  // ---- M23 P5.6D transactions
+  // ---- transactions
   transactions(s: Session, status?: string): Promise<TransactionList>;
   createTransaction(s: Session, input: TransactionCreateInput): Promise<TransactionMutation>;
   transaction(s: Session, id: string): Promise<{ transaction: Transaction }>;
@@ -546,7 +546,7 @@ export const httpAgent: AgentApi = {
   client: (s, id) => get(s, `/org/agent/clients/${encodeURIComponent(id)}`),
   terminate: (s, id, input) => post(s, `/org/agent/clients/${encodeURIComponent(id)}/terminate`, input),
   clientOpportunities: (s, id) => get(s, `/org/agent/clients/${encodeURIComponent(id)}/opportunities`),
-  // ---- M23 P5.6E
+  // ---- cross-app integration
   clientContacts: (s, id) => get(s, `/org/agent/clients/${encodeURIComponent(id)}/contacts`),
   clientTrials: (s, id) => get(s, `/org/agent/clients/${encodeURIComponent(id)}/trials`),
   clientOffers: (s, id) => get(s, `/org/agent/clients/${encodeURIComponent(id)}/offers`),

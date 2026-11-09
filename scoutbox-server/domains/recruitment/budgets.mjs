@@ -1,4 +1,4 @@
-// F9 — Recruitment budget and deal scenarios (moved from m13/planning.mjs).
+// Recruitment budget and deal scenarios.
 // Money is integer minor units end to end; market values are never invented.
 import { convertMinor, BUDGET_LINE_KINDS as LINE_KINDS, BUDGET_SCHEDULES as SCHEDULES } from '../../m13/shared.mjs';
 import { readDateOnly } from '../../temporal.mjs';
@@ -53,7 +53,7 @@ export function registerBudgets(ctx) {
   const {
     orgRouter, nextId, histAppend, isLead, requireLead, canViewFinance,
     validAmountMinor, CURRENCIES,
-    recruitmentCases, // S8b: a budget change is one explicit write of its case (cases.update)
+    recruitmentCases, // a budget change is one explicit write of its case
   } = ctx;
   const { cases } = recruitmentCases;
 

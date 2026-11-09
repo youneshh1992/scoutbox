@@ -1,13 +1,13 @@
-// M16.2 — Trust Score: canonical source gathering + viewer-safe routes.
+// Trust Score: canonical source gathering + viewer-safe routes.
 //
 // This module NEVER stores a score. Every read recomputes from canonical
 // sources, so a revoked claim, an invalidated Combine result or an expired
 // piece of evidence is reflected immediately and deterministically.
 //
 // Canonical sources are read through the systems that already own them —
-// M14 effective claims, the M15 Passport assembly (which already folds
-// duplicate self-entries into authoritative rows), M16 Box Cam sessions and
-// M16.1 Combine attempts — so the same underlying fact is counted once and
+// effective verification claims, the Passport assembly (which already folds
+// duplicate self-entries into authoritative rows), Box Cam sessions and
+// Combine attempts — so the same underlying fact is counted once and
 // the UI projection is never what gets scored.
 //
 // The Trust Score grants no permission whatsoever: every route below runs the
@@ -35,8 +35,8 @@ export function registerTrust(ctx) {
   const allowSimulatedEvidence = () => !!ctx.testProviderEnabled;
 
   // ------------------------------------------------- canonical source maps
-  /** Strongest EFFECTIVE identity assurance for a player (§9). Prefers the
-   *  structured M14.1 claim assurance; falls back to the legacy compatibility
+  /** Strongest EFFECTIVE identity assurance for a player. Prefers the
+   *  structured claim assurance; falls back to the legacy compatibility
    *  boolean only when no structured claim exists — and then states honestly
    *  that it was a ScoutBox review. */
   function identitySource(player) {
@@ -69,7 +69,7 @@ export function registerTrust(ctx) {
    *  verified and distinct. */
   function relationshipSource(player) {
     const out = [];
-    // S9c: the player's squad rows in one indexed query (a club's shadow list is not a relationship).
+    // A club's shadow list is not a relationship.
     const clubs = new Set();
     for (const row of ctx.scoutingReads.squad.forPlayer(player.id)) {
       const o = ctx.byId.org(row.orgId);
@@ -84,8 +84,8 @@ export function registerTrust(ctx) {
     }
     const now = Date.now();
     // The agent relationships (repositories/agentCore.mjs): only a relationship IN FORCE — naming a licensed
-    // individual, confirmed by the client, active, its term covering now — is a verified relationship (D-P56A-1;
-    // agreementInForce is the access predicate's own rule, so a mandate that has not started counts for nothing). The
+    // individual, confirmed by the client, active, its term covering now — is a verified relationship
+    // (agreementInForce is the access predicate's own rule, so a mandate that has not started counts for nothing). The
     // key is the AGENCY, so one client represented by two agencies is two relationships and moving between agents
     // inside one agency is not.
     for (const a of ctx.agentReads.agreements.forClient(player.id)) {
@@ -95,7 +95,7 @@ export function registerTrust(ctx) {
     return out;
   }
 
-  /** M12 evidence records mapped to their canonical provenance. */
+  /** Evidence records mapped to their canonical provenance. */
   function evidenceSource(player) {
     return ctx.scoutingReads.evidence.currentForPlayer(player.id)
       .filter((e) => !(e.expiresAt && e.expiresAt < Date.now()))
@@ -108,7 +108,7 @@ export function registerTrust(ctx) {
       }));
   }
 
-  /** Box Cam observed sessions (finalized, still standing). S12b: read through SQL. */
+  /** Box Cam observed sessions (finalized, still standing). */
   function boxCamSource(player) {
     return ctx.boxCamReads.sessions.forPlayer(player.id)
       .filter((s) => s.finalizedAt)
@@ -160,7 +160,7 @@ export function registerTrust(ctx) {
   /** Build the full Trust Profile for a player. `full` is an already-built
    *  light Passport assembly when the caller has one (batch reuse). */
   function buildFor(player, { full = null } = {}) {
-    // S14j: only the club history of the Passport is a trust source, so without an assembly at hand the history is
+    // Only the club history of the Passport is a trust source, so without an assembly at hand the history is
     // read alone (passportHistoryFor: the Passport's own definition), not the whole light Passport.
     const assembled = full ?? (ctx.passportHistoryFor ? { history: ctx.passportHistoryFor(player) } : null) ?? ctx.assemblePassport?.(player, { light: true }) ?? null;
     return calculateTrustScore({
@@ -227,7 +227,7 @@ export function registerTrust(ctx) {
     res.json({ playerId: p.id, trust: safeTrustProjection(buildFor(p), viewer) });
   });
 
-  /** Batch summaries for player lists (§53). Light assembly per player, no
+  /** Batch summaries for player lists. Light assembly per player, no
    *  full timeline build, and never a ranking — the caller sorts. */
   orgRouter.get('/trust-summaries', (req, res) => {
     const ids = String(req.query.playerIds ?? '').split(',').map((s) => s.trim()).filter(Boolean).slice(0, 100);

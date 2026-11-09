@@ -1,10 +1,10 @@
-// M23 P2.5 — page chrome for the player app.
+// Page chrome for the player app.
 //
 // PageHeader: the reference's 64px phone header. Home carries the wordmark;
 // every other page carries a back chevron (when it is not a tab root) and
 // its title. On the right, in the reference's order: the page's own primary
 // action, the notification bell, and the Report
-// control that every screen keeps (§33).
+// control that every screen keeps.
 //
 // PageTabs: the "functions of one destination" control — the reference's
 // underline tabs. Rendered as a real tablist so a screen reader, a keyboard
@@ -102,7 +102,7 @@ const makeStyles = (colors: Palette) => StyleSheet.create({
     flexDirection: 'row', gap: 2, justifyContent: 'space-between',
     backgroundColor: colors.panel2, borderRadius: 18, padding: 4, marginBottom: 16, zIndex: 1,
   },
-  // M24B — a page tab is a 44px touch target (paddingVertical 13 + the 16px line keeps the underline tight to the text).
+  // A page tab is a 44px touch target (paddingVertical 13 + the 16px line keeps the underline tight to the text).
   tab: { minHeight: 44, paddingVertical: 13, paddingHorizontal: 4, overflow: 'hidden', borderRadius: 14, flexGrow: 1, alignItems: 'center', justifyContent: 'center', marginBottom: -1 },
   tabOn: { backgroundColor: colors.tabActiveBg },
   tabText: { color: colors.tabInactive, fontSize: 12, fontWeight: '500' },

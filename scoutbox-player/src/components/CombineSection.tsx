@@ -1,5 +1,5 @@
 import { GuidanceNote } from './InformationRows';
-// M16.1 — At-Home Combine, the player/guardian surface.
+// At-Home Combine, the player/guardian surface.
 //   Record it. Prove it. — Real numbers. Real evidence. From anywhere.
 //
 // A Combine Attempt binds a live Box Cam session: this screen drives the
@@ -53,12 +53,11 @@ function VerifiedBadge() {
   return <Pill label={pt('cmbVerified')} tone="green" />;
 }
 
-// Every Combine state that is not "verified" says which one it is. Until M18.1
-// only `partially_measured` had words of its own, so an attempt invalidated
-// after review, one the device could not measure, one that broke the protocol
-// and one the player cancelled all rendered identically — a bare value with no
-// badge. Those mean completely different things to a player, and the one that
-// reads worst (invalidated) was the one that looked most like a normal result.
+// Every Combine state that is not "verified" says which one it is: an attempt
+// invalidated after review, one the device could not measure, one that broke
+// the protocol and one the player cancelled mean completely different things
+// to a player, and without a badge the one that reads worst (invalidated)
+// would look most like a normal result.
 const STATE_TONE: Record<string, 'default' | 'gold' | 'red'> = {
   partially_measured: 'gold',
   measurement_unavailable: 'default',
@@ -333,7 +332,7 @@ export function CombineSection({ actor, childName }: { actor: CombineActor; chil
   const [overview, reloadOverview] = useLoad<CombineOverview>(() => combine.overview(actor), [key]);
   const [protoData] = useLoad(() => isPlayer ? combine.protocols(actor.id) : Promise.resolve(null), [actor.id]);
   const [card, setCard] = useState<CombineCard | null>(null);
-  // M16.2 — the Trust Score shown on the Combine Card comes from its own
+  // The Trust Score shown on the Combine Card comes from its own
   // endpoint and is rendered in a visually separate block, so a Trust Score of
   // 92 can never be misread as a Combine measurement.
   const [trustProfile, setTrustProfile] = useState<TrustSelf | null>(null);
@@ -354,7 +353,7 @@ export function CombineSection({ actor, childName }: { actor: CombineActor; chil
     setPage({ kind: 'card' });
   }
 
-  // M24F.4 — the root names the exercises, and nothing else. A guardian has
+  // The root names the exercises, and nothing else. A guardian has
   // no protocol library (attempts start on the player's device), so their
   // rows are the exercises the child has attempted.
   const allAttempts = overview ? [...overview.attempts].sort((a, b) => (b.completedAt ?? b.createdAt) - (a.completedAt ?? a.createdAt)) : [];
@@ -398,7 +397,7 @@ export function CombineSection({ actor, childName }: { actor: CombineActor; chil
               <Disclosure label="About this result"><GuidanceNote size={12}>{card.note}</GuidanceNote></Disclosure>
             </View>
           ) : <Muted size={12.5}>{pt('cmbLoading')}</Muted>}
-          {/* M16.2 — Trust Score, in its OWN block outside the Combine Card.
+          {/* Trust Score, in its OWN block outside the Combine Card.
               It is deliberately separated by its own heading and spacing so
               the number is never read as a Combine result, and it never
               implies that a higher measured value earns more trust. */}

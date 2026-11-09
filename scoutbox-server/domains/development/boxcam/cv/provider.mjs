@@ -1,6 +1,6 @@
-// M22 — the production_cv provider (§3–§7, §26–§28, §34).
+// The production_cv provider.
 //
-// ORCHESTRATION ONLY (§4).
+// ORCHESTRATION ONLY.
 //
 // This file contains no detection, no tracking, no touch logic, no juggle
 // logic, no quality thresholds and no refusal precedence. Every one of those
@@ -8,7 +8,7 @@
 // The rule is worth stating as a rule because it is the kind of boundary that
 // erodes one convenience at a time: the first `if (count > 0)` written here
 // would be a second, unversioned, unfrozen copy of the protocol layer, and the
-// freeze in m22/freeze.mjs would not cover it.
+// freeze in freeze.mjs would not cover it.
 //
 // What this file DOES own:
 //
@@ -36,11 +36,11 @@ import {
   combineEligibilityMatrix, combineVerifiedProtocols,
 } from './eligibility.mjs';
 
-/** The provider's own version, separate from the engine's (§34). */
+/** The provider's own version, separate from the engine's. */
 export const PROVIDER_VERSION = 1;
 
 // =========================================================================
-// §6 — the runtime state machine
+// The runtime state machine
 // =========================================================================
 //
 // Explicit, with an explicit transition table, because "fail closed" is only
@@ -85,10 +85,10 @@ export const PROVIDER_ERRORS = Object.freeze({
   CLIENT_FIELD_REFUSED: 'client_field_refused',
 });
 
-// §17 — a small bounded reorder window, or nothing. Never an unlimited buffer.
+// A small bounded reorder window, or nothing. Never an unlimited buffer.
 export const REORDER_WINDOW = 0;
 
-// §96/§97 — a deliberate concurrent-session ceiling, so load shedding is a
+// A deliberate concurrent-session ceiling, so load shedding is a
 // decision rather than a memory profile.
 export const MAX_CONCURRENT_SESSIONS = 16;
 
@@ -111,7 +111,7 @@ class ProviderSession {
     this.run = new ObservationRun({ eventKind });
     this.queue = new FrameQueue();
 
-    // §16 — monotonic per-session sequence. `lastSeq` is the high-water mark;
+    // Monotonic per-session sequence. `lastSeq` is the high-water mark;
     // `seenSeqs` catches a replay of an OLD sequence rather than only a
     // repeat of the newest one.
     this.lastSeq = 0;
@@ -123,7 +123,7 @@ class ProviderSession {
     this.duplicatesRejected = 0;
     this.outOfOrderRejected = 0;
 
-    // §19/§20 — client timestamps are recorded for diagnosis and never used
+    // Client timestamps are recorded for diagnosis and never used
     // authoritatively. The server timeline is the clock.
     this.serverStartedAt = null;
     this.serverEndedAt = null;
@@ -146,7 +146,7 @@ class ProviderSession {
     return { ok: true, state: to };
   }
 
-  /** Release everything. Idempotent (§25, and the M22 robustness contract). */
+  /** Release everything. Idempotent. */
   dispose() {
     if (this.disposed) return false;
     this.queue.clear();
@@ -178,11 +178,11 @@ export class ProductionCvProvider {
     now = () => Date.now(),
     ttlMs = 5 * 60_000,
     maxConcurrent = MAX_CONCURRENT_SESSIONS,
-    // §24/§95: an injection point for a worker boundary. It is NOT used by
-    // default, because a measurement (M22) found one frame at 0.31-0.92 ms and a
+    // An injection point for a worker boundary. It is NOT used by
+    // default, because a measurement found one frame at 0.31-0.92 ms and a
     // batch capped at 12 — moving that to a worker would add more
-    // serialisation cost than it removes blocking. Measure first, as §24
-    // says; the seam exists so a future measurement can change the answer
+    // serialisation cost than it removes blocking. Measure first:
+    // the seam exists so a future measurement can change the answer
     // without rewriting the provider.
     processFrame = null,
   } = {}) {
@@ -209,7 +209,7 @@ export class ProductionCvProvider {
   // ------------------------------------------------------------- health
 
   /**
-   * §26/§27 — health describes whether the provider can OBSERVE. It says
+   * Health describes whether the provider can OBSERVE. It says
    * nothing about whether anything may be called Combine Verified, and the
    * returned object says so out loud so a caller cannot read `ready` and
    * infer eligibility.
@@ -226,7 +226,7 @@ export class ProductionCvProvider {
       cvPolicyVersion: this.cvPolicyVersion,
       activeSessions: this.sessions.size,
       maxConcurrentSessions: this.maxConcurrent,
-      // The sentence that keeps §27 true wherever health is rendered.
+      // Said wherever health is rendered: observation is not eligibility.
       combineVerificationEligible: false,
       combineVerifiedProtocols: combineVerifiedProtocols(),
       note: 'Provider health describes observation capability only. It is not Combine verification eligibility.',
@@ -234,7 +234,7 @@ export class ProductionCvProvider {
   }
 
   /**
-   * §28 — truthful runtime capabilities, NOT collapsed into one list.
+   * Truthful runtime capabilities, NOT collapsed into one list.
    *
    * `observation` and `combine` are separate fields on purpose. A reader who
    * wants "what can this thing do" gets an honest answer; a reader who wants
@@ -273,7 +273,7 @@ export class ProductionCvProvider {
   // ------------------------------------------------------- begin session
 
   /**
-   * §5 — isolated per-session state, keyed by provider session id, with the
+   * Isolated per-session state, keyed by provider session id, with the
    * Box Cam session id kept as a separate index so a frame naming the wrong
    * pair is caught rather than silently routed.
    */
@@ -283,13 +283,13 @@ export class ProductionCvProvider {
     }
     const candidate = CANDIDATE_PROTOCOLS[protocolId];
     if (!candidate) {
-      // §57 — no fallback. An unsupported protocol is named, not approximated.
+      // No fallback. An unsupported protocol is named, not approximated.
       return { ok: false, error: PROVIDER_ERRORS.UNSUPPORTED_PROTOCOL, protocolId };
     }
     if (!boxCamSessionId || !playerId || !nonce) {
       return { ok: false, error: PROVIDER_ERRORS.INVALID_STATE, detail: 'binding incomplete' };
     }
-    // §97 — shed load rather than accept and silently drop critical frames.
+    // Shed load rather than accept and silently drop critical frames.
     if (this.sessions.size >= this.maxConcurrent) {
       this.stats.shed += 1;
       return { ok: false, error: PROVIDER_ERRORS.PROVIDER_BUSY, activeSessions: this.sessions.size };
@@ -335,9 +335,9 @@ export class ProductionCvProvider {
   // -------------------------------------------------------- ingest frame
 
   /**
-   * §12–§18 — bind, validate, order, dedupe, bound, then observe.
+   * Bind, validate, order, dedupe, bound, then observe.
    *
-   * `frame` is an ALREADY-DECODED frame from m22/frames.mjs. Decoding happens
+   * `frame` is an ALREADY-DECODED frame from frames.mjs. Decoding happens
    * at the transport boundary so this method never sees a base64 string and
    * cannot accidentally retain one.
    */
@@ -345,12 +345,12 @@ export class ProductionCvProvider {
     const s = this.get(providerSessionId);
     if (!s) return { ok: false, error: PROVIDER_ERRORS.SESSION_NOT_FOUND };
 
-    // §13 — every element of the binding is checked, not just the one that
+    // Every element of the binding is checked, not just the one that
     // happens to be in the URL.
     if (s.boxCamSessionId !== boxCamSessionId) {
       return { ok: false, error: PROVIDER_ERRORS.SESSION_NOT_FOUND, detail: 'session binding mismatch' };
     }
-    // §14/§15 — the nonce is server-minted and bound at beginSession. A
+    // The nonce is server-minted and bound at beginSession. A
     // client-supplied nonce is only ever compared, never adopted.
     if (s.nonceBinding !== nonce) {
       return { ok: false, error: PROVIDER_ERRORS.NONCE_INVALID };
@@ -367,13 +367,13 @@ export class ProductionCvProvider {
       return { ok: false, error: PROVIDER_ERRORS.INVALID_STATE, state: s.state };
     }
 
-    // §16 — sequence validation before any work is done on the frame.
+    // Sequence validation before any work is done on the frame.
     const n = Number(seq);
     if (!Number.isInteger(n) || n < 1) {
       s.framesRejected += 1;
       return { ok: false, error: PROVIDER_ERRORS.OUT_OF_ORDER_FRAME, detail: 'sequence must be a positive integer' };
     }
-    // §18 — a duplicate never double-processes, never creates a touch, never
+    // A duplicate never double-processes, never creates a touch, never
     // alters a count and never alters quality twice. It is rejected before
     // the engine is reached at all.
     if (s.seenSeqs.has(n)) {
@@ -381,8 +381,8 @@ export class ProductionCvProvider {
       s.framesRejected += 1;
       return { ok: false, error: PROVIDER_ERRORS.DUPLICATE_FRAME, seq: n, lastSeq: s.lastSeq };
     }
-    // §17 — REORDER_WINDOW is 0, so anything not strictly ahead is refused.
-    // An unlimited reorder buffer is exactly the unbounded memory this phase
+    // REORDER_WINDOW is 0, so anything not strictly ahead is refused.
+    // An unlimited reorder buffer is exactly the unbounded memory this provider
     // is meant to avoid, and a bounded one is complexity with no demonstrated
     // need, so the window is a named constant sitting at zero.
     if (n <= s.lastSeq - REORDER_WINDOW) {
@@ -391,7 +391,7 @@ export class ProductionCvProvider {
       return { ok: false, error: PROVIDER_ERRORS.OUT_OF_ORDER_FRAME, seq: n, lastSeq: s.lastSeq };
     }
 
-    // §20 — a client clock that is in the future, in the past, stalled or
+    // A client clock that is in the future, in the past, stalled or
     // jumping is COUNTED and then ignored. It never moves the timeline.
     if (clientCapturedAtMs != null) {
       const drift = Math.abs(Number(clientCapturedAtMs) - now);
@@ -400,8 +400,8 @@ export class ProductionCvProvider {
 
     if (s.state === 'ready') s.transition('running');
 
-    // §21/§22 — bounded queue. The queue drops oldest and REPORTS it; the
-    // drop count feeds observation quality at finalization (§23), so the
+    // Bounded queue. The queue drops oldest and REPORTS it; the
+    // drop count feeds observation quality at finalization, so the
     // engine is never told that frames it did not see were fine.
     const before = s.queue.dropped;
     s.queue.push(frame);
@@ -419,7 +419,7 @@ export class ProductionCvProvider {
         else s.run.processFrame(f);
       }
     } catch (err) {
-      // §88 — an engine exception fails the session safely. No raw stack
+      // An engine exception fails the session safely. No raw stack
       // reaches the caller; the message is kept server-side for logs.
       s.failure = { at: now, message: String(err && err.message ? err.message : err) };
       this.#end(s, 'failed');
@@ -455,7 +455,7 @@ export class ProductionCvProvider {
   // ----------------------------------------------------------- finalize
 
   /**
-   * §7 — single-shot. A second call returns the SAME immutable result, or a
+   * Single-shot. A second call returns the SAME immutable result, or a
    * typed already-finalized response for a session that ended some other way.
    * It never runs the engine twice and never mints a second record.
    */
@@ -502,7 +502,7 @@ export class ProductionCvProvider {
   }
 
   /**
-   * §34 — the canonical provider observation result.
+   * The canonical provider observation result.
    *
    * Contains NO raw frame content and nothing pixel-wise derived from a frame.
    * The derived block is counts, presence booleans and durations; the trace is
@@ -514,7 +514,7 @@ export class ProductionCvProvider {
     const integrity = observation.integrity ?? {};
     const framesAnalysed = Number(integrity.framesAnalysed ?? 0) || 0;
 
-    // §36 — bounded trace. An attempt cannot produce an unbounded array by
+    // Bounded trace. An attempt cannot produce an unbounded array by
     // touching the ball a great many times.
     const MAX_TRACE = 256;
     const events = Array.isArray(observation.events) ? observation.events : [];
@@ -561,13 +561,13 @@ export class ProductionCvProvider {
         personPresent: framesAnalysed > 0 && (integrity.personDetectedFrames ?? 0) / framesAnalysed >= 0.5,
         ballPresent: framesAnalysed > 0 && (integrity.ballDetectedFrames ?? 0) / framesAnalysed >= 0.5,
         // The engine's count. Present because it is genuine, and carried under
-        // a name that does not read as a published measurement (§32, §33).
+        // a name that does not read as a published measurement.
         touchCount: s.eventKind === 'touch' ? (observation.count ?? null) : null,
         juggleCount: s.eventKind === 'juggle' ? (observation.count ?? null) : null,
         activeDurationMs,
       },
 
-      // §32/§33 — the exact count is EXPERIMENTAL until real-world validation
+      // The exact count is EXPERIMENTAL until real-world validation
       // passes. The label travels with the number so a downstream reader
       // cannot pick up the count without also picking up its status.
       experimental: {
@@ -595,12 +595,12 @@ export class ProductionCvProvider {
       trace,
       traceTruncated: events.length > MAX_TRACE,
 
-      // §19 — the server timeline, always. No client field contributes.
+      // The server timeline, always. No client field contributes.
       serverStartedAt: s.serverStartedAt,
       serverEndedAt: s.serverEndedAt,
       serverDurationMs: Math.max(0, (s.serverEndedAt ?? 0) - (s.serverStartedAt ?? 0)),
 
-      // §2/§31 — stated on the result itself, not left to a caller.
+      // Stated on the result itself, not left to a caller.
       combineVerified: false,
       combineVerifiedBlockedBy: 'REAL_WORLD_VALIDATION_NOT_COMPLETED',
     };
@@ -616,8 +616,7 @@ export class ProductionCvProvider {
     }
     if (s.finalized) return { ok: true, alreadyFinalized: true, state: s.state };
     this.#end(s, 'cancelled');
-    // A cancelled attempt mints NO result. This is the same rule the M22
-    // robustness pass established for the engine runtime.
+    // A cancelled attempt mints NO result, the same rule as the engine runtime.
     return { ok: true, alreadyFinalized: false, state: s.state, result: null };
   }
 
@@ -627,7 +626,7 @@ export class ProductionCvProvider {
     return id ? this.get(id) : null;
   }
 
-  /** §90 — sweep whatever has outlived its TTL. */
+  /** Sweep whatever has outlived its TTL. */
   sweep(nowMs = this.now()) {
     let swept = 0;
     for (const [, s] of this.sessions) {
@@ -674,10 +673,10 @@ export class ProductionCvProvider {
 /**
  * The process-wide provider.
  *
- * §121/§122: this implementation is built in and has no external dependency,
+ * This implementation is built in and has no external dependency,
  * no model file and no configuration, so it reports `ready` honestly rather
  * than pretending to need setup. Combine verification remains closed
- * regardless — which is precisely the distinction §27 exists to make.
+ * regardless — which is precisely the distinction between health and eligibility.
  */
 let singleton = null;
 export function productionCvProvider() {

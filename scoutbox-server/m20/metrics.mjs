@@ -1,8 +1,8 @@
 /**
- * M20 — Recruitment Analytics: the metric registry and the pure statistics
+ * Recruitment analytics: the metric registry and the pure statistics
  * behind it.
  *
- * The governing rule of this module, and of the milestone:
+ * The governing rule of this module, and of all of analytics:
  *
  *     Measure the recruitment process, not the worth of the player or
  *     the scout.
@@ -27,9 +27,8 @@
  *   4. No causation. A metric that compares groups declares
  *      `association: true` and carries the sentence that says so.
  *
- * The definitions in M20_METRICS.md and the registry here are the same
- * definitions; `assertMetricRegistry` is what stops them drifting apart, and
- * e2e/recruitment/analytics cross-checks the file against the registry.
+ * docs/reference/recruitment-metrics.md documents the same definitions as the
+ * registry here; a change to one is a change to the other.
  */
 
 export const RECRUITMENT_ANALYTICS_POLICY_VERSION = 1;
@@ -39,7 +38,7 @@ export const RECRUITMENT_ANALYTICS_POLICY_VERSION = 1;
  * numerator and denominator are shown instead. Counts are never suppressed: a
  * director must be able to see their own three rooms.
  *
- * 5 rather than M18's SUPPRESS_MIN of 3, because a ratio invites a conclusion
+ * 5 rather than the SUPPRESS_MIN of 3 used for lists elsewhere, because a ratio invites a conclusion
  * that a list does not: "we convert 33% of trials" reads as a finding even
  * when it means one trial out of three.
  */
@@ -145,7 +144,7 @@ export const METRICS = {
     ratio: false,
     limitation: 'Counts of formal recruitment decisions finalized in the window, by outcome — progress, hold, reject — and how many were later superseded. A process count, never a verdict on anyone: a club that rejects nine players and progresses one has run ten decisions, not ranked ten people.',
   }),
-  // M23 P8 (§42–§45) — the journey funnel from the CANONICAL RECORDS, not from
+  // The journey funnel from the CANONICAL RECORDS, not from
   // the case's status history: a stage counts only when the record that proves
   // it exists. Case-based: a case counts once per stage however many retries,
   // revisions or re-invitations it carried. Beside each stage the number of
@@ -360,7 +359,7 @@ export const METRIC_IDS = Object.keys(METRICS);
  * an internal field list invites an integrator to treat it as a contract.
  * Everything else — including the limitation sentence — travels with the
  * number, because a figure without its caveat is the failure mode this
- * milestone exists to avoid.
+ * module exists to avoid.
  */
 export const wire = (m) => {
   const { reads, ...rest } = m;
@@ -467,9 +466,9 @@ export const days = (from, to) => (Number(to) - Number(from)) / DAY_MS;
 // ------------------------------------------------------------------ window
 
 /**
- * Windows are inclusive UTC calendar days, the same rule M18.2 established for
- * brief date boundaries. There is no local time anywhere in this codebase's
- * boundaries and M20 does not introduce one: a club in UTC+13 and a club in
+ * Windows are inclusive UTC calendar days, the same rule as brief date
+ * boundaries. There is no local time anywhere in this codebase's
+ * boundaries and analytics does not introduce one: a club in UTC+13 and a club in
  * UTC-7 both see the day boundary at the same instant, and the docs say which.
  */
 export const utcDay = (ms) => new Date(Number(ms)).toISOString().slice(0, 10);
@@ -492,7 +491,7 @@ export const DEFAULT_WINDOW = 'last_90_days';
 export function resolveWindow({ preset, from, to } = {}, nowMs = Date.now()) {
   const today = utcDay(nowMs);
   if (from || to) {
-    // M23 P5.7: a day that exists. `2026-02-30` passed the old shape-and-parse test as 2 March.
+    // A day that exists: a shape-and-parse test alone would read `2026-02-30` as 2 March.
     const ok = (d) => parseStrictDateOnly(d).ok;
     if (!ok(from) || !ok(to)) return { error: 'WINDOW_INVALID', detail: 'from and to must both be calendar days as YYYY-MM-DD.' };
     if (from > to) return { error: 'WINDOW_INVALID', detail: 'from must not be after to.' };

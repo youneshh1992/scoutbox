@@ -1,4 +1,4 @@
-// M14 player/guardian data surface: SAFE verification badges for clubs, the
+// Player/guardian data surface: SAFE verification badges for clubs, the
 // player's structured coach references (with honest provenance wording), and
 // squad-invitation acceptance (adults self-serve; minors only via guardian).
 // Nothing here exposes evidence, emails or review internals — the server's

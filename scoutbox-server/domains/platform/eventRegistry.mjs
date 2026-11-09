@@ -1,18 +1,13 @@
 /**
- * M18.2 — the canonical event registry.
- *
- * M18.1 classified every live event's AUDIENCE. That closed the leak, but an
- * audience is one fact about an event, and the rest were still implicit in
- * whichever call site happened to emit it: what the payload may carry, whether
- * two emissions of the same fact should collapse, whether the event is
- * replayed to a reconnecting client, whether it may become a notification.
- * Before M19 adds more events, every one of those facts lives here, once.
+ * The canonical event registry: every fact about a live event (who may receive
+ * it, what its payload may carry, how it dedupes, whether it replays, whether it
+ * may become a notification) lives here, once, rather than at the call site.
  *
  * Every field is a decision, not a description:
  *
  *   domain               which product area owns the event
  *   sourceSystem         the canonical store the event is about
- *   audience             who may receive it (M18.1 vocabulary; fails closed)
+ *   audience             who may receive it (fails closed)
  *   privacyClass         none | subject_reference | org_internal — what the
  *                        payload could reveal, not what it happens to contain
  *   payload              the ONLY keys a payload may carry. Anything else is
@@ -105,14 +100,12 @@ export const EVENT_REGISTRY = {
   },
   recruitment_room_archived: {
     domain: 'recruitment_rooms', sourceSystem: 'cases', audience: 'org_private',
-    // Reduced in M18.2: the live payload used to carry status, reasonCodes,
-    // revisitable, decisionAt and the snapshot's sourceRefs. No consumer of
-    // the STREAM reads any of them — the client refetches, and Second Look
-    // reconciles server-side from the canonical decision row. Ids only.
+    // Ids only: the client refetches, and Second Look reconciles server-side
+    // from the canonical decision row, so the stream needs no decision detail.
     privacyClass: 'org_internal', payload: ['orgId', 'roomId'],
     dedupeStrategy: 'fingerprint', replayPolicy: 'replay', notificationEligible: true, analyticsEligible: true,
   },
-  // ---- M23 P8. A club member submitted an assessment: org-private, ids only
+  // ---- A club member submitted an assessment: org-private, ids only
   // (the org and the assessment). The Room re-reads its journey; the subject is
   // NOT named, so nothing about the club's evaluation reaches the player's or a
   // rival club's stream.
@@ -121,7 +114,7 @@ export const EVENT_REGISTRY = {
     privacyClass: 'org_internal', payload: ['orgId', 'assessmentId'],
     dedupeStrategy: 'fingerprint', replayPolicy: 'replay', notificationEligible: false, analyticsEligible: false,
   },
-  // ---- M23 P8. A case moved on the recruitment lifecycle (any writer: the
+  // ---- A case moved on the recruitment lifecycle (any writer: the
   // semantic-action route, a domain seam, the legacy status route, a reopen).
   // Org-private, ids and the two status WORDS only: no reason code, no note,
   // no actor. An open Room re-reads the journey when it arrives.
@@ -130,7 +123,7 @@ export const EVENT_REGISTRY = {
     privacyClass: 'org_internal', payload: ['orgId', 'roomId', 'from', 'to'],
     dedupeStrategy: 'fingerprint', replayPolicy: 'replay', notificationEligible: false, analyticsEligible: false,
   },
-  // ---- M23 P5 formal decision. Org-private, ids only (§80, §81): never the
+  // ---- Formal decision. Org-private, ids only: never the
   // outcome, never a reason code, never the rationale. The client refetches
   // through the authorised read; analytics reads the store, not the stream.
   room_decision_finalized: {
@@ -143,10 +136,10 @@ export const EVENT_REGISTRY = {
     privacyClass: 'org_internal', payload: ['orgId', 'roomId', 'decisionId'],
     dedupeStrategy: 'none', replayPolicy: 'never', notificationEligible: true, analyticsEligible: false,
   },
-  // ---- M23 P5.6E. An authorised club invited a transaction workspace from this
-  // case, or withdrew that invitation. Ids only, and — like the decision events
-  // above — never the outcome, never a reason and never the rationale that led
-  // the club here (§32 "Do not expose the internal decision itself").
+  // ---- An authorised club invited a transaction workspace from this case, or
+  // withdrew that invitation. Ids only, and — like the decision events above —
+  // never the outcome, never a reason and never the rationale that led the club
+  // here: the internal decision itself is not exposed.
   transaction_handoff_invited: {
     domain: 'recruitment', sourceSystem: 'recruitmentCases', audience: 'org_private',
     privacyClass: 'org_internal', payload: ['orgId', 'roomId', 'handoffId'],
@@ -158,16 +151,12 @@ export const EVENT_REGISTRY = {
     dedupeStrategy: 'none', replayPolicy: 'never', notificationEligible: true, analyticsEligible: false,
   },
   recruitment_room_reopened_from_second_look: {
-    // Emitted since M18, never classified until M18.2. It carried an orgId, so
-    // the subject rules kept it inside the organisation — but only by luck of
-    // payload shape, which is exactly what the registry exists to replace.
     domain: 'second_look', sourceSystem: 'cases', audience: 'org_private',
     privacyClass: 'org_internal', payload: ['orgId', 'roomId', 'itemId'],
     dedupeStrategy: 'fingerprint', replayPolicy: 'replay', notificationEligible: true, analyticsEligible: true,
   },
 
-  // ---- player-owned records
-  // ------------------------------------------------------------------ M19
+  // ---- watchlists and matching
   // A watchlist is organisation-private by construction: the player is never
   // told a club is watching them, so none of these may reach a player channel.
   watchlist_created: {
@@ -202,17 +191,16 @@ export const EVENT_REGISTRY = {
     dedupeStrategy: 'fingerprint', replayPolicy: 'replay',
     notificationEligible: false, analyticsEligible: true,
   },
-  // ------------------------------------------------------------------ M21
-  // Development Hub. Every one of these is ORGANISATION-PRIVATE and carries
+  // ---- Development Hub. Every one of these is ORGANISATION-PRIVATE and carries
   // ids only, and that is a design decision rather than an accident of shape.
   //
   // An event carrying a bare playerId is delivered by shouldDeliver to every
   // organisation that can currently see that player — correct for a catalogue
   // ping, wrong for a private development plan, where it would announce to
-  // every club within the wall that something happened. So M21 emits nothing
-  // player-directed on the stream at all: a change the player should hear
-  // about reaches them as a NOTIFICATION, which is addressed to one person and
-  // passes through their preferences on the way (§44).
+  // every club within the wall that something happened. So the Hub emits
+  // nothing player-directed on the stream at all: a change the player should
+  // hear about reaches them as a NOTIFICATION, which is addressed to one person
+  // and passes through their preferences on the way.
   //
   // A player-owned plan shared with two clubs emits one event per club. A
   // private plan emits none, because there is nobody it would be right to tell.
@@ -267,15 +255,8 @@ export const EVENT_REGISTRY = {
     notificationEligible: true, analyticsEligible: false,
   },
 
-  // ------------------------------------------------------------- M23 P3
-  // The Contact workflow. Every one of these is ORGANISATION-PRIVATE and
-  // carries ids only. The RECIPIENT side deliberately adds no event: a send
-  // creates a `db.requests` row exactly as the legacy request route does, so
-  // the recipient hears through the existing `inbox` ping and `notify`, both
-  // of which are addressed to one person and pass through their preferences.
-  // A draft emits nothing a player could ever receive (§58, §83).
-  // ---- M23 P4B Trial. All org_private, ids only (architecture §14). The
-  // recipient side keeps the existing `inbox` / `notify` events; no Trial
+  // ---- Trial. All org_private, ids only. The recipient side hears through
+  // the existing `inbox` / `notify` events; no Trial
   // event ever carries a schedule, a venue, an attendance note, an assessment
   // or a guardian id. Analytics reads none of them — counts come from the
   // store, small-n applied.
@@ -324,6 +305,12 @@ export const EVENT_REGISTRY = {
     privacyClass: 'org_internal', payload: ['orgId', 'roomId', 'trialId', 'sessionId'],
     dedupeStrategy: 'none', replayPolicy: 'never', notificationEligible: false, analyticsEligible: false,
   },
+  // ---- The Contact workflow. Every one of these is ORGANISATION-PRIVATE and
+  // carries ids only. The RECIPIENT side deliberately adds no event: a send
+  // creates a request exactly as the legacy request route does, so the
+  // recipient hears through the existing `inbox` ping and `notify`, both of
+  // which are addressed to one person and pass through their preferences.
+  // A draft emits nothing a player could ever receive.
   contact_created: {
     domain: 'recruitment', sourceSystem: 'recruitmentContacts', audience: 'org_private',
     privacyClass: 'org_internal', payload: ['orgId', 'roomId', 'contactId'],
@@ -349,7 +336,7 @@ export const EVENT_REGISTRY = {
     privacyClass: 'org_internal', payload: ['orgId', 'roomId', 'contactId'],
     dedupeStrategy: 'none', replayPolicy: 'replay', notificationEligible: true, analyticsEligible: true,
   },
-  // ---- M23 P6 — the canonical Offer (P6 §35–§36). Every Offer event is
+  // ---- The canonical Offer. Every Offer event is
   // org-private: it carries the organisation, the case and the Offer id and
   // NOTHING else — no term, no expiry, no note, no recipient, no reason. The
   // recipient and the shared agent are told through notifications, whose text
@@ -387,7 +374,7 @@ export const EVENT_REGISTRY = {
     privacyClass: 'org_internal', payload: ['orgId', 'roomId', 'offerId', 'status'],
     dedupeStrategy: 'none', replayPolicy: 'replay', notificationEligible: true, analyticsEligible: true,
   },
-  // ---- M23 P7 — the signing workflow (P7 §46–§47). Org-private, ids plus a
+  // ---- The signing workflow. Org-private, ids plus a
   // party TYPE word on `signing_party_completed`; never a term, a document, a
   // digest, a note, a fee or a signatory's identity. The player and a shared
   // agent hear through notifications with a factual line.
@@ -433,15 +420,14 @@ export const EVENT_REGISTRY = {
     dedupeStrategy: 'coalesce_by_subject', replayPolicy: 'replay', notificationEligible: false, analyticsEligible: false,
   },
 
-  // ------------------------------------------------- M22 production CV
+  // ---- Box Cam computer vision.
   //
-  // Three events, all `player_private` (§72). An observation is something a
+  // Three events, all `player_private`. An observation is something a
   // player did in their own home; there is no cross-organisation broadcast of
   // it, and none of these is analytics-eligible, because counting how often
-  // players are observed is one step from ranking them (§137).
+  // players are observed is one step from ranking them.
   //
-  // §41 is enforced here as much as in the route: there is deliberately NO
-  // per-frame event in this table, so a future caller cannot emit one without
+  // There is deliberately NO per-frame event in this table, so a future caller cannot emit one without
   // first adding it and answering the privacy question.
   box_cam_cv_session_started: {
     domain: 'box_cam', sourceSystem: 'boxCamCv', audience: 'player_private',
@@ -468,7 +454,7 @@ export const EVENT_REGISTRY = {
   },
 };
 
-// ---- M23 P5.6B ScoutBox Agent core. All org_private to the AGENCY, ids
+// ---- ScoutBox Agent core. All org_private to the AGENCY, ids
 // only. The player side hears through the existing `notify` stream (their
 // own preferences apply); no event here ever carries a licence reference, a
 // dispute reason or a client's name.
@@ -482,7 +468,7 @@ for (const [name, payload] of [
   ['representation_rejected', ['orgId', 'agreementId', 'agentUserId']],
   ['representation_terminated', ['orgId', 'agreementId', 'agentUserId']],
   ['representation_disputed', ['orgId', 'agreementId', 'agentUserId']],
-  // M23 P5.6E. The client changed one of their disclosure choices; WHICH one is
+  // The client changed one of their disclosure choices; WHICH one is
   // not in the payload, because the agent reads the relationship for that and a
   // stream should not carry a person's choices around.
   ['representation_disclosure_changed', ['orgId', 'agreementId', 'agentUserId']],
@@ -500,14 +486,14 @@ for (const [name, payload] of [
   };
 }
 
-// ---- M23 P5.6C Conflict & Compliance Engine. org_private to the AGENCY,
+// ---- Conflict & Compliance Engine. org_private to the AGENCY,
 // ids and state words only: never a reason text, never a reviewer's note,
 // never a party's name, never another agency's agent.
 for (const [name, payload] of [
   ['regulatory_review_requested', ['orgId', 'reviewId', 'kind']],
   ['regulatory_review_started', ['orgId', 'reviewId']],
   ['regulatory_review_resolved', ['orgId', 'reviewId', 'outcome']],
-  // `ctxId` (not `contextId`): the M18.2 personal-field sweep reads "text" in
+  // `ctxId` (not `contextId`): the personal-field sweep reads "text" in
   // "contextId"; the key names a compliance context id and nothing else.
   ['conflict_evaluated', ['orgId', 'ctxId', 'outcome']],
   ['regulatory_consent_requested', ['orgId', 'consentId', 'ctxId']],
@@ -522,14 +508,14 @@ for (const [name, payload] of [
     notificationEligible: true, analyticsEligible: false,
   };
 }
-// ---- M23 P5.6D Agent Transaction Workspace. org_private to the AGENCY that
+// ---- Agent Transaction Workspace. org_private to the AGENCY that
 // holds the workspace, ids and state words only: never a party's name, never a
 // document's label, never a note, never a term, never a fee. A club party and
 // the individual hear through the `notify` stream, where their own preferences
 // apply and the text is written for them.
 //
 // The payload key is `txId`, not `transactionId`: short, and consistent with
-// the `ctxId` the P5.6C events use for the same reason (the M18.2 personal-field
+// the `ctxId` the compliance events use for the same reason (the personal-field
 // sweep reads substrings, so a key is chosen to be obviously about an id).
 for (const [name, payload] of [
   ['agent_transaction_created', ['orgId', 'txId']],
@@ -554,7 +540,7 @@ EVENT_REGISTRY.policy_version_published = ping('compliance', 'jurisdictionPolici
 
 export const EVENT_NAMES = Object.freeze(Object.keys(EVENT_REGISTRY));
 
-/** Audience for an event. Unknown names fail closed — the M18.1 rule, unchanged. */
+/** Audience for an event. Unknown names fail closed. */
 export function audienceFor(event) {
   return EVENT_REGISTRY[event]?.audience ?? 'org_private';
 }
@@ -584,7 +570,7 @@ export function minimizePayload(event, payload = {}) {
  * fact reaching notifications, Second Look and analytics through different
  * projectors must fingerprint identically, or it becomes four events.
  *
- *   fingerprint          type:sourceSystem:sourceId — the M18 rule
+ *   fingerprint          type:sourceSystem:sourceId
  *   coalesce_by_subject  event:subjectId — repeated pings collapse
  *   none                 every emission distinct
  */

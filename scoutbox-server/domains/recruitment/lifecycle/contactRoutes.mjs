@@ -1,5 +1,5 @@
 /**
- * M23 P3 — Contact routes: the club side of one communication process.
+ * Contact routes: the club side of one communication process.
  *
  *   GET   /org/rooms/:id/contacts                 history + live routing preview
  *   POST  /org/rooms/:id/contacts                 create a DRAFT (nothing leaves)
@@ -10,7 +10,7 @@
  *   POST  /org/rooms/:id/contacts/external        attest a contact made outside ScoutBox
  *
  * There is deliberately NO recipient route in this file. The recipient sees
- * the `db.requests` row the send creates, through the Inbox that already
+ * the request row the send creates, through the Inbox that already
  * exists, and answers through the respond route that already exists; that
  * route calls `ctx.onRequestResponded` (registered here) so the answer lands
  * on the Contact. One Inbox, one response path, one channel-opening path.
@@ -23,7 +23,7 @@
  * restored if it fails. The case cannot say `contacted` on disk while the
  * Contact that justifies it was lost.
  *
- * S8c: a Contact is changed only through the repository —
+ * A Contact is changed only through the repository —
  * `contacts.create(record)` and `contacts.update(id, (draft) => …)`, which
  * type the record and write its rows at once. The records the views hand out
  * are read-only.
@@ -46,10 +46,10 @@ export function registerContact(ctx) {
   const {
     guardians, orgRouter, nextId, notify, broadcast, findPlayer, isBlocked, isAdult,
     rateLimit, mailer, isLead, moderateOrRefuse, issueRecruitmentRequest,
-    // S8c: the recruitment contacts/offers repository. Every write is an explicit operation inside `unit`.
+    // Every write is an explicit repository operation inside `unit`.
     recruitmentContactsOffers, unit, afterCommit,
-    recruitmentReads, // §4.3 step 2: the cases are read through SQL
-    // M23 P5.6E — the ONE cross-app integration seam. It is a HOLDER: M23 is
+    recruitmentReads,
+    // The ONE cross-app integration seam. It is a HOLDER: these routes are
     // registered before the Agent, Compliance and Integration layers, so the
     // methods arrive later. Until they do, `agentRoute` is absent and every
     // contact routes to the player and to nobody else — the honest answer when
@@ -73,7 +73,7 @@ export function registerContact(ctx) {
 
   // ------------------------------------------------------------- lookups
 
-  /** The room, through M17's concealing lookup, plus the caller's live role and the permission check. */
+  /** The room, through the rooms' concealing lookup, plus the caller's live role and the permission check. */
   function roomFor(req, res, need) {
     const room = ctx.findRoomForRequest(req, res);
     if (!room) return null;
@@ -121,7 +121,7 @@ export function registerContact(ctx) {
   });
 
   /**
-   * M23 P5.6E §21–§23 — the routing MODE the club asks for.
+   * The routing MODE the club asks for.
    *
    * `player_only` is the default and always available. `both` asks that the
    * player's own agent be a party as well; whether that is permitted is not the
@@ -169,7 +169,7 @@ export function registerContact(ctx) {
   }
 
   /**
-   * What the club is told. The recipient type and the minor flag as before, plus
+   * What the club is told. The recipient type and the minor flag, plus
    * the agent answer: whether an agent is a party, and — when the club asked and
    * the answer was no — WHICH rule refused, as a code.
    *
@@ -205,11 +205,11 @@ export function registerContact(ctx) {
   }
 
   /**
-   * The lifecycle coupling (§30–§31). The Contact does not write a case
+   * The lifecycle coupling. The Contact does not write a case
    * status. It asks the ONE validator whether `recordContact` is possible —
-   * with the real evidence provider, which now sees this Contact — and, if
+   * with the real evidence provider, which sees this Contact — and, if
    * so, writes through the ONE status writer. "Already contacted" is
-   * recorded on the Contact and is not an error (contract §8).
+   * recorded on the Contact and is not an error.
    */
   function advanceCase(req, room, c, at) {
     const role = roleFor(req, room);
@@ -280,12 +280,10 @@ export function registerContact(ctx) {
     // the player alone and the same words to the player and their agent are two
     // different contacts, and one clientKey must not stand for both.
     const fp = payloadFingerprint({ subject: content.subject, body: content.body, contactMode: mode });
-    // A draft created BEFORE P5.6E has a fingerprint over the words alone. A
-    // client replaying such a key must still be answered with the contact it
-    // already created — otherwise the upgrade silently turns every in-flight
-    // retry into a second draft. The stored record's own mode stands in for the
-    // one its fingerprint never carried, so a genuinely different request (same
-    // key, different mode) still conflicts.
+    // A fingerprint over the words alone (no mode) still matches: the stored
+    // record's own mode stands in for the one that fingerprint never carried,
+    // so a genuinely different request (same key, different mode) still
+    // conflicts.
     const legacyFp = payloadFingerprint({ subject: content.subject, body: content.body });
     const keyMatches = (c) => c.keys?.create?.fp === fp
       || (c.keys?.create?.fp === legacyFp && (c.contactMode ?? 'player_only') === mode);
@@ -301,7 +299,7 @@ export function registerContact(ctx) {
     if (limited('contact_draft', req.org.id)) return res.status(429).json(rateLimitedBody('contact_draft'));
 
     // A draft for someone the club cannot contact is refused at compose time,
-    // and the same rule runs again at send time (§17: block before compose).
+    // and the same rule runs again at send time (block before compose).
     const { recipient: routing, routing: route } = routeFor(req, room, mode);
     if (!routing.ok) return err(res, routing.error, routing.message);
 
@@ -314,7 +312,7 @@ export function registerContact(ctx) {
       status: 'draft', channel: 'in_app', recipient: null,
       // What the club ASKED for, and nothing more. `routingSnapshot` — what was
       // actually routed — is written only by a send, because a draft routed
-      // nothing to anybody (§22).
+      // nothing to anybody.
       contactMode: mode, routingSnapshot: null,
       subject: content.subject, body: content.body, summary: null,
       createdBy: by, createdAt: at, updatedAt: at,
@@ -385,7 +383,7 @@ export function registerContact(ctx) {
     if (!revGate(req, res, c)) return;
     const at = now();
     // The draft text is KEPT. Cancelling records that nothing was sent; it does
-    // not erase what was written (§25).
+    // not erase what was written.
     const stored = unit(() => contacts.update(c.id, (d) => {
       d.status = 'cancelled';
       d.cancelledAt = at;
@@ -413,7 +411,7 @@ export function registerContact(ctx) {
       // different Contact is a different request wearing the same name.
       const holder = contactsOf(room).list.find((x) => x.keys?.send?.key === key.key);
       if (holder && holder.id !== c.id) return err(res, 'CONTACT_IDEMPOTENCY_CONFLICT', 'This clientKey was already used to send a different contact.');
-      // M23 P8.1 (D-P81-10): the replay answers with the Contact's CURRENT
+      // The replay answers with the Contact's CURRENT
       // truth — `delivered` is true only for a delivered (or answered)
       // Contact, never for one that failed and was then cancelled.
       if (holder && holder.id === c.id) return res.json({ contact: contactView(c), delivered: ['delivered', 'responded'].includes(c.status), idempotent: true });
@@ -427,7 +425,7 @@ export function registerContact(ctx) {
     if (!revGate(req, res, c)) return;
     if (limited('contact_send', req.org.id)) return res.status(429).json(rateLimitedBody('contact_send'));
 
-    // RE-DERIVED NOW (P3 §14, §17, §21; P5.6E §23): the player's age, the
+    // RE-DERIVED NOW: the player's age, the
     // guardian route, the block relation and the visibility wall are read at this
     // moment, not from the draft — and so is the AGENT's authority. A draft
     // composed while the relationship was active and the client's disclosure was
@@ -455,7 +453,7 @@ export function registerContact(ctx) {
     // caller) leaves an honest `failed` attempt and no recipient object.
     if (ctx.operations.delivery.injected('contact') > 0) {
       const failed = unit(() => {
-        ctx.operations.delivery.consumeInjectedFailure('contact'); // S13e: used up in the unit that records the failed attempt
+        ctx.operations.delivery.consumeInjectedFailure('contact'); // used up in the unit that records the failed attempt
         const fresh = contacts.update(c.id, (d) => {
           d.keys.send = sendKey;
           d.status = 'failed';
@@ -501,7 +499,7 @@ export function registerContact(ctx) {
         d.failureCode = null;
         d.attempts.push({ at, ok: true, code: null });
         d.updatedAt = at;
-        // §22 — WHO WAS VALIDLY ROUTED, at this moment, as roles and ids. A later
+        // WHO WAS VALIDLY ROUTED, at this moment, as roles and ids. A later
         // change to the relationship does not rewrite it and the next contact is
         // routed from the authority in force then. The snapshot is what the agent's
         // own read is filtered by, so it is the record of participation, not a label.
@@ -524,9 +522,9 @@ export function registerContact(ctx) {
       const advanced = advanceCase(req, room, delivered, at);
       moved = advanced.moved;
 
-      // M23 P5.6E §24 — the agent hears through the canonical notification stream
+      // The agent hears through the canonical notification stream
       // into the Agent workspace's OWN Inbox. No second Inbox is created, no
-      // `db.requests` row is written for the agent, and the agent cannot answer:
+      // request row is written for the agent, and the agent cannot answer:
       // accepting or declining belongs to the person the message is about. The text
       // carries the club's name and nothing about the club's recruitment process.
       if (route.agent?.agentUserId) {
@@ -626,7 +624,7 @@ export function registerContact(ctx) {
   // ------------------------------------------------------------- response
 
   /**
-   * Called by the EXISTING respond routes once a `db.requests` row that a
+   * Called by the respond routes once a request row that a
    * Contact created has been accepted or declined. The recipient never
    * addresses the Contact; the Contact learns of the answer — in the respond
    * route's unit of work, so the answer and the Contact commit together.
@@ -647,7 +645,7 @@ export function registerContact(ctx) {
 
     // The sender already hears through the respond route's own notification.
     // The room's owner and lead scout hear too, if they are different people;
-    // nobody else in the organisation does (§62).
+    // nobody else in the organisation does.
     const room = recruitmentReads.cases.byId(c.caseId);
     if (room) {
       for (const uid of new Set([room.ownerUserId, room.room?.leadScoutUserId])) {

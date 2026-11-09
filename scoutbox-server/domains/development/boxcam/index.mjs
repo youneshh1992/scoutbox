@@ -1,14 +1,10 @@
-// Milestone 16 registration point — Box Cam + Development Intelligence.
-// Same architecture as m12–m15: focused modules receive the shared server
-// context and register on the EXISTING authenticated routers, so every
-// standing gate runs before any M16 handler.
+// Box Cam + Development Intelligence registration point. Focused modules receive the shared server context and
+// register on the authenticated routers, so every standing gate runs before any Box Cam handler.
 //
-// Persistence is limited to what Box Cam genuinely introduces: sessions
-// (aggregated observations, never raw frames or video), assignments,
-// challenges (+entries), disputes and privacy prefs, Combine requests and
-// attempts, and CV results (all typed tables since S12b). The
-// drill registry is versioned code, and the Football Passport PROJECTS
-// Box Cam data — it is never copied.
+// Persistence is limited to what Box Cam genuinely introduces: sessions (aggregated observations, never raw frames
+// or video), assignments, challenges (+entries), disputes and privacy prefs, Combine requests and attempts, and CV
+// results. The drill registry is versioned code, and the Football Passport PROJECTS Box Cam data — it is never
+// copied.
 import { metrics } from '../../enterprise/enterprise.mjs';
 import { DRILLS, PROVIDERS } from './drills.mjs';
 import { registerBoxCamSessions } from './sessions.mjs';
@@ -17,8 +13,8 @@ import { registerCombine } from './combine.mjs';
 import { registerM22Routes } from './cv/routes.mjs';
 
 export function registerM16(ctx) {
-  // S12b: Box Cam, Combine and the CV results are tables (repositories/boxCam.mjs, migration 0031); every module
-  // writes through `boxCam` and reads through `boxCamReads`. There is no db.box* or db.combine* collection.
+  // Box Cam, Combine and the CV results are tables (repositories/boxCam.mjs); every module writes through `boxCam`
+  // and reads through `boxCamReads`.
   if (typeof ctx.boxCam?.sessions?.create !== 'function' || !ctx.boxCamReads) throw new TypeError('registerM16 needs the Box Cam repository from the data layer');
 
   // Privacy-safe operational metrics — counters only, never player labels.
@@ -27,12 +23,12 @@ export function registerM16(ctx) {
     box_sessions_partial: 0, box_sessions_unverifiable: 0, box_session_active_seconds: 0,
     box_assignment_created: 0, box_assignment_completed: 0,
     box_challenge_started: 0, box_challenge_completed: 0, provider_errors: 0,
-    // M16.1 At-Home Combine
+    // At-Home Combine
     combine_attempt_started: 0, combine_attempt_completed: 0, combine_attempt_verified: 0,
     combine_attempt_incomplete: 0, combine_attempt_invalidated: 0, combine_practice_started: 0,
     combine_request_created: 0, combine_request_completed: 0, club_combine_created: 0,
     combine_measurement_provider_error: 0,
-    // M22 production CV provider
+    // production CV provider
     box_cam_cv_sessions_started: 0, box_cam_cv_accepted: 0, box_cam_cv_refused: 0,
   };
   const vmetric = (k, n = 1) => { metrics.boxCam[k] = (metrics.boxCam[k] ?? 0) + n; };
@@ -53,6 +49,6 @@ export function registerM16(ctx) {
   registerBoxTraining(shared);   // sets onSessionFinalized/prefs/views on ctx
   registerBoxCamSessions(shared); // sets boxMintSession/boxCompleteSession/boxSessionView
   registerCombine(shared);        // At-Home Combine — chains onSessionFinalized, reuses Box Cam
-  registerM22Routes(shared);      // M22 production CV: frame transport, Ready Check, diagnostics
+  registerM22Routes(shared);      // production CV: frame transport, Ready Check, diagnostics
   return shared;
 }

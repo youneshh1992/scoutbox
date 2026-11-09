@@ -1,5 +1,5 @@
 /**
- * M23 P5.6C — the compliance domain's audit projections.
+ * The compliance domain's audit projections.
  *
  * Two audiences, two projections:
  *   - the AGENCY audit feed (`/org/audit`, `/org/agent/agency/audit`): what
@@ -9,7 +9,7 @@
  *   - the TRUST & SAFETY audit (`/ts/compliance/audit`): every authoritative
  *     compliance decision WITH the reviewer's identity, role, reason code,
  *     evidence references, policy versions, prior and resulting state, and
- *     the record's rev at decision time. This is the G-C0 record.
+ *     the record's rev at decision time.
  */
 
 export const COMPLIANCE_AUDIT_ACTIONS = new Set([
@@ -40,10 +40,7 @@ const actorOf = (h) => {
   return { userId: null, name: by.kind };
 };
 
-/**
- * Agency-facing rows, newest first. S11b-2: read through the compliance records repository (`complianceReads`); a
- * revocation is recorded once, on its consent.
- */
+/** Agency-facing rows, newest first. A revocation is recorded once, on its consent. */
 export function complianceAuditRows(reads, org) {
   const rows = [];
   for (const c of reads.contexts.forAgency(org.id)) {
@@ -68,7 +65,7 @@ export function complianceAuditRows(reads, org) {
   return rows;
 }
 
-/** The Trust & Safety decision record, newest `limit` entries: attributed, complete, minimal PII (SQL-limited, S11b-2). */
+/** The Trust & Safety decision record, newest `limit` entries: attributed, complete, minimal PII. */
 export function reviewerDecisionRows(reads, limit = 200) {
   return reads.reviews.decisionEntries(limit).map(({ review: r, entry: h }) => {
     const d = h.detail ?? {};

@@ -1,9 +1,9 @@
-// M23 P6 LIVE — the canonical Offer, driven through the real Pro workspace,
+// Live: the canonical Offer, driven through the real Pro workspace,
 // the real player app, the real agent app and the guardian screen against a
 // real server.
 //
 //   A  CLUB ISSUES     lead opens a room for Kola (adult) → the case reaches
-//                      Offer consideration through P5 → the Offer tab shows
+//                      Offer consideration through the decision → the Offer tab shows
 //                      no Offer and says drafting is possible → a DRAFT is
 //                      opened and edited (terms, expiry, message, an internal
 //                      note sentinel) → issued behind an explicit confirmation
@@ -177,7 +177,7 @@ async function openRoomFor(page, playerName) {
   if (!/^case-/.test(id)) fail(`could not read the room id from the deep link (${hash})`);
   return id;
 }
-// M24B — the Room is category → subcategory; the helper opens the category that holds the page, then the page.
+// The Room is category → subcategory; the helper opens the category that holds the page, then the page.
 const tab = async (page, name) => { await roomTab(page, name); };
 const ow = (page) => page.locator('[data-testid="offer-workflow"]');
 const headerStatus = async (page) => (await page.locator('[aria-label="Room header"] .badges').innerText());
@@ -314,11 +314,11 @@ await offerTab(lead.page, ROOM_A);
 const ctxKola = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
 const kola = await enterPlayer(ctxKola, 'Kola Adeyemi', 'kola', 'text=Your visibility right now');
 {
-  await playerCategory(kola, 'offer'); // M24B — Offer › Offer
+  await playerCategory(kola, 'offer'); // Offer › Offer
   const sec = kola.locator('[data-testid="offer-section"]');
   await sec.waitFor({ timeout: 20000 });
   ok(await waitIn(sec, /Offers/i), 'B1: Kola\'s Opportunities carries the Offers section at 390px');
-  await sec.locator('[data-testid^="offer-terms-"]').first().click().catch(() => {}); // M24F.4 — conditions, the club's message and the documents sit behind "View terms"
+  await sec.locator('[data-testid^="offer-terms-"]').first().click().catch(() => {}); // conditions, the club's message and the documents sit behind "View terms"
   const txt = await sec.innerText();
   ok(/Eastport FC/.test(txt) && /Awaiting your answer/.test(txt) && /Revision 1/.test(txt) && /Central midfielder/.test(txt) && /Under-23s/.test(txt) && /1 Jul 2027|2027-07-01/.test(txt) && /Expires/.test(txt), 'B2: the exact revision: club, revision 1, terms, expiry');
   ok(txt.includes(S_MSG), 'B2b: the club\'s message reaches the player');
@@ -402,7 +402,7 @@ const ana = await enterAgent(ctxAna, 'Ana Agent', 'Agent', 'ana');
   ok(await waitText(ana, /No Offer has been shared with you by this client/), 'E1: Ana\'s Offers tab for Kola shows nothing — the issued Offer was not shared');
   neg(!(await bodyText(ana)).includes('Central midfielder'), 'E1b: no term leaks before the share');
   // Kola shares from his app.
-  await playerCategory(kola, 'offer', 'Response'); // M24B — sharing with the agent lives under Offer › Response
+  await playerCategory(kola, 'offer', 'Response'); // sharing with the agent lives under Offer › Response
   const sec = kola.locator('[data-testid="offer-section"]');
   await sec.waitFor({ timeout: 15000 });
   const offerId = (await j('GET', '/player/offers', undefined, KOLA)).body.items[0].id;
@@ -431,14 +431,14 @@ const ana = await enterAgent(ctxAna, 'Ana Agent', 'Agent', 'ana');
   ok((await avail.getAttribute('data-possible')) === '0' && /under the age of majority/i.test(await avail.innerText()), 'F1: for a minor the readiness names the closed pathway before anyone tries');
   ok(await ow(lead.page).locator('[data-testid="offer-issue"]').isDisabled(), 'F1b: the Issue button is disabled');
   const s = (await j('GET', `/org/rooms/${ROOM_G}/offers`, undefined, LEAD)).body;
-  // Complete the draft through the API (content is validated before the recipient, §50), then force the issue.
+  // Complete the draft through the API (content is validated before the recipient), then force the issue.
   const completed = await j('PATCH', `/org/offers/${s.offers[0].id}/draft`, { terms: { role: 'Winger', startDate: '2027-07-01' }, expiresAt: Date.now() + 5 * DAY, expectedRev: s.offers[0].rev }, LEAD);
   expect(await j('POST', `/org/offers/${s.offers[0].id}/issue`, { expectedRev: completed.body.offer.rev, clientKey: 'live-g' }, LEAD), 422, 'OFFER_RECIPIENT_INVALID', 'F1c: and forcing the request gets the same answer — visibility of a button is not authorization');
   const ctxAmara = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
   const amara = await enterPlayer(ctxAmara, 'Amara Adebayo', 'amara', 'text=Guardian');
   const gsec = amara.locator('[data-testid="offer-section"]');
   await gsec.waitFor({ timeout: 20000 });
-  await gsec.locator('[data-testid="about-offers"]').first().click().catch(() => {}); // M24F.3 — the guardian wording sits behind About offers
+  await gsec.locator('[data-testid="about-offers"]').first().click().catch(() => {}); // the guardian wording sits behind About offers
   ok(await waitIn(gsec, /Offers addressed to you as the guardian/), 'F2: Amara\'s guardian screen carries the Offers section with the guardian wording');
   const txt = await gsec.innerText();
   neg(/No Offers right now/.test(txt) && !/Winger|Central midfielder|Eastport FC/.test(txt), 'F2b: and lists no Offer — none was issued to a minor');

@@ -1,4 +1,4 @@
-// M23 P7.1 LIVE — signing hardening driven through the real Pro workspace,
+// Live: signing hardening driven through the real Pro workspace,
 // the real player app and the real agent app against a real server. The
 // exhaustive invariants live in scoutbox-server/e2e/recruitment/signingsAdversarial.mjs;
 // this suite proves that what the interfaces show and do follows them.
@@ -161,7 +161,7 @@ async function enterClub(ctx, org, name, role, who) {
   if (!token) fail(`${name}: the client stored no session token after login`);
   return { page, token };
 }
-// M24B — the Room is category → subcategory; the helper opens the category that holds the page, then the page.
+// The Room is category → subcategory; the helper opens the category that holds the page, then the page.
 const tab = async (page, name) => { await roomTab(page, name); };
 const sw = (page) => page.locator('[data-testid="signing-workflow"]');
 const headerStatus = async (page) => (await page.locator('[aria-label="Room header"] .badges').innerText());
@@ -350,7 +350,7 @@ const kola = await enterPlayer(ctxKola, 'Kola Adeyemi', 'kola', 'text=Your visib
   const room = await j('GET', `/org/rooms/${ROOM_C}/signing`, undefined, LEAD);
   ok(room.body.livePackageId === null && room.body.requirements.startBlockers.length === 0, 'D0: the expired package is not live: a new one may be opened over the same accepted Offer');
   const PD = await presentedHttp(OFFER_C, LEAD);
-  await playerCategory(kola, 'signing'); // M24B — Signing › Signing
+  await playerCategory(kola, 'signing'); // Signing › Signing
   const sec = kola.locator('[data-testid="signing-section"]');
   await sec.waitFor({ timeout: 20000 });
   ok(await waitIn(sec, /Presented — awaiting signatures/), 'D1: Kola\'s section shows the newly presented revision');
@@ -394,7 +394,7 @@ const ctxAna = await browser.newContext({ viewport: { width: 1280, height: 800 }
 const ana = await enterAgent(ctxAna, 'Ana Agent', 'Agent', 'ana');
 {
   ok((await j('POST', `/player/offers/${OFFER_C}/share-agent`, { share: true }, KOLA)).status === 200, 'F1: Kola shares the Offer with Ana (HTTP)');
-  await go(ana, `#/clients/${REL}/transaction/signings`); // M24B — Transaction › Signing
+  await go(ana, `#/clients/${REL}/transaction/signings`); // Transaction › Signing
   await ana.locator(`[data-testid="offer-signing-${OFFER_C}"]`).waitFor({ timeout: 15000 });
   const line = ana.locator(`[data-testid="offer-signing-${OFFER_C}"]`);
   ok(/Presented for signature|Signing in progress/.test(await line.innerText()) && /Signing revision 2/.test(await line.innerText()) && (await line.locator('button').count()) === 0, 'F2: Ana reads the live package\'s state and revision, no control');

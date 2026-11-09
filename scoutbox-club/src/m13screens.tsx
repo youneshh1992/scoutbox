@@ -1,7 +1,7 @@
 import { RecordFacts, DetailItems, sentenceCase } from './RecordDetails';
 import { ProNetworkMap } from './proExperience';
 import { ProChart } from './proDesign';
-// M13 org screens: Imports & Integrations, Coverage, Calibration, Scouting
+// Org screens: Imports & Integrations, Coverage, Calibration, Scouting
 // Insight (exposure + review queue + evidence gaps), Club Network (groups +
 // transition packs), Deal Budgets and
 // Organisation (onboarding, MFA, SSO, sessions, support, delivery).
@@ -38,7 +38,7 @@ function useAsync<T>(fn: () => Promise<T>, deps: unknown[]): [T | null, () => vo
 const money = (minor: number, cur: string) => `${cur === 'GBP' ? '£' : cur === 'EUR' ? '€' : cur === 'USD' ? '$' : `${cur} `}${(minor / 100).toLocaleString(undefined, { minimumFractionDigits: 2 })}`;
 const verdictPill = (v: string) => (v === 'compatible' || v === 'delivered' || v === 'aligned' ? 'green' : v === 'conflict' || v === 'high' || v === 'failed' ? 'red' : '');
 
-// ================================================ F1 Imports & Integrations
+// ================================================ Imports & Integrations
 export function ImportsScreen({ session, notify }: ScreenProps) {
   const [csv, setCsv] = useState('');
   const [importTab,setImportTab] = useState('imports');
@@ -141,7 +141,7 @@ export function ImportsScreen({ session, notify }: ScreenProps) {
   );
 }
 
-// ======================================================== F7 Coverage
+// ======================================================== Coverage
 export function CoverageScreen({ session, notify }: ScreenProps) {
   const [fixtures, reloadFx] = useAsync(() => m13.listFixtures(session), [session]);
   const [plans, reloadPlans] = useAsync(() => m13.listPlans(session), [session]);
@@ -222,7 +222,7 @@ export function CoverageScreen({ session, notify }: ScreenProps) {
   );
 }
 
-// ======================================================== F5 Calibration
+// ======================================================== Calibration
 export function CalibrationScreen({ session, notify }: ScreenProps) {
   const [list, reloadList] = useAsync(() => m13.listCalibrations(session), [session]);
   const [openId, setOpenId] = useState<string | null>(null);
@@ -300,7 +300,7 @@ export function CalibrationScreen({ session, notify }: ScreenProps) {
   );
 }
 
-// ============================================ F4+F6 Scouting Insight
+// ============================================ Scouting Insight
 export function InsightScreen({ session, notify, openPlayer }: ScreenProps) {
   const [report] = useAsync(() => m13.exposureReport(session).catch(() => null), [session]);
   const [queue, reloadQueue] = useAsync(() => m13.reviewQueue(session), [session]);
@@ -371,7 +371,7 @@ export function InsightScreen({ session, notify, openPlayer }: ScreenProps) {
   );
 }
 
-// ======================================== F8+F2 Club network
+// ======================================== Club network
 export function NetworkScreen({ session, notify }: ScreenProps) {
   const [groups, reloadGroups] = useAsync(() => m13.listGroups(session), [session]);
   const [grants, reloadGrantList] = useAsync(() => m13.listGrants(session), [session]);
@@ -478,7 +478,7 @@ export function NetworkScreen({ session, notify }: ScreenProps) {
   );
 }
 
-// ======================================================== F9 Budgets
+// ======================================================== Budgets
 export function BudgetsScreen({ session, notify }: ScreenProps) {
   const [cases] = useAsync<CaseRec[]>(() => m12.listCases(session).then((r) => (Array.isArray(r) ? r : (r as { items: CaseRec[] }).items)), [session]);
   const [caseId, setCaseId] = useState('');
@@ -534,8 +534,8 @@ export function BudgetsScreen({ session, notify }: ScreenProps) {
   );
 }
 
-// ==================================================== F12+F11 Organisation
-/** M24F.5 — a settings section as one row: its name and a short state; the controls are one tap deeper. */
+// ==================================================== Organisation
+/** A settings section as one row: its name and a short state; the controls are one tap deeper. */
 function SettingsRow({ id, title, value, children }: { id: string; title: string; value?: string; children: ReactNode }) {
   return (
     <details className="settings-row" data-testid={`org-row-${id}`}>

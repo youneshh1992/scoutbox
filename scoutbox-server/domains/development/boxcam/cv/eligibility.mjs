@@ -1,14 +1,11 @@
-// M22 — the capability separation (§27, §28, §30, §58, §59).
+// The capability separation.
 //
 // THE ONE IDEA THIS FILE EXISTS FOR
 //
-// Before this phase, `production_cv` had no capabilities, so nothing could be
-// measured with it and the Combine blocker was enforced by absence. That is a
-// weak kind of safety: it holds only while the provider does nothing.
-//
-// Now the provider genuinely observes. So the blocker has to be enforced by
-// STRUCTURE rather than by emptiness, and the structure is this: a provider
-// has TWO capability lists, and they are never the same object.
+// The Combine blocker is enforced by STRUCTURE rather than by emptiness: the
+// provider genuinely observes, so an empty capability list would be a weak
+// kind of safety that holds only while the provider does nothing. Instead a
+// provider has TWO capability lists, and they are never the same object.
 //
 //   observationCapabilities()  what the engine can actually see. Drives Box
 //                              Cam observed. Real, and honest about it.
@@ -18,13 +15,13 @@
 //                              through the real-world validation record, per
 //                              protocol. Currently empty for every protocol.
 //
-// `measurementSupported()` in m16/combineShared.mjs is set containment over
+// `measurementSupported()` in boxcam/combineShared.mjs is set containment over
 // whichever list it is handed. Hand it the observation list and a synthetic
 // success mints Combine Verified. Hand it the combine list and it cannot,
 // because the list is empty until a versioned real-world validation record
 // exists for that specific protocol at this engine and policy version.
 //
-// So the governing rule of the phase —
+// So the governing rule —
 //
 //   "The transport may deliver evidence to the engine. It may never grant the
 //    engine permission to claim more than the evidence justifies."
@@ -45,16 +42,17 @@ import { CV_ENGINE_VERSION, BOX_CAM_CV_POLICY_VERSION, CANDIDATE_PROTOCOLS } fro
 import { realWorldValidationPass, REAL_WORLD_VALIDATION } from './validation.mjs';
 
 /**
- * What the v2 engine genuinely observes, in M16 capability vocabulary.
+ * What the v2 engine genuinely observes, in the Box Cam capability vocabulary.
  *
- * Each entry is a claim this repository can defend with a measurement:
+ * Each entry is a claim this repository can defend with a measurement (the
+ * recorded synthetic evaluation: cv/evaluation.json, cv/holdout.json):
  *
- *   player_presence   detect.mjs finds a person region      (39/39 families)
- *   ball_presence     detect.mjs finds a ball blob           (39/39 families)
+ *   player_presence   detect.mjs finds a person region
+ *   ball_presence     detect.mjs finds a ball blob
  *   active_motion     tracking produces player-relative motion
  *   active_duration   server-owned timeline over usable samples
- *   rep_count         protocol.mjs contact state machine     (0 false touches
- *                     across 56 adversarial scenes, 3 holdout generations)
+ *   rep_count         protocol.mjs contact state machine (no false touches
+ *                     across the adversarial scenes and holdout generations)
  *
  * Deliberately absent, because the engine cannot do them and a claim here
  * would flow straight into a product surface:
@@ -95,19 +93,19 @@ export function combineCapabilities(protocolId, {
   policyVersion = BOX_CAM_CV_POLICY_VERSION,
 } = {}) {
   const verdict = realWorldValidationPass(protocolId, { table, engineVersion, policyVersion });
-  // DEFENSIVE, AND NOT PARANOIA — this exact line was wrong once.
+  // DEFENSIVE, AND NOT PARANOIA.
   //
   // `realWorldValidationPass()` returns an OBJECT, `{ pass, status, problems }`,
-  // which is always truthy. The first cut of this function read it as a
-  // boolean, so `if (!verdict) return []` never fired and every protocol came
-  // back Combine-eligible: the single most important gate in ScoutBox, open,
-  // from a truthiness mistake that reviews well.
+  // which is always truthy. Read as a boolean, `if (!verdict) return []` would
+  // never fire and every protocol would come back Combine-eligible: the single
+  // most important gate in ScoutBox, open, from a truthiness mistake that
+  // reviews well.
   //
   // So the test is not "is it truthy" but "is it EXACTLY the boolean true".
   // Anything else — an object, a string, undefined, a future refactor that
-  // changes the return shape again — denies. The failure mode of this
-  // function must be closed, and `=== true` is what makes the closed
-  // direction the default rather than the exception.
+  // changes the return shape — denies. The failure mode of this function must
+  // be closed, and `=== true` is what makes the closed direction the default
+  // rather than the exception.
   if (verdict?.pass !== true) return [];
   const candidate = CANDIDATE_PROTOCOLS[protocolId];
   if (!candidate) return [];
@@ -167,12 +165,11 @@ export function combineVerifiedProtocols(opts = {}) {
 }
 
 // =========================================================================
-// §30 — Box Cam observed eligibility, evaluated INDEPENDENTLY
+// Box Cam observed eligibility, evaluated INDEPENDENTLY
 // =========================================================================
 //
 // Box Cam observed and Combine Verified are different claims with different
-// evidence bars, and collapsing them is the mistake this whole phase guards
-// against.
+// evidence bars, and collapsing them is the mistake this file guards against.
 //
 //   Box Cam observed  "this activity was genuinely observed happening"
 //   Combine Verified  "this is a standardised, comparable measurement"
@@ -180,8 +177,8 @@ export function combineVerifiedProtocols(opts = {}) {
 // The first is a statement about an event. The second is a statement about a
 // NUMBER, and a number invites comparison between players, which is what
 // makes it need real-world validation. Observation needs the activity to have
-// been seen; it does not need the count to be exact, and M16 semantics never
-// required an exact count for a Box Cam session.
+// been seen; it does not need the count to be exact, and a Box Cam session
+// never required an exact count.
 
 export const BOX_CAM_OBSERVED_REQUIREMENTS = Object.freeze([
   'provider_ready',
@@ -198,7 +195,7 @@ export const BOX_CAM_OBSERVED_REQUIREMENTS = Object.freeze([
 /**
  * Decide Box Cam observed for one finalized provider result.
  *
- * Deliberately does NOT require an exact count: per §30, M16 semantics never
+ * Deliberately does NOT require an exact count: a Box Cam session never
  * did, and requiring one here would silently import the Combine evidence bar
  * into a claim that does not need it — which would look conservative and
  * would in fact be a category error.

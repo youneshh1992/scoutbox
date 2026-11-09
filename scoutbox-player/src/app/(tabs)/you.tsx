@@ -1,13 +1,12 @@
 import { GuidanceNote } from '../../components/InformationRows';
 import { PolicyList } from '../../components/InformationRows';
-// You — M24F.2. Three page tabs (Profile, Account, Clubs), each a page that
-// fits a phone. Profile is the M24F.1 composition. Account is a short list
+// You. Three page tabs (Profile, Account, Clubs), each a page that
+// fits a phone. Account is a short list
 // of categories — Profile, Privacy, Preferences — with Switch
 // account and Sign out beneath it; a category opens its own settings, and
 // `?section=` deep-links it. Clubs is four categories — Current, Requests,
-// Development, History — on the same `?section=` parameter. Nothing the
-// old pages held is gone: it is grouped, and a row stands on its own
-// label; supporting copy is the exception.
+// Development, History — on the same `?section=` parameter. A row
+// stands on its own label; supporting copy is the exception.
 import { useEffect, useState } from 'react';
 import { Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { Text, TextInput } from '../../components/Text';
@@ -44,7 +43,7 @@ export default function You() {
   ];
   const [tab, setTabState] = useState(() => pickTab(TABS, params.tab));
   useEffect(() => { if (params.tab) setTabState(pickTab(TABS, params.tab)); }, [params.tab]); // eslint-disable-line react-hooks/exhaustive-deps
-  // M24F.2 — a tab or category change is a history entry on the web (the router's own navigation to the
+  // A tab or category change is a history entry on the web (the router's own navigation to the
   // same tab screen only replaces the entry), so the browser's back and forward move between them.
   const remember = (tabKey: string, sec: string) => {
     if (Platform.OS !== 'web' || typeof window === 'undefined' || !window.history?.pushState) return;
@@ -126,7 +125,7 @@ export default function You() {
             <ListRow label={pt('accPrivacy')} icon="shield-check" onPress={() => go('privacy')} testID="account-cat-privacy" />
             <ListRow label={pt('accPreferences')} icon="settings-2" onPress={() => go('preferences')} testID="account-cat-preferences" />
 
-            {/* M24E — the way out: Sign out ends this identity's session on the server and on the device; Switch account does the same and opens the entry screen on Sign in. */}
+            {/* The way out: Sign out ends this identity's session on the server and on the device; Switch account does the same and opens the entry screen on Sign in. */}
             <View style={{ marginTop: 26 }}>
               <ListRow label="Switch account" icon="users" testID="switch-account" onPress={() => { logout(); router.replace('/onboarding?mode=signin'); }} />
               <ListRow label="Sign out" icon="log-out" testID="sign-out" onPress={() => { logout(); router.replace('/onboarding'); }} />

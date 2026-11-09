@@ -1,4 +1,4 @@
-// M23 P3 acceptance suite — the Contact workflow.
+// Acceptance suite — the Contact workflow.
 //
 // The governing principle this suite exists to enforce:
 //
@@ -46,10 +46,10 @@ import { RATE_LIMIT_POLICY } from '../../domains/platform/rateLimit.mjs';
 import { DATA_MIGRATIONS, TABLE_BACKED } from '../../repositories/index.mjs';
 import { roomCan } from '../../domains/recruitment/rooms/shared.mjs';
 import { pickPort } from '../../scripts/testPort.mjs';
-import { buildRecruitmentJourney, createEvidenceProvider } from '../../scripts/recruitmentReadsFixture.mjs'; // §4.3 step 2: the contacts/offers queries over the plain arrays
-const LATEST_SCHEMA = Number(DATA_MIGRATIONS.map((m) => m.id).sort().at(-1).slice(0, 4)); // S14a: the latest table migration's number
+import { buildRecruitmentJourney, createEvidenceProvider } from '../../scripts/recruitmentReadsFixture.mjs'; // the contacts/offers queries over plain arrays
+const LATEST_SCHEMA = Number(DATA_MIGRATIONS.map((m) => m.id).sort().at(-1).slice(0, 4)); // the latest table migration's number
 
-const PORT = pickPort(5900, 200, [0]); // TH-6: never a fetch-blocked port
+const PORT = pickPort(5900, 200, [0]); // never a fetch-blocked port
 const BASE = `http://localhost:${PORT}`;
 const DATA_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-m23c-'));
 const SERVER = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'server.mjs');
@@ -115,7 +115,7 @@ section('U — the Contact state machine is total, closed and null-prototype');
   neg(inversions === 0, 'the role ladder is monotone — no lower role may do what a higher one may not');
   neg(!canContactAction({ status: 'draft' }, 'send', { role: 'contributor' }).ok
     && canContactAction({ status: 'draft' }, 'send', { role: 'contributor' }).error === 'CONTACT_NOT_PERMITTED',
-  'a contributor cannot send — an outward act with a person on the other end sits with the room lead (contract §6)');
+  'a contributor cannot send — an outward act with a person on the other end sits with the room lead');
   neg(!canContactAction({ status: 'draft' }, 'send', { role: 'viewer' }).ok, 'nor can a viewer');
   ok(canContactAction({ status: 'draft' }, 'send', { role: 'room_lead' }).ok, 'a room lead can');
   neg(canContactAction({ status: 'delivered' }, 'send', { role: 'room_lead' }).error === 'CONTACT_ALREADY_SENT',
@@ -277,10 +277,10 @@ section('V — a draft is not evidence; the journey carries milestones, never wo
   ok(v2.ok === true && v2.to === 'contacted', 'and permits it once a contact was delivered');
 
   // Journey.
-  // §4.3 step 2 (rewritten: these described the old storage): the contacts are read through SQL, not a db collection.
+  // The contacts are read through SQL.
   const noContacts = buildRecruitmentJourney({ recruitmentCases: [], roomDecisions: [], requests: [], trials: [], assessments: [], signings: [] }, 'k', { kind: 'org_staff', orgId: 'o1' });
   ok(noContacts.ok === false && noContacts.error === 'JOURNEY_STORE_MISSING' && noContacts.missing.includes('recruitmentContacts'), 'the journey requires the contacts: without their queries it reports the store missing');
-  ok(TABLE_BACKED.includes('recruitmentContacts'), 'and they are a table since 0017, read through SQL'); // rewritten in S14a: it read the store contract
+  ok(TABLE_BACKED.includes('recruitmentContacts'), 'and they are a table since 0017, read through SQL');
   const db = {
     recruitmentCases: [{ ...kase, room: { status: 'contacted', rev: 2 }, history: [{ action: 'room_status_changed', at: 10, by: { name: 'A' }, detail: { from: 'contact_planned', to: 'contacted' } }] }],
     roomDecisions: [], requests: [{ id: 'r1', orgId: 'o1', playerId: 'p1', type: 'contact', status: 'accepted', routedTo: 'player', createdAt: 10, contactId: 'cA', message: `${SENTINEL} shared body` }],
@@ -331,7 +331,6 @@ section('V — registry, limits and schema');
   neg(!EVENT_REGISTRY.contact_created.notificationEligible, 'a draft can never become a notification');
   for (const a of ['contact_draft', 'contact_send', 'contact_external_record', 'contact_response']) ok(RATE_LIMIT_POLICY[a]?.max > 0, `rate-limit policy ${a} exists (${RATE_LIMIT_POLICY[a].max}/window)`);
   ok(RATE_LIMIT_POLICY.contact_response.scope === 'actor', 'the response limit is per actor, so a club cannot exhaust a recipient\'s quota');
-  // Rewritten in S14a: the blob's 2303 step and runMigrations described the old storage; the in-memory upgrade cases are gone.
   ok(DATA_MIGRATIONS.length === LATEST_SCHEMA && DATA_MIGRATIONS.some((m) => m.id === '0017_recruitment_contacts_offers'), 'the current schema: table migration 0017 creates the contacts (later steps may add migrations, never remove this one)');
   for (const code of Object.keys(M23_ERROR_HTTP).filter((c) => c.startsWith('CONTACT_'))) {
     ok([400, 403, 404, 409, 422, 429, 500].includes(httpStatusFor(code)), `${code} → ${httpStatusFor(code)}`);
@@ -416,7 +415,7 @@ const J = {};
   ok(await stage(J.RID) === 'contact_planned', 'J1 the case is at contact_planned');
   const inboxBefore = (await j('GET', '/player/inbox', undefined, kola.token)).body.items;
   const notifsBefore = (await j('GET', '/player/notifications', undefined, kola.token)).body;
-  const outboxBefore = (await j('GET', '/admin/overview', undefined, undefined, ADMIN)).body.emailsSent; // S14d: the outbox pages; its size is the overview's count
+  const outboxBefore = (await j('GET', '/admin/overview', undefined, undefined, ADMIN)).body.emailsSent; // the outbox pages; its size is the overview's count
 
   // Internal notes go in BEFORE anything is sent, so every recipient-facing
   // payload from here on is a leak test.
@@ -506,7 +505,7 @@ const J = {};
   const histNow = await historyLen(J.RID);
   const ext = await j('POST', `/org/rooms/${J.RID}/contacts/external`, { channel: 'phone', occurredAt: Date.now() - 600_000, summary: 'Phoned to confirm the call time.', recipientType: 'player', clientKey: 'J-ext' }, maria.token);
   ok(ext.status === 201 && ext.body.contact.status === 'recorded' && ext.body.contact.channel === 'phone', 'J16 a phone call is recorded as an external contact (201, recorded)');
-  ok(ext.body.case?.unchanged === true && await historyLen(J.RID) === histNow, 'J16b the case was already contacted: no second transition, no second history entry (contract §8)');
+  ok(ext.body.case?.unchanged === true && await historyLen(J.RID) === histNow, 'J16b the case was already contacted: no second transition, no second history entry');
   ok(ext.body.contact.recordedBy?.name === 'Maria Keane' && typeof ext.body.contact.occurredAt === 'number', 'J16c attributed to the named person, with the time they say it happened');
   neg((await j('GET', '/player/inbox', undefined, kola.token)).body.items.filter((r) => r.type === 'contact').length === 1, 'J16d it created nothing in the player\'s Inbox — a recorded contact has no recipient object');
   J.EXT = ext.body.contact.id;
@@ -579,7 +578,7 @@ section('M — the minor journey: guardian route, no direct contact, missing gua
   const guniInboxBefore = (await j('GET', '/player/inbox', undefined, guni.token)).body.items;
   const sent = await j('POST', `/org/rooms/${RID}/contacts/${draft.body.contact.id}/send`, { expectedRev: draft.body.contact.rev, clientKey: 'M-send' }, maria.token);
   ok(sent.status === 200 && sent.body.contact.recipient?.type === 'guardian' && sent.body.contact.recipient.minor === true, 'M3 send resolves the guardian as the recipient');
-  ok(sent.body.case?.to === 'contacted', 'M3b a guardian-routed delivery satisfies contact_delivered (contract §5)');
+  ok(sent.body.case?.to === 'contacted', 'M3b a guardian-routed delivery satisfies contact_delivered');
   const gInbox = (await j('GET', '/guardian/inbox', undefined, amara.token)).body.items;
   const gReq = gInbox.find((r) => r.type === 'contact' && r.subject === 'About Guni');
   ok(!!gReq && gReq.routedTo === 'guardian' && gReq.playerName === 'Guni Adebayo', 'M4 the guardian\'s Inbox holds it, naming the child and the club');
@@ -679,7 +678,7 @@ section('R — roles are decided now, from the database');
   // Downgrade between compose and send. The room is MARIA's: the drifter is
   // neither its owner nor its lead scout, so their standing in it comes from
   // the organisation tier alone — which is what a demotion changes. (A person
-  // who opened a room is its room lead by M17's rule whatever their tier;
+  // who opened a room is its room lead whatever their tier;
   // that is reassignment, tested below, not demotion.)
   const drifter = await login('org-eastport', 'Drift Lead', 'Head of Recruitment');
   const RID = await planned(maria.token, 'pl-mensah');
@@ -846,7 +845,7 @@ section('F — honest transport failure and resend');
   ok(again.status === 200 && again.body.delivered === true && again.body.contact.status === 'delivered' && again.body.contact.attempts === 2, 'F5 an explicit resend is a new attempt on the SAME Contact: delivered, attempts 2');
   ok(again.body.contact.history.map((h) => h.action).join(',') === 'contact_created,contact_send_failed,contact_sent', 'F5b history keeps both attempts in order');
   ok(await stage(RID) === 'contacted' && (await j('GET', '/player/inbox', undefined, theo.token)).body.items.length === 1, 'F5c now the case moves and the player has exactly one message');
-  const everyMail = []; // S14d: the outbox pages; read every page
+  const everyMail = []; // the outbox pages; read every page
   for (let page = { nextCursor: '' }; page.nextCursor !== null;) { page = (await j('GET', `/admin/outbox?limit=100${page.nextCursor ? `&cursor=${page.nextCursor}` : ''}`, undefined, undefined, ADMIN)).body; everyMail.push(...page.items); }
   neg(everyMail.length > 0 && everyMail.every((m) => !String(m.text ?? '').includes('Goalkeeping')), 'F6 no outbox record ever carries the message body');
 }
@@ -897,9 +896,9 @@ section('X — content at the HTTP boundary');
 }
 
 // ==================================================================== Y
-// M23 P5.6E — the routing MODE at the HTTP boundary. The agent-side behaviour
-// (who is routed, what they then see, and the re-authorization at send time)
-// belongs to `m23AgentIntegrationE2E`, which has an agent and a confirmed
+// The routing MODE at the HTTP boundary. The agent-side behaviour (who is
+// routed, what they then see, and the re-authorization at send time) belongs
+// to e2e/agents/crossApp.mjs, which has an agent and a confirmed
 // relationship to work with. What belongs HERE is the part that is Contact's own:
 // the vocabulary, the refusal, and that a club with no agent in the picture is
 // unaffected.
@@ -1012,7 +1011,7 @@ section('E — every refusal, swept at once; the contract');
   const strays = [];
   for (const { label, body } of ERROR_BODIES) {
     if (!String(body?.error ?? '').startsWith('CONTACT_')) continue;
-    if (body.error === 'CONTACT_VERSION_CONFLICT') continue; // M18.1's shared conflict body
+    if (body.error === 'CONTACT_VERSION_CONFLICT') continue; // the shared version-conflict body
     for (const k of Object.keys(body ?? {})) if (!ALLOWED.has(k)) strays.push(`${label}.${k}`);
   }
   for (const s of strays) console.error(`   stray: ${s}`);

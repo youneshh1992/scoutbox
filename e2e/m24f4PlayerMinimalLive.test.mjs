@@ -1,4 +1,4 @@
-// M24F.4 — the Player's roots in a real browser, on the demo bundle, at
+// The Player's roots in a real browser, on the demo bundle, at
 // 320 / 360 / 390 / 430 and 640×360 (landscape): Home, Activity (collapsed on
 // Home, the full page behind "View all activity"), Passport, Development,
 // Box Cam, Combine, Evidence, Explore, Opportunity, Offer, Messages.
@@ -148,7 +148,7 @@ for (const [w, h] of [[320, 690], [360, 780], [390, 844], [430, 932], [640, 360]
     const m = await measure(page); check(tag, 'Offer', m, 110);
     const sec = page.locator('[data-testid="offer-section"]');
     const t0 = await txt(sec);
-    // M24F.5 — the status is its own line (no "Status" fact label); it carries the accessible label "Status: …".
+    // The status is its own line (no "Status" fact label); it carries the accessible label "Status: …".
     const hasStatus = (await sec.locator('[aria-label^="Status:"]').count()) >= 1;
     ok(/Eastport FC/.test(t0) && hasStatus && /Accept/.test(t0) && /Decline/.test(t0) && /View terms/.test(t0), `${tag} Offer: club, status, Accept / Decline, "View terms"`);
     ok(/Offer acceptance is not a signature\./.test(t0), `${tag} Offer: the one quiet line`);

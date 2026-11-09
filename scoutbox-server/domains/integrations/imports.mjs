@@ -1,4 +1,4 @@
-// F1 — Imports, integrations, portable player identity.
+// Imports, integrations, portable player identity (repositories/integrations.mjs).
 // Design decisions that are safety features, not gaps:
 //  * Bulk import creates ORG-PRIVATE prospect records, never platform player
 //    accounts. A CSV can therefore never mint a discoverable minor.
@@ -6,10 +6,6 @@
 //    it queues an identity review for a human with the right permissions.
 //  * Outgoing webhooks are signed, tenant-scoped, retried with bounds, and
 //    SSRF-guarded. Connectors report "not configured" until credentialed.
-//
-// S13a: every record here is a row of the integrations repository (repositories/integrations.mjs, migration 0034),
-// written by explicit operations; a route that writes several rows (a commit's prospects, reviews and webhook
-// deliveries) does so in one unit of work. Reads go through SQL (`integrationReads`).
 import crypto from 'node:crypto';
 import { parseDobStrict } from '../../temporal.mjs';
 import { readPage, sendPageError } from '../platform/paging.mjs';
@@ -75,7 +71,6 @@ export function registerImports(ctx) {
       if (field) colFor[field] = i;
     });
     const missingCols = ['name', 'provider', 'externalId'].filter((f) => colFor[f] === undefined);
-    // S14h: the two identity lookups are indexed queries (provider and external id; date of birth, then the name).
     const results = [];
     const seenInBatch = new Set();
     for (let r = 0; r < dataRows.length; r++) {
@@ -85,13 +80,13 @@ export function registerImports(ctx) {
       for (const f of PROSPECT_FIELDS) {
         if (colFor[f] === undefined) continue;
         rec[f] = String(raw[colFor[f]] ?? '').trim();
-        // S13a: a cell longer than the field holds is a row error (kept cut to the limit), never stored whole.
+        // A cell longer than the field holds is a row error (kept cut to the limit), never stored whole.
         if (rec[f].length > L.record[f]) { errors.push(`${f} exceeds ${L.record[f]} characters`); rec[f] = rec[f].slice(0, L.record[f]); }
       }
       if (!rec.name) errors.push('name is required');
       if (!rec.provider || !rec.externalId) errors.push('provider and externalId are required — identity is never name-only');
-      // M23 P5.7: the platform DOB rule (shape, a day that exists, not in the
-      // future), then the import's own floor. A 30 February used to pass the shape check.
+      // The platform DOB rule (shape, a day that exists, not in the future),
+      // then the import's own floor.
       if (rec.dob) {
         const d = parseDobStrict(rec.dob, Date.now());
         if (!d.ok) errors.push(d.why === 'wrong shape' || d.why === 'not text' ? 'dob must be YYYY-MM-DD' : `dob out of range (${d.why})`);
@@ -140,7 +135,7 @@ export function registerImports(ctx) {
     if (rows.length > L.rows + 1) return res.status(400).json({ error: 'CSV_TOO_LARGE', message: `Max ${L.rows} rows per batch.` });
     const header = rows[0];
     if (header.length > L.columns || header.some((h) => h.length > L.header)) return fieldInvalid(res, 'csv', `The header row holds at most ${L.columns} column names of at most ${L.header} characters each.`);
-    // S13a: the mapping is refused rather than ignored where it does not say something the import can do.
+    // The mapping is refused rather than ignored where it does not say something the import can do.
     if (mapping !== undefined && mapping !== null) {
       if (!isObject(mapping)) return fieldInvalid(res, 'mapping', 'mapping is an object from CSV column name to prospect field.');
       for (const [col, field] of Object.entries(mapping)) {
@@ -205,7 +200,7 @@ export function registerImports(ctx) {
     const b = batches.forOrgById(req.org.id, req.params.id);
     if (!b) return res.status(404).json({ error: 'BATCH_NOT_FOUND' });
     if (b.status !== 'committed') return res.status(409).json({ error: 'NOT_COMMITTED' });
-    // The batch's own prospects (S13a: nothing edits a prospect after its import, so none is kept back).
+    // The batch's own prospects: nothing edits a prospect after its import, so none is kept back.
     const { removed } = batches.reverse(b.id, { at: Date.now(), by: { id: req.orgUser.id, name: req.orgUser.name }, historyId: nextId('aud') });
     res.json({ removed, kept: [], note: 'All records from this batch were reversed.' });
   });
@@ -256,7 +251,7 @@ export function registerImports(ctx) {
         emitWebhook(req.org.id, 'identity.resolved', { reviewId: r.id, resolution: 'linked' });
       });
     } else if (action === 'separate') {
-      // S13a: one live prospect per provider and external id — the same rule the import applies.
+      // One live prospect per provider and external id — the same rule the import applies.
       if (prospects.liveKeyTaken(req.org.id, r.record.provider, r.record.externalId)) return res.status(409).json({ error: 'ALREADY_IMPORTED', message: `${r.record.provider} ${r.record.externalId} is already one of your live prospects.` });
       try {
         unit(() => {
@@ -281,7 +276,7 @@ export function registerImports(ctx) {
     if (!requireLead(req, res)) return;
     const { scopes, label } = req.body ?? {};
     if (scopes === undefined || scopes === null || (Array.isArray(scopes) && !scopes.length)) return res.status(400).json({ error: 'SCOPES_REQUIRED', message: `Pick at least one of: ${API_SCOPES.join(', ')}` });
-    // S13a: an unknown or repeated scope is refused, not silently dropped.
+    // An unknown or repeated scope is refused, not silently dropped.
     if (!Array.isArray(scopes)) return fieldInvalid(res, 'scopes', `scopes is a list of: ${API_SCOPES.join(', ')}`);
     const wrong = scopes.findIndex((s) => !API_SCOPES.includes(s));
     if (wrong >= 0) return fieldInvalid(res, `scopes[${wrong}]`, `Pick from: ${API_SCOPES.join(', ')}`);
@@ -313,7 +308,7 @@ export function registerImports(ctx) {
       const k = apiKeys.liveByHash(hash);
       if (!k) return res.status(401).json({ error: 'API_KEY_INVALID' });
       if (!k.scopes.includes(requiredScope)) return res.status(403).json({ error: 'SCOPE_MISSING', required: requiredScope, held: k.scopes });
-      apiKeys.touch(k.id, Date.now()); // S13a: an explicit write, durable at once
+      apiKeys.touch(k.id, Date.now());
       req.apiOrg = byId.org(k.orgId);
       if (!req.apiOrg || req.apiOrg.suspended) return res.status(403).json({ error: 'ORG_UNAVAILABLE' });
       next();
@@ -324,7 +319,7 @@ export function registerImports(ctx) {
   app.get('/api/v1/export/prospects', apiKeyAuth('export:prospects'), (req, res) => {
     res.json({
       contract: EXPORT_CONTRACT_VERSION, kind: 'prospects', orgId: req.apiOrg.id,
-      // linkedPlayerId stays in the contract: nothing links a prospect to a player (S13a dropped the never-written field).
+      // linkedPlayerId stays in the export contract, always null: nothing links a prospect to a player.
       items: prospects.liveForOrg(req.apiOrg.id)
         .map((p) => ({ id: p.id, name: p.name, dob: p.dob, position: p.position, provider: p.provider, externalId: p.externalId, linkedPlayerId: null })),
     });
@@ -356,7 +351,7 @@ export function registerImports(ctx) {
     const problem = webhookUrlProblem(url);
     if (problem) return res.status(400).json({ error: 'WEBHOOK_URL_REJECTED', message: problem });
     if (events === undefined || events === null || (Array.isArray(events) && !events.length)) return res.status(400).json({ error: 'EVENTS_REQUIRED', message: `Subscribe to at least one of: ${WEBHOOK_EVENTS.join(', ')}` });
-    // S13a: an unknown or repeated event is refused, not silently dropped.
+    // An unknown or repeated event is refused, not silently dropped.
     if (!Array.isArray(events)) return fieldInvalid(res, 'events', `events is a list of: ${WEBHOOK_EVENTS.join(', ')}`);
     const wrong = events.findIndex((e) => !WEBHOOK_EVENTS.includes(e));
     if (wrong >= 0) return fieldInvalid(res, `events[${wrong}]`, `Subscribe to: ${WEBHOOK_EVENTS.join(', ')}`);
@@ -416,7 +411,7 @@ export function registerImports(ctx) {
   // attempt is a numbered row; two sweeps must never send the same delivery at once).
   const inFlight = new Set();
 
-  /** One attempt; returns true when it staged an ops event (which the sweep's save then carries). */
+  /** One attempt; returns true when it recorded an ops event. */
   async function deliverOne(d) {
     const w = endpoints.byId(d.endpointId);
     if (!w || !w.active) { deliveries.abandon(d.id); return false; }

@@ -1,10 +1,10 @@
 // Cross-tab messaging E2E: a club demo tab and a player demo tab in the SAME
-// browser hold one real conversation over the sync bus. Requires
-// buildDemos.mjs output + serve.mjs running on :8099.
+// browser hold one real conversation over the sync bus. Needs freshly built
+// demo bundles (buildDemos.mjs).
 import { chromium } from 'playwright-core';
 import { ensureDemoHost } from './demoHost.mjs';
 
-// §74: this test OWNS its demo host. It starts one if none is running, and
+// This test OWNS its demo host. It starts one if none is running, and
 // refuses to run against one serving bundles other than the ones on disk —
 // see demoHost.mjs for why that second half is the part that matters.
 const demo = await ensureDemoHost();
@@ -25,7 +25,7 @@ await club.goto(`${HOST}/club/`);
 await club.click('.org-card:has-text("Eastport FC")');
 await club.fill('.enter-row input', 'Maria Keane');
 await club.click('button:has-text("Enter workspace")');
-await club.evaluate(() => { location.hash = '#/search'; }); // M15-Nav deep link (Search)
+await club.evaluate(() => { location.hash = '#/search'; }); // deep link (Search)
 await club.waitForSelector('.player-card:not(.skeleton)');
 
 // ---- player tab joins (same origin → bus connects, presence marks peer)
@@ -59,7 +59,7 @@ await club.waitForSelector('.toast', { timeout: 15000 });
 say('club: acceptance toast appeared');
 
 // player → message (open the thread, then write)
-await player.locator('[data-testid="detail-back"]').first().click().catch(() => {}); // M24F.3 — leave the request detail
+await player.locator('[data-testid="detail-back"]').first().click().catch(() => {}); // leave the request detail
 await player.locator('[data-testid^="thread-"]').first().click(); // a conversation row
 await player.fill('input[placeholder="Message…"]', 'Thanks — happy to talk this week.');
 await player.keyboard.press('Enter');
@@ -70,7 +70,7 @@ await club.waitForSelector('.nav-badge', { timeout: 15000 });
 const badge = await club.locator('.nav-badge').first().innerText();
 if (!/^\d+$/.test(badge.trim()) || Number(badge) < 1) fail(`club badge not a count: "${badge}"`);
 say(`club: red Messages badge shows ${badge.trim()}`);
-await club.evaluate(() => { location.hash = '#/messages'; }); // M15-Nav deep link (Messages)
+await club.evaluate(() => { location.hash = '#/messages'; }); // deep link (Messages)
 await club.click('.list-row:has-text("Kola Adeyemi")');
 await club.waitForSelector('text=happy to talk this week', { timeout: 10000 });
 say('club: player message visible in thread');

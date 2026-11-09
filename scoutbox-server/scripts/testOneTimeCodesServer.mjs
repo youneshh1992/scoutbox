@@ -1,4 +1,4 @@
-// S6a through the REAL server (server.mjs booted as a child process on
+// One-time codes through the REAL server (server.mjs booted as a child process on
 // temporary data directories, synthetic records only): durable issuance, the
 // two atomic consumption operations (a seam after the consumption and a real
 // COMMIT failure, each read back through a second connection), SIGKILL
@@ -94,7 +94,7 @@ await test('pairing: the mint answers { code, expiresAt } as before and the row 
 });
 
 // ------------------------------------------------------------- crash safety
-await test('crash safety: a SIGKILL right after the mint response keeps the code (issuance is durable; before S6a the code lived in memory until some later save); a SIGKILL right after a successful pairing leaves the session AND the consumption committed, so after the restart the code cannot buy a second session', async () => {
+await test('crash safety: a SIGKILL right after the mint response keeps the code (issuance is durable); a SIGKILL right after a successful pairing leaves the session AND the consumption committed, so after the restart the code cannot buy a second session', async () => {
   const dir = tempDir('s6a-crash'); let S = await boot(dir);
   const { token, childId } = await guardianWithChild(S, 'crash');
   const { code } = (await S.j('POST', `/guardian/children/${childId}/pairing-code`, {}, token)).body;
@@ -172,7 +172,7 @@ await test('club e-mail challenge: the request stores only the hash and mails th
   for (let i = 0; i < 3; i++) assert.equal((await request(`r${i}@eastportfc.test`)).status, 201);
   const lim = await request('r9@eastportfc.test'); assert.equal(lim.status, 429); assert.equal(lim.body.error, 'RATE_LIMITED');
   await S.stop();
-  // Review of e020aba, finding 1: no raw challenge code anywhere in the database file (the saved outbox mails included).
+  // No raw challenge code anywhere in the database file (the saved outbox mails included).
   for (const c of [code, code2]) assert.equal(fileText(dir).includes(c), false, 'a raw challenge code is stored in the database');
   rm(dir);
 });
@@ -188,7 +188,7 @@ await test('player deletion: the child\'s pairing code goes in the deletion unit
     assert.equal(q1(dir, 'SELECT COUNT(*) AS n FROM players WHERE id = ?', childId).n, 1, `${label}: the child is retained`);
   });
   assert.equal((await del()).status, 200);
-  assert.equal(q1(dir, 'SELECT COUNT(*) AS n FROM pairing_codes').n, 0); assert.equal(q1(dir, 'SELECT COUNT(*) AS n FROM players WHERE id = ? AND deleted_at IS NULL', childId).n, 0, 'the live row went (S4b-R: the retained record stays)');
+  assert.equal(q1(dir, 'SELECT COUNT(*) AS n FROM pairing_codes').n, 0); assert.equal(q1(dir, 'SELECT COUNT(*) AS n FROM players WHERE id = ? AND deleted_at IS NULL', childId).n, 0, 'the live row went (the retained record stays)');
   assert.equal((await S.j('POST', '/auth/player/pair', { code })).status, 404);
   await S.stop(); rm(dir);
 });
@@ -210,7 +210,7 @@ await test('backup/restore: the admin backup\'s database copy holds the codes as
   const backup = bk.body.dir; const backupBytes = fs.readFileSync(path.join(backup, 'scoutbox.db')).toString('latin1');
   assert.deepEqual(qAll(backup, 'SELECT code_hash, player_id FROM pairing_codes'), [{ code_hash: hash(code), player_id: childId }]);
   assert.deepEqual(qAll(backup, 'SELECT org_id, code_hash, attempts FROM email_challenges').map((c) => [c.org_id, c.code_hash, c.attempts]), [['org-eastport', hash(challengeCode), 2]]);
-  // Review of e020aba, finding 1: the WHOLE copy, not one value — a code embedded in a longer string (an outbox mail) counts.
+  // The WHOLE copy, not one value — a code embedded in a longer string (an outbox mail) counts.
   for (const text of [fileText(backup), backupBytes]) {
     assert.equal(text.includes(code), false, 'the raw pairing code appears nowhere in the backup');
     assert.equal(text.includes(challengeCode), false, 'the raw challenge code appears nowhere in the backup (the outbox mail withholds it)');
@@ -227,7 +227,7 @@ await test('backup/restore: the admin backup\'s database copy holds the codes as
   rm(dir, restored);
 });
 
-// ------------------------------------------------------------- review of e020aba, finding 1: the mail's copy of the code
+// ------------------------------------------------------------- the mail's copy of the code
 await test('the challenge mail: on the dev transport the admin outbox still delivers the full mail while the process runs, but the saved outbox record withholds the code (no raw code in the database file), and after a restart the outbox shows the withheld text; on the live transport (provider stubbed locally) the provider receives the code while the database, the backup and the admin outbox never hold it; the code is redeemable in both; an unrelated mail is kept unchanged', async () => {
   // Dev transport.
   const dir = tempDir('s6a-f1-dev'); let S = await boot(dir);
@@ -261,7 +261,7 @@ await test('the challenge mail: on the dev transport the admin outbox still deli
   await S.stop(); rm(live); fs.rmSync(stubLog, { force: true });
 });
 
-// ------------------------------------------------------------- review of e020aba, finding 2: an exhausted row is never redeemed
+// ------------------------------------------------------------- an exhausted row is never redeemed
 await test('an exhausted challenge row (attempts at the limit, planted through a second connection as a hand-edited file could hold it) is refused at the real route even with the correct code (404, the organisation unverified), and the boot sweep removes it', async () => {
   const dir = tempDir('s6a-f2'); let S = await boot(dir);
   const pro = await orgLogin(S, 'org-eastport', 'Maria Keane', 'Head of Recruitment');

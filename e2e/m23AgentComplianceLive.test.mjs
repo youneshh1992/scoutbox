@@ -1,4 +1,4 @@
-// M23 P5.6C LIVE — the Conflict & Compliance Engine driven through the real
+// Live: the Conflict & Compliance Engine driven through the real
 // clients against a real server: the agent workspace, the Trust & Safety
 // console, the player app and the club's verification console, four separate
 // browser contexts, one backend.
@@ -10,7 +10,7 @@
 //                 (one party) → records that she acts for Eastport FC, which
 //                 has no ScoutBox agreement → REFUSED into attributed review,
 //                 with the review id shown and the representation only declared
-//   C  T&S        The console's admin key alone gets no reviewer lane (G-C0).
+//   C  T&S        The console's admin key alone gets no reviewer lane.
 //                 Marcus signs in with his own credentials → sees the item →
 //                 an approval with no evidence is refused → with evidence it is
 //                 approved, attributed to him by name and role
@@ -138,7 +138,7 @@ const j = async (method, p, body, token, extra = {}) => {
 const ADMIN_H = { 'x-admin-key': ADMIN_KEY };
 
 // ------------------------------------------------- setup the world over HTTP
-// The P5.6B journey (team, profile, verification, a confirmed relationship) is
+// The agency setup journey (team, profile, verification, a confirmed relationship) is
 // already proven in m23AgentLive; here it is scaffolding, so it goes over HTTP.
 const login = async (orgId, scoutName, role, platform = 'agent') => (await j('POST', '/auth/org/login', { orgId, scoutName, role, platform })).body;
 const tomas = await login('org-northstar', 'Tomás Rivera', 'Director');

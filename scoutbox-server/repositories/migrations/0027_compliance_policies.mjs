@@ -1,9 +1,7 @@
 /**
- * Trust & Safety reviewers and jurisdiction policy versions get their own typed tables (S11b-1): a reviewer with its
- * history; a policy version with its publishers, rules (sources, overrides, typed parameters) and history. REGISTERED
- * in DATA_MIGRATIONS. `up()` is the DDL plus the catalogue: the three seeded policy versions (FIFA, the FA, U.S. Soccer),
- * published and attributed to this migration, which every database has from its first boot (blob step 2306 used to
- * push them into memory). Nothing else is carried over (no production data; rollback means re-seed).
+ * Trust & Safety reviewers (with history) and jurisdiction policy versions (publishers, rules with sources, overrides
+ * and typed parameters, history). Also inserts the catalogue: the three seeded policy versions (FIFA, the FA, U.S.
+ * Soccer), published and attributed to this migration, which every database has from its first boot.
  */
 import { migrationApplied } from '../database.mjs';
 import { AGENT_CORE_MIGRATION } from '../agentCore.mjs';

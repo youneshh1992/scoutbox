@@ -47,7 +47,7 @@ export const m24mock: PlayerM24 = {
     if (r.shareWithAgencyStaff !== share) { r.shareWithAgencyStaff = share; r.rev += 1; }
     return delay(r);
   },
-  // M23 P5.6E — one disclosure at a time, exactly as the server does it: the
+  // One disclosure at a time, exactly as the server does it: the
   // other two are untouched, so a demo cannot teach the wrong mental model.
   setDisclosure: (pid, id, key, value, expectedRev) => {
     const r = (RELS[pid] ?? []).find((x) => x.id === id);

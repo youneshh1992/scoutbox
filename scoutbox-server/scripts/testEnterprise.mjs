@@ -1,13 +1,7 @@
-// S13b — staff invites, SSO configurations and sign-in states, support tickets and support access grants as typed
-// tables with explicit writes (repositories/enterprise.mjs, migration 0035). What this suite proves: the migration
-// creates the STRICT tables (no JSON column), empty; the typers refuse junk naming the record and field (a plain invite
-// code or SSO state where a hash belongs, a reference kind the support read cannot resolve, a grant's state that does
-// not match its clocks); an invite is found by its code's hash only, and moves pending → accepted (naming staff of its
-// organisation) | revoked | expired once; an organisation has one SSO configuration and a sign-in state is used once,
-// decided in the database; a ticket keeps its references and replies as ordered rows; a grant is approved for its
-// hours and logs every read; a rolled-back unit leaves nothing; and a fixture written through the repository is typed,
-// names a missing reference and reads back what it wrote. Temporary databases only; nothing touches DATA_DIR.
-// Run with: npm test
+// Staff invites, SSO configurations and sign-in states, support tickets and support access grants
+// (repositories/enterprise.mjs, migration 0035). Invite codes and SSO states are stored only as hashes; a sign-in state
+// is used once, decided in the database; a support grant lasts its hours and logs every read. Also the typers, units of
+// work and fixtures. Temporary databases only; nothing touches DATA_DIR. Run with: npm test
 
 import assert from 'node:assert/strict';
 import fs from 'node:fs';

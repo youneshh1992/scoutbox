@@ -1,11 +1,6 @@
-// S10b — the Football Passport's own records as typed tables with explicit writes (repositories/passport.mjs, migration
-// 0024). What this suite proves: the migration creates the nine STRICT tables (no JSON column) and a fresh database holds
-// no row; the typers refuse junk with the record and field named (an unknown field, a position outside the codes, a date
-// that is not a football date, a selection list too long); preferences are saved whole, read back with their positions,
-// history and selections, never created by a read, and the position history only grows; create/update return fresh,
-// deep-frozen records and refuse identity changes, duplicates and nested updates; a share's views count up and the
-// token hash is unique; the T&S lists page by cursor; a rolled-back unit leaves nothing; there is no db.* view; and the
-// fixture written through the repository is typed, refuses a missing organisation and reads back what it wrote.
+// The Football Passport's own records (repositories/passport.mjs, migration 0024): the STRICT tables, the typers'
+// refusals, preferences saved whole and never created by a read, a position history that only grows, typed writes and
+// their guards, share view counts and a unique token hash, T&S paging, units of work and fixtures.
 // Temporary databases only; nothing touches DATA_DIR. Run with: npm test
 
 import assert from 'node:assert/strict';

@@ -1,8 +1,5 @@
 /**
- * Transition cases and coach references (vouches) become typed tables (S10c). The legacy M13 F10 representations move
- * with the agent stores in S11 (step 2305 mirrors them into the agent agreements).
- * REGISTERED in DATA_MIGRATIONS. `up()` is the DDL only; nothing is carried over (no production data; rollback means
- * re-seed).
+ * Transition cases and coach references (vouches).
  */
 import { migrationApplied } from '../database.mjs';
 import { PASSPORT_MIGRATION } from '../passport.mjs';

@@ -43,7 +43,7 @@ async function loadWith(session) {
   await ctx.close();
 }
 
-// 2. Stale UNVERSIONED session (what an M13 build left behind).
+// 2. Stale UNVERSIONED session (as an older build would have stored it).
 {
   const { ctx, body, errors } = await loadWith(JSON.stringify({ kind: 'player', id: 'demo-999' }));
   check('unversioned stale session falls back to onboarding', /or continue as a demo account/i.test(body));

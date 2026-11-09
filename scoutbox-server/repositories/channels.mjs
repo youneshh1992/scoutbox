@@ -1,6 +1,5 @@
 /**
- * Message threads as typed tables with explicit writes (S7d, migration `0012_channels`; explicit since S14c,
- * docs/architecture/migration.md §4.6; sql/03_messaging_safety_audit.sql).
+ * Message threads: `channels`, `messages` and `message_attachments`.
  *
  * A thread exists only because a request was accepted (one per request). For a minor the counterparty is the
  * guardian; the child is never in the thread.
@@ -17,13 +16,13 @@
  * `sender_user_id`, a player or guardian in `sender_person_id`; the client's retry id unique per thread and sender)
  * and `message_attachments` (0..1 per message, typed columns by kind).
  *
- * WRITES are explicit operations: each joins the open unit of work, the caller's transaction or its own. READS are
- * SQL: no mirror, no db.* view. Fresh, deep-frozen records; a list decodes its threads' messages in one batch. The
- * organisation's thread list and the admin list page by cursor, most recently active first.
+ * Each write joins the open unit of work, the caller's transaction or its own. Records are deep-frozen; a list decodes
+ * its threads' messages in one batch. The organisation's thread list and the admin list page by cursor, most recently
+ * active first.
  *
  * References. The request (`recruitment_requests`), the organisation and a staff sender are RESTRICT keys. Player and
- * guardian ids carry no key (tolerant, §4.3); `open` still refuses a guardian that does not exist, and a snapshot's
- * final state is checked for it. A deleted player's threads are deleted explicitly with the account (D-B, as before).
+ * guardian ids carry no key (tolerant); `open` still refuses a guardian that does not exist. A deleted player's threads
+ * are deleted explicitly with the account (D-B in docs/decisions.md).
  *
  * Refusals name tables, ids and fields, never a message text or a name.
  */
@@ -243,7 +242,7 @@ function decodeChannels(sqlite, rows) {
   const atts = childRowsOf(sqlite, 'message_attachments', 'message_id', all.map((m) => m.id));
   return rows.map((r) => channelFromDb(r, msgs.all(r.id).map((m) => messageFromDb(m, atts.all(m.id)[0] ?? null))));
 }
-/** Every thread in insertion order (the snapshot read): fresh objects. */
+/** Every thread in insertion order (the whole-domain read): fresh objects. */
 const readChannels = (sqlite) => decodeChannels(sqlite, sqlite.prepare('SELECT * FROM channels ORDER BY seq').all());
 function insertChannel(sqlite, row) {
   sqlite.prepare(CHANNEL_INSERT).run(channelParams(row));
@@ -265,7 +264,7 @@ function referenceMisses(sqlite, rows) {
 }
 
 
-/** The whole domain read back as plain records (`readAllRecords` in index.mjs: the test suites' read-back); null before its migration. */
+/** The whole domain read back as plain records (`readAllRecords` in index.mjs: the test suites' read-back). */
 export const CHANNELS_TABLE = {
   name: CHANNELS_COLLECTION,
   read(sqlite) { return channelsLive(sqlite) ? readChannels(sqlite) : null; },

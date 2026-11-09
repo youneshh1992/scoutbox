@@ -67,11 +67,11 @@ const PERMISSIONS: Record<string, Tier[]> = {
   'inbox.read': ['licensed_agent', 'agency_admin', 'analyst', 'assistant', 'finance'], 'agency.read': ['licensed_agent', 'agency_admin', 'analyst', 'assistant', 'finance'],
   'agency.team.read': ['licensed_agent', 'agency_admin', 'analyst', 'assistant', 'finance'], 'agency.team.write': ['agency_admin'],
   'agency.settings.write': ['agency_admin'], 'agency.audit.read': ['agency_admin'], 'agency.compliance.read': ['agency_admin', 'licensed_agent'],
-  // M23 P5.6C
+  // compliance
   'compliance.read': ['licensed_agent', 'agency_admin', 'analyst', 'assistant', 'finance'], 'compliance.contexts.write': ['licensed_agent'],
-  // M23 P5.6D. Mirrors the server matrix in domains/agents/core/shared.mjs exactly: reading the
+  // Mirrors the server matrix in domains/agents/core/shared.mjs exactly: reading the
   // agency's transactions is every member's, and every WRITE is the licensed
-  // individual's. Omitting them made the demo refuse its own screen (D15).
+  // individual's. Without them the demo would refuse its own screen.
   'transactions.read': ['licensed_agent', 'agency_admin', 'analyst', 'assistant', 'finance'], 'transactions.write': ['licensed_agent'],
 };
 /** The public club directory the demo picks an engaging or releasing entity from. */
@@ -112,7 +112,7 @@ const PROFILES: DemoProfile[] = [{
   facets: {
     fifa_licence: facet('VERIFIED', { reference: 'TEST-VERIFIED-777', provenance: { provider: 'local-synthetic-test-provider', kind: 'synthetic', at: NOW - 10 * DAY }, submittedAt: NOW - 10 * DAY, verifiedAt: NOW - 10 * DAY, recheckAt: NOW + 20 * DAY, note: 'Verified by the LOCAL SYNTHETIC test provider. This is not a FIFA, FA or U.S. Soccer register check and never exists in production.' }),
     national_registration: { ENG: facet('VERIFIED', { reference: 'TEST-VERIFIED-FA', memberAssociation: 'ENG', provenance: { provider: 'local-synthetic-test-provider', kind: 'synthetic', at: NOW - 9 * DAY }, submittedAt: NOW - 9 * DAY, verifiedAt: NOW - 9 * DAY, recheckAt: NOW + 21 * DAY, note: 'Verified by the LOCAL SYNTHETIC test provider.' }) },
-    // P5.6C: a fourth facet, empty. A licence is not a national registration and neither is a domestic authorisation.
+    // A fourth facet, empty. A licence is not a national registration and neither is a domestic authorisation.
     domestic_authorisation: {},
     minors_authorisation: {},
   },
@@ -216,7 +216,7 @@ const memberRow = (a: Aff): Member => {
 };
 
 
-// ============================================================ M23 P5.6C compliance (demo)
+// ============================================================ compliance (demo)
 // The demo mirrors the SERVER's verdicts for the journey it shows: a single
 // represented party is CLEAR, a second party needs prior written consent, an
 // entity with no ScoutBox agreement is only "declared" and waits for an
@@ -328,9 +328,9 @@ export const demoCore: CoreApi = {
 };
 
 // ============================================================ agent
-// ------------------------------------------- M23 P5.6D transaction workspace
-// Six synthetic transactions, one per state the mandate asks the demo to show
-// (§86): compliance clear, consent required, attributed review, blocked by an
+// ------------------------------------------- transaction workspace
+// Six synthetic transactions, one per state the demo needs to show:
+// compliance clear, consent required, attributed review, blocked by an
 // active rule, on hold and cancelled. No minor appears in any of them and none
 // implies a minor pathway exists; nothing here is an offer or a signing.
 const HONEST_TX = 'A ScoutBox transaction is a permissioned workspace. "Ready" means ScoutBox currently permits this workflow to proceed under the encoded rules — it is not a statement of legal validity, no governing body has approved anything, no offer exists and nothing has been signed.';
@@ -466,7 +466,7 @@ for (const tx of TXS) {
   ];
 }
 
-// ============================================ M23 P5.6E cross-app integration
+// ============================================ cross-app integration
 // Synthetic, and deliberately partial: rep-d1's client has said yes to contact
 // routing and trial visibility, rep-d2's has not. A demo that showed everything
 // open would teach the wrong mental model about whose choice this is.
@@ -689,7 +689,7 @@ export const demoAgent: AgentApi = {
     items.sort((x, y) => String(x.deadline).localeCompare(String(y.deadline)));
     return delay({ items, note: 'Only opportunities legitimately visible to a confirmed client appear here. Club-private recruitment cases never do.' });
   },
-  // ---- M23 P5.6C compliance
+  // ---- compliance
   async complianceOverview(s) {
     need(s, 'compliance.read');
     const p = PROFILES.find((x) => x.userId === s.userId);
@@ -1071,13 +1071,13 @@ export const demoAgent: AgentApi = {
     return delay({ notifications: NOTES[s.userId] ?? [], pending: RELS.filter((r) => r.agentUserId === s.userId && eff(r) === 'proposed').map((r) => forAgent(r, s.userId)), note: 'Operational messages only. Negotiation and offers are not part of this workspace.' });
   },
 
-  // ---- M23 P5.6E. Each refuses exactly as the server does when the client has
+  // ---- cross-app integration. Each refuses exactly as the server does when the client has
   // not chosen to share — the refusal is the honest answer, not a gap.
   async clientContacts(s, id) {
     if (!P56E_DISCLOSED.has(id)) refuse(403, 'DISCLOSURE_WITHHELD', 'Your client has not chosen to route you their club messages. That choice is theirs and they can change it at any time in My Agent.');
     return delay({ items: ROUTED_CONTACTS[id] ?? [], clientId: RELS.find((x) => x.id === id)?.clientId ?? id, note: 'Contacts a club routed to you as well as to your client. The club\u2019s own recruitment case, its internal notes and its assessment of your client are not here and never will be. Answering is your client\u2019s act, not yours.' });
   },
-  // M23 P6 — only what the client shared; the demo client has shared nothing yet.
+  // Only what the client shared; the demo client has shared nothing yet.
   async clientOffers(s, id) {
     void s;
     return delay({
@@ -1086,12 +1086,12 @@ export const demoAgent: AgentApi = {
       honest: 'Nothing here is a negotiation, a fee or a signing. An accepted Offer is not a signed contract.',
     });
   },
-  // M23 P8 — the demo client shared nothing, so no club's stage is open to the agent.
+  // The demo client shared nothing, so no club's stage is open to the agent.
   async clientJourney(s, id) {
     void s;
     return delay({ relationshipId: id, clientId: RELS.find((x) => x.id === id)?.clientId ?? id, grants: [] as string[], items: [], generatedAt: Date.now() });
   },
-  // M23 P7 — the signing rides on the shared Offer; the demo client has shared nothing, so there is nothing to show.
+  // The signing rides on the shared Offer; the demo client has shared nothing, so there is nothing to show.
   async clientSignings(s, id) {
     void s;
     return delay({ items: [], clientId: RELS.find((x) => x.id === id)?.clientId ?? id, clientName: null, honest: 'Read-only. Your client signs as themselves; ScoutBox does not let you sign, acknowledge or complete for a client.' });

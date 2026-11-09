@@ -117,7 +117,7 @@ export function SessionProvider({ children: kids }: { children: ReactNode }) {
     setPopup(null);
     seenNotifIds.current = null;
   }, []);
-  // PRE-M24 (PM-5): the server said this session no longer exists (expired,
+  // The server said this session no longer exists (expired,
   // revoked, the account removed). End the stored identity — the same path as
   // signing out — instead of staying "signed in" with every request refused.
   const endSession = useCallback(() => {
@@ -158,7 +158,7 @@ export function SessionProvider({ children: kids }: { children: ReactNode }) {
         surfaceFresh(notifs);
       }
     } catch (e) {
-      if (isSessionEnded(e)) endSession(); // PRE-M24 (PM-5)
+      if (isSessionEnded(e)) endSession();
       // anything else is transient — keep last good state
     }
   }, [playerId, guardianId, surfaceFresh, endSession]);
@@ -190,7 +190,7 @@ export function SessionProvider({ children: kids }: { children: ReactNode }) {
       } catch (err) {
         const code = err instanceof ClientError ? err.code : '';
         if (code.includes('NOT_FOUND') || isSessionEnded(err)) {
-          storeSession(null); // stale identity or an ended session — handled, not a crash (PRE-M24 PM-5)
+          storeSession(null); // stale identity or an ended session — handled, not a crash
         } else if (!cancelled) {
           // Transient failure (e.g. live-mode network blip): keep the session;
           // refresh() already tolerates temporary errors.
@@ -214,7 +214,7 @@ export function SessionProvider({ children: kids }: { children: ReactNode }) {
       ? ({ kind: 'guardian', id: guardianId } as const)
       : ({ kind: 'player', id: playerId! } as const);
     return client.onChange((event, payload) => {
-      if (event === 'session_expired') { endSession(); return; } // PRE-M24 (PM-3)
+      if (event === 'session_expired') { endSession(); return; }
       if (event === 'typing') return; // ephemeral — screens listen for it directly
       if (event === 'sse_status') {
         setLiveConnected((payload as { connected?: boolean } | undefined)?.connected !== false);
@@ -261,7 +261,7 @@ export function SessionProvider({ children: kids }: { children: ReactNode }) {
       },
       logout: () => {
         const id = playerId ?? guardianId;
-        if (id) void client.logout?.(id); // PRE-M24 (PM-4): revoke server-side, forget the token here
+        if (id) void client.logout?.(id); // revoke server-side, forget the token here
         clearIdentityState();
         setPlayerId(null);
         setGuardianId(null);

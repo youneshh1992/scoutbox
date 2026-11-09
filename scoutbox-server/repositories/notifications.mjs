@@ -1,6 +1,5 @@
 /**
- * Notifications and category notification preferences as typed tables with explicit writes (S7a, migration
- * `0009_notifications`; explicit since S14e, docs/architecture/migration.md §4.6; sql/03_messaging_safety_audit.sql).
+ * Notifications and category notification preferences.
  *
  * Record (the keys every reader sees):
  *   { id, ts, audience: { kind, id }, type, text, refId, read, repeatCount, groupKey, category, deferredPush,
@@ -22,9 +21,8 @@
  * COALESCING. An identical unread notice (same audience, type, text and refId) whose last occurrence was at most six
  * hours ago is refreshed and counted rather than duplicated (`findCoalescible`, then `coalesce`); the newest such row.
  *
- * WRITES are explicit operations: each joins the open unit of work, the caller's transaction or its own. The push
- * and the live event of a notification are the caller's `store.afterCommit` effects. READS are SQL: no mirror, no
- * db.* view; fresh, deep-frozen records.
+ * Each write joins the open unit of work, the caller's transaction or its own. The push and the live event of a
+ * notification are the caller's `store.afterCommit` effects. Records are deep-frozen.
  *
  * Refusals name the table, the id and the field, never a text or a preference.
  */
@@ -34,7 +32,7 @@ import { CATEGORY_NAMES } from '../domains/platform/notificationPrefs.mjs';
 
 export const NOTIFICATIONS_MIGRATION = '0009_notifications';
 export const NOTIFICATION_TABLES = Object.freeze(['notifications', 'notification_prefs', 'notification_pref_categories']);
-/** How long an identical UNREAD notification stays coalescible (M18.1). */
+/** How long an identical UNREAD notification stays coalescible. */
 export const NOTIFY_COALESCE_MS = 6 * 60 * 60 * 1000;
 export const NOTIFICATION_AUDIENCE_KINDS = Object.freeze(['player', 'guardian', 'org_user']);
 export const NOTIFICATION_LIMITS = Object.freeze({ id: 80, type: 80, text: 2000, refId: 200 });
@@ -165,7 +163,7 @@ function readPrefs(sqlite) {
   return out;
 }
 
-/** The whole domain read back as plain records (`readAllRecords` in index.mjs: the test suites' read-back); null before its migration. */
+/** The whole domain read back as plain records (`readAllRecords` in index.mjs: the test suites' read-back). */
 export const NOTIFICATIONS_TABLE = {
   name: 'notifications',
   read(sqlite) { return notificationsLive(sqlite) ? readRows(sqlite) : null; },

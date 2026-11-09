@@ -1,4 +1,4 @@
-// M15 — Passport sharing: revocable opaque links.
+// Passport sharing: revocable opaque links.
 //
 // Tokens are high-entropy, stored ONLY as SHA-256 hashes, expiring and
 // revocable. A share can only ever NARROW what a viewer would legitimately
@@ -22,7 +22,7 @@ export function registerPassportSharing(ctx) {
     nextId, notify, ledgerAppend, findPlayer, isBlocked, vmetric,
     buildFootballPassport, passport, unit,
   } = ctx;
-  const shares = ctx.verificationReads.shares; // S10b: the share links are read through SQL
+  const shares = ctx.verificationReads.shares;
 
   const orgCanSee = (org, p) => !!p && visibleToOrg(p, org) && !isBlocked(p.id, org.id);
   const guardianOwnsChild = (g, id) => g.childIds.includes(id);
@@ -31,7 +31,7 @@ export function registerPassportSharing(ctx) {
   function createShare(res, player, body, createdBy) {
     const mode = String(body.mode ?? 'public');
     if (!SHARE_MODES.includes(mode)) return res.status(400).json({ error: 'MODE_INVALID', allowed: SHARE_MODES });
-    // S10b: a lifetime that is not a whole number of days from 1 to 90 is refused (it used to be clamped).
+    // A lifetime that is not a whole number of days from 1 to 90 is refused, not clamped.
     const days = body.expiresDays === undefined || body.expiresDays === null ? DAYS.default : body.expiresDays;
     if (!Number.isInteger(days) || days < DAYS.min || days > DAYS.max) return res.status(400).json({ error: 'FIELD_INVALID', field: 'expiresDays', message: `A whole number of days from ${DAYS.min} to ${DAYS.max}.` });
     const secret = mintShareSecret();

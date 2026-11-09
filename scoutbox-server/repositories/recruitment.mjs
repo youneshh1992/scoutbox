@@ -1,33 +1,20 @@
 /**
- * Recruitment requests and accepted trials as typed tables with EXPLICIT writes (migration `0015_recruitment`,
- * docs/architecture/migration.md §4.3; the S8c and S8d repositories are the template).
+ * Recruitment requests (with their trial slots) and accepted trials (with their schedule, attendance, history, keys,
+ * reminders, reports and trial-day rows).
  *
- * Tables (file 02):
- *   recruitment_requests, request_trial_slots                                      → db.requests
- *   trials, trial_schedule_sessions, trial_session_evidence, trial_schedule_revisions,
- *   trial_revision_sessions, trial_attendance, trial_history, trial_keys, trial_reminders,
- *   trial_reports, trial_day_staff, trial_day_consents, trial_day_checkins,
- *   trial_day_status_events                                                         → db.trials
- * (`channels` names its request with a real key: repositories/channels.mjs.)
- *
- * EVERY FIELD IS A TYPED COLUMN with the vocabulary CHECKs of the domain rules (server.mjs issueRecruitmentRequest and
- * issueAcceptedTrial, domains/recruitment/lifecycle/trial.mjs, domains/recruitment/lifecycle/trialRoutes.mjs, domains/scouting/journeys.mjs). There is no `absent_keys_json`,
- * `offtype_json`, `extra_json` or `raw_json`. A record the columns cannot hold — an unknown field at any level
- * included — is REFUSED with its id, at a repository write (the unit rolls back). An `undefined` field is an absent one (the JSON rule); an absent field reads back as null, an absent
- * list as empty. A trial always reads back with its trial-day container, its five client-key lists and its reminder
- * map, so a reader never has to create them.
- *
- * EXPLICIT WRITES, SQL READS. There is no in-memory mirror and no `db.requests` / `db.trials` (§4.3 step 2: both
- * throw): readers call the repository's queries (`requests.forPlayer`, `trials.forCase`, …), which hand out fresh,
- * deep-frozen records. A route changes a record with `requests.create` / `update`, `trials.create` / `update` or the
- * deletion unit's `tombstoneForPlayer`; `update` hands the caller a plain copy, types the result whole and writes it at
- * once, joined into the open unit of work (store.unit) or in a transaction of its own.
+ * Every field is a typed column with the vocabulary CHECKs of the domain rules (server.mjs issueRecruitmentRequest and
+ * issueAcceptedTrial, domains/recruitment/lifecycle/trial.mjs, domains/recruitment/lifecycle/trialRoutes.mjs,
+ * domains/scouting/journeys.mjs). A record the columns cannot hold, an unknown field at any level included, is refused
+ * with its id at a repository write (the unit rolls back). An `undefined` field is an absent one; an absent field reads
+ * back as null, an absent list as empty. A trial always reads back with its trial-day container, its five client-key
+ * lists and its reminder map, so a reader never has to create them.
  *
  * References. `org_id` → orgs, `user_id` → org_users and `case_id` (both tables) → recruitment_cases (RESTRICT).
- * `recruitment_requests.trial_id` → trials is DEFERRABLE INITIALLY DEFERRED (checked at COMMIT): a request and the trial it names are written in one unit. `trials.request_id` → recruitment_requests is immediate. Player ids: no key, tolerant and counted (Q7a).
- * Guardian ids: no key (identity rewrites the guardians table), checked in code at every write (Q7c).
+ * `recruitment_requests.trial_id` → trials is DEFERRABLE INITIALLY DEFERRED (checked at COMMIT): a request and the
+ * trial it names are written in one unit. `trials.request_id` → recruitment_requests is immediate. Player ids: no key,
+ * tolerant and counted (Q7a in docs/decisions.md). Guardian ids: no key, checked in code at every write (Q7c).
  *
- * Refusals name tables, fields and ids — never a name, a message, a note, an address or a phone number.
+ * Refusals name tables, fields and ids, never a name, a message, a note, an address or a phone number.
  */
 import { pageOf } from '../domains/platform/paging.mjs';
 import { transaction, migrationApplied, newestHistory, childRowsOf } from './database.mjs';
@@ -43,7 +30,7 @@ export const TRIAL_TABLES = Object.freeze(['trials', 'trial_schedule_sessions', 
 export const RECRUITMENT_TABLES = Object.freeze([...REQUEST_TABLES, ...TRIAL_TABLES]);
 export const recruitmentLive = (sqlite) => migrationApplied(sqlite, RECRUITMENT_MIGRATION);
 
-// ------------------------------------------------------------------ small shared helpers (S8b, S8c and S8d import these)
+// ------------------------------------------------------------------ small shared helpers (the other recruitment repositories import these)
 export const describe = (v) => (v === null ? 'null' : v === undefined ? 'nothing' : Array.isArray(v) ? 'an array' : typeof v === 'object' ? 'an object' : `a ${typeof v}`);
 export const isPlainObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 export const nonEmpty = (v) => typeof v === 'string' && v.length > 0;
@@ -52,11 +39,8 @@ export const ids = (list) => list.slice(0, 20).join(', ') + (list.length > 20 ? 
 const refusal = (code, message, extra = {}) => Object.assign(new Error(`${code}: ${message}`), { code, ...extra });
 const clone = (v) => (v === undefined ? undefined : JSON.parse(JSON.stringify(v)));
 
-/**
- * The shared idempotency_keys table (migration 0018: S8d's signing packages; the other steps keep their keys as
- * columns). Its owner CHECK names the owner tables.
- */
 export const JSON_CHECK = (col) => `CHECK (${col} IS NULL OR json_valid(${col}))`;
+/** The shared idempotency_keys table (the signing packages' keys; other domains keep their keys as columns). Its owner CHECK names the owner tables. */
 export function idempotencyKeysDdl(owners) {
   return { table: `CREATE TABLE idempotency_keys (\n  owner_table                      TEXT NOT NULL CHECK (owner_table IN (${owners.map((o) => `'${o}'`).join(', ')})),\n  owner_id                         TEXT NOT NULL,\n  position                         INTEGER NOT NULL,\n  act                              TEXT NOT NULL,\n  shape                            TEXT NOT NULL CHECK (shape IN ('list', 'value')),\n  key                              TEXT,\n  fp                               TEXT,\n  at                               INTEGER,\n  entry_json                       TEXT NOT NULL ${JSON_CHECK('entry_json')},\n  PRIMARY KEY (owner_table, owner_id, position)\n) STRICT;`, indexes: ['CREATE INDEX idempotency_keys_owner_act_key ON idempotency_keys (owner_table, owner_id, act, key)'] };
 }
@@ -383,7 +367,7 @@ const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
 /** A typing failure carries `reason` (record, field, what it holds — never the value of a text field). */
 class Bad extends Error {}
 const fail = (label, field, what) => { throw new Bad(`${label}.${field} ${what}`); };
-/** Refuse an own key the tables have no column for; an `undefined` value is an absent key (the JSON rule). */
+/** Refuse an own key the tables have no column for; an `undefined` value is an absent key. */
 function onlyKeys(v, keys, label, field) {
   if (!isPlainObject(v)) fail(label, field, `must be an object (got ${describe(v)})`);
   for (const k of Object.keys(v)) if (v[k] !== undefined && !keys.includes(k)) fail(label, `${field}.${k}`, 'is not a field this table stores');
@@ -698,7 +682,7 @@ function statements(sqlite) {
 }
 
 /**
- * The statements `decodeTrial` reads children through, answered for many trials at once (§4.3 step 4): each child
+ * The statements `decodeTrial` reads children through, answered for many trials at once: each child
  * table read once for the whole list instead of about fourteen queries a trial. Same rows, same order.
  */
 function batchTrialStatements(sqlite, st, ids) {
@@ -716,7 +700,7 @@ function batchTrialStatements(sqlite, st, ids) {
 function caseMustExist(st, table, r) {
   if (r.caseId !== null && !st.caseExists.get(r.caseId)) throw refusal('RECRUITMENT_CASE_MISSING', `${table} holds 1 row naming a recruitment_cases row that is not there (${r.id} → recruitment_cases ${r.caseId}); the write was rolled back`);
 }
-/** Write a typed request whole: the row upserted (its rowid, and so its place in the mirror, kept), the slots replaced. */
+/** Write a typed request whole: the row upserted (its rowid, and so its insertion order, kept), the slots replaced. */
 function writeRequest(st, q) {
   caseMustExist(st, 'recruitment_requests', q);
   st.ins.recruitment_requests.run(requestRow(q));
@@ -826,28 +810,16 @@ const TABLE_OF = { requests: 'recruitment_requests', trials: 'trials' };
 export const RECRUITMENT_RECORDS = {
   names: RECRUITMENT_COLLECTIONS,
   read(sqlite) { if (!recruitmentLive(sqlite)) return null; return { requests: readRequests(sqlite), trials: readTrials(sqlite) }; },
-  /**
-   * Type the supplied collections (an omitted one is retained whole, an array is the whole final collection), remove
-   * the trials a supplied list no longer carries, and write the records — requests before trials. The requests a
-   * supplied list no longer carries are removed by `prune`, after the threads that may name them. Returns the names
-   * written.
-   */
-
-  /** The requests a supplied list no longer carries (their slots with them); a thread or a trial still naming one refuses the save by its key. */
-
-
 };
 
-// ------------------------------------------------------------------ the repository (explicit writes; SQL reads)
+// ------------------------------------------------------------------ the repository
 const deepFreeze = (v) => { if (v !== null && typeof v === 'object' && !Object.isFrozen(v)) { Object.freeze(v); for (const k of Object.keys(v)) deepFreeze(v[k]); } return v; };
 /**
  * `createRecruitmentRepository({ sqlite, unit, now, log })`. Every operation joins the open unit of work (a failure
  * poisons it), the caller's open raw transaction, or runs a transaction of its own; it writes its rows and returns the
  * record read back from the tables. A case a request or a trial names must already be written (its key is immediate).
- *
- * READS ARE SQL (§4.3 step 2): no mirror and no db.requests / db.trials (both throw). Every query decodes fresh,
- * deep-frozen records in insertion (rowid) order and runs on the one connection, so a read inside a unit of work sees
- * the unit's own writes. The sweeps' queries are indexed predicates; the admin staff-check queue pages by cursor.
+ * Every query decodes fresh, deep-frozen records in insertion (rowid) order and runs on the one connection, so a read
+ * inside a unit of work sees the unit's own writes.
  */
 export function createRecruitmentRepository({ sqlite, unit = null, now = Date.now, log = () => {} } = {}) {
   if (!sqlite) throw new TypeError('the recruitment repository needs a SQLite connection (node:sqlite)');
@@ -882,7 +854,7 @@ export function createRecruitmentRepository({ sqlite, unit = null, now = Date.no
   const typedOr = (name, raw) => { const t = TYPERS[name](raw, name); if (!t.ok) throw refusal('RECRUITMENT_INPUT_INVALID', t.reason); return t.record; };
   const IMMUTABLE = { requests: ['id', 'playerId', 'orgId', 'userId', 'type', 'createdAt'], trials: ['id', 'requestId', 'playerId', 'orgId', 'acceptedAt'] };
   const guardiansExist = (name, r) => { const missing = guardianIdsOf(name, r).filter((g) => !st.guardian.get(g)); if (missing.length) throw refusal('RECRUITMENT_GUARDIAN_MISSING', `${TABLE_OF[name]} ${r.id} names a guardian that does not exist (${ids(missing)})`); };
-  // S14i: a trial's filed report counts in its player's profile figure, refreshed with the write.
+  // A trial's filed report counts in its player's profile figure, refreshed with the write.
   const write = (name, record) => { guardiansExist(name, record); if (name === 'requests') writeRequest(st, record); else { writeTrial(st, record); refreshProfileSignals(sqlite, [record.playerId]); } };
 
   /** `create(record)`: a new record, typed whole; an existing id is refused. */
@@ -969,7 +941,7 @@ export function createRecruitmentRepository({ sqlite, unit = null, now = Date.no
     /** The report sweep: a deadline passed, no report, never escalated, the subject not removed. */
     reportOverdue: list('trials', 'SELECT * FROM trials t WHERE t.report_due_at < ? AND t.feedback_escalated_at IS NULL AND t.subject_removed_at IS NULL AND NOT EXISTS (SELECT 1 FROM trial_reports r WHERE r.trial_id = t.id) ORDER BY t.rowid'),
     /**
-     * The reminder sweep (§4.3 step 4): the confirmed, open trials with a reminder due at `now`, and no others. Either a
+     * The reminder sweep: the confirmed, open trials with a reminder due at `now`, and no others. Either a
      * session starts within 48 hours and its `t48:<session>:<revision>` marker is unset (found through the sessions'
      * start index: the CROSS JOIN keeps SQLite from starting at the trials instead), or the last session ended over a
      * day ago and `completionPending` is unset (a pass over the open trials' index with a marker probe each, in SQL;
@@ -1009,7 +981,7 @@ export function createRecruitmentRepository({ sqlite, unit = null, now = Date.no
     /** The queries alone, for the pure projectors and providers that must not write. */
     reads: Object.freeze({ requests: readOnly(requests), trials: readOnly(trials) }),
     /**
-     * The deletion unit (M23 P4A-D14): every request and trial of the player becomes the tombstone the callbacks build
+     * The deletion unit: every request and trial of the player becomes the tombstone the callbacks build
      * from a plain copy (ids, states and times kept; the person-shaped fields gone), written at once.
      */
     tombstoneForPlayer(playerId, { request, trial }) {
@@ -1020,7 +992,7 @@ export function createRecruitmentRepository({ sqlite, unit = null, now = Date.no
         return { requests: n, trials: m };
       });
     },
-    /** The derived `players[].trialReports`: the reports filed on the player's trials, in filing order (S5's rule). */
+    /** The derived `players[].trialReports`: the reports filed on the player's trials, in filing order. */
     trialReportsFor(playerId) {
       return trials.forPlayer(playerId).filter((t) => t.report).map((t) => t.report).sort((a, b) => a.filedAt - b.filedAt);
     },
@@ -1031,7 +1003,7 @@ export function createRecruitmentRepository({ sqlite, unit = null, now = Date.no
       for (const list of out.values()) list.sort((a, b) => a.filedAt - b.filedAt);
       return out;
     },
-    /** Check the tables are authoritative (0015 recorded); there is nothing to load. */
+    /** Check migration 0015 is recorded; there is nothing to load. */
     attach() {
       if (!recruitmentLive(sqlite)) throw new Error(`the recruitment repository needs ${RECRUITMENT_MIGRATION} recorded; it never imports an in-memory array`);
       return { counts: this.counts() };

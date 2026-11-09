@@ -1,13 +1,13 @@
-// PRE-M24 final defect sweep — server regressions for the defects the sweep
-// fixed (PRE_M24_DEFECT_REGISTER.md).
+// Server regressions: sessions, async handler errors, typed request fields, the production boot and the test
+// harness's port picker.
 //
-//   S  sessions (PM-4): a session has an absolute lifetime, decided in ONE
+//   S  sessions: a session has an absolute lifetime, decided in ONE
 //      place and applied to every way a session is resolved — the bearer
 //      lookup, the event-stream ticket and connect, a signed media link. A
 //      session with no valid creation time is expired (fail closed). Sign-out
 //      revokes the token. Expired sessions are pruned at the next login and
 //      stay refused across a restart. A fresh session is unaffected.
-//   P  production configuration (PM-1, PM-2) is proved in m181E2E §48; here a
+//   P  production configuration is proved in productionHardening.mjs §48; here a
 //      real production boot is refused without its own admin key.
 import { spawn } from 'node:child_process';
 import crypto from 'node:crypto';
@@ -56,10 +56,10 @@ const orgLogin = async () => (await j('POST', '/auth/org/login', { orgId: 'org-e
 const playerLogin = async (id = 'pl-adeyemi') => (await j('POST', '/auth/player/login', { playerId: id })).body.token;
 
 // ================================================================ S — sessions
-section('S — sessions have a lifetime, sign-out revokes, every resolution path agrees (PM-4)');
+section('S — sessions have a lifetime, sign-out revokes, every resolution path agrees');
 let S = await boot();
 ok(S.up, 'server booted');
-neg(!/never emits|EVENT REGISTRY/.test(S.log()), `S0 the boot log carries no event-registry drift warning (PM-15)${/never emits/.test(S.log()) ? `: ${S.log().match(/never emits[^\n]*/)[0]}` : ''}`);
+neg(!/never emits|EVENT REGISTRY/.test(S.log()), `S0 the boot log carries no event-registry drift warning${/never emits/.test(S.log()) ? `: ${S.log().match(/never emits[^\n]*/)[0]}` : ''}`);
 {
   // S1–S2 sign-out revokes the bearer token (org and player)
   const t = await orgLogin();
@@ -149,8 +149,8 @@ S = await boot({ SESSION_TTL_DAYS: '1' });
 }
 await stop(S);
 
-// ================================================================ A — async handler errors (PM-9)
-section('A — a rejected async handler answers 500 and the process keeps serving (PM-9)');
+// ================================================================ A — async handler errors
+section('A — a rejected async handler answers 500 and the process keeps serving');
 {
   const { installAsyncErrorForwarding } = await import('../../domains/platform/asyncErrors.mjs');
   const { createRequire } = await import('node:module');
@@ -178,8 +178,8 @@ S = await boot();
   ok((await fetch(`${BASE}/healthz`)).status === 200, 'A5 the server is still up');
 }
 
-// ================================================================ T — typed request fields (PM-10)
-section('T — free text is a string: a non-string is a 400 naming the field, never a 500 or a stored object (PM-10)');
+// ================================================================ T — typed request fields
+section('T — free text is a string: a non-string is a 400 naming the field, never a 500 or a stored object');
 {
   const org = await orgLogin();
   const grass = (await j('POST', '/auth/org/login', { orgId: 'org-mossside', scoutName: 'Pat Doyle', role: 'Head Coach', platform: 'grassroots' })).body.token;
@@ -229,7 +229,7 @@ section('T — free text is a string: a non-string is a 400 naming the field, ne
 await stop(S);
 
 // ================================================================ P — production boot
-section('P — production refuses to start without its own admin key (PM-1)');
+section('P — production refuses to start without its own admin key');
 {
   const d2 = mkdtempSync(path.join(tmpdir(), 'sbx-prem24p-'));
   const p1 = await boot({ NODE_ENV: 'production', MEDIA_SECRET: 'synthetic-media-secret-0123456789abcdef' }, d2, PORT + 201);
@@ -247,11 +247,11 @@ section('P — production refuses to start without its own admin key (PM-1)');
     await stop(p3);
   }
   const p4 = await boot({ NODE_ENV: 'production', MEDIA_SECRET: 'synthetic-media-secret-0123456789abcdef', ADMIN_KEY: 'sweep-production-admin-key-0123', AGENT_VERIFICATION_TEST_PROVIDER: '1' }, d2, PORT + 204);
-  neg(!p4.up && /AGENT_TEST_PROVIDER_IN_PRODUCTION/.test(p4.log()), 'P6 the synthetic agent licence register is refused in production (PM-2)');
+  neg(!p4.up && /AGENT_TEST_PROVIDER_IN_PRODUCTION/.test(p4.log()), 'P6 the synthetic agent licence register is refused in production');
 }
 
 // ================================================================ H — the test harness itself
-section('H — no suite can draw a port that fetch() refuses (TH-6)');
+section('H — no suite can draw a port that fetch() refuses');
 {
   // H1 the cause: Node's fetch() refuses a Fetch-standard "bad port" before it opens a socket.
   const refused = await fetch('http://localhost:6000/healthz').then(() => null, (e) => String(e?.cause?.message ?? e));

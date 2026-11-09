@@ -1,9 +1,9 @@
-// M22 — parametric synthetic scene generator (Fix A, §2).
+// Parametric synthetic scene generator.
 //
-// The first fixture set hard-coded one geometry at one size at one cadence.
-// That is exactly how a detector gets overfitted to its own test data: every
+// A fixture set that hard-codes one geometry at one size at one cadence is
+// exactly how a detector gets overfitted to its own test data: every
 // threshold quietly tuned to 240x180 with a 6-pixel ball at 12 fps, and no
-// way to tell because nothing else was ever rendered.
+// way to tell because nothing else is ever rendered.
 //
 // So geometry here is defined in NORMALISED coordinates — 0..1 across the
 // frame, ball radius as a fraction of the short side — and resolution,
@@ -122,7 +122,7 @@ export function sequence({
   for (let t = 0; t <= durationMs; t += dtMs) {
     const idx = i; i += 1;
     if (dropFrame && dropFrame(idx, t)) continue;
-    // Cadence jitter: real capture is never perfectly periodic (§22).
+    // Cadence jitter: real capture is never perfectly periodic.
     const at = Math.round(t + (jitterMs ? (jitterRng() - 0.5) * 2 * jitterMs : 0));
 
     // Rigid camera motion applies to EVERYTHING in frame, which is what
@@ -169,7 +169,7 @@ export function sequence({
 //
 // Each returns a `path(tMs)` in normalised coordinates. Ground truth is the
 // number of contacts the path CONTAINS by construction, declared by the
-// caller — never read back out of the engine (§3).
+// caller — never read back out of the engine.
 
 /** Juggling: parabolic flights between contacts at a fixed period. */
 export function jugglePath({ contacts = 8, periodMs = 600, apexFrac = 0.30, x = 0.47, contactY = 0.83 }) {
@@ -216,13 +216,12 @@ export function jugglePath({ contacts = 8, periodMs = 600, apexFrac = 0.30, x = 
  * contact range at 1.2 diameters and the anchor 0.1 diameters off the
  * silhouette, a 1.0-diameter tap keeps the far position at 1.1.
  *
- * Two earlier cuts bracketed this. A 1.26-diameter tap put the far position
- * outside contact range, so every second strike happened while the ball was
- * already out of range and went uncounted — counts landed at almost exactly
- * half of truth, at every pace. A 0.4-diameter tap was then too small to
- * clear the separation requirement and counts collapsed altogether. Neither
- * was an engine defect; both were the fixture asserting physics the protocol
- * rules do not describe.
+ * A larger tap (1.26 diameters) puts the far position outside contact range,
+ * so every second strike goes uncounted and counts land at almost exactly
+ * half of truth, at every pace. A smaller one (0.4 diameters) is too small to
+ * clear the separation requirement and counts collapse altogether. Neither is
+ * an engine defect; both are the fixture asserting physics the protocol rules
+ * do not describe.
  */
 export function touchPath({
   touches = 10, periodMs = 500, impulseN = 0.833, tauMs = 60, x0 = 0.545, y = 0.83,

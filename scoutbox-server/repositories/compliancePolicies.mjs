@@ -1,9 +1,8 @@
 /**
- * S11b-1 — Trust & Safety reviewers and jurisdiction policies as typed tables (migration `0027_compliance_policies`;
- * docs/architecture/migration.md §4.5 S11; sql/06_agent_compliance_transactions.sql).
+ * Trust & Safety reviewers and jurisdiction policy versions.
  *
  * Records:
- *   - A reviewer: the attributed Trust & Safety identity every authoritative compliance decision names (G-C0). The
+ *   - A reviewer: the attributed Trust & Safety identity every authoritative compliance decision names. The
  *     secret is stored only as its scrypt hash. A reviewer is never removed; a revocation is final.
  *   - A policy version: a jurisdiction's encoded rules, proposed by one administrator and published by another (dual
  *     control). Its rules are ordered rows, each with ordered sources, overrides and parameters. A parameter is typed
@@ -20,7 +19,7 @@
  * joined into the open unit of work, the caller's open transaction, or a transaction of their own; an unknown field and
  * an update from inside its own update are refused. History only grows.
  *
- * READS are SQL: no mirror. Records are fresh and deep-frozen. The published set is decoded once per change (its
+ * Records are deep-frozen. The published set is decoded once per change (its
  * signature is the published rows' count and revisions), because every evaluation reads it.
  *
  * References. A revoker, proposer and approver are reviewers (RESTRICT); `supersedes` names an earlier version of the
@@ -37,7 +36,7 @@ export const COMPLIANCE_POLICIES_MIGRATION = '0027_compliance_policies';
 export const COMPLIANCE_POLICIES_COLLECTIONS = Object.freeze(['tsReviewers', 'jurisdictionPolicies']);
 
 // ------------------------------------------------------------------ vocabularies and limits (one definition; the routes import them)
-/** Text limits: the routes refuse longer ids and shorten longer free text, as before. */
+/** Text limits: the routes refuse longer ids and shorten longer free text. */
 export const COMPLIANCE_POLICY_LIMITS = Object.freeze({
   id: 80, reviewerId: 40, name: 80, actorName: 200, secretHash: 400, revokeReason: 200, regulator: 20, ruleId: 40,
   note: 1000, source: 300, sourceVersion: 120, ruleCount: 200, sourceCount: 20, overrideCount: 10, role: 60,
@@ -462,7 +461,7 @@ export function insertSeededPolicies(sqlite, now) {
   }
 }
 
-// ------------------------------------------------------------------ snapshot (fixtures and the persistence batteries)
+// ------------------------------------------------------------------ whole-domain read (the test suites)
 export const compliancePoliciesLive = (sqlite) => migrationApplied(sqlite, COMPLIANCE_POLICIES_MIGRATION);
 function readAll(sqlite) {
   return {
@@ -470,7 +469,7 @@ function readAll(sqlite) {
     jurisdictionPolicies: decodePolicies(sqlite, sqlite.prepare('SELECT * FROM jurisdiction_policies ORDER BY rowid').all()),
   };
 }
-/** The whole domain read back as plain records (`readAllRecords` in index.mjs: the test suites' read-back); null before its migration. */
+/** The whole domain read back as plain records (`readAllRecords` in index.mjs: the test suites' read-back). */
 export const COMPLIANCE_POLICIES_RECORDS = {
   names: COMPLIANCE_POLICIES_COLLECTIONS,
   read(sqlite) { return compliancePoliciesLive(sqlite) ? readAll(sqlite) : null; },

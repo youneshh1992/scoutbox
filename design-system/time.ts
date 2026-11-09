@@ -1,4 +1,4 @@
-// M24F.3 — human time for the portals. Never a machine timestamp
+// Human time for the portals. Never a machine timestamp
 // ("10/3/2026, 8:45:24 PM") in the interface: a day, or a day and the
 // minute. Seconds never appear.
 const locale = () => (typeof document !== 'undefined' && document.documentElement.lang === 'fr' ? 'fr-FR' : 'en-GB');

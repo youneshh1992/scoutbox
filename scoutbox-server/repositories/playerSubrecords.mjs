@@ -1,5 +1,5 @@
 /**
- * Player sub-records (S5): the eleven lists a player record carries — `media`, `attendance`, `timeline`, `badges`,
+ * Player sub-records: the eleven lists a player record carries — `media`, `attendance`, `timeline`, `badges`,
  * `drills`, `drillResults`, `activityLog`, `externalIds`, `seasonHistory`, `medical.records`,
  * `programme.completed` — are rows of the twelve `player_*` tables created by migration `0007_player_subrecords`
  * (`media[].tags{}` is the twelfth, `player_media_tags`). The identity repository (identity.mjs) is the one writer.
@@ -14,8 +14,7 @@
  *     absent`); a natural key the code enforces (season, drill, provider and external id, tag, every item id) is
  *     refused when a list repeats it, never deduplicated.
  *
- * S14h: an external id's `reviewId` names the identity review it was linked from (the review keeps the imported
- * row; the copy that used to ride in `claim_json` is gone).
+ * An external id's `reviewId` names the identity review it was linked from (the review keeps the imported row).
  */
 import { migrationApplied, childRowsOf } from './database.mjs';
 
@@ -24,7 +23,7 @@ export const PLAYER_SUBRECORDS_MIGRATION = '0007_player_subrecords';
 export const PLAYER_SUBRECORD_KEYS = Object.freeze(['media', 'attendance', 'timeline', 'badges', 'drills', 'drillResults', 'activityLog', 'externalIds', 'seasonHistory']);
 /** Composites whose list sub-key is stored as rows (`medical.records` → `player_medical_records`, …). */
 export const PLAYER_COMPOSITE_SUBRECORDS = Object.freeze({ medical: Object.freeze(['records']), programme: Object.freeze(['completed']) });
-/** Is the S5 storage authoritative on this connection? Decided by the migration record, never by the tables existing. */
+/** Are the sub-record tables in use on this connection? Decided by the migration record, never by the tables existing. */
 export const subrecordsLive = (sqlite) => migrationApplied(sqlite, PLAYER_SUBRECORDS_MIGRATION);
 
 /** The array keys the repository writes, as the writers name them (`medical.records` and `programme.completed` are sub-keys of split composites). */
@@ -41,7 +40,7 @@ const absentOrNull = (v) => v === null || v === undefined;
 const isSafeInt = (v) => typeof v === 'number' && Number.isSafeInteger(v);
 const isFinite_ = (v) => typeof v === 'number' && Number.isFinite(v);
 
-// ------------------------------------------------------------------ the DDL (what migration 0007 creates; 01_identity.sql documents it)
+// ------------------------------------------------------------------ the DDL (what migration 0007 creates)
 export const SUBRECORDS_DDL = `
 CREATE TABLE player_season_history (
   player_id           TEXT NOT NULL REFERENCES players(id) ON DELETE CASCADE,
@@ -188,12 +187,12 @@ CREATE TABLE player_programme_completions (
 // → column), the type each column holds (what the validator refuses), which
 // keys the table requires, which optional keys read back as `null` when their
 // column is NULL (`nullable`; the others are omitted), and the natural key the
-// code enforces today (refused when an array violates it).
+// code enforces (refused when an array violates it).
 const itemSpec = ({ scalars, booleans = [], json = [], composites = {}, defaults = {}, columns }) => Object.freeze({
   scalars: Object.freeze(scalars), booleans: new Set(booleans), json: new Set(json), composites: Object.freeze(composites),
   defaults: Object.freeze(defaults), columns: Object.freeze(columns),
 });
-/** S14i: a clip's upload instant, as every writer stores it (toISOString), so the feed compares it as text in SQL. */
+/** A clip's upload instant, as every writer stores it (toISOString), so the feed compares it as text in SQL. */
 const INSTANT_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 /** `types`: record key → 'text' | 'date' | 'instant' | 'int' | 'real' | 'bool' | 'json'; `required`: keys that must be present and non-null; `enums`: allowed values. */
 export const SUBRECORD_SPECS = Object.freeze({
@@ -399,7 +398,7 @@ export function itemRows(key, item, position, playerId) {
   if (def.children === 'tags' && isPlainObject(item.tags)) tags = Object.entries(item.tags).map(([tag, count], i) => ({ media_id: item.id, position: i, tag, count }));
   return { row, tags };
 }
-/** A valid item exactly as the tables will read it back (what the repository keeps in memory after a write). */
+/** A valid item exactly as the tables will read it back. */
 export function storedItem(key, item) {
   const def = SUBRECORD_SPECS[key];
   if (def.primitive) return item;
@@ -441,7 +440,7 @@ export function writeArrayRows(st, key, playerId, items) {
   });
   return items.length;
 }
-/** Write every array of a record (`players.insert`, the migration). Returns rows per table. */
+/** Write every array of a record (`players.insert`). Returns rows per table. */
 export function writeChildRows(st, rec) {
   const counts = {};
   for (const key of SUBRECORD_KEYS) {
@@ -503,10 +502,8 @@ export function countChildRows(st) {
 
 // ------------------------------------------------------------------ the derived trial reports
 /**
- * The trial reports of a player, from the authoritative `trials` collection:
- * every `trials[].report` whose trial names the player, in filing order
- * (ascending `filedAt`, the trials' order for a tie). The same objects the
- * trials hold, never copies.
+ * The trial reports of a player from a list of trials: every `trials[].report` whose trial names the player, in
+ * filing order (ascending `filedAt`, the trials' order for a tie). The same objects the trials hold, never copies.
  */
 export function trialReportsFor(trials, playerId) {
   if (!Array.isArray(trials)) return [];

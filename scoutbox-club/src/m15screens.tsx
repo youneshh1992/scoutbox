@@ -1,4 +1,4 @@
-// M15 org screens — the recruitment Football Passport.
+// Org screens — the recruitment Football Passport.
 // Everything rendered here is the SERVER's projection for this organisation:
 // own-org assessments/trials only, provenance on every item, and honest
 // wall messages when the standing gates refuse access (agency/minor wall,
@@ -12,10 +12,8 @@ import { m15, shareTokenFrom, type FpEvent, type FpSummary, type RecruitmentPass
 import { t } from './i18n';
 import { provenanceOf } from './provenance';
 
-// M18.2 — the labels come from ONE canonical mapping (provenance.ts). This
-// file used to hold its own table, and its fallback once badged Box Cam
-// evidence as "Player-provided". ProvPill stays exported so every surface
-// that imported it keeps working; it just no longer decides any words.
+// The labels come from ONE canonical mapping (provenance.ts); ProvPill
+// renders them and decides no words of its own.
 export function ProvPill({ provenance, copy }: { provenance: string; copy?: string | null }) {
   const p = provenanceOf(provenance, copy);
   return (

@@ -1,4 +1,4 @@
-// ScoutBox design system — the authentication composition (M24C).
+// ScoutBox design system — the authentication composition.
 //
 // One page for every portal: the brand-green page, a centred two-panel card
 // (a soft-green introduction on the left, the deep-green form on the right),
@@ -20,9 +20,9 @@ export function AuthPage({ app, product, heading, summary, points, toolbar, chil
   /** The product identity beside the wordmark: Pro, Grassroots, Agent, Trust & Safety. */
   product: string;
   heading: string;
-  /** M24D — one sentence under the headline; the only introduction a phone shows. */
+  /** One sentence under the headline; the only introduction a phone shows. */
   summary?: string;
-  /** At most three short, factual lines about what exists (desktop only). M24F.2 — an empty list renders nothing (Grassroots keeps its introduction to the headline and one sentence). */
+  /** At most three short, factual lines about what exists (desktop only). An empty list renders nothing (Grassroots keeps its introduction to the headline and one sentence). */
   points: readonly string[];
   toolbar?: ReactNode;
   children: ReactNode;
@@ -90,7 +90,7 @@ export function PasswordInput({ className, ...rest }: React.InputHTMLAttributes<
   );
 }
 
-/** M24D — a choice presented as a row: a name, one quiet line, an arrow.
+/** A choice presented as a row: a name, one quiet line, an arrow.
  *  Keeps `.org-card` / `.org-name` so the browser suites still find it. A row
  *  that selects (organisation) carries aria-pressed; a row that acts (a demo
  *  identity) does not. */
@@ -108,12 +108,12 @@ export function AuthRow({ label, meta, selected, onClick, testId, title }: {
   );
 }
 
-/** M24D — a small uppercase label over a block of the form ("AGENCY", "Organisation"). */
+/** A small uppercase label over a block of the form ("AGENCY", "Organisation"). */
 export function AuthSectionLabel({ children, id }: { children: ReactNode; id?: string }) {
   return <span className="auth-label" id={id}>{children}</span>;
 }
 
-/** M24D — a quiet one-line note (demo mode, access). */
+/** A quiet one-line note (demo mode, access). */
 export function AuthNote({ children, testId }: { children: ReactNode; testId?: string }) {
   return <p className="auth-note" data-testid={testId}>{children}</p>;
 }

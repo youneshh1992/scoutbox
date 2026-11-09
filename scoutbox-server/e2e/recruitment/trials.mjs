@@ -1,6 +1,6 @@
-// M23 P4B acceptance suite — the Trial workflow.
+// Acceptance suite for the Trial workflow.
 //
-// The governing principle this suite exists to enforce (mandate §5–§9):
+// The governing principle this suite exists to enforce:
 //
 //   An invitation is not an acceptance; an acceptance is not a schedule; a
 //   schedule is not attendance; attendance is not completion; completion is
@@ -17,7 +17,7 @@
 //   A  attendance and the completion gate
 //   M  the minor journey — guardian route, child's device, revoked guardian
 //   W  the walls — agency, unverified club, foreign organisation, roles
-//   B  blocks — before, pending, scheduled; D-16 nuanced policy
+//   B  blocks — before, pending, scheduled; the nuanced block policy
 //   K  expectedRev matrix, idempotency, cross-org keys
 //   C  the concurrency matrix
 //   F  honest transport failure — invitation, acceptance, completion
@@ -49,8 +49,8 @@ import { RATE_LIMIT_POLICY } from '../../domains/platform/rateLimit.mjs';
 import { DATA_MIGRATIONS } from '../../repositories/index.mjs';
 import { STATUS_EVIDENCE_REQUIRED, roomCan } from '../../domains/recruitment/rooms/shared.mjs';
 import { EVIDENCE_KINDS } from '../../domains/recruitment/lifecycle/evidence.mjs';
-import { createEvidenceProvider } from '../../scripts/recruitmentReadsFixture.mjs'; // §4.3 step 2: the contacts/offers queries over the plain arrays
-const LATEST_SCHEMA = Number(DATA_MIGRATIONS.map((m) => m.id).sort().at(-1).slice(0, 4)); // S14a: the latest table migration's number
+import { createEvidenceProvider } from '../../scripts/recruitmentReadsFixture.mjs'; // the contacts/offers queries over plain arrays
+const LATEST_SCHEMA = Number(DATA_MIGRATIONS.map((m) => m.id).sort().at(-1).slice(0, 4)); // the latest table migration's number
 
 const PORT = 6100 + Math.floor(Math.random() * 200);
 const BASE = `http://localhost:${PORT}`;
@@ -164,7 +164,7 @@ section('U — states, gates and views');
   neg(M({ ...sched, completion: { state: 'completed' } }, ACTS) === '0000010' && M({ ...sched, completion: { state: 'cancelled' } }, ACTS) === '0000000', 'U45 completed allows only evidence linking; cancelled allows nothing');
   neg(trialStateAllows(sched, 'assess') === false && trialStateAllows(sched, 'constructor') === false, 'U46 an unknown action is never allowed');
   ok(blockedAllows('cancel') && blockedAllows('report'), 'U47 a blocked club may cancel and file the mandatory report');
-  neg(['schedule', 'reschedule', 'attendance', 'complete', 'link', 'invite', 'assess'].every((a) => blockedAllows(a) === false), 'U47b and may do nothing else (D-16)');
+  neg(['schedule', 'reschedule', 'attendance', 'complete', 'link', 'invite', 'assess'].every((a) => blockedAllows(a) === false), 'U47b and may do nothing else');
   ok(trialRoleAllows('recruitment_admin', 'trial_write') && trialRoleAllows('room_lead', 'trial_write') && trialRoleAllows('contributor', 'trial_assess') && trialRoleAllows('viewer', 'trial_view'), 'U48 write is lead+, assess is member+, view is everyone in the room');
   neg(!trialRoleAllows('contributor', 'trial_write') && !trialRoleAllows('viewer', 'trial_assess') && !trialRoleAllows(null, 'trial_view') && !trialRoleAllows('admin', 'trial_view'), 'U48b a contributor cannot write, a viewer cannot assess, no role is no access');
   ok(roomCan('contributor', 'trial_assess') && !roomCan('contributor', 'trial_write') && roomCan('room_lead', 'trial_write'), 'U49 roomCan carries the same three actions (one permission table)');
@@ -188,7 +188,7 @@ section('U — states, gates and views');
   ok(cv.workflowState === 'scheduled' && cv.rev === 3 && cv.caseId === 'k1' && cv.schedule.sessions[0].instructions === 'Ask for Priya' && cv.attendanceHistory[0].note === S_NOTE, 'U51 the club view carries the operational record, including the club\'s own note');
   neg(!has(cv, S_EMERG) && !has(cv, 'secret-key') && !has(cv, '0777'), 'U52 the club view never carries the family\'s emergency contact or an idempotency key');
   neg(!has(fv, 'k1') && !has(fv, S_NOTE) && !has(fv, 'bx1') && !has(fv, 'aud-1') && fv.caseId === undefined && fv.history === undefined && fv.attendanceHistory === undefined, 'U53 the family view has no case id, no club note, no evidence link and no history internals');
-  ok(fv.schedule.sessions[0].venue.address === 'Gate B' && fv.schedule.sessions[0].instructions === 'Ask for Priya' && fv.awaitingYourConfirmation === false, 'U53b the family view shares the address and instructions (accepted trial, D-23)');
+  ok(fv.schedule.sessions[0].venue.address === 'Gate B' && fv.schedule.sessions[0].instructions === 'Ask for Priya' && fv.awaitingYourConfirmation === false, 'U53b the family view shares the address and instructions (accepted trial)');
   neg(!has(mv, 'Ask for Priya') && !has(mv, 'Gate B') && !has(mv, S_NOTE) && mv.sessions[0].attendance === 'attended' && mv.sessions[0].evidenceCount === 1, 'U54 the milestone is ids, states, times and counts — never text');
   neg(Object.keys(ov).sort().join(',') === 'guardianManaged,id,orgName,workflowLabel,workflowState', 'U55 the minor\'s outcome line is exactly five fields');
   ok(normaliseTrialClientKey(undefined).ok && normaliseTrialClientKey(undefined).key === null && normaliseTrialClientKey('k-1').key === 'k-1', 'U56 a client key is optional');
@@ -211,10 +211,10 @@ section('P — error bands, rate policies, events, migration, evidence, permissi
     neg(!!r && Array.isArray(r.payload) && r.payload.every((k) => /Id$/.test(k)) && !r.payload.some((k) => /name|note|message|reason|address|instruction/i.test(k)), `P4b ${e} payload is ids only`);
   }
   neg(EVENT_REGISTRY.trial_assessment_recorded === undefined && EVENT_REGISTRY.trial_observed === undefined, 'P5 no event announces an assessment or an observation — judgement never broadcasts');
-  // P6–P8 rewritten in S14a: they ran the blob's 2304 trial step in memory (an upgrade path, ground rule 1). That a trial
-  // row reads back with neutral containers, nothing renamed or invented, is proved on typed rows in trialsPersistence §1.
+  // That a trial row reads back with neutral containers, nothing renamed or invented, is proved on typed rows in
+  // trialsPersistence section 1.
   ok(DATA_MIGRATIONS.length === LATEST_SCHEMA && DATA_MIGRATIONS.some((m) => m.id === '0015_recruitment'), 'P6 the current schema; the trials are typed rows of table migration 0015');
-  ok(STATUS_EVIDENCE_REQUIRED.trial_requested?.kind === 'trial_invited' && STATUS_EVIDENCE_REQUIRED.trial_scheduled?.kind === 'trial_confirmed' && STATUS_EVIDENCE_REQUIRED.trial_completed?.kind === 'trial_completed', 'P9 the three trial stages are evidence-gated: invited, confirmed, completed (D-3/D-4/D-5)');
+  ok(STATUS_EVIDENCE_REQUIRED.trial_requested?.kind === 'trial_invited' && STATUS_EVIDENCE_REQUIRED.trial_scheduled?.kind === 'trial_confirmed' && STATUS_EVIDENCE_REQUIRED.trial_completed?.kind === 'trial_completed', 'P9 the three trial stages are evidence-gated: invited, confirmed, completed');
   ok(EVIDENCE_KINDS.includes('trial_invited') && EVIDENCE_KINDS.includes('trial_confirmed') && EVIDENCE_KINDS.includes('trial_completed'), 'P9b the evidence provider knows all three kinds');
   const kase = { id: 'k1', orgId: 'o', playerId: 'p' };
   const chk = (db, kind) => createEvidenceProvider(db).check(kind, { kase });
@@ -330,7 +330,7 @@ const J = {};
   const jr0 = (await j('GET', `/org/rooms/${J.RID}/journey`, undefined, maria.token)).body;
   await j('POST', `/org/rooms/${J.RID}/lifecycle`, { action: 'startReview', expectedRev: jr0.case.rev }, maria.token);
   const direct = collect('direct move', await j('POST', `/org/rooms/${J.RID}/lifecycle`, { action: 'planTrial', expectedRev: jr0.case.rev + 1 }, maria.token));
-  neg(expect(direct, 422, 'LIFECYCLE_EVIDENCE_REQUIRED'), 'J1 moving the case to trial_requested BY HAND is refused — there is no invitation to evidence it (422 LIFECYCLE_EVIDENCE_REQUIRED, D-3)');
+  neg(expect(direct, 422, 'LIFECYCLE_EVIDENCE_REQUIRED'), 'J1 moving the case to trial_requested BY HAND is refused — there is no invitation to evidence it (422 LIFECYCLE_EVIDENCE_REQUIRED)');
   const list0 = await trialsOf(J.RID);
   ok(list0.items.length === 0 && list0.invitation === null && list0.routing.available === true && list0.routing.type === 'player' && list0.routing.minor === false && list0.canWrite === true && list0.case.acceptsInvitation === true, 'J2 before anything: no trial, no invitation, the routing says adult player, the lead may write');
   const playerNotifsBefore = (await notifs('/player/notifications', kola.token)).length;
@@ -349,7 +349,7 @@ const J = {};
   // The recipient's view of the invitation.
   const p = await pendingTrial(kola.token);
   ok(!!p && p.id === J.REQ && p.trialDetails.slots.length === 2 && p.trialDetails.proposedDate === localDay(T0 + 2 * H, 'Europe/London') && p.trialDetails.slots[0].timezone === 'Europe/London', 'J6 the player sees the invitation in the existing Inbox with its slots, days and the organiser timezone');
-  neg(!has(p, 'Gate B') && !has(p, 'Ask for Priya') && !has(p, J.RID) && p.caseId === undefined && p.recipient === undefined && p.keys === undefined, 'J7 the Inbox view carries neither the exact address, the arrival instructions, the case id, the recipient snapshot nor the club\'s idempotency key (D-23)');
+  neg(!has(p, 'Gate B') && !has(p, 'Ask for Priya') && !has(p, J.RID) && p.caseId === undefined && p.recipient === undefined && p.keys === undefined, 'J7 the Inbox view carries neither the exact address, the arrival instructions, the case id, the recipient snapshot nor the club\'s idempotency key');
   ok(p.trialDetails.venue === 'Eastport Dome, Eastport' && p.trialDetails.slots[0].venue.name === 'Eastport Dome', 'J7b venue name and town are shared before acceptance');
   const badSlot = collect('bad slot', await j('POST', `/player/requests/${J.REQ}/respond`, { accept: true, chosenSlot: '2030-01-01' }, kola.token));
   neg(badSlot.status === 400 && (await pendingTrial(kola.token))?.id === J.REQ, 'J8 accepting with a day the club never offered is refused and the invitation stays pending (P4A-D12)');
@@ -357,8 +357,8 @@ const J = {};
   ok(acc.status === 200 && acc.body.status === 'accepted' && typeof acc.body.trialId === 'string', 'J9 the player accepts the first slot through the existing respond route and learns the trial id');
   J.TID = acc.body.trialId;
   const t1 = (await trialsOf(J.RID)).items[0];
-  ok(t1?.id === J.TID && t1.workflowState === 'scheduled' && t1.schedule.revision === 1 && t1.schedule.confirmedAt > 0 && t1.schedule.sessions.length === 1 && t1.schedule.sessions[0].startsAt === T0 + 2 * H && t1.rev === 1 && t1.caseId === J.RID, 'J10 accepting a concrete slot IS the schedule confirmation: one trial, scheduled, revision 1 confirmed by the recipient, rev 1 (D-4)');
-  ok(await stage(J.RID) === 'trial_scheduled', 'J10b and the case advanced to trial_scheduled in the same save — the writer, not the trial, moved it (D-15)');
+  ok(t1?.id === J.TID && t1.workflowState === 'scheduled' && t1.schedule.revision === 1 && t1.schedule.confirmedAt > 0 && t1.schedule.sessions.length === 1 && t1.schedule.sessions[0].startsAt === T0 + 2 * H && t1.rev === 1 && t1.caseId === J.RID, 'J10 accepting a concrete slot IS the schedule confirmation: one trial, scheduled, revision 1 confirmed by the recipient, rev 1');
+  ok(await stage(J.RID) === 'trial_scheduled', 'J10b and the case advanced to trial_scheduled in the same save — the writer, not the trial, moved it');
   neg(/^tses-\d+$/.test(t1.schedule.sessions[0].id) && t1.schedule.sessions[0].id !== p.trialDetails.slots[0].id, 'J10c the session id is a minted id — not an array position, not the slot id');
   ok(t1.schedule.sessions[0].venue.address === 'Gate B, Dome Road' && t1.schedule.sessions[0].instructions === 'Ask for Priya at reception.', 'J11 the club view of the trial carries the address and instructions it wrote');
   ok(t1.legacy === false && t1.reportStatus === 'awaiting_report' && t1.hasReport === false, 'J12 the M12 report obligation is untouched: awaiting_report, no report');
@@ -369,7 +369,7 @@ const J = {};
   const early2 = collect('attendance early', await j('POST', `/org/rooms/${J.RID}/trials/${J.TID}/sessions/${J.SID}/attendance`, { state: 'attended', expectedRev: 1 }, maria.token));
   neg(expect(early2, 409, 'TRIAL_INVALID_STATE') && early2.body.current?.sessionId === J.SID, 'J14 attendance cannot be recorded before the session starts');
   const compEarly = collect('complete early', await j('POST', `/org/rooms/${J.RID}/trials/${J.TID}/complete`, { expectedRev: 1 }, maria.token));
-  neg(expect(compEarly, 409, 'TRIAL_COMPLETION_REQUIREMENTS_NOT_MET') && compEarly.body.reasons.join(',') === 'no_attended_session,last_session_not_ended', 'J15 completing before attendance names both missing requirements (D-5)');
+  neg(expect(compEarly, 409, 'TRIAL_COMPLETION_REQUIREMENTS_NOT_MET') && compEarly.body.reasons.join(',') === 'no_attended_session,last_session_not_ended', 'J15 completing before attendance names both missing requirements');
   neg(await stage(J.RID) === 'trial_scheduled', 'J15b and the case did not move');
   const att = await j('POST', `/org/rooms/${J.RID}/trials/${J.TID}/sessions/${J.SID}/attendance`, { state: 'attended', expectedRev: 1, clientKey: 'J-att' }, maria.token, at(T0 + 3 * H));
   ok(att.status === 200 && att.body.trial.rev === 2 && att.body.trial.attendanceHistory.length === 1 && att.body.trial.attendanceHistory[0].source === 'manual' && att.body.trial.attendanceHistory[0].recordedBy.name === 'Maria Keane', 'J16 once the session has started, attendance is recorded (manual, by name) and the rev moves to 2');
@@ -432,7 +432,7 @@ const S = {};
 
   // A cosmetic revision keeps the confirmation.
   const cosmetic = await j('POST', `/org/rooms/${S.RID}/trials/${S.TID}/reschedule`, body([{ id: S.SID, startsAt: T0 + 2 * H, endsAt: T0 + 4 * H, kind: 'drill', venue: V(), instructions: 'Bring shin pads.' }], { expectedRev: 1, clientKey: 'S-cos' }), maria.token);
-  ok(cosmetic.status === 200 && cosmetic.body.requiresConfirmation === false && cosmetic.body.material === false && cosmetic.body.trial.workflowState === 'scheduled' && cosmetic.body.trial.schedule.revision === 2 && cosmetic.body.trial.rev === 2, 'S2 changing the kind and the instructions is not material: revision 2, still scheduled, no re-confirmation asked (D-8)');
+  ok(cosmetic.status === 200 && cosmetic.body.requiresConfirmation === false && cosmetic.body.material === false && cosmetic.body.trial.workflowState === 'scheduled' && cosmetic.body.trial.schedule.revision === 2 && cosmetic.body.trial.rev === 2, 'S2 changing the kind and the instructions is not material: revision 2, still scheduled, no re-confirmation asked');
   ok(cosmetic.body.trial.schedule.sessions[0].id === S.SID && cosmetic.body.trial.schedule.sessions[0].instructions === 'Bring shin pads.', 'S2b the session kept its id across the revision');
   ok(cosmetic.body.trial.revisions.length === 2 && cosmetic.body.trial.revisions[0].supersededAt > 0 && cosmetic.body.trial.revisions[1].supersededAt === null && cosmetic.body.trial.revisions[1].confirmedAt > 0, 'S3 revisions are append-only: the first is superseded, the second is current and carries the standing confirmation');
   // A material revision clears it.
@@ -539,7 +539,7 @@ const A = {};
   ok(famCancel.status === 200 && famCancel.body.idempotent === false && famCancel.body.trial.workflowState === 'completed', 'A10d the player cancelling a completed trial changes nothing (200, not a replay, not an error)');
   const passport = (await j('GET', '/player/football-passport', undefined, osei.token)).body;
   const ev = passport.timeline.find((e) => e.type === 'trial_attended' && e.source?.id === A.TID);
-  ok(!!ev && ev.legacy === false && ev.attendedSessions === 1, 'A11 the Passport shows trial_attended keyed on the RECORDED attendance, flagged non-legacy (D-14)');
+  ok(!!ev && ev.legacy === false && ev.attendedSessions === 1, 'A11 the Passport shows trial_attended keyed on the RECORDED attendance, flagged non-legacy');
 }
 
 // ================================================================= M — minor
@@ -564,7 +564,7 @@ const M = {};
   // Revoke the guardian's identity check between invitation and acceptance: the route is re-derived at acceptance.
   await j('POST', '/admin/guardians/gd-amara/idv', { approved: false }, undefined, ADMIN);
   const revoked = collect('revoked accept', await j('POST', `/guardian/requests/${M.REQ}/respond`, { accept: true, chosenSlot: gp.trialDetails.proposedDate }, amara.token));
-  neg(expect(revoked, 422, 'TRIAL_GUARDIAN_REQUIRED') && (await pendingTrial(amara.token, '/guardian/inbox'))?.id === M.REQ, 'M6 a guardian whose verification was withdrawn cannot accept — re-derived NOW, the invitation stays pending (D-7)');
+  neg(expect(revoked, 422, 'TRIAL_GUARDIAN_REQUIRED') && (await pendingTrial(amara.token, '/guardian/inbox'))?.id === M.REQ, 'M6 a guardian whose verification was withdrawn cannot accept — re-derived NOW, the invitation stays pending');
   const listRevoked = await trialsOf(M.RID);
   neg(listRevoked.routing.available === false && listRevoked.routing.reason === 'TRIAL_GUARDIAN_REQUIRED', 'M6b the club sees the routing as unavailable while the guardian route is broken');
   await j('POST', '/admin/guardians/gd-amara/idv', { approved: true }, undefined, ADMIN);
@@ -579,7 +579,7 @@ const M = {};
   ok(gv?.workflow?.workflowState === 'scheduled' && gv.workflow.schedule.sessions[0].venue.address === 'Gate B, Dome Road' && gv.workflow.schedule.sessions[0].instructions === 'Ask for Priya at reception.', 'M9 the guardian now holds the address and instructions');
   const cv = (await j('GET', '/player/trials', undefined, guni.token)).body.find((x) => x.id === M.TID);
   ok(!!cv && cv.workflow?.guardianManaged === true && cv.workflow.workflowState === 'scheduled', 'M10 the child\'s own device carries the guardian-managed outcome line');
-  neg(!has(cv.workflow, 'Gate B') && !has(cv.workflow, 'Ask for Priya') && cv.workflow.schedule === undefined && cv.workflow.completion === undefined, 'M10b and not the sessions, the address, the instructions or the completion detail (privacy matrix §112)');
+  neg(!has(cv.workflow, 'Gate B') && !has(cv.workflow, 'Ask for Priya') && cv.workflow.schedule === undefined && cv.workflow.completion === undefined, 'M10b and not the sessions, the address, the instructions or the completion detail (privacy matrix)');
   const childConfirm = collect('child confirm', await j('POST', `/player/trials/${M.TID}/confirm-schedule`, {}, guni.token));
   neg(childConfirm.status === 403, 'M11 the child cannot confirm a schedule (403 — guardian-managed)');
   const childCancel = collect('child cancel', await j('POST', `/player/trials/${M.TID}/cancel`, {}, guni.token));
@@ -650,7 +650,7 @@ section('W — walls: agency, unverified club, foreign organisation, roles');
 }
 
 // ================================================================ B — blocks
-section('B — blocks: before, pending, scheduled — the D-16 policy');
+section('B — blocks: before, pending, scheduled');
 {
   const kim = await playerLogin('pl-kim');
   const bRoom = await reviewed(maria.token, 'pl-kim');
@@ -694,12 +694,12 @@ section('B — blocks: before, pending, scheduled — the D-16 policy');
   neg(assessBlocked.status === 403, 'B8 an assessment in the context of the blocked trial is refused (the player is not visible to the club while blocked)');
   const kimNotifsBefore = (await notifs('/player/notifications', kim.token)).length;
   const cancel = await j('POST', `/org/rooms/${bRoom}/trials/${TID}/cancel`, { expectedRev: t.rev, reason: 'The session will not go ahead.' }, maria.token);
-  ok(cancel.status === 200 && cancel.body.trial.workflowState === 'cancelled', 'B9 the club MAY cancel while blocked — a minor must never be stranded with an unannounced trial (D-16)');
+  ok(cancel.status === 200 && cancel.body.trial.workflowState === 'cancelled', 'B9 the club MAY cancel while blocked — a minor must never be stranded with an unannounced trial');
   const kn = await notifs('/player/notifications', kim.token);
   ok(kn.length === kimNotifsBefore + 1 && /cancelled the trial/.test(kn[0].text), 'B9b the cancellation notice reaches the family — operational safety, not solicitation');
   const report = await j('POST', `/org/trials/${TID}/report`, { technical: 3, tactical: 3, physical: 3, mental: 3, potential: 3, fit: 3, notes: 'Filed to close the obligation.' }, maria.token);
   ok(report.status === 201 || report.status === 400, `B10 the mandatory report can still be filed while blocked (${report.status})`);
-  neg((await notifs('/player/notifications', kim.token)).length === kimNotifsBefore + 1, 'B10b but its player notification is suppressed while the block stands (D-16)');
+  neg((await notifs('/player/notifications', kim.token)).length === kimNotifsBefore + 1, 'B10b but its player notification is suppressed while the block stands');
   const famCancel = await j('POST', `/player/trials/${TID}/cancel`, {}, kim.token);
   ok(famCancel.status === 200 && famCancel.body.idempotent === true, 'B11 the player\'s own cancel of the already-cancelled trial is a replay, even while blocked');
   await unblock('pl-kim', 'org-eastport');
@@ -801,7 +801,7 @@ section('F — honest transport failure: nothing half-written, nothing sent');
 {
   const RID = await reviewed(maria.token, 'pl-okafor');
   const chinedu = await playerLogin('pl-okafor');
-  const outboxBefore = (await j('GET', '/admin/overview', undefined, undefined, ADMIN)).body.emailsSent; // S14d: the outbox pages; its size is the overview's count
+  const outboxBefore = (await j('GET', '/admin/overview', undefined, undefined, ADMIN)).body.emailsSent; // the outbox pages; its size is the overview's count
   const notifsBefore = (await notifs('/player/notifications', chinedu.token)).length;
   const histBefore = (await j('GET', `/org/rooms/${RID}/journey?limit=200`, undefined, maria.token)).body.history.total;
   const inj = await j('POST', '/admin/delivery/inject-failure', { channel: 'trial', count: 1 }, undefined, ADMIN);
@@ -877,7 +877,7 @@ const E = {};
   neg(!has(ev, 'trace') && !has(ev, 'nonce') && !has(ev, '"obs"') && !has(ev, 'confidence') && !has(ev, 'frames') && !has(ev, E.OPEN.nonce), 'E8 never trace[], nonce, obs.*, frames or a numeric confidence (N3/N4)');
   ok(ev.observation.state === 'no_cv_result' && /^No reliable observation available/.test(ev.observation.copy), 'E9 a session with no CV result projects "No reliable observation available" — a state, not a score');
   const again = await link(E.OPEN.id, { expectedRev: rev });
-  ok(again.status === 200 && again.body.idempotent === true && again.body.evidence.length === 1, 'E10 linking the same session twice is a replay (D-12)');
+  ok(again.status === 200 && again.body.idempotent === true && again.body.evidence.length === 1, 'E10 linking the same session twice is a replay');
   const replayKey = await link(E.OPEN.id, { expectedRev: 1, clientKey: 'E-1' });
   ok(replayKey.status === 200 && replayKey.body.idempotent === true, 'E10b and by key too');
   // A CV refusal.
@@ -889,9 +889,9 @@ const E = {};
   rev = linkedRefused.body?.trial?.rev ?? rev;
   const evR = linkedRefused.body?.evidence?.find((e) => e.session?.id === E.REFUSED.id);
   ok(linkedRefused.status === 201 && !!evR && (fin.status !== 200 || fin.body.result?.outcome !== 'accepted'), `E11 a session the CV pipeline refused still links — it happened (${fin.status} ${fin.body?.result?.outcome ?? fin.body?.error ?? ''})`);
-  ok(!!evR && /^No reliable observation available/.test(evR.observation.copy) && evR.observation.state !== 'accepted', `E12 the refusal projects as "No reliable observation available. …" under the refusal state (${evR?.observation?.state}) — never as poor performance (D-17)`);
+  ok(!!evR && /^No reliable observation available/.test(evR.observation.copy) && evR.observation.state !== 'accepted', `E12 the refusal projects as "No reliable observation available. …" under the refusal state (${evR?.observation?.state}) — never as poor performance`);
   neg(!!evR && !/\b0\.\d+\b|\d+%|score|rating/i.test(JSON.stringify(evR.observation)), 'E12b the observation carries no confidence number, percentage, score or rating');
-  ok(fin.status === 200 && fin.body.result?.outcome === 'refused' && evR?.observation.state === fin.body.result.refusalReason, `E12c the session's recorded CV result is the one projected, under its own refusal reason (S12b: the lookup named a field no result carries, so it projected no_cv_result) (${fin.status} ${evR?.observation?.state})`);
+  ok(fin.status === 200 && fin.body.result?.outcome === 'refused' && evR?.observation.state === fin.body.result.refusalReason, `E12c the session's recorded CV result is the one projected, under its own refusal reason (${fin.status} ${evR?.observation?.state})`);
   // Withdrawn.
   E.CANCELLED = await mk(kola.token);
   await j('POST', `/player/box-cam/sessions/${E.CANCELLED.id}/cancel`, {}, kola.token);
@@ -903,7 +903,7 @@ const E = {};
   const fam = (await j('GET', '/player/trials', undefined, kola.token)).body.find((x) => x.id === J.TID);
   neg(!has(fam, E.OPEN.id) && !has(fam, E.LINK) && !has(fam.workflow, 'evidence'), 'E15 the family view carries no evidence links — the player already owns the sessions in their own Box Cam record');
   const passport = (await j('GET', '/player/football-passport', undefined, kola.token)).body;
-  neg(!passport.timeline.some((e) => /trial_evidence|trial_observ|box.*trial/i.test(e.type)) && !has(passport, E.LINK), 'E16 the Passport gains no event from the link — referenced, not promoted (D-14)');
+  neg(!passport.timeline.some((e) => /trial_evidence|trial_observ|box.*trial/i.test(e.type)) && !has(passport, E.LINK), 'E16 the Passport gains no event from the link — referenced, not promoted');
   const jr = (await j('GET', `/org/rooms/${J.RID}/journey?limit=200`, undefined, maria.token)).body;
   ok(jr.trials[0].workflow.evidenceCount === 2 && jr.trials[0].workflow.sessions[0].evidenceCount === 2 && jr.history.entries.filter((e) => e.kind === 'trial_evidence_linked').length === 2, 'E17 the journey counts the links and shows the link milestones (ids only)');
   neg(!has(jr, E.OPEN.nonce) && !has(jr, 'observation') && !has(jr, 'trace'), 'E17b and carries no observation');

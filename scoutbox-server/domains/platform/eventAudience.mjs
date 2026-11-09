@@ -1,11 +1,6 @@
 /**
- * M18.1 — explicit event audiences.
- *
- * Since M18.2 the audience table is a VIEW over the canonical event registry
- * (`domains/platform/eventRegistry.mjs`), which also carries payload allowlists, dedupe
- * and replay semantics. This module keeps the M18.1 names so nothing that
- * imported them changes, and so the M18.1 suite keeps asserting the rule it
- * was written for: every event name is classified, and anything unknown
+ * Event audiences: a view over the canonical event registry
+ * (`eventRegistry.mjs`). Every event name is classified, and anything unknown
  * FAILS CLOSED to org_private.
  *
  *   player_private      only the subject player (and their guardian)

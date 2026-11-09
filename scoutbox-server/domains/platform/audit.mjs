@@ -1,11 +1,8 @@
 /**
- * M18.2 — the organisation audit view.
- *
- * Nothing here is new history. Recruitment Rooms have carried an append-only
- * `history` since M17, Recruitment Briefs since M18, and staff removal has been
- * a Discovery Ledger row since M12. What an organisation's leads could not do
- * was read them together, in order, without opening each record. This route
- * is a read-only projection over those three sources.
+ * The organisation audit view: a read-only projection that merges the
+ * append-only histories of Rooms, Contacts, Trials, Briefs, Watchlists,
+ * development plans, the agent and compliance domains and the Discovery Ledger
+ * into one feed, in order. It records nothing of its own.
  *
  * Three rules, in priority order:
  *
@@ -32,7 +29,7 @@ const PAGE_DEFAULT = 25;
 /** Room activity types worth an administrator's attention. Chatter is not. */
 const ROOM_ACTIONS = new Set([
   'room_created', 'room_status_changed', 'room_reopened', 'room_decision_recorded',
-  // M23 P5 — the formal decision: drafted, discarded, finalized, superseded.
+  // The formal decision: drafted, discarded, finalized, superseded.
   'room_decision_drafted', 'room_decision_draft_discarded', 'room_decision_finalized', 'room_decision_superseded',
   'room_owner_changed', 'room_member_assigned', 'room_priority_changed',
   'room_evidence_requested', 'room_assessment_assigned',
@@ -43,16 +40,16 @@ const BRIEF_ACTIONS = new Set([
 const WATCHLIST_ACTIONS = new Set(['watchlist_created', 'watchlist_updated', 'watchlist_archived']);
 const LEDGER_ACTIONS = new Set(['staff_removed', 'signing', 'released_by_club']);
 /**
- * M21 §88: a plan's LIFECYCLE, and nothing else. Every action checkbox and
- * every goal edit belongs in that plan's own history, which is richer and is
- * read by the people working the plan (§89). Flooding an administrator's feed
+ * A plan's LIFECYCLE, and nothing else. Every action checkbox and every goal
+ * edit belongs in that plan's own history, which is richer and is read by the
+ * people working the plan. Flooding an administrator's feed
  * with them would bury the four events an administrator actually needs.
  */
 const DEVELOPMENT_ACTIONS = new Set([
   'plan_created', 'plan_archived', 'plan_visibility_changed', 'review_submitted',
 ]);
 /**
- * M23 P3: what happened to a Contact, never what it said. Drafting and
+ * What happened to a Contact, never what it said. Drafting and
  * editing are the author's business until something leaves; sending,
  * failing, recording, cancelling and the recipient's answer are the
  * administrator's.
@@ -62,7 +59,7 @@ const CONTACT_ACTIONS = new Set([
 ]);
 
 /**
- * M23 P4B: what happened to a Trial — accepted, scheduled, confirmed,
+ * What happened to a Trial — accepted, scheduled, confirmed,
  * declined, attended, cancelled, completed, evidence linked or unlinked.
  * Never the instructions, the venue address, a note or the family's contact.
  */
@@ -76,9 +73,9 @@ function safeDetail(action, detail) {
   if (!detail || typeof detail !== 'object') return null;
   const out = {};
   for (const k of ['from', 'to', 'status', 'priority', 'recommendation', 'version', 'criteriaChanged', 'sourceContext', 'kind', 'channel', 'recipientType', 'code',
-    // P4B Trial detail: ids, states, counts and flags only.
+    // Trial detail: ids, states, counts and flags only.
     'sessionId', 'trialSessionId', 'state', 'source', 'revision', 'sessionCount', 'material', 'requiresConfirmation', 'phase', 'cancelledBy', 'attendedSessions', 'slotId', 'day', 'hadReason',
-    // P5 Decision detail: ids and the outcome word only — never the rationale.
+    // Decision detail: ids and the outcome word only — never the rationale.
     'outcome', 'decisionId', 'supersedes', 'draftId']) {
     if (detail[k] !== undefined) out[k] = detail[k];
   }
@@ -99,7 +96,7 @@ export function registerAudit(ctx) {
   const subjectFor = (org, playerId) => { const p = findPlayer(playerId); return p && orgCanSee(org, p) ? { playerId: p.id, playerName: p.name } : { playerId: null, playerName: null }; };
 
   /**
-   * The recruitment sources, read in SQL a page at a time (§4.3 step 4): the Room, Contact and Trial history entries
+   * The recruitment sources, read in SQL a page at a time: the Room, Contact and Trial history entries
    * at or before `atMost`, at least `n` of each source past any at `atMost` itself (repositories/database.mjs
    * `newestHistory`), so the merged page is exact. The player is named only if the organisation may currently see them.
    */
@@ -113,7 +110,7 @@ export function registerAudit(ctx) {
         detail: safeDetail(h.action, h.detail),
       });
     }
-    // M23 P3: Contact lifecycle. The body, the summary and the reply never reach this feed.
+    // Contact lifecycle. The body, the summary and the reply never reach this feed.
     for (const { contactId, caseId, playerId, entry: h } of recruitmentReads.contacts.historyFeed(org.id, CONTACT_ACTION_LIST, atMost, n)) {
       rows.push({
         id: h.id, at: h.at, action: h.action, domain: 'recruitment_contact',
@@ -122,7 +119,7 @@ export function registerAudit(ctx) {
         detail: safeDetail(h.action, h.detail),
       });
     }
-    // M23 P4B: Trial history — the operational record of what happened, for the club that ran it.
+    // Trial history — the operational record of what happened, for the club that ran it.
     for (const { trialId, caseId, playerId, entry: h } of recruitmentReads.trials.historyFeed(org.id, TRIAL_ACTION_LIST, atMost, n)) {
       rows.push({
         id: h.id, at: h.at, action: h.action, domain: 'recruitment_trial',
@@ -139,7 +136,7 @@ export function registerAudit(ctx) {
   /** The sources read whole and merged (briefs, watchlists, development, agents, compliance, the ledger). */
   function memoryEntries(org) {
     const rows = [];
-    // S12c: the briefs' and the watchlists' trails come from SQL (discoveryReads), the organisation's own only.
+    // The organisation's own briefs and watchlists only.
     for (const { entry: h, brief } of ctx.discoveryReads.briefs.historyFeed(org.id, [...BRIEF_ACTIONS])) {
       rows.push({
         id: h.id, at: h.at, action: h.action, domain: 'recruitment_brief',
@@ -148,7 +145,7 @@ export function registerAudit(ctx) {
         detail: safeDetail(h.action, h.detail),
       });
     }
-    // M19: watchlist LIFECYCLE only. Which players entered or left belongs in
+    // Watchlist LIFECYCLE only. Which players entered or left belongs in
     // the watchlist's own history, not in an administrator's audit feed.
     for (const { entry: h, watchlist } of ctx.discoveryReads.watchlists.historyFeed(org.id, [...WATCHLIST_ACTIONS])) {
       rows.push({
@@ -158,10 +155,10 @@ export function registerAudit(ctx) {
         detail: safeDetail(h.action, h.detail),
       });
     }
-    // M21: development plans this organisation OWNS. A plan a player shared
-    // with the club is the player's record, not the club's administrative
-    // history, so it is read in the Hub and never mirrored into this feed.
-    // S12a: both read through SQL (developmentReads.plans.orgFeed), the plan named only where the org may see its player.
+    // Development plans this organisation OWNS. A plan a player shared with
+    // the club is the player's record, not the club's administrative history,
+    // so it is read in the Hub and never copied into this feed. The player is
+    // named only where the org may see them.
     for (const { entry: h, plan, review } of ctx.developmentReads.plans.orgFeed(org.id, [...DEVELOPMENT_ACTIONS])) {
       let target;
       if (plan) {
@@ -176,11 +173,11 @@ export function registerAudit(ctx) {
         detail: safeDetail(h.action, h.detail),
       });
     }
-    // M23 P5.6B: the Agent domain — profile, affiliation and relationship
+    // The Agent domain — profile, affiliation and relationship
     // lifecycle for an agency organisation. Same rules: subject named only
     // where the org may see them; no reference numbers, no reason text.
     if (org.type === 'agency') rows.push(...agentAuditRows(ctx.agentReads, org, { findPlayer, orgCanSee }));
-    // M23 P5.6C: the compliance domain — contexts, consents and reviews, content-free.
+    // The compliance domain — contexts, consents and reviews, content-free.
     if (org.type === 'agency') rows.push(...complianceAuditRows(ctx.complianceReads, org));
     for (const l of ctx.safetyReads.ledger.forOrg(org.id, [...LEDGER_ACTIONS])) {
       rows.push({

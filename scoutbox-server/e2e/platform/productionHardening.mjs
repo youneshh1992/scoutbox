@@ -1,7 +1,5 @@
-// M18.1 acceptance suite — production hardening.
-//
-// M18.1 adds no recruitment concept, so almost nothing here is a feature test.
-// What it proves is that the failure modes named in M18_1_MATRIX.md are closed:
+// Production hardening. Almost nothing here is a feature test. What it proves
+// is that these failure modes are closed:
 // a lost update is refused rather than silently applied, a Passport revision is
 // a fact about content and not about when you asked, a change clock is the
 // clock of the thing that actually changed, an unclassified event reaches
@@ -9,9 +7,8 @@
 // malformed, oversized or from an unknown origin gets a specific answer instead
 // of a 500 and a stack trace.
 //
-// Fifty numbered sections, matching the Test column of the matrix. More than
-// half are negative: a hardening milestone that mostly asserts happy paths has
-// not hardened anything.
+// Fifty numbered sections. More than half are negative: hardening that mostly
+// asserts happy paths has not hardened anything.
 import { spawn } from 'node:child_process';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -171,22 +168,22 @@ section('§48 — boot refuses configuration that is unsafe in production');
     .some((p) => p.code === 'DEV_LOGIN_IN_PRODUCTION' && p.fatal), 'dev login is fatal in production');
   neg(productionConfigProblems({ env: {}, trustWeightsTotal: 95 }).some((p) => p.code === 'TRUST_WEIGHTS_INVALID' && p.fatal),
     'Trust Score weights that do not total 100 are fatal in EVERY mode — a wrong score is not a development-only problem');
-  // PRE-M24 (PM-1, PM-2): the admin key and the synthetic licence register.
+  // The admin key and the synthetic licence register.
   const SAFE = { NODE_ENV: 'production', MEDIA_SECRET: 'synthetic-media-secret-0123456789abcdef', ADMIN_KEY: 'a-long-production-admin-key-0123' };
   neg(productionConfigProblems({ env: { NODE_ENV: 'production', MEDIA_SECRET: 'synthetic-media-secret-0123456789abcdef' } }).some((p) => p.code === 'ADMIN_KEY_UNSAFE' && p.fatal),
-    'PM-1: an unset ADMIN_KEY is fatal in production (the T&S API would accept the public development key)');
+    'an unset ADMIN_KEY is fatal in production (the T&S API would accept the public development key)');
   neg(productionConfigProblems({ env: { ...SAFE, ADMIN_KEY: 'scoutbox-admin' } }).some((p) => p.code === 'ADMIN_KEY_UNSAFE' && p.fatal),
-    'PM-1: the development default key is fatal in production');
+    'the development default key is fatal in production');
   neg(productionConfigProblems({ env: { ...SAFE, ADMIN_KEY: 'short' } }).some((p) => p.code === 'ADMIN_KEY_UNSAFE' && p.fatal),
-    'PM-1: a trivially short key is fatal in production');
+    'a trivially short key is fatal in production');
   neg(productionConfigProblems({ env: { ...SAFE, AGENT_VERIFICATION_TEST_PROVIDER: '1' } }).some((p) => p.code === 'AGENT_TEST_PROVIDER_IN_PRODUCTION' && p.fatal),
-    'PM-2: the synthetic agent licence register is fatal in production');
+    'the synthetic agent licence register is fatal in production');
   ok(productionConfigProblems({ env: SAFE, trustWeightsTotal: 100 }).length === 0,
-    'PM-1/PM-2: a production configuration with its own admin key and no test provider passes');
+    'a production configuration with its own admin key and no test provider passes');
   ok(productionConfigProblems({ env: { AGENT_VERIFICATION_TEST_PROVIDER: '1' }, trustWeightsTotal: 100 }).length === 0,
-    'PM-1/PM-2: development keeps the default admin key and the synthetic register');
+    'development keeps the default admin key and the synthetic register');
   ok(productionConfigProblems({ env: { BOX_CAM_TEST_PROVIDER: '1' }, trustWeightsTotal: 100 }).length === 0,
-    'the same simulator configuration is fine in development (§74: local development stays possible)');
+    'the same simulator configuration is fine in development (local development stays possible)');
 }
 
 // ================================================= unit: Passport revision
@@ -330,7 +327,7 @@ section('§4 — the concurrency token is validated, not trusted');
   const replay = await j('PATCH', `/org/recruitment-briefs/${brief.id}`, { title: 'y', expectedRev: 1 }, tom.token);
   neg(replay.status === 409, 'replaying the stale rev again still loses — retrying is not a way to win');
   const legacy = await j('PATCH', `/org/recruitment-briefs/${brief.id}`, { title: 'Left-sided CM (v3)' }, maria.token);
-  ok(legacy.status === 200, 'a caller that sends no token keeps the pre-M18.1 behaviour (§74: nothing existing breaks)');
+  ok(legacy.status === 200, 'a caller that sends no token keeps the pre-M18.1 behaviour (nothing existing breaks)');
 }
 
 section('§5 — a conflict body is safe to show a colleague');
@@ -451,13 +448,11 @@ section('§21 — position_changed is written when the value actually changes');
   // The store is VALUE-triggered: re-saving the same preference is not a change.
   const w2 = await j('PATCH', '/player/football-passport/prefs', { positions: { primary: target, secondary: [] } }, kola.token);
   ok(w2.status === 200, 'saving the same position again is accepted');
-  // A bio edit bumps prefs.updatedAt but changes no position — the old, wrong
-  // clock. It must not produce a position change either.
+  // A bio edit bumps prefs.updatedAt but changes no position, so that timestamp
+  // is the wrong clock. It must not produce a position change either.
   const w3 = await j('PATCH', '/player/football-passport/prefs', { bio: 'Left-footed midfielder.' }, kola.token);
   ok(w3.status === 200, 'an unrelated preference edit is accepted');
   neg(w3.body.prefs?.positions?.primary === target, 'and leaves the position exactly where it was');
-  // End to end: the archived room from §14 means a real change should now be
-  // visible as a Second Look change with its own clock.
   // End to end: the archived room from §14 means the change should now be a
   // Second Look change carrying its OWN clock, not a preference-edit clock.
   const q = await j('GET', '/org/second-look?status=all&limit=100', undefined, maria.token);
@@ -494,7 +489,7 @@ section('§31 — the terminology split reaches the wire');
   const p = list[0];
   ok(typeof p.profileSignal === 'number', 'the legacy completeness figure is published as profileSignal');
   ok(p.trustScore === p.profileSignal, 'trustScore remains as a deprecated alias so nothing downstream breaks');
-  neg(!('trust' in p) || typeof p.trust !== 'number', 'the M16.2 Trust Score is NOT a bare number on this projection');
+  neg(!('trust' in p) || typeof p.trust !== 'number', 'the Trust Score is NOT a bare number on this projection');
 }
 
 section('§32 — a Second Look item never reaches the player or a rival');
@@ -627,13 +622,12 @@ section('§35 — /capabilities is reachable and honest about this deployment');
   ok(r.status === 200, 'the report is served');
   ok(r.body.mode === 'development', 'it names the mode it is running in');
   ok(r.body.capabilities.distributed_rate_limit.state === 'not_configured', 'and does not claim a distributed rate limiter');
-  // M22 replaced the fact this asserted. A genuine production CV provider now
-  // exists, so `configured` is the truth and `test_only` would be a lie. The
-  // assertion becomes stronger, not weaker: the report must say the provider
-  // is configured AND that Combine verification is still unavailable, which
-  // is the distinction §29 exists to protect.
+  // A genuine production CV provider exists, so `configured` is the truth and
+  // `test_only` would be a lie. The report must say the provider is configured
+  // AND that Combine verification is still unavailable, which is the
+  // distinction §29 exists to protect.
   ok(r.body.capabilities.production_cv.state === 'configured',
-    'a real production CV provider is reported as configured (M22)');
+    'a real production CV provider is reported as configured');
   ok(r.body.capabilities.production_cv.realWorldValidation === 'not_completed'
     && r.body.capabilities.production_cv.combineVerificationAvailable === false
     && Array.isArray(r.body.capabilities.production_cv.combineVerifiedProtocols)
@@ -746,7 +740,7 @@ section('§19b — Trust & Safety has no default reach into recruitment decision
   const rooms = await j('GET', '/org/rooms', undefined, undefined, A);
   neg([401, 403, 404].includes(rooms.status), 'nor Recruitment Rooms');
   const briefs = await j('GET', '/org/recruitment-briefs', undefined, undefined, A);
-  neg([401, 403, 404].includes(briefs.status), 'nor Recruitment Briefs — the M18.1 default is no access, by design (matrix #19)');
+  neg([401, 403, 404].includes(briefs.status), 'nor Recruitment Briefs — the default is no access, by design');
 }
 
 section('§2b — an unauthenticated caller reaches none of the M18.1 surfaces');

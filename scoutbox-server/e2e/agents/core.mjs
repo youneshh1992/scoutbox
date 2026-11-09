@@ -1,6 +1,6 @@
-// M23 P5.6B acceptance suite — ScoutBox Agent core.
+// Agent core battery.
 //
-// The governing principle this suite exists to enforce (P5.6A, frozen):
+// The governing principle this suite exists to enforce (docs/product/agents.md):
 //
 //   A licensed natural person is not an agency; agency membership is not a
 //   licence; a self-typed licence number is not a verified licence; a CRM
@@ -8,31 +8,6 @@
 //   the client's confirmation — and only that — is the root of a relationship.
 //   ScoutBox adjudicates nothing, and the shared Trust & Safety key can
 //   adjudicate nothing either.
-//
-// Groups:
-//   A  pure engine — states, facets, decay, synthetic provider, gaps
-//   B  permission matrix — every tier × capability, monotone, null-prototype
-//   C  affiliation invariants — self-promotion, last admin, windows
-//   D  agreement engine — statuses, transitions, access predicate, cooldown
-//   E  platform gating — agent login, org listing, club user refused
-//   F  membership over HTTP — bootstrap, foreign org, ended member, removed user
-//   G  profile + verification over HTTP — declaration ≠ verification, facets separate
-//   H  the synthetic provider is named, local, and absent without the flag
-//   I  team management — tiers, self-promotion, last admin, rev, idempotency
-//   J  players lookup — adults only, invisible, blocked, short query, cap
-//   K  request — verification gate, uniform 404, conflict, cooldown, term/scope
-//   L  the client's answer — confirm / decline / dispute / terminate, notifications
-//   M  access basis — proposed ≠ access, disputed suspends, terminated ends, expiry derives
-//   N  privacy — colleague, other agency, other player, summary sharing, minor
-//   O  blocks — before request, before confirm
-//   P  idempotency, payload collision, stale rev, malformed rev, concurrency
-//   Q  rate limits — every agent policy exists and fires
-//   R  Trust & Safety — read-only; NO route lets the shared key adjudicate
-//   S  the subsystems Agent must not touch — signings, offers, Trust, Passport, Box Cam
-//   T  events, notifications, audit — registered, org-private, ids only
-//   U  tombstones — player deletion leaves an id-only record
-//   V  legacy rows — read-only, no access, mirrored once
-//   W  restart — everything above survives the process dying
 //
 // No assertion here is `status !== 200`. Every refusal names the status and
 // the code it expects.
@@ -89,7 +64,7 @@ section('A — verification engine: honest states, separate facets, decay, no pr
 {
   ok(VERIFICATION_STATES.length === 6 && ['UNVERIFIED', 'PENDING', 'VERIFIED', 'STALE', 'INACTIVE', 'MANUAL_REVIEW_REQUIRED'].every((s) => VERIFICATION_STATES.includes(s)), 'A1 the six honest verification states, exactly');
   neg(!VERIFICATION_STATES.includes('APPROVED') && !VERIFICATION_STATES.includes('LICENSED') && !VERIFICATION_STATES.includes('TRUSTED'), 'A2 no state claims a licence, an approval or trust — a state describes provenance, never authority');
-  // P5.6C added the fourth facet (domestic_authorisation, P5.6A DR-53); the invariant is "separate facets, never one boolean".
+  // The invariant is "separate facets, never one boolean" (domestic_authorisation is DR-53, docs/product/agents.md).
   ok(FACETS.length === 4 && FACETS.includes('fifa_licence') && FACETS.includes('national_registration') && FACETS.includes('domestic_authorisation') && FACETS.includes('minors_authorisation'), 'A3 four separate facets, never one boolean');
   const f = newFacets();
   ok(f.fifa_licence.state === 'UNVERIFIED' && f.fifa_licence.reference === null && Object.keys(f.national_registration).length === 0 && Object.keys(f.minors_authorisation).length === 0, 'A4 a new profile is UNVERIFIED with nothing declared');
@@ -112,7 +87,7 @@ section('A — verification engine: honest states, separate facets, decay, no pr
   // Requirements and gaps.
   ok(requiredFacetsFor('INT').length === 1 && requiredFacetsFor('INT')[0].facet === 'fifa_licence', 'A16 INT requires the FIFA licence');
   ok(requiredFacetsFor('ENG').length === 2 && requiredFacetsFor('ENG')[1].facet === 'national_registration' && requiredFacetsFor('ENG')[1].ma === 'ENG', 'A17 ENG additionally requires FA registration (FA 2026-27 basis)');
-  neg(!requiredFacetsFor('INT').some((r) => r.facet === 'minors_authorisation') && !requiredFacetsFor('ENG').some((r) => r.facet === 'minors_authorisation'), 'A18 minors_authorisation is required by NO regulated action in P5.6B — the minor pathway is preserved, not activated');
+  neg(!requiredFacetsFor('INT').some((r) => r.facet === 'minors_authorisation') && !requiredFacetsFor('ENG').some((r) => r.facet === 'minors_authorisation'), 'A18 minors_authorisation is required by NO regulated action — the minor pathway is preserved, not activated');
   neg(verificationGap(null, 'INT', T0)?.error === 'AGENT_PROFILE_REQUIRED', 'A19 no profile → AGENT_PROFILE_REQUIRED');
   const p = { facets: newFacets(), declared: { fifaLicenceNumber: 'FIFA-123' } };
   neg(verificationGap(p, 'INT', T0)?.error === 'AGENT_VERIFICATION_REQUIRED' && verificationGap(p, 'INT', T0).state === 'UNVERIFIED', 'A20 a DECLARED licence number with nothing verified is a gap — a typed number is a declaration (S9)');
@@ -125,7 +100,7 @@ section('A — verification engine: honest states, separate facets, decay, no pr
   neg(verificationGap({ facets: { fifa_licence: { state: 'MANUAL_REVIEW_REQUIRED' } } }, 'INT', T0)?.state === 'MANUAL_REVIEW_REQUIRED', 'A25 MANUAL_REVIEW_REQUIRED is a gap: pending human review authorises nothing');
   neg(verificationGap({ facets: { fifa_licence: { state: 'INACTIVE' } } }, 'INT', T0)?.state === 'INACTIVE', 'A26 INACTIVE is a gap');
   neg(verificationGap({ facets: { fifa_licence: { state: 'PENDING' } } }, 'INT', T0)?.state === 'PENDING', 'A27 PENDING is a gap');
-  ok(JURISDICTIONS.length === 3 && JURISDICTIONS.includes('INT') && JURISDICTIONS.includes('ENG') && JURISDICTIONS.includes('USA'), 'A28 three member-association codes in P5.6B');
+  ok(JURISDICTIONS.length === 3 && JURISDICTIONS.includes('INT') && JURISDICTIONS.includes('ENG') && JURISDICTIONS.includes('USA'), 'A28 three member-association codes');
   ok(AGENT_POLICY_VERSION === 1, 'A29 policy version 1');
 }
 
@@ -152,7 +127,7 @@ section('B — the permission matrix is server-side, complete, monotone and null
     neg(can(TIERS, key) === false && PERMISSIONS[key] === undefined, `B9 "${key}" is not a capability`);
     neg(!normaliseTiers([key]).length && !can([key], 'me.read'), `B10 "${key}" is not a role`);
   }
-  neg(can(['licensed_agent'], 'licence.verify') === false && can(TIERS, 'dispute.resolve') === false && can(TIERS, 'regulatory.override') === false && can(TIERS, 'minor.approve') === false, 'B11 no capability named verify, resolve, override or approve exists for any agency role — those are P5.6C attributed-review acts, not agency powers');
+  neg(can(['licensed_agent'], 'licence.verify') === false && can(TIERS, 'dispute.resolve') === false && can(TIERS, 'regulatory.override') === false && can(TIERS, 'minor.approve') === false, 'B11 no capability named verify, resolve, override or approve exists for any agency role — those are attributed-review acts, not agency powers');
   ok(capabilitiesOf(['licensed_agent', 'agency_admin']).length > capabilitiesOf(['licensed_agent']).length && capabilitiesOf(['licensed_agent', 'agency_admin']).every((c) => can(['licensed_agent'], c) || can(['agency_admin'], c)), 'B12 roles combine by union, never more');
   ok(normaliseTiers(['analyst', 'analyst', 'bogus', 'finance']).join(',') === 'analyst,finance' && normaliseTiers('licensed_agent').length === 0, 'B13 tiers normalise: de-duplicated, unknown dropped, non-array rejected');
 }
@@ -179,8 +154,8 @@ section('C — affiliation windows and role-change invariants');
 // ============================================================ D — agreement engine
 section('D — agreement statuses, transitions, the access predicate and the cooldown');
 {
-  ok(AGREEMENT_STATUSES.length === 7 && ['proposed', 'active', 'declined', 'expired', 'terminated_by_client', 'terminated_by_agent', 'disputed'].every((s) => AGREEMENT_STATUSES.includes(s)), 'D1 the seven P5.6A statuses, by their P5.6A names');
-  neg(!AGREEMENT_STATUSES.includes('signed') && !AGREEMENT_STATUSES.includes('approved') && !AGREEMENT_STATUSES.includes('resolved'), 'D2 no signed, approved or resolved status — nothing in P5.6B is adjudicated or transacted');
+  ok(AGREEMENT_STATUSES.length === 7 && ['proposed', 'active', 'declined', 'expired', 'terminated_by_client', 'terminated_by_agent', 'disputed'].every((s) => AGREEMENT_STATUSES.includes(s)), 'D1 the seven statuses, by their names');
+  neg(!AGREEMENT_STATUSES.includes('signed') && !AGREEMENT_STATUSES.includes('approved') && !AGREEMENT_STATUSES.includes('resolved'), 'D2 no signed, approved or resolved status — nothing in the agent core is adjudicated or transacted');
   ok(SCOPES.length === 4 && MAX_TERM_MONTHS === 24 && DEFAULT_TERM_MONTHS === 12, 'D3 four scopes; two-year cap (FFAR 12(3) / FA 4.3); 12-month default');
   ok(normaliseScope(undefined).join() === 'employment' && normaliseScope(['transfer', 'transfer', 'x']).join() === 'transfer' && normaliseScope('commercial').join() === 'commercial', 'D4 scope normalises with employment as default');
   ok(termMonthsOf(undefined) === 12 && termMonthsOf('') === 12 && termMonthsOf(24) === 24 && termMonthsOf('6') === 6, 'D5 term defaults and parses');
@@ -203,7 +178,7 @@ section('D — agreement statuses, transitions, the access predicate and the coo
   // Transitions.
   ok(CLIENT_TRANSITIONS.proposed.join() === 'active,declined,disputed' && CLIENT_TRANSITIONS.active.join() === 'terminated_by_client,disputed', 'D20 the client confirms, declines or disputes a proposal; ends or disputes an active one');
   ok(AGENT_TRANSITIONS.proposed.join() === 'terminated_by_agent' && AGENT_TRANSITIONS.active.join() === 'terminated_by_agent', 'D21 the agent may only withdraw or end');
-  neg(AGENT_TRANSITIONS.disputed === undefined && CLIENT_TRANSITIONS.disputed === undefined && AGENT_TRANSITIONS.declined === undefined && CLIENT_TRANSITIONS.expired === undefined, 'D22 disputed, declined and expired are terminal for BOTH sides in P5.6B — resolution is P5.6C attributed review');
+  neg(AGENT_TRANSITIONS.disputed === undefined && CLIENT_TRANSITIONS.disputed === undefined && AGENT_TRANSITIONS.declined === undefined && CLIENT_TRANSITIONS.expired === undefined, 'D22 disputed, declined and expired are terminal for BOTH sides — resolution is attributed review');
   neg(!agentTransitionAllowed({ status: 'proposed' }, 'active', T0), 'D23 the agent cannot make a proposal active — only the client can');
   neg(!clientTransitionAllowed({ status: 'proposed' }, 'terminated_by_agent', T0) && !clientTransitionAllowed({ status: 'active', endAt: T0 - 1 }, 'terminated_by_client', T0), 'D24 the client cannot act as the agent, nor end an already-expired agreement');
   for (const key of ['constructor', '__proto__', 'toString']) {
@@ -229,7 +204,7 @@ section('D — agreement statuses, transitions, the access predicate and the coo
   const summary = agreementSummaryForStaff(a, T0);
   neg(Object.keys(summary).sort().join() === 'agentUserId,clientId,endAt,id,startAt,status,summaryOnly' && !('scope' in summary) && !('history' in summary), 'D35 the staff summary is id, status and dates only');
   ok(/not a representation contract/.test(forAgent.honest) && /has not assessed/.test(forAgent.honest), 'D36 the agent projection says what the record is not');
-  // S11a: the legacy agency-level rows are gone with their lane; every record names its licensed individual and says what it is.
+  // Every record names its licensed individual and says what it is.
   ok(/not a representation contract/.test(agreementForAgent(a, T0).honest) && /client confirmed it/.test(agreementForAgent(a, T0).honest) && agreementForAgent(a, T0).legacy === undefined, 'D37 a relationship record says it is not a representation contract, only what the client confirmed (no legacy kind remains)');
   // Errors.
   ok(Object.getPrototypeOf(M24_ERROR_HTTP) === null && M24_ERROR_HTTP.constructor === undefined, 'D38 the error table is null-prototype');
@@ -255,12 +230,10 @@ section('T1 — events, notification categories, rate policies and stores are de
   for (const [k, scope] of [['agent_representation_request', 'actor'], ['agent_player_lookup', 'actor'], ['agent_profile_write', 'actor'], ['agent_affiliation_write', 'org'], ['agent_client_response', 'actor']]) {
     ok(RATE_LIMIT_POLICY[k] && RATE_LIMIT_POLICY[k].scope === scope && RATE_LIMIT_POLICY[k].max > 0, `T1 rate policy ${k} (${scope})`);
   }
-  // S11a: the three stores are tables of the agent core (migration 0026). Rewritten in S14a: the step-2305 and
-  // store-contract checks described the retired snapshot registry.
   for (const s of ['agentProfiles', 'agencyAffiliations', 'representationAgreements']) ok(TABLE_BACKED.includes(s), `T1 ${s} is a table of the agent core, not a collection`);
   ok(DATA_MIGRATIONS.filter((m) => m.id === AGENT_CORE_MIGRATION).length === 1 && SCHEMA_VERSION >= 26, `T1 exactly one migration creates the agent core tables (${AGENT_CORE_MIGRATION}), and the schema has only moved forward since (now ${SCHEMA_VERSION})`);
-  // What P5.6B asserted and what must stay true: the Agent app has no parallel identity database and no Offer store.
-  neg(!['agentAuth', 'agentSessions', 'agentUsers', 'offers'].some((s) => TABLE_BACKED.includes(s)), 'T1 no agent auth database and no offers store exists (signings is the existing M12 store, which no Agent milestone writes)');
+  // The Agent app has no parallel identity database and no Offer store.
+  neg(!['agentAuth', 'agentSessions', 'agentUsers', 'offers'].some((s) => TABLE_BACKED.includes(s)), 'T1 no agent auth database and no offers store exists (signings is the club\'s store, which the Agent domain never writes)');
 }
 
 // =================================================================== HTTP
@@ -581,7 +554,7 @@ let REL3; // Ana ↔ Chinedu (will be terminated by client)
   neg(disputedView.status === 200 && disputedView.body.access === false && disputedView.body.relationship.status === 'disputed' && !JSON.stringify(disputedView.body).includes('never agreed'), 'M20 Ana\'s access is SUSPENDED and she does not see the reason');
   neg(expect(collect('M21', await j('GET', `/org/agent/clients/${REL2}/opportunities`, undefined, ANA.token)), 409, 'REPRESENTATION_NOT_ACTIVE'), 'M21 no board through a dispute');
   neg(expect(collect('M22', await j('POST', `/org/agent/clients/${REL2}/terminate`, {}, ANA.token)), 409, 'REPRESENTATION_NOT_ACTIVE'), 'M22 the agent cannot end a disputed agreement (and so cannot "resolve" it by ending it)');
-  neg(expect(collect('M23', await j('POST', `/player/agent/relationships/${REL2}/terminate`, { expectedRev: 3 }, mateus.token)), 409, 'REPRESENTATION_DISPUTED'), 'M23 nor can the client — a dispute is terminal until attributed review exists (P5.6C)');
+  neg(expect(collect('M23', await j('POST', `/player/agent/relationships/${REL2}/terminate`, { expectedRev: 3 }, mateus.token)), 409, 'REPRESENTATION_DISPUTED'), 'M23 nor can the client — a dispute is terminal until attributed review');
   neg(expect(collect('M24', await j('POST', `/player/agent/relationships/${REL2}/confirm`, { expectedRev: 3 }, mateus.token)), 409, 'REPRESENTATION_NOT_ACTIVE'), 'M24 nor re-confirmed');
   neg(expect(collect('M25', await j('POST', '/org/agent/clients/request', { playerId: 'pl-carvalho', clientKey: 'ana-mateus-again' }, ANA.token)), 409, 'REPRESENTATION_ALREADY_EXISTS'), 'M25 Ana cannot route around the dispute with a fresh request');
   ok((await j('GET', '/org/agent/home', undefined, ANA.token)).body.counts.disputed === 1 && (await j('GET', '/org/agent/home', undefined, ANA.token)).body.alerts.some((a) => a.kind === 'disputed'), 'M26 Home alerts the dispute');
@@ -637,7 +610,7 @@ section('N — privacy: other agency, other player, minor, guardian-managed, enu
   neg(expect(collect('N10', await j('POST', '/player/agent/relationships/constructor/confirm', { expectedRev: 1 }, kola.token)), 404, 'REPRESENTATION_NOT_FOUND'), 'N10 "constructor" is 404');
   // The club side: no agent data leaks into a club's view of the player.
   const clubView = await j('GET', '/org/players/pl-adeyemi', undefined, maria.token);
-  neg(clubView.status === 200 ? !JSON.stringify(clubView.body).includes('Ana Costa') && !JSON.stringify(clubView.body).includes(REL) : true, 'N11 a club\'s player view carries no P5.6B relationship or agent name (M16.2 relationship semantics untouched)');
+  neg(clubView.status === 200 ? !JSON.stringify(clubView.body).includes('Ana Costa') && !JSON.stringify(clubView.body).includes(REL) : true, 'N11 a club\'s player view carries no agent relationship or agent name (club relationship semantics untouched)');
   // Trust score untouched.
   const trust = await j('GET', '/player/trust', undefined, kola.token);
   neg(trust.status === 404 || !JSON.stringify(trust.body).includes('agent'), 'N12 the Trust projection has no agent term (DR-21 deferred)');
@@ -733,9 +706,9 @@ section('R — Trust & Safety: read-only; NO route lets the shared key adjudicat
   neg(after.body.items.find((a) => a.id === REL2).status === 'disputed' && after.body.items.find((a) => a.id === REL2).rev === (rels.body.items.find((a) => a.id === REL2).rev), 'R6 the disputed relationship is untouched: same status, same rev');
   const anaProf = (await j('GET', '/org/agent/profile', undefined, ANA.token)).body.profile;
   neg(anaProf.rev === ANA_PROFILE_REV && anaProf.facets.fifa_licence.provenance.provider === 'local-synthetic-test-provider', 'R7 Ana\'s profile is untouched: same rev, provenance still the synthetic provider — no admin provenance exists');
-  // The M14 review lane cannot reach agent facets: they are not M14 claims.
+  // The verification-claim review lane cannot reach agent facets: they are not claims.
   const claims = await j('GET', '/admin/verification/queue', undefined, undefined, ADMIN);
-  neg(claims.status !== 200 || !JSON.stringify(claims.body).includes(ANA_ID) || !JSON.stringify(claims.body).includes('fifa_licence'), 'R8 no agent facet sits in the M14 verification queue — the shared-key claim review cannot reach a licence facet');
+  neg(claims.status !== 200 || !JSON.stringify(claims.body).includes(ANA_ID) || !JSON.stringify(claims.body).includes('fifa_licence'), 'R8 no agent facet sits in the verification queue — the shared-key claim review cannot reach a licence facet');
   // Without the key, nothing.
   neg(expect(collect('R9', await j('GET', '/admin/agent/relationships')), 401, 'ADMIN_KEY_REQUIRED'), 'R9 no key, no look');
   neg(expect(collect('R10', await j('GET', '/admin/agent/relationships', undefined, ANA.token)), 401, 'ADMIN_KEY_REQUIRED'), 'R10 an agent session is not the T&S key');
@@ -747,9 +720,9 @@ section('S — the subsystems Agent must not touch');
   const before = readRecords(DATA_DIR);
   neg((before.signings ?? []).length === 0 || before.signings === undefined, 'S1 no signing was written by any agent action');
   neg(!(before.ledger ?? []).some((l) => /offer|signed/.test(l.type) && l.orgId === 'org-northstar'), 'S2 no offer_made / offer_accepted / offer_declined / signed ledger row for the agency');
-  neg((before.representations ?? []).length === 0, 'S3 the legacy M13 representations store was not written by P5.6B');
+  neg((before.representations ?? []).length === 0, 'S3 the legacy representations store was not written by the agent core');
   neg(!(before.trials ?? []).some((t) => t.orgId === 'org-northstar') && !(before.recruitmentCases ?? []).some((c) => c.orgId === 'org-northstar'), 'S4 no trial and no recruitment case was created for the agency');
-  neg(!(before.claims ?? before.verificationClaims ?? []).some((c) => String(c.orgId) === 'org-northstar' && /fifa|licence/i.test(JSON.stringify(c))), 'S5 no M14 claim was created for a licence facet');
+  neg(!(before.claims ?? before.verificationClaims ?? []).some((c) => String(c.orgId) === 'org-northstar' && /fifa|licence/i.test(JSON.stringify(c))), 'S5 no verification claim was created for a licence facet');
   const kolaP = before.players.find((p) => p.id === 'pl-adeyemi');
   neg(!('agentUserId' in kolaP) && !('agent' in kolaP) && !('representationAgreements' in kolaP), 'S6 the player record gained no agent field — the relationship lives in its own store');
   neg(expect((await j('POST', '/org/agent/clients/' + REL + '/offer', { amount: 1 }, ANA.token)), 404, null), 'S7 there is no offer route');
@@ -757,10 +730,9 @@ section('S — the subsystems Agent must not touch');
   neg(expect((await j('POST', '/org/agent/clients/' + REL + '/passport', {}, ANA.token)), 404, null) && expect(await j('GET', '/org/agent/clients/' + REL + '/passport', undefined, ANA.token), 404, null), 'S9 no passport route — the agent does not own the client\'s Passport');
   neg(expect((await j('GET', '/org/agent/clients/' + REL + '/box-cam', undefined, ANA.token)), 404, null), 'S10 no Box Cam route');
   neg(expect((await j('POST', '/org/agent/clients/' + REL + '/trust', { score: 99 }, ANA.token)), 404, null), 'S11 no Trust route');
-  neg(expect((await j('POST', '/org/agent/clients/' + REL + '/contact', { body: 'hi' }, ANA.token)), 404, null), 'S12 no Contact route — an Agent is not a Club Contact actor in P5.6B');
-  // P5.6D made /org/agent/transactions a real route, so it no longer 404s — it
-  // refuses an empty body instead. The claim that survives is that no FEE route
-  // exists, and that a transaction still cannot be opened out of nothing.
+  neg(expect((await j('POST', '/org/agent/clients/' + REL + '/contact', { body: 'hi' }, ANA.token)), 404, null), 'S12 no Contact route — an Agent is not a Club Contact actor');
+  // /org/agent/transactions is a real route that refuses an empty body; the claim
+  // is that no FEE route exists and a transaction cannot be opened out of nothing.
   neg(expect((await j('POST', '/org/agent/transactions', {}, ANA.token)), 400, 'TRANSACTION_INPUT_INVALID') && expect(await j('GET', '/org/agent/fees', undefined, ANA.token), 404, null), 'S13 no fee route, and an empty body opens no transaction');
   neg(expect((await j('POST', '/org/agent/clients/' + REL + '/apply', { opportunityId: 'x' }, ANA.token)), 404, null), 'S14 no route lets the agent APPLY for the client — applying is the player\'s act');
 }

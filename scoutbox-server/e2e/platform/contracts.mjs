@@ -1,18 +1,15 @@
-// M18.2 acceptance suite — final pre-M19 cleanup.
-//
-// M18.2 adds no recruitment concept. What it removes is ambiguity: an event
+// Platform contracts. What these sections rule out is ambiguity: an event
 // that reaches a client without a registry entry, a notification nobody can
 // mute, a conflict told two different ways, an ordering nobody declared, a
 // schema nobody versioned, a date computed in whatever zone the host happened
-// to be in. Every section here corresponds to a row of M18_2_MATRIX.md and a
-// numbered requirement of the mandate.
+// to be in.
 //
-// More than half the checks are negative. A cleanup milestone that mostly
-// proves the happy path has not cleaned anything.
+// More than half the checks are negative: a contract suite that mostly proves
+// the happy path has not pinned anything down.
 //
 // Structure:  §1–§19  in-process (pure engines, source sweeps, client modules)
 //             §20–§40 HTTP against a fresh server
-//             §41–§45 second and third boots: upgrade path, idempotence
+//             §41, §43 later boots: idempotence, the production boot
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import { mkdtempSync } from 'node:fs';
@@ -45,7 +42,7 @@ const SCHEMA_VERSION = Number(DATA_MIGRATIONS.map((m) => m.id).sort().at(-1).sli
 const SERVER_DIR = path.join(HERE, '..', '..');
 const ROOT = path.join(SERVER_DIR, '..');
 const SERVER = path.join(SERVER_DIR, 'server.mjs');
-const PORT = pickPort(5990, 8, [0, 10, 11]); // TH-6: never a fetch-blocked port
+const PORT = pickPort(5990, 8, [0, 10, 11]); // never a fetch-blocked port
 const BASE = `http://localhost:${PORT}`;
 const DATA_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-m182-'));
 
@@ -66,9 +63,8 @@ section('§1 — every event the server emits is in the registry, and the source
   const listSrc = src.slice(src.indexOf('export const EMITTED_EVENTS'), src.indexOf(']);', src.indexOf('export const EMITTED_EVENTS')));
   const declared = [...listSrc.matchAll(/'([A-Za-z_]+)'/g)].map((m) => m[1]);
   ok(declared.length >= 18, `${declared.length} emitted event names declared in server.mjs`);
-  // Grep every broadcast('name' call site in the server tree — and, since the S7a correction
-  // (review of ba6956d, finding 1), every publishEvent('name' site: the transport half of
-  // broadcast() that notify() reaches through the notifications repository's effects queue, with
+  // Grep every broadcast('name' call site in the server tree, and every publishEvent('name'
+  // site: the transport half of broadcast() that notify() reaches through the notifications repository's effects queue, with
   // the payload minimised through the registry at the call site. Both are emissions.
   const files = [];
   const walk = (d) => { for (const f of fs.readdirSync(d)) { const p = path.join(d, f); if (f === 'node_modules' || f === 'scripts' || f === 'e2e' || f === 'public') continue; if (fs.statSync(p).isDirectory()) walk(p); else if (p.endsWith('.mjs')) files.push(p); } };
@@ -100,7 +96,7 @@ section('§2 — every registry entry is complete and internally consistent');
     'a public event carries at most ids and a type — a ping to re-read, never the record');
   neg(EVENT_REGISTRY.typing.replayPolicy === 'never', 'a typing indicator is never replayed to a reconnecting client');
   neg(EVENT_REGISTRY.recruitment_room_archived.audience === 'org_private', 'a Room archival stays inside the organisation');
-  ok(EVENT_AUDIENCE.recruitment_room_archived === audienceFor('recruitment_room_archived'), 'the M18.1 audience table is a view over the registry, not a second table');
+  ok(EVENT_AUDIENCE.recruitment_room_archived === audienceFor('recruitment_room_archived'), 'the audience table is a view over the registry, not a second table');
   neg(audienceFor('never_registered') === 'org_private', 'an unregistered event fails closed to organisation-private');
 }
 
@@ -175,7 +171,7 @@ section('§6 — EN/FR parity in both web apps');
 section('§7 — every sort has a stable tie-break, and the ordering is declared');
 {
   const serverSrc = read('scoutbox-server/server.mjs');
-  // S14i: the Discover order is the query's (repositories/identity.mjs directoryOrder), read from source.
+  // The Discover order is the query's (repositories/identity.mjs directoryOrder), read from source.
   const identitySrc = read('scoutbox-server/repositories/identity.mjs');
   const discover = identitySrc.slice(identitySrc.indexOf('const directoryOrder'), identitySrc.indexOf('// ---------------------------------------------------------- list operations'));
   ok((discover.match(/\['p\.id', 'ASC'\]\]/g) ?? []).length === 2, 'both Discover sorts (Pro and Grassroots) end on the player id');
@@ -216,14 +212,14 @@ section('§9 — defaults are conservative without muting an obligation, and the
     neg(TYPE_CATEGORY[t] !== 'discovery_nudges', `${t} is an obligation or a request, never a nudge that defaults off`);
   }
   neg(d.emailIntent === false, 'nobody is opted into email they never asked for');
-  // In-process enforcement with stub routers. S7a: the stored preferences are
+  // In-process enforcement with stub routers. The stored preferences are
   // rows of the notification tables, so the module is given a real repository
-  // on a temporary in-memory database (migrations 0001–0009 applied); the
+  // on a temporary in-memory database (every table migration applied); the
   // stored "security_account: false" is planted as a stored row — the
   // repository stores what it is given, the effective view forces it on.
   const prefsDb = new DatabaseSync(':memory:'); prefsDb.exec('PRAGMA foreign_keys = ON;');
   runDataMigrations(prefsDb, DATA_MIGRATIONS, { now: Date.now(), log: () => {} });
-  // S14e: a staff audience is a key to org_users, so the two staff members exist (storage setup only).
+  // A staff audience is a key to org_users, so the two staff members exist (storage setup only).
   prefsDb.prepare("INSERT INTO orgs (id, name, type, level, plan, created_at) VALUES ('org-a', 'Org A', 'club', 'pro', 'Pro', 0)").run();
   for (const [id, name] of [['u-tom', 'Tom'], ['u-maria', 'Maria']]) prefsDb.prepare("INSERT INTO org_users (id, org_id, name, name_key, role, created_at) VALUES (?, 'org-a', ?, ?, 'Scout', ?)").run(id, name, name.toLowerCase(), Date.now());
   const notifications = createNotificationsRepository({ sqlite: prefsDb, now: Date.now });
@@ -246,8 +242,6 @@ section('§9 — defaults are conservative without muting an obligation, and the
 // ================================================== §10 migrations (unit)
 section('§10 — migrations: ordered, idempotent, recorded, and a failure aborts before any save');
 {
-  // Rewritten in S14a: this described the retired snapshot registry (runMigrations over an in-memory db, db.schema,
-  // the m182 backfills of a pre-M18.1 snapshot). It now runs the table migrations on an in-memory SQLite database.
   const db = new DatabaseSync(':memory:'); db.exec('PRAGMA foreign_keys = ON;');
   neg(!migrationApplied(db, DATA_MIGRATIONS.at(-1).id), 'an unmigrated database records no migration, never "fine"');
   const first = runDataMigrations(db, DATA_MIGRATIONS, { now: 1000 });
@@ -298,8 +292,8 @@ section('§11 — boot-time integrity reports and never repairs');
   ok(dup.recruitmentCases.length === 3, 'and nothing was deleted or repaired');
   const orphan = { ...sane, recruitmentCases: [{ id: 'c9', orgId: 'nope', playerId: 'p1', room: { status: 'watching', rev: 1 } }] };
   neg(integrityReport(orphan, { cases: orphan.recruitmentCases ?? [] }).violations.some((v) => v.code === 'ROOM_ORPHAN_ORG'), 'a Room whose organisation does not exist is reported');
-  // S12c (rewritten: these were reports over blob rows; the discovery tables now refuse the row instead, so a duplicated
-  // brief id, a fingerprint counted twice in one item and a brief without rev are never stored to be reported).
+  // The discovery tables refuse a duplicated brief id, a fingerprint counted twice in one item and a brief without rev,
+  // so none of them is ever stored to be reported.
   const { typeBrief, typeSecondLookItem, DISCOVERY_DDL } = await import('../../repositories/discovery.mjs');
   neg(/CREATE TABLE recruitment_briefs \(\n\s+id\s+TEXT PRIMARY KEY/.test(DISCOVERY_DDL), 'a duplicated brief id is refused: the brief id is the table\'s primary key');
   neg(/the same evidence|names an entry twice/.test(typeSecondLookItem({ id: 's1', orgId: 'o1', playerId: 'p1', roomId: 'c1', decisionId: 'd1', policyVersion: 1, triggerType: 'general_update', changeFingerprints: ['f1', 'f1'], directReasonCodes: [], status: 'open', createdAt: 1, updatedAt: 1, latestChangeAt: 1, history: [] }).reason ?? '')
@@ -704,8 +698,8 @@ section('§27 — Discover ordering is deterministic and declared');
   neg(!/score|rank/.test(a.headers.get('x-scoutbox-ordering')), 'and it is not a ranking');
   const ids = a.body.items.map((p) => p.id);
   const sortedByRule = a.body.items.slice().sort((x, y) => (y.academyPlus ? 1 : 0) - (x.academyPlus ? 1 : 0) || y.profileSignal - x.profileSignal || (x.id < y.id ? -1 : x.id > y.id ? 1 : 0)).map((p) => p.id);
-  ok(ids.join() === sortedByRule.join(), 'the body follows the declared rule exactly (S14i: the id tie-break in code-point order, as SQL compares it)');
-  ok(Array.isArray(a.body.items) && 'nextCursor' in a.body, 'S14i: the directory is a page ({ items, nextCursor })');
+  ok(ids.join() === sortedByRule.join(), 'the body follows the declared rule exactly (the id tie-break in code-point order, as SQL compares it)');
+  ok(Array.isArray(a.body.items) && 'nextCursor' in a.body, 'the directory is a page ({ items, nextCursor })');
   if (hack?.token) {
     const g = await j('GET', '/org/players', undefined, hack.token);
     ok(g.status === 200 && g.headers.get('x-scoutbox-ordering') === 'first_team_seeker,distance,profile_completeness,player_id', 'the Grassroots ordering is declared differently — distance, never ability');
@@ -775,9 +769,6 @@ section('§41 — a second boot on the same database applies no migration twice'
   ok(tomPrefs.categories.find((x) => x.id === 'mentions').enabled === true, "Tom's preference survived the restart");
 }
 
-// §42 (a snapshot written before M18.2 upgrading in place) was removed in S14a: it regressed the retired blob store's
-// schema record, and there is no compatibility with files written by earlier dev builds.
-
 // ===================================================== §43 production boot
 section('§43 — a production boot refuses simulated faults and exposes no fault control');
 {
@@ -785,21 +776,15 @@ section('§43 — a production boot refuses simulated faults and exposes no faul
   await sleep(800);
   const PPORT = PORT + 10; const PBASE = `http://localhost:${PPORT}`;
   const PDATA = mkdtempSync(path.join(tmpdir(), 'sbx-m182prod-'));
-  const prodEnv = { ...process.env, NODE_ENV: 'production', PORT: String(PPORT), DATA_DIR: PDATA, M13_QUIET_LOGS: '1', MEDIA_SECRET: 'synthetic-media-secret-0123456789abcdef', ADMIN_KEY: 'm182-test-admin-key-not-real' }; // PRE-M24 (PM-1): a real deployment names its own admin key
+  const prodEnv = { ...process.env, NODE_ENV: 'production', PORT: String(PPORT), DATA_DIR: PDATA, M13_QUIET_LOGS: '1', MEDIA_SECRET: 'synthetic-media-secret-0123456789abcdef', ADMIN_KEY: 'm182-test-admin-key-not-real' }; // a real deployment names its own admin key
   const withFaults = spawn(process.execPath, [SERVER], { env: { ...prodEnv, SCOUTBOX_FAULTS: 'unavailable:/org/players' }, stdio: 'ignore' });
   children.push(withFaults);
   const exited = await new Promise((resolve) => { const t = setTimeout(() => resolve(null), 8000); withFaults.on('exit', (code) => { clearTimeout(t); resolve(code); }); });
   neg(exited !== null && exited !== 0, `a production boot with SCOUTBOX_FAULTS set exits non-zero (exit ${exited})`);
-  // A SEPARATE PORT for the plain boot.
-  //
-  // This used to reuse PPORT, immediately after the fault-configured server
-  // had been expected to exit on it. When the kernel had not yet released the
-  // socket the plain boot died with EADDRINUSE, and the branch below took a
-  // fallback that recorded a PASSING check and quietly skipped four real ones
-  // — three of them negative. The suite then printed 330 instead of 333 with
-  // no indication that anything had been left unasserted. A check that
-  // sometimes does not run sometimes protects nothing, and a summary line is
-  // not where a skipped assertion should be announced.
+  // A SEPARATE PORT for the plain boot: reusing PPORT straight after the
+  // fault-configured server exits on it can fail with EADDRINUSE before the
+  // kernel releases the socket, and a check that sometimes does not run
+  // protects nothing.
   const PPORT2 = PORT + 11; const PBASE2 = `http://localhost:${PPORT2}`;
   let prodUp = false; let prodLog = '';
   const prod = spawn(process.execPath, [SERVER], { env: { ...prodEnv, PORT: String(PPORT2) }, stdio: ['ignore', 'pipe', 'pipe'] });

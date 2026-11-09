@@ -1,18 +1,16 @@
 /**
- * S13c — group workspaces and group grants as typed tables (migration `0036_groups`; docs/architecture/migration.md
- * §4.5 S13; sql/08_operations_integrations.sql).
+ * Group workspaces and group grants.
  *
  * Records:
- *   - A group (F8, a federation or parent organisation): its member organisations as rows, each flagged admin or not
+ *   - A group (a federation or parent organisation): its member organisations as rows, each flagged admin or not
  *     (so an admin is always a member), its pending invites (one per invited organisation, never a member's), the
  *     assessment templates its admin shares (by template id) and its programmes.
- *   - A group grant (F8): one organisation shares one resource (its whole shortlist, a case or an assessment) with
+ *   - A group grant: one organisation shares one resource (its whole shortlist, a case or an assessment) with
  *     named fellow members until it expires or is revoked. The recipients are ordered rows. Ownership, liveness, shared
  *     membership and each player's visibility are re-checked on every read (domains/groups/groups.mjs).
  *
- * WRITES are explicit operations; every write joins the open unit of work, the caller's transaction or its own.
- * READS are SQL: no mirror. Fresh, deep-frozen records; lists decode child rows in one batch. Modules receive the
- * queries as `groupReads`.
+ * Every write joins the open unit of work, the caller's transaction or its own. Records are deep-frozen; lists decode
+ * child rows in one batch. Modules receive the queries as `groupReads`.
  *
  * References. Organisations are RESTRICT keys; so is a grant's group. A group's member, invite, template and
  * programme rows cascade with it (groups are never deleted); a grant's recipients cascade with the grant.
@@ -75,7 +73,7 @@ export const GROUPS_DDL = [
     ownedBy('groups', 'group_id'), rowOf('orgs', 'org_id'), rowOf('orgs', 'invited_by_org_id'), 'PRIMARY KEY (group_id, org_id)',
   ]),
   'CREATE INDEX group_pending_invites_org ON group_pending_invites (org_id);',
-  // An assessment template by its id (template ids are shared by every version and every club until after S14).
+  // An assessment template by its id (a template id is shared by every version and every club).
   table('group_shared_templates', [idCol('group_id'), idCol('template_id'), ownedBy('groups', 'group_id'), 'PRIMARY KEY (group_id, template_id)']),
   tableDdl('group_programmes', PROGRAMME_ROW_SPEC, [ownedBy('groups', 'group_id')]),
   'CREATE INDEX group_programmes_group ON group_programmes (group_id);',
@@ -214,13 +212,13 @@ function decodeGrants(sqlite, rows) {
   return rows.map((row) => ({ ...decode(GRANT_SPEC, row), toOrgIds: to.all(row.id).map((r) => r.org_id) }));
 }
 
-// ------------------------------------------------------------------ snapshot (fixtures and the persistence batteries)
+// ------------------------------------------------------------------ whole-domain read (the test suites)
 export const groupsLive = (sqlite) => migrationApplied(sqlite, GROUPS_MIGRATION);
 function readAll(sqlite) {
   const all = (t) => sqlite.prepare(`SELECT * FROM ${t} ORDER BY rowid`).all();
   return { groups: decodeGroups(sqlite, all('groups')), groupGrants: decodeGrants(sqlite, all('group_grants')) };
 }
-/** The whole domain read back as plain records (`readAllRecords` in index.mjs: the test suites' read-back); null before its migration. */
+/** The whole domain read back as plain records (`readAllRecords` in index.mjs: the test suites' read-back). */
 export const GROUPS_RECORDS = {
   names: GROUPS_COLLECTIONS,
   read(sqlite) { return groupsLive(sqlite) ? readAll(sqlite) : null; },

@@ -1,6 +1,6 @@
-// Behavioural tests for migration plan step S2: sessions become table-backed
-// with hashed tokens. Everything runs on throwaway databases under the OS temp
-// directory with synthetic fixtures; nothing touches DATA_DIR. Run with: npm test
+// Behavioural tests for sessions: a table with hashed tokens. Everything runs on
+// throwaway databases under the OS temp directory with synthetic fixtures;
+// nothing touches DATA_DIR. Run with: npm test
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { spawnChild } from './testChildren.mjs';
@@ -17,11 +17,9 @@ import { openStore } from '../store.mjs';
 import { writeFixture, readRecords } from './dataLayerFixture.mjs';
 import { createStorage } from '../adapters.mjs';
 import { hasBlobTable } from './coreIdentityTestFixtures.mjs';
-// The checks below that drive the runner on a raw connection are about the S2/S3
-// steps (0001–0004): they run exactly those. The S4a steps that follow them
-// (0005 core identity, 0006 media deletions) have their own suites
-// (testCoreIdentityMigration, testCoreSchema); the full registered list is what
-// attachDataLayer and the real-server checks below run.
+// The checks below that drive the runner on a raw connection run exactly migrations
+// 0001–0004; the later ones have their own suites (e.g. testCoreSchema). The full
+// registered list is what attachDataLayer and the real-server checks below run.
 const S3_MIGRATIONS = DATA_MIGRATIONS.filter((m) => /^000[1-4]_/.test(m.id));
 import { buildSeed } from '../seed.mjs';
 import { freePort } from './testPort.mjs';
@@ -75,7 +73,7 @@ const liveRepo = (opts = {}) => {
   repo.attach();
   return { s, repo };
 };
-test('repository: create returns the token once; the table and the list queries hold only the hash-free row; lookup is by hash; there is no view (S14f)', () => {
+test('repository: create returns the token once; the table and the list queries hold only the hash-free row; lookup is by hash; there is no view', () => {
   const { s, repo } = liveRepo();
   const { token, session } = repo.create('player', 'pl-1');
   assert.equal(token.length, 48); assert.equal(session.kind, 'player'); assert.equal(session.refId, 'pl-1'); assert.ok(session.sid);
@@ -200,8 +198,7 @@ await atest('busy timeout: a unit of work waits for a concurrent writer in anoth
     assert.throws(() => raw.exec("INSERT INTO meta (key, value) VALUES ('x', '1')"), /SQLITE_BUSY|database is locked/, 'a connection without the pragma fails immediately');
     raw.close();
     const t0 = Date.now();
-    // Rewritten in S14a (a save wrote the blob) and S14g (it flushed an organisation facet): an explicit write in a
-    // unit of work now (BEGIN IMMEDIATE, which waits through the busy handler, as a route's unit does).
+    // An explicit write in a unit of work (BEGIN IMMEDIATE, which waits through the busy handler, as a route's unit does).
     store.unitOfWork(() => layer.orgs.update('org-a', (d) => { d.suspended = true; }));
     const waited = Date.now() - t0;
     assert.ok(waited >= holdMs - 300, `the store waited for the lock (${waited} ms)`);
@@ -222,8 +219,7 @@ await atest('server: plain-token sessions in a fixture are stored as hashes, the
     { token: 'legacy-maria-token-00000000000000000000000000', sid: 'sid-maria', kind: 'org', refId: 'org-eastport', userId: 'usr-legacy', createdAt: Date.now() - DAY },
   ];
   // A deterministic media fixture: one of Kola's clips has a stored file, so a
-  // signed media link must resolve to 200 with these bytes. (S14a: written to
-  // storage directly; the mediaBlobs collection is gone.)
+  // signed media link must resolve to 200 with these bytes.
   const clip = seed.players.find((p) => p.id === 'pl-adeyemi').media[0];
   const clipBytes = Buffer.from('synthetic-webm-bytes-for-the-sessions-suite');
   clip.url = `/media/${clip.id}`;
@@ -250,9 +246,9 @@ await atest('server: plain-token sessions in a fixture are stored as hashes, the
     assert.equal((await j('GET', '/player/me', undefined, kola)).status, 200, 'the fixture player token works');
     const notif = await j('GET', '/org/notifications', undefined, maria);
     assert.equal(notif.status, 200, 'the fixture staff token works');
-    // The file holds no plain token and no sessions blob.
+    // The file holds no plain token.
     const raw = openRaw(dir);
-    assert.equal(hasBlobTable(raw), false, 'no blob table (rewritten in S14a: this checked for a sessions blob)');
+    assert.equal(hasBlobTable(raw), false, 'no blob table');
     assert.ok(raw.prepare('SELECT 1 FROM sessions WHERE token_hash = ?').get(sha256(kola)), 'the session is in the table by hash');
     assert.equal(JSON.stringify(raw.prepare('SELECT * FROM sessions').all()).includes('legacy-kola-token'), false, 'no plain token in the table');
     raw.close();
@@ -333,7 +329,7 @@ await atest('server: media links are signed with MEDIA_SECRET only — a link su
     await stop(S); S = await boot({ SCOUTBOX_MEDIA_SECRET: SECRET });
     assert.equal(await status(url), 401, 'the old variable name is not read: development signs with a fresh per-process key');
     await stop(S); S = null;
-    // Rewritten in S14a: this looked for a secrets blob; now the whole file is searched for the key.
+    // The whole file is searched for the key.
     const raw = openRaw(dir);
     assert.equal(hasBlobTable(raw), false);
     raw.exec('PRAGMA wal_checkpoint(TRUNCATE)'); raw.close();
@@ -403,7 +399,7 @@ await atest('server (review correction 2): player and org sessions survive the a
   }
 });
 
-// ------------------------------------------------------------- SQLite is required (review correction 4)
+// ------------------------------------------------------------- SQLite is required
 test('without node:sqlite the store refuses to open with a compatibility error and touches nothing; the repositories refuse a missing connection', () => {
   const dir = tempDir('s2-nosqlite');
   const probe = execFileSync(process.execPath, ['--no-experimental-sqlite', '--input-type=module', '-e', `

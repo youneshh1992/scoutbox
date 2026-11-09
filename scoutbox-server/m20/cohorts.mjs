@@ -1,5 +1,5 @@
 /**
- * M20 — decision record hygiene, coverage of the club's own stated demand, and
+ * Recruitment analytics: decision record hygiene, coverage of the club's own stated demand, and
  * dynamic watchlists as a work surface.
  *
  * "Decision record hygiene" is a careful name. Nothing in this file measures
@@ -58,7 +58,7 @@ export function supersededDecisionRate(ctx) {
 // ------------------------------------------- D3 · endings limited by evidence
 
 /**
- * The one figure in M20 that points at something a director can actually fix.
+ * The one figure in analytics that points at something a director can actually fix.
  * If a third of endings are recorded as "we could not tell", the constraint is
  * the club's evidence pipeline, not its judgement — and unlike almost every
  * other analytics number, acting on it changes a process rather than a person.
@@ -213,7 +213,7 @@ export function watchlistActivity(ctx) {
       entered: count(entered),
       left: count(left),
       // Without this the number reads as "players whose situation changed",
-      // which it is not. M19 has no scheduler: membership is worked out when
+      // which it is not. Watchlists have no scheduler: membership is worked out when
       // somebody opens a list, so this counts recalculations.
       derivedOnRead: true,
       refreshNote: 'ScoutBox does not recompute watchlists in the background. These are the changes found when someone opened a list — a list nobody opened records nothing.',

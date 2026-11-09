@@ -1,8 +1,8 @@
-// M21 — the Development Hub, inside a player.
+// The Development Hub, inside a player.
 //
 // It is reached from a player, which is where a development plan belongs, and
-// it adds NO top-level destination (§54). The nav inventory is unchanged, and
-// `navConfig.test.mjs` proves it.
+// it adds NO top-level destination; `navConfig.test.mjs` proves the nav
+// inventory holds.
 //
 // Three things this panel refuses to draw, each of which is the easy thing:
 //
@@ -138,7 +138,7 @@ function GoalCard({ g, view, session, act, busy }: {
         <Pill tone={g.status === 'achieved' ? 'green' : g.status === 'blocked' ? 'gold' : ''} data-goal-status={g.status}>{goalStatus(g.status)}</Pill>
       </div>
       {g.description && <div className="dim" style={{ fontSize: 13, marginTop: 3 }}>{g.description}</div>}
-      {/* The word never travels without the sentence (§16). */}
+      {/* The word never travels without the sentence. */}
       {g.statusMeaning && <div className="dim" style={{ fontSize: 11.5, marginTop: 3 }} data-achieved-meaning>{g.statusMeaning}</div>}
       {g.status === 'blocked' && (
         <div className="dim" style={{ fontSize: 12.5, marginTop: 3 }}>
@@ -149,7 +149,7 @@ function GoalCard({ g, view, session, act, busy }: {
 
       {g.targetState && <TargetBlock target={g.targetState} />}
 
-      {/* Counts and a sentence made of counts. Never a bar (§46). */}
+      {/* Counts and a sentence made of counts. Never a bar. */}
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginTop: 8 }}>
         <span data-completion>{g.completion.phrase}</span>
         {g.actionCounts.overdue > 0 && <Pill tone="gold">{g.actionCounts.overdue} {t('m21.overdue')}</Pill>}
@@ -328,7 +328,7 @@ export function DevelopmentPanel({ session, playerId, notify }: {
         if (r.value.idempotent) notify(t('m21.alreadyDone'));
       } catch (e) {
         const c = conflictOf(e);
-        // The shared M18.2 experience, unchanged: reload, keep your edits.
+        // The shared conflict experience: reload, keep your edits.
         if (c) setConflict(c);
         else notify(httpMessage(e), true);
       } finally {

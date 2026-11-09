@@ -1,15 +1,8 @@
-// S8b through the REAL server (server.mjs booted as a child process on temporary data directories, synthetic records
-// only): recruitment cases, room comments, room snapshots, room decisions and room evidence states as tables. A room
-// created and one adopting an M12 case, a comment edited and tombstoned, a task, a status move with its snapshot, an
-// archive and a reopen, an evidence review overwritten in place, a decision draft replayed and conflicted, finalized
-// with its keys carried to the formal row, an M12 case with its budget scenario (lines, fx assumption, approval,
-// actual), the handoff readiness route, the listing and reading routes answering as before, a SIGKILL right after a
-// comment, /capabilities counting the rows; the player's and the guardian's surfaces acquiring no internal note, no
-// decision and no mention of a room; another club's 404; the deletion unit tombstoning the cases in place with a REAL
-// COMMIT failure leaving every row as it was and the retry landing once; a case naming a historically missing player
-// restored, served and counted (Q8a); the admin backup (a copy of the database) holding the five collections, a restore
-// into a NEW directory serving them row for row. Every database read goes through a
-// second read-only connection. Nothing here touches DATA_DIR or real data. Run with: npm test
+// Recruitment cases, room comments, room snapshots, room decisions and room evidence states through the REAL server
+// (booted as a child process on temporary data directories, synthetic records only): the room and decision routes, a
+// SIGKILL, the player's and guardian's surfaces showing no internal note, decision or room, the deletion unit with a
+// real COMMIT failure, a historically missing player counted (Q8a), and backup/restore. Every database read goes
+// through a second read-only connection. Nothing here touches DATA_DIR or real data. Run with: npm test
 import assert from 'node:assert/strict';
 import { spawnChild } from './testChildren.mjs';
 import { freePort } from './testPort.mjs';
@@ -66,7 +59,7 @@ const noBlobTable = (dir) => !q1(dir, "SELECT 1 AS one FROM sqlite_master WHERE 
 const tableExists = (dir, t) => !!q1(dir, "SELECT 1 AS one FROM sqlite_master WHERE type = 'table' AND name = ?", t);
 const fkOf = (dir, t) => qAll(dir, `PRAGMA foreign_key_list(${t})`).map((r) => `${r.from}->${r.table}(${r.to}) ${r.on_delete}`);
 const ddlOf = (dir, t) => q1(dir, "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?", t)?.sql ?? null;
-/** The S8b, S8a and thread tables as an exact dump (rowid order). */
+/** The case, request/trial and thread tables as an exact dump (rowid order). */
 const recDump = (dir) => JSON.stringify(Object.fromEntries([...TABLES, ...S8A_TABLES, 'channels', 'messages'].filter((t) => tableExists(dir, t)).map((t) => [t, qAll(dir, `SELECT * FROM ${t} ORDER BY rowid`)])));
 const caseRow = (dir, id) => q1(dir, 'SELECT * FROM recruitment_cases WHERE id = ?', id);
 const orgLogin = async (S, orgId = 'org-eastport', scoutName = 'Maria Keane', role = 'Head of Recruitment') => { const r = await S.j('POST', '/auth/org/login', { orgId, scoutName, role }); assert.equal(r.status, 200, r.text); return r.body.token; };
@@ -89,10 +82,10 @@ const moveStatus = async (S, token, id, status, extra = {}) => S.j('POST', `/org
 
 await test('[routes] a fresh boot records 0016_recruitment_cases last; the twenty-five tables exist, recruitment_requests and trials carry the REAL, immediate case key, the case graph keeps its keys as columns, no blob behind any of the five; a room created, a comment (edited, tombstoned), a task, a status move with its snapshot, an archive and a reopen, an evidence review overwritten in place, a draft replayed/conflicted/patched/finalized with its keys, an M12 case with its budget and a room adopting it land as rows the moment the route answers; the handoff readiness route, the listing and reading routes answer as before; a SIGKILL right after a comment loses nothing; /capabilities counts the rows; [compat] another club gets 404, the player\'s and the guardian\'s surfaces carry no internal note, no decision and no room', async () => {
   const dir = tempDir('s8b-boot'); let S = await boot(dir);
-  assert.equal(applied(dir).filter((id) => id < '0019').at(-3), MIGRATION, 'the recorded migration (0017_recruitment_contacts_offers, S8c, and 0018_signings_follow_ups, S8d, follow it on the same boot)'); assert.equal(applied(dir).filter((id) => id < '0019').at(-2), '0017_recruitment_contacts_offers'); assert.equal(applied(dir).filter((id) => id < '0019').at(-1), '0018_signings_follow_ups'); for (const t of TABLES) assert.ok(tableExists(dir, t), `${t} exists`);
-  for (const t of ['recruitment_requests', 'trials']) assert.ok(fkOf(dir, t).includes('case_id->recruitment_cases(id) RESTRICT'), `${t}.case_id is a real, immediate key (§4.3): ${fkOf(dir, t)}`);
+  assert.equal(applied(dir).filter((id) => id < '0019').at(-3), MIGRATION, 'the recorded migration (0017_recruitment_contacts_offers and 0018_signings_follow_ups follow it on the same boot)'); assert.equal(applied(dir).filter((id) => id < '0019').at(-2), '0017_recruitment_contacts_offers'); assert.equal(applied(dir).filter((id) => id < '0019').at(-1), '0018_signings_follow_ups'); for (const t of TABLES) assert.ok(tableExists(dir, t), `${t} exists`);
+  for (const t of ['recruitment_requests', 'trials']) assert.ok(fkOf(dir, t).includes('case_id->recruitment_cases(id) RESTRICT'), `${t}.case_id is a real, immediate key: ${fkOf(dir, t)}`);
   assert.match(ddlOf(dir, 'idempotency_keys') ?? '', /owner_table IN \('signing_packages'\)/, 'the case graph keeps its keys as columns');
-  assert.ok(noBlobTable(dir), 'no blob table'); // rewritten in S14a: it described the blob
+  assert.ok(noBlobTable(dir), 'no blob table');
   const maria = await orgLogin(S); const a = await signupAdult(S, 'Room Adult'); const b = await signupAdult(S, 'Case Adult'); const c = await signupAdult(S, 'Adopted Adult');
   // the room
   const room = await roomFor(S, maria, a.pid); assert.equal(room.status, 201); const RID = room.id;
@@ -200,7 +193,7 @@ await test('[routes] the deletion unit tombstones the person\'s cases in place (
   await S.stop(); rm(dir, restored, bk.body.dir);
 });
 
-await test('[routes] the audit feed pages each source in SQL (§4.3 step 4): walked one, two, three or fifty at a time it is the same rows, newest first with the id as the tie-break (ties planted across Rooms), every Room entry of the club exactly once and as many rows as `total`; a junk cursor, an old id cursor and another club\'s cursor are 400 AUDIT_CURSOR_INVALID', async () => {
+await test('[routes] the audit feed pages each source in SQL: walked one, two, three or fifty at a time it is the same rows, newest first with the id as the tie-break (ties planted across Rooms), every Room entry of the club exactly once and as many rows as `total`; a junk cursor, an old id cursor and another club\'s cursor are 400 AUDIT_CURSOR_INVALID', async () => {
   const dir = tempDir('s8b-audit'); const S = await boot(dir);
   const maria = await orgLogin(S);
   for (let i = 0; i < 7; i += 1) { const p = await signupAdult(S, `Audit Adult ${i}`); const r = await roomFor(S, maria, p.pid); if (r.body?.room?.status === 'watching') assert.equal((await S.j('POST', `/org/rooms/${r.id}/lifecycle`, { action: 'startReview', expectedRev: await roomRev(S, maria, r.id) }, maria)).status, 200); }

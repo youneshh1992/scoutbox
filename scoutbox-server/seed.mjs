@@ -1,10 +1,10 @@
-// Seed dataset. In-memory only — a server restart resets to this.
-// Milestone 3: under-18 players exist, each owned by a verified guardian.
+// Seed dataset: what a first installation boots with.
+// Under-18 players exist, each owned by a verified guardian.
 // Agencies never see them; unverified clubs never see them; verified clubs
 // contact the guardian, never the child (domain.mjs / visibleToOrg).
 //
 // The billing plans and positional archetypes are product constants
-// (catalogue.mjs), not data: the seed carries neither (S13e).
+// (catalogue.mjs), not data: the seed carries neither.
 
 /**
  * The world a first boot starts from. `demo: false` keeps every container
@@ -435,7 +435,7 @@ export function buildSeed({ demo = true } = {}) {
   players.find((p) => p.id === 'pl-guni').activityLog = [now - 4 * day, now - 3 * day, now - 2 * day, now - day, now - 7200_000];
 
   // Seeded scout & coach track records (demo only); live rows are computed from the ledger. The data layer imports them
-  // once, with a first installation's players, into reputation_seed (S13e).
+  // once, with a first installation's players, into reputation_seed.
   const reputationSeed = [
     { scoutName: 'Maria Keane', orgName: 'Eastport FC', discoveries: 14, successRatePct: 64, avgResaleMultiple: 3.1, seeded: true },
     { scoutName: 'Coach D. Ansah', orgName: 'Harbour City FC', discoveries: 9, successRatePct: 55, avgResaleMultiple: 2.2, seeded: true },

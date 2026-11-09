@@ -1,31 +1,28 @@
 /**
- * S9b — assessment templates, assessments, video segments and playlists as typed tables (migration
- * `0020_scouting_assessments`; docs/architecture/migration.md §4.3 "The pattern", §4.5 S9; sql/04_scouting_assessment.sql).
+ * Assessment templates, assessments, video segments and playlists.
  *
  * Tables: assessment_templates, assessment_template_attributes; assessments, assessment_ratings,
  * assessment_rating_refs, assessment_history; video_segments, video_segment_labels; playlists, playlist_segments.
  * Every field is a typed column with its vocabulary and length CHECKs. A segment's drawing is the one JSON column: an
  * overlay the client draws and the server never reads, kept as data (no app sends one today). A record the columns
- * cannot hold is refused with its id, at the repository (the routes check first and answer 400) and at a snapshot
- * write (the save rolls back).
+ * cannot hold is refused with its id at the repository (the routes check first and answer 400).
  *
  * WRITES are explicit. Templates are append-only (`templates.create`); a new version never changes an old one.
  * Assessments and playlists have `create(record)` and `update(id, (draft) => …)`, typed whole and written at once;
  * segments are never edited (`segments.create`). Writes join the open unit of work, the caller's transaction, or a
  * transaction of their own. An unknown field is refused, and so is an update of a record from inside its own update.
  *
- * READS are SQL: there is no mirror and no db.assessmentTemplates / db.assessments / db.videoSegments / db.playlists
- * (reading one throws, naming this repository). Queries decode fresh, deep-frozen records in insertion (rowid) order
- * unless they say otherwise; a read inside a unit of work sees the unit's writes. Modules receive the queries as
- * `scoutingReads` (`templates`, `assessments`, `segments`, `playlists`).
+ * Queries decode fresh, deep-frozen records in insertion (rowid) order unless they say otherwise; a read inside a unit
+ * of work sees the unit's writes. Modules receive the queries as `scoutingReads` (`templates`, `assessments`,
+ * `segments`, `playlists`).
  *
  * An assessment's `attributesSnapshot` is not stored: a template version never changes, so the attributes of
  * (template_id, template_version) are the snapshot, joined on read.
  *
- * References. Player, media, trial and trial-session ids have NO foreign key: tolerant, like recruitment and S9a (an
- * assessment outlives its player's account, which nulls the name; a trial is never deleted, only tombstoned; the
- * routes check the trial when the assessment is written). `org_id` → orgs and the staff ids → org_users are RESTRICT
- * (organisations are never deleted, O2). Inside the domain every key is immediate RESTRICT: an assessment's template,
+ * References. Player, media, trial and trial-session ids have no foreign key: tolerant, like recruitment and the
+ * evidence passport (an assessment outlives its player's account, which nulls the name; a trial is never deleted, only
+ * tombstoned; the routes check the trial when the assessment is written). `org_id` → orgs and the staff ids →
+ * org_users are RESTRICT (organisations are never deleted, O2 in docs/decisions.md). Inside the domain every key is immediate RESTRICT: an assessment's template,
  * its first opinion, a rating's cited segment and a playlist's segments; the child rows cascade with their owner.
  */
 import { isPlainObject, ids, describe } from './recruitment.mjs';
@@ -46,7 +43,7 @@ export const VERDICTS = Object.freeze(['sign', 'monitor', 'pass']);
 export const VIEWINGS = Object.freeze(['live', 'video']);
 /** The anchor levels a template attribute may describe (a 3 means the sentence, not a feeling). */
 export const ANCHOR_LEVELS = Object.freeze(['1', '2', '3', '4', '5']);
-/** Limits: the routes shorten longer text to these (as they always have); the columns refuse anything longer. */
+/** Limits: the routes shorten longer text to these; the columns refuse anything longer. */
 export const ASSESSMENT_LIMITS = Object.freeze({
   attrId: 40, attrLabel: 80, anchor: 200, attributes: 20, name: 200, fixture: 120, opponentLevel: 60, reasons: 500,
   reviewNote: 300, feedback: 800, ratingNote: 300, refs: 6, refLabel: 80, ref: 80, minutesWatched: 600,
@@ -477,7 +474,7 @@ function readAll(sqlite) {
   };
 }
 
-/** The whole domain read back as plain records (`readAllRecords` in index.mjs: the test suites' read-back); null before its migration. */
+/** The whole domain read back as plain records (`readAllRecords` in index.mjs: the test suites' read-back). */
 export const SCOUTING_ASSESSMENTS_RECORDS = {
   names: SCOUTING_ASSESSMENTS_COLLECTIONS,
   read(sqlite) { return scoutingAssessmentsLive(sqlite) ? readAll(sqlite) : null; },

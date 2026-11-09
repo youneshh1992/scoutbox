@@ -1,4 +1,4 @@
-// M14 — Trust & Safety review, licence verification, disputes, cascades and
+// Trust & Safety review, licence verification, disputes, cascades and
 // the deterministic expiry sweep.
 //
 // Honesty contract:
@@ -17,7 +17,7 @@ import { parseDateOrInstant, isAbsent } from '../../../temporal.mjs';
 import { VERIFICATION_LIMITS as L } from '../../../repositories/verification.mjs';
 
 // ---------------------------------------------------------------- registry
-// Licence-registry adapter (§13/§63). Interface every future FA/UEFA/
+// Licence-registry adapter. Interface every future FA/UEFA/
 // federation integration implements. Nothing here fakes a network call.
 export function licenceProviders() {
   const testState = process.env.TEST_LICENCE_REGISTRY; // '1' | 'down' | unset
@@ -62,17 +62,12 @@ export function registerVerificationReview(ctx) {
     try { unit(() => { const err = fn(); if (err) throw Object.assign(new Error(err), { transitionError: err }); }); } catch (e) { if (e.transitionError) return e.transitionError; throw e; }
     return null;
   };
-  // M14.1 attribution: the admin surface authenticates with one SHARED key
-  // (prototype F12 architecture) — individual Trust & Safety accounts do not
-  // exist yet, so a reviewer's identity cannot be independently
-  // authenticated here. The cleanest compatible boundary: each request may
-  // DECLARE its reviewer (x-admin-reviewer-id / x-admin-reviewer-name);
-  // every consequential decision then records that declared identity, the
-  // correlation id and the attribution mode. When no reviewer is declared,
+  // Attribution: the admin surface may authenticate with one SHARED key, which identifies no individual. A request
+  // may DECLARE its reviewer (x-admin-reviewer-id / x-admin-reviewer-name); every consequential decision then
+  // records that declared identity, the correlation id and the attribution mode. When no reviewer is declared,
   // events honestly say `shared_admin_key` instead of inventing a person.
-  // This limitation is documented in M14_VERIFICATION.md.
   const reviewerOf = (req) => {
-    // M23 P5.6C (G-C0): an AUTHENTICATED reviewer session, when presented
+    // An AUTHENTICATED reviewer session, when presented
     // beside the shared key, is the attribution — derived by the server from
     // the session, never from a header a caller typed.
     if (req?.reviewer?.id) return { id: String(req.reviewer.id).slice(0, L.id), name: String(req.reviewer.name ?? req.reviewer.id).slice(0, L.name), attribution: 'authenticated_reviewer' };
@@ -98,10 +93,9 @@ export function registerVerificationReview(ctx) {
 
   orgRouter.post('/verification/licence', (req, res) => {
     const { licenceType, issuer, identifier, issueDate, expiry, dataUrl, filename, holderName } = req.body ?? {};
-    if (typeof licenceType !== 'string' || typeof issuer !== 'string' || !licenceType.trim() || !issuer.trim()) return res.status(400).json({ error: 'FIELDS_REQUIRED', message: 'licenceType and issuer are required.' }); // PRE-M24 (PM-10)
+    if (typeof licenceType !== 'string' || typeof issuer !== 'string' || !licenceType.trim() || !issuer.trim()) return res.status(400).json({ error: 'FIELDS_REQUIRED', message: 'licenceType and issuer are required.' });
     for (const [k, v] of [['identifier', identifier], ['holderName', holderName], ['filename', filename]]) if (!(v === undefined || v === null || typeof v === 'string')) return fieldInvalid(res, k, `${k} is text.`);
-    // M23 P5.7 (T-3): a malformed expiry used to become `null` — "no expiry" —
-    // so a licence declared with a typo never expired. A DATE_ONLY expiry
+    // A malformed expiry is refused, not read as "no expiry". A DATE_ONLY expiry
     // covers the whole day (the licence is valid THROUGH that day).
     const exp = isAbsent(expiry) ? null : parseDateOrInstant(expiry, { dayEdge: 'end' });
     if (exp && !exp.ok) return res.status(400).json({ error: 'DATE_INVALID', field: 'expiry', message: `An expiry is a calendar day written YYYY-MM-DD (${exp.why}).`, expected: 'YYYY-MM-DD' });
@@ -125,7 +119,7 @@ export function registerVerificationReview(ctx) {
           licenceType: String(licenceType).slice(0, L.licenceType), issuer: String(issuer).slice(0, L.issuer),
           identifier: String(identifier ?? '').slice(0, L.identifier) || null,
           holderName: String(holderName ?? req.orgUser.name).slice(0, L.holderName),
-          display: 'Credential submitted — verification pending', // §13: never "Licence verified" from an upload
+          display: 'Credential submitted — verification pending', // never "Licence verified" from an upload
         },
       }, req);
       if (stored) {
@@ -158,7 +152,7 @@ export function registerVerificationReview(ctx) {
     const view = () => { const c = reads.claims.byId(claim.id); return { id: c.id, status: c.status, display: c.metadata.display }; };
     const addReasons = (...codes) => (d) => { d.reviewReasons = [...new Set([...d.reviewReasons, ...codes])]; };
     if (lookup.state !== 'configured') {
-      // Fail HONEST (§62): unavailable/unconfigured providers leave the claim
+      // Fail HONEST: unavailable/unconfigured providers leave the claim
       // pending — never "verified", never "rejected".
       const registry = { provider: providerId, state: lookup.state, checkedAt: Date.now() };
       const routed = transition(claim, 'requires_human_review', { actorKind: 'system', reason: 'no authoritative register available' }, req, (d) => { d.metadata.registry = registry; addReasons('NO_AUTHORITATIVE_SOURCE', 'DOCUMENT_AUTHENTICITY_UNCONFIRMED')(d); });
@@ -174,9 +168,8 @@ export function registerVerificationReview(ctx) {
     }
     if (lookup.result === 'match') {
       const rec = lookup.record;
-      // M23 P5.7 (T-3): the register's expiry must be readable before it can
-      // verify anything. `Date.parse(x) || claim.validUntil` used to keep the
-      // SELF-DECLARED expiry when the authoritative one could not be read.
+      // The register's expiry must be readable before it can verify anything: the
+      // SELF-DECLARED expiry never stands in for an unreadable authoritative one.
       const regUntil = isAbsent(rec.validUntil) ? null : parseDateOrInstant(rec.validUntil, { dayEdge: 'end' });
       if (regUntil && !regUntil.ok) {
         const registry = { provider: providerId, result: 'unreadable_record', checkedAt: Date.now(), reference: rec.identifier };
@@ -212,7 +205,7 @@ export function registerVerificationReview(ctx) {
     res.json({ claim: view(), provider: { id: providerId, result: 'no_match' }, note: 'No register record matched. The credential stays unverified; a reviewer can examine the evidence.' });
   });
 
-  // ================================================= evidence access (§38)
+  // ================================================= evidence access
   // T&S: everything, every read logged. Org reviewers: organisation_internal
   // evidence of their OWN org only. Subjects: their own uploads' metadata via
   // the subject claim view (organisations.mjs). Nothing is ever public.
@@ -294,7 +287,7 @@ export function registerVerificationReview(ctx) {
     res.json({ assigned: assignedTo });
   });
 
-  // Consequential decisions all REQUIRE a reason (§23) and land in the
+  // Consequential decisions all REQUIRE a reason and land in the
   // append-only event log with before/after.
   const reasonRequired = (req, res) => {
     if (typeof req.body?.reason === 'string' && req.body.reason.trim()) return true;
@@ -376,7 +369,7 @@ export function registerVerificationReview(ctx) {
     res.json({ claim: claimById(c.id) });
   });
 
-  // ================================================ root requests (§6/V4)
+  // ================================================ root requests
   adminRouter.post('/verification/root-requests/:id/approve', (req, res) => {
     const r = reads.rootRequests.byId(req.params.id);
     if (!r) return res.status(404).json({ error: 'REQUEST_NOT_FOUND' });
@@ -386,7 +379,7 @@ export function registerVerificationReview(ctx) {
     const rev = reviewerOf(req);
     // Organisation: attach to the matched existing org, or create a new one (inside the unit below).
     const existingOrg = r.existingOrgId ? orgOf(r.existingOrgId) : null;
-    // Applicant → account linking (M14.1 P0). Identity is NEVER established
+    // Applicant → account linking. Identity is NEVER established
     // by a name: two different people can share one. The rules:
     //  * exact match on the VERIFIED work email (mailbox control proven via
     //    the single-use token challenge) may link authoritatively;
@@ -422,7 +415,7 @@ export function registerVerificationReview(ctx) {
       });
     }
     // Staff sign in by name: a new account cannot take a name an account of the organisation already has
-    // (removed accounts included; Founder, S14f). Refused before anything is written.
+    // (removed accounts included: product decision). Refused before anything is written.
     if (!user && existingOrg && users.byOrgAndName(existingOrg.id, r.applicantName)) {
       return res.status(409).json({ error: 'STAFF_NAME_TAKEN', message: 'An account of this organisation (current or removed) already has the applicant\'s name. Link it (linkUserId) if it is a current account and the applicant\'s; otherwise reject the request and ask the applicant to re-apply under a name that tells them apart.' });
     }
@@ -456,7 +449,7 @@ export function registerVerificationReview(ctx) {
         metadata: { rootRequest: r.id, orgType: r.orgType, website: r.website },
       });
       // Keep the LEGACY effective flag in sync — same standing meaning: minors
-      // still additionally need the safeguarding contract (unchanged).
+      // still additionally need the safeguarding contract.
       orgs.update(org.id, (d) => { d.verified = true; });
       // Domain claim only where the mailbox proof aligns with the stated domain.
       if (r.emailProved && r.domain && domainCovered(domainOfEmail(r.workEmail), r.domain)) {
@@ -505,8 +498,7 @@ export function registerVerificationReview(ctx) {
     res.json({ request: { ...rejected, applicantSecretHash: undefined } });
   });
 
-  // Appoint a root admin for an org that is ALREADY verified (e.g. migrated
-  // legacy orgs) — a T&S action with a reason, never self-service.
+  // Appoint a root admin for an org that is ALREADY verified — a T&S action with a reason, never self-service.
   adminRouter.post('/verification/orgs/:id/appoint-root', (req, res) => {
     const org = orgOf(req.params.id);
     if (!org) return res.status(404).json({ error: 'ORG_NOT_FOUND' });
@@ -529,7 +521,7 @@ export function registerVerificationReview(ctx) {
     res.status(201).json({ orgId: org.id, rootAdminUserId: user.id });
   });
 
-  // Domain requests escalated to T&S (root/contested changes, §8).
+  // Domain requests escalated to T&S (root/contested changes).
   adminRouter.get('/verification/domain-requests', (_req, res) => {
     res.json({ items: reads.domainRequests.awaitingReview() });
   });
@@ -561,7 +553,7 @@ export function registerVerificationReview(ctx) {
     res.json({ request: decided });
   });
 
-  // ======================================================= disputes (§16)
+  // ======================================================= disputes
   adminRouter.get('/verification/disputes', (_req, res) => {
     res.json({
       items: reads.disputes.all().map((d) => ({ ...d, claim: claimById(d.claimId) ? adminClaimRow(claimById(d.claimId)) : null })),
@@ -577,8 +569,7 @@ export function registerVerificationReview(ctx) {
     if (!(req.body?.role === undefined || req.body?.role === null || typeof req.body.role === 'string')) return fieldInvalid(res, 'role', 'role is text.');
     if (!(req.body?.current === undefined || typeof req.body.current === 'boolean')) return fieldInvalid(res, 'current', 'current is true or false.');
     const c = claimById(d.claimId);
-    // M23 P5.7 (T-3): a corrected expiry is an instant or a calendar day that
-    // exists, or null. `Number(x) || null` used to turn a typo into "no expiry".
+    // A corrected expiry is an instant or a calendar day that exists, or null; a typo is refused, not "no expiry".
     let validUntilCorrection = null;
     if (req.body?.validUntil !== undefined && !isAbsent(req.body.validUntil)) {
       const p = parseDateOrInstant(req.body.validUntil, { dayEdge: 'end' });
@@ -615,7 +606,7 @@ export function registerVerificationReview(ctx) {
     res.json({ dispute: resolved, claim: c ? claimById(c.id) : null });
   });
 
-  // =========================================== authority cascade (§52/§53)
+  // =========================================== authority cascade
   adminRouter.get('/verification/authorities/:userId/claims', (req, res) => {
     res.json({
       items: reads.claims.byAuthority(req.params.userId).map(adminClaimRow),
@@ -658,8 +649,8 @@ export function registerVerificationReview(ctx) {
     res.json({ orgId: org.id, status: ctx.orgVerificationStatus(orgOf(org.id)), note: 'Staff claims verified through this organisation stop displaying (engine re-checks at read time); their audit history is preserved.' });
   });
 
-  // =============================================== legacy-route sync (§48)
-  // The pre-M14 admin toggle (POST /admin/clubs/:id/verification) stays
+  // =============================================== legacy-route sync
+  // The admin toggle (POST /admin/clubs/:id/verification) stays
   // functional; this hook gives its changes claim-level provenance so the two
   // systems can never drift apart.
   /** Called inside the legacy route's unit of work. */
@@ -682,7 +673,7 @@ export function registerVerificationReview(ctx) {
     }
   };
 
-  // =============================================== deterministic sweep (§36)
+  // =============================================== deterministic sweep
   ctx.verificationSweep = () => {
     const now = Date.now();
     let changed = 0;

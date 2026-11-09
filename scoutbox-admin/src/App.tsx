@@ -18,7 +18,7 @@ import { M162Panel, M162_TABS, type M162Tab } from './m162tabs';
 import { M25Panel, M25_TABS, type M25Tab } from './m25tabs';
 import { ADMIN_NAV_GROUPS, type AdminNavTab } from './navGroups';
 
-// M24F — presentation casing for status labels; the data value is never changed.
+// Presentation casing for status labels; the data value is never changed.
 const cap = (v: string | null | undefined) => (v ? v.charAt(0).toUpperCase() + v.slice(1).replace(/_/g, ' ') : '');
 
 const API_URL = (import.meta.env.VITE_API_URL as string | undefined) ?? 'http://localhost:4000';
@@ -102,8 +102,8 @@ async function call<T>(key: string, path: string, init?: RequestInit): Promise<T
 }
 
 type Tab = 'overview' | 'reports' | 'clubs' | 'guardians' | 'blocks' | 'moderation' | 'threads' | 'outbox' | 'billing' | M12Tab | M13Tab | M14Tab | M15Tab | M16Tab | M162Tab | M25Tab;
-// M15-Nav: the flat 22-tab sidebar became grouped destinations with a
-// page-level tab row; M24D keeps every group at five pages or fewer. The
+// Grouped destinations with a page-level tab row; no group lists more than
+// five pages. The
 // configuration lives in navGroups.ts (plain data the navigation suite reads);
 // the groups are presentation only — the admin key + server rules still gate
 // all data.
@@ -113,7 +113,7 @@ type AdminTabsAreTabs = AdminNavTab extends Tab ? true : never;
 const ADMIN_TABS_ARE_TABS: AdminTabsAreTabs = true;
 void ADMIN_TABS_ARE_TABS;
 const groupOfTab = (tab: Tab) => NAV_GROUPS.find((g) => g.tabs.includes(tab)) ?? NAV_GROUPS[0];
-// M24A — the platform icon for each destination group (lucide names).
+// The platform icon for each destination group (lucide names).
 const GROUP_ICON: Record<string, string> = { home: 'layout-dashboard', cases: 'inbox', evidence: 'file-check-2', verification: 'badge-check', safety: 'shield-check', operations: 'folders', delivery: 'mail', agents: 'users', system: 'settings-2' };
 const THEME_LABELS = { aria: 'Dark theme', light: 'Light', dark: 'Dark' };
 
@@ -157,9 +157,9 @@ export default function App() {
   const [outcomeDrafts, setOutcomeDrafts] = useState<Record<string, string>>({});
 
   const say = (text: string) => { setToast(text); setTimeout(() => setToast(null), 3500); };
-  // M24A — one appearance for Trust & Safety, persisted under its own key.
+  // One appearance for Trust & Safety, persisted under its own key.
   const { theme, toggle: toggleTheme } = useTheme('safety');
-  // M24E — at ≤ 900px the sidebar is a drawer (platform.css); the top bar
+  // At ≤ 900px the sidebar is a drawer (platform.css); the top bar
   // opens it, choosing a section or Escape closes it. Without this the
   // console had no navigation and no Sign out on a phone or in landscape.
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -186,21 +186,21 @@ export default function App() {
     }
     try {
       setOverview(await call<Overview>(key, '/admin/overview'));
-      // Reports, blocks and moderation page by cursor (S14b): the first page is read (reports in triage order, the
+      // Reports, blocks and moderation page by cursor: the first page is read (reports in triage order, the
       // others newest first); "load more" (nextCursor) is still needed.
       setReports((await call<{ items: Report[]; nextCursor: string | null }>(key, '/admin/reports')).items);
-      // The clubs page by cursor too (S14g): the first page is read; "load more" (nextCursor) is still needed.
+      // The clubs page by cursor too: the first page is read; "load more" (nextCursor) is still needed.
       setClubs((await call<{ items: Club[]; nextCursor: string | null }>(key, '/admin/clubs')).items);
-      // The guardians page by cursor too (S14h): the first page is read; "load more" (nextCursor) is still needed.
+      // The guardians page by cursor too: the first page is read; "load more" (nextCursor) is still needed.
       const g = await call<{ guardians: GuardianRow[]; nextCursor: string | null; idvQueue: IdvRow[] }>(key, '/admin/guardians');
       setGuardians(g.guardians); setIdvQueue(g.idvQueue);
       setBlocks((await call<{ items: BlockRow[]; nextCursor: string | null }>(key, '/admin/blocks')).items);
       setModeration((await call<{ items: ModRow[]; nextCursor: string | null }>(key, '/admin/moderation')).items);
-      // Pages by cursor (S14c), most recently active first: the first page is read; "load more" (nextCursor) is still needed.
+      // Pages by cursor, most recently active first: the first page is read; "load more" (nextCursor) is still needed.
       setThreads((await call<{ items: ThreadRow[]; nextCursor: string | null }>(key, '/admin/channels')).items);
-      // Pages by cursor (S14d), newest first: the first page is read; "load more" (nextCursor) is still needed.
+      // Pages by cursor, newest first: the first page is read; "load more" (nextCursor) is still needed.
       setOutbox((await call<{ items: MailRow[]; nextCursor: string | null }>(key, '/admin/outbox')).items);
-      // Pages by cursor (S13e), newest first: the first page is read; "load more" (nextCursor) is still needed.
+      // Pages by cursor, newest first: the first page is read; "load more" (nextCursor) is still needed.
       setInvoices((await call<{ items: InvoiceRow[]; nextCursor: string | null }>(key, '/admin/invoices')).items);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Cannot reach scoutbox-server — is it running with your ADMIN_KEY?');
@@ -209,7 +209,7 @@ export default function App() {
   }, [key]);
 
   useEffect(() => { if (entered) void load(); }, [entered, load]);
-  // M24E — the way out: forget the key and everything it loaded, back to the
+  // The way out: forget the key and everything it loaded, back to the
   // key screen. There is no server session to revoke — the key is sent with
   // every request and nothing is stored on the server for it.
   const signOut = () => {
@@ -267,7 +267,7 @@ export default function App() {
   };
 
   if (!entered) {
-    // M24C — staff only: the admin key is the credential, there is no
+    // Staff only: the admin key is the credential, there is no
     // registration of any kind, and that is said on the surface.
     return (
       <AuthPage
@@ -304,7 +304,7 @@ export default function App() {
           <span className="p-avatar club" aria-hidden="true">TS</span>
           <span><strong>Safety workspace</strong><small>{DEMO ? 'Demo data' : 'Live console'}</small></span>
         </div>
-        {/* M24E — the sections scroll on their own; the account block with Sign out stays on screen. */}
+        {/* The sections scroll on their own; the account block with Sign out stays on screen. */}
         <div className="nav-scroll" data-testid="nav-scroll">
           <span className="nav-group-label" aria-hidden="true">Review workspace</span>
           {NAV_GROUPS.map((g) => {
@@ -350,7 +350,7 @@ export default function App() {
           </nav>
         )}
         <div className="content">
-          {/* M24A — the reference page heading; the top bar keeps the crumb path. */}
+          {/* The reference page heading; the top bar keeps the crumb path. */}
           <div className="f-heading"><p className="f-display" aria-hidden="true">{TABS.find((t) => t.id === tab)?.label}</p></div>
           {tab === 'overview' && overview && (
             <div className="stat-grid">
@@ -537,7 +537,7 @@ export default function App() {
               <div className="notice">Every conversation on the platform is auditable — this is the "all communications logged" promise, inspectable.</div>
               {threads.map((t) => (
                 <div key={t.id} className="list-row" style={{ flexDirection: 'column', alignItems: 'stretch' }}>
-                  <div style={{ display: 'flex', gap: 10, alignItems: 'center', cursor: 'pointer' }} role="button" tabIndex={0} aria-expanded={openThread === t.id} onClick={() => setOpenThread(openThread === t.id ? null : t.id)} onKeyDown={(e) => { if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); setOpenThread(openThread === t.id ? null : t.id); } }} /* PRE-M24 (PM-14): keyboard-operable */>
+                  <div style={{ display: 'flex', gap: 10, alignItems: 'center', cursor: 'pointer' }} role="button" tabIndex={0} aria-expanded={openThread === t.id} onClick={() => setOpenThread(openThread === t.id ? null : t.id)} onKeyDown={(e) => { if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); setOpenThread(openThread === t.id ? null : t.id); } }} /* keyboard-operable */>
                     <span className="grow"><b>{t.orgName}</b> — {t.counterparty === 'guardian' ? `guardian of ${t.playerName}` : t.playerName}</span>
                     <span className="dim">{t.scoutRole} — {t.scoutName}</span>
                     <span className="pill">{t.messages.length} msg</span>

@@ -1,8 +1,8 @@
-// Recruitment at scale (migration.md §4.3 step 4): does the recruitment domain meet the bar of §2 (p50 under 5 ms on
-// the hot paths, no request writing the whole database) with 100k synthetic players?
+// Recruitment at scale: does the recruitment domain meet the bar (p50 under 5 ms on the hot paths, no request
+// writing the whole database) with 100k synthetic players?
 //
 // 1. Builds a database in a temporary directory: the synthetic population (scripts/perfPopulation.mjs) and the
-//    recruitment graph of the S8a–S8d test fixtures (a Room case with its request, trial, comments, snapshots,
+//    recruitment graph of the recruitment test fixtures (a Room case with its request, trial, comments, snapshots,
 //    decisions, evidence states, contacts, offers, signing packages, signings, follow-ups and outcome report, plus an
 //    M12 case, a legacy case and a tombstoned one), cloned with fresh ids onto real clubs and players. One club is
 //    busy (BUSY clones); the rest of the clones spread over the other clubs, and one player is in many of them.
@@ -50,8 +50,8 @@ const mb = (bytes) => `${(bytes / 1e6).toFixed(1)} MB`;
 
 // ------------------------------------------------------------------ the template graph and its clones
 // The fixtures' clock is a fixed day (NOW of coreIdentityTestFixtures.mjs); every instant is moved to today, so the
-// graph is current and the boot's sweep has no backlog to catch up on (a backlog is measured separately: see
-// migration.md §4.3 step 4). The 200-day-old legacy signing is left out for the same reason: its follow-ups would all be
+// graph is current and the boot's sweep has no backlog to catch up on (a backlog is measured separately). The
+// 200-day-old legacy signing is left out for the same reason: its follow-ups would all be
 // backfilled and notified at the first boot.
 const SHIFT = Date.now() - NOW;
 const isInstant = (v) => typeof v === 'number' && v > NOW - 400 * DAY && v < NOW + 400 * DAY;
@@ -105,7 +105,7 @@ function build() {
     }
   }
   const leadOf = (i) => `usr-${[i, i + ORGS, i + 2 * ORGS].find((j) => j % 3 === 0)}`;
-  // S14i: a Grassroots club whose 50 km radius holds the population's ground (51.5, -0.1).
+  // A Grassroots club whose 50 km radius holds the population's ground (51.5, -0.1).
   const grass = clubs.find(({ o }) => o.level === 'grassroots' && Math.abs(o.location.lat - 51.5) < 0.2 && Math.abs(o.location.lng + 0.1) < 0.6) ?? null;
   return { db, now, grass: grass?.o ?? null, grassUser: grass ? `usr-${grass.i}` : null, busy: busy.o, busyUser: leadOf(busy.i), typical: typical.o, typicalUser: leadOf(typical.i), popular, guardian: minors[0].guardianId, ORGS };
 }
@@ -132,7 +132,7 @@ async function boot(dir) {
 }
 
 const quantile = (xs, q) => { const s = [...xs].sort((a, b) => a - b); return s[Math.min(s.length - 1, Math.floor(s.length * q))]; };
-/** `spec` is a path (a GET) or `{ label, path, body }` (a POST of `body`, S14j's matching). */
+/** `spec` is a path (a GET) or `{ label, path, body }` (a POST of `body`, e.g. matching). */
 async function timeRoute(S, label, spec, token) {
   const { path: route, body, label: shown = route } = typeof spec === 'string' ? { path: spec } : spec;
   const call = () => S.get(route, token, body ? { method: 'POST', body: JSON.stringify(body) } : undefined);
@@ -192,7 +192,7 @@ if (process.env.PERF_BOOT_ONLY) { await S.stop(); if (!KEEP) fs.rmSync(dir, { re
 const room = async (token) => { const r = await S.get('/org/rooms?limit=1', token); return JSON.parse(r.text).items?.[0]?.roomId ?? null; };
 const busyRoom = await room(tokens.busy);
 const typicalRoom = await room(tokens.typical);
-// S14j: matching, a watchlist and Nobody Missed are SQL over the stored facts. A brief and a watchlist are created
+// Matching, a watchlist and Nobody Missed are SQL over the stored facts. A brief and a watchlist are created
 // through the routes (the busy club's user must be a lead for the brief; without one, its routes are skipped).
 const post = async (route, token, body, method = 'POST') => { const r = await S.get(route, token, { method, body: JSON.stringify(body) }); return { status: r.status, body: r.text ? JSON.parse(r.text) : null }; };
 const CM = { required: [{ type: 'position', operator: 'in', values: ['CM', 'CDM'] }], preferred: [] };
@@ -212,7 +212,7 @@ const ROUTES = [
   ...(tokens.grass ? [['grassroots', tokens.grass, MATCHING('grassroots').slice(0, 1)]] : []),
   ['busy club', tokens.busy, ['/org/rooms', '/org/rooms-funnel', '/org/rooms/needs-attention', '/org/rooms/summaries', '/org/cases', '/org/audit', '/org/requests', '/org/trials', '/org/recruitment-counts', '/org/followups', '/org/signings', '/org/recruitment-analytics', '/org/funnel', ...(busyRoom ? [`/org/rooms/${busyRoom}`, `/org/rooms/${busyRoom}/journey`, `/org/rooms/${busyRoom}/activity`, `/org/rooms/${busyRoom}/offers`, `/org/rooms/${busyRoom}/contacts`, `/org/rooms/${busyRoom}/trials`] : [])]],
   ['typical club', tokens.typical, ['/org/rooms', '/org/cases', '/org/audit', '/org/requests', '/org/recruitment-counts', '/org/recruitment-analytics', ...(typicalRoom ? [`/org/rooms/${typicalRoom}`, `/org/rooms/${typicalRoom}/journey`] : [])]],
-  // S14i: the hot player reads (the directory, similar players, the deck, the feed, the fixtures, the rotation, benchmarks).
+  // The hot player reads (the directory, similar players, the deck, the feed, the fixtures, the rotation, benchmarks).
   ['busy club', tokens.busy, ['/org/players', '/org/players?academyPlus=true&position=CM', '/org/players?q=player%2012', `/org/players/${world.popular.id}`, `/org/players/${world.popular.id}/morelike`, '/org/filmroom', '/org/feed', '/org/fixtures', '/org/discovery-rotation']],
   ...(tokens.grass ? [['grassroots', tokens.grass, ['/org/players', '/org/filmroom', '/org/feed', '/org/fixtures']]] : []),
   ['popular player', tokens.player, ['/player/benchmarks']],
@@ -239,7 +239,7 @@ if (busyRoom) {
   const rooms = JSON.parse((await S.get('/org/rooms?limit=20', tokens.busy)).text).items.map((x) => x.roomId);
   const lat = []; const grew = [];
   for (const id of rooms.slice(0, 10)) {
-    await sleep(1500); // let any debounced save land before measuring
+    await sleep(1500); // space the samples out before measuring
     if (!truncateWal()) { say('  could not truncate the log; skipping'); continue; }
     const before = wal(); const t = t0();
     const r = await S.get(`/org/rooms/${id}/comments`, tokens.busy, { method: 'POST', body: JSON.stringify({ body: 'Synthetic perf comment.' }) });

@@ -1,4 +1,4 @@
-// M15-Nav — the ONE navigation source of truth for ScoutBox Pro.
+// The ONE navigation source of truth for ScoutBox Pro.
 //
 // This configuration drives the sidebar, the page-level secondary tabs, the
 // command palette, active-section resolution and pinned shortcuts, so the
@@ -23,7 +23,7 @@ export interface NavItem {
   /** Client-side convenience filter; server authorization stays authoritative. */
   visible?: (ctx: NavContext) => boolean;
   /**
-   * P2.5 closure — phone strip presentation only. In a group with more pages
+   * Phone strip presentation only. In a group with more pages
    * than fit in one row, the `primary` pages stay visible and the rest sit
    * behind an explicit "More" menu. Never affects visibility or routing.
    */
@@ -33,7 +33,7 @@ export interface NavItem {
 }
 
 /**
- * P2.5 — a labelled subgroup INSIDE a section.
+ * A labelled subgroup INSIDE a section.
  *
  * Presentation only. It decides how a section's children are arranged in the
  * sidebar and which siblings the phone-width strip lists. It is NOT a
@@ -45,13 +45,13 @@ export interface NavGroup {
   id: string;
   labelKey: string;
   items: ScreenId[];
-  /** M24D — how many of this group's pages fit one phone-width strip row
+  /** How many of this group's pages fit one phone-width strip row
    *  (default `STRIP_MAX_VISIBLE`). Presentation only: a group whose names
    *  are long shows its `primary` pages and puts the rest behind More. */
   stripMax?: number;
 }
 
-/** M24D — no navigation category may hold more than five entries: a section's
+/** No navigation category may hold more than five entries: a section's
  *  groups, a group's pages, and an ungrouped section's pages all obey it
  *  (`validateNavConfig` reports a breach; `navConfig` asserts it). */
 export const NAV_MAX_PER_CATEGORY = 5;
@@ -82,14 +82,14 @@ export const LEAD_RE = LEAD_ROLE_PATTERN;
 const leadOrVer = (ctx: NavContext) => isLeadRole(ctx.role) || ctx.verLevel !== null;
 
 // ---------------------------------------------------------------- sections
-// Every legacy sidebar ScreenId appears EXACTLY ONCE below (asserted by the
+// Every sidebar ScreenId appears EXACTLY ONCE below (asserted by the
 // nav test suite), except `messages` which is the Inbox utility.
 //
-// P2.5: four sections, not six. A grassroots manager runs the club from a
+// Four sections. A grassroots manager runs the club from a
 // phone on a touchline; the four things they do are look after their players,
 // recruit, run the club, and read messages. Discover folds into Recruitment as
 // its first group; Coverage and Calibration are scout planning and move there
-// too; Network (one page) folds into Club. No route moved.
+// too; Network (one page) folds into Club. Grouping moves no route.
 export const NAV_SECTIONS: NavSection[] = [
   {
     id: 'home', labelKey: 'navsec.home', icon: 'home',
@@ -127,13 +127,13 @@ export const NAV_SECTIONS: NavSection[] = [
       { id: 'video', labelKey: 'nav2.video', shortKey: 'navshort.video', aliases: ['evidence', 'video workspace', 'preuves'] },
       { id: 'trials', labelKey: 'nav.trials', shortKey: 'navshort.trials', aliases: ['trial', 'trial reports', 'essais'] },
       { id: 'trialdays', labelKey: 'nav.trialdays', aliases: ['trial days', 'journées d’essai'] },
-      // — Intelligence (M18/M19 — none is a ranking)
+      // — Intelligence (none is a ranking)
       { id: 'briefs', labelKey: 'nav2.briefs', primary: true, shortKey: 'navshort.briefs', aliases: ['recruitment briefs', 'brief', 'briefs', 'criteria', 'cahier des charges', 'briefs de recrutement'] },
       { id: 'matching', labelKey: 'nav2.matching', primary: true, shortKey: 'navshort.matching', aliases: ['player matching', 'explainable matching', 'match criteria', 'who matches', 'why this player matches', 'correspondance', 'critères de correspondance'] },
       { id: 'watchlists', labelKey: 'nav2.watchlists', primary: true, shortKey: 'navshort.watchlists', aliases: ['dynamic watchlists', 'dynamic watchlist', 'saved criteria', 'listes dynamiques', 'critères enregistrés'] },
       { id: 'secondlook', labelKey: 'nav2.secondlook', aliases: ['second look', 'worth another look', 'evidence changed', 'reconsider', 'second regard', 'nouveau regard'] },
       { id: 'nobodymissed', labelKey: 'nav2.nobodymissed', shortKey: 'navshort.nobodymissed', aliases: ['nobody missed', 'evaluation coverage', 'coverage gaps', 'not yet evaluated', 'couverture d’évaluation'] },
-      // — Analytics (M20 measures the process, never a player or a colleague)
+      // — Analytics (measures the process, never a player or a colleague)
       { id: 'dashboard', labelKey: 'nav2.dashboard', shortKey: 'navshort.dashboard', aliases: ['director dashboard', 'recruitment analytics', 'analytics', 'pipeline health', 'how long does it take', 'stalled rooms', 'tableau de bord', 'analyse du recrutement'] },
       { id: 'funnel', labelKey: 'nav.funnel', aliases: ['recruitment funnel', 'entonnoir'] },
       { id: 'ledger', labelKey: 'nav.ledger', shortKey: 'navshort.ledger', aliases: ['discovery ledger', 'audit trail', 'registre'] },
@@ -141,7 +141,7 @@ export const NAV_SECTIONS: NavSection[] = [
       { id: 'coverage', labelKey: 'nav.coverage', aliases: ['scout coverage', 'planning', 'couverture'] },
       { id: 'calibration', labelKey: 'nav.calibration', aliases: ['scout calibration', 'calibrage'] },
     ],
-    // M24D — the Recruitment IA, as in Pro, with Open Days in Outreach (an
+    // The Recruitment IA, as in Pro, with Open Days in Outreach (an
     // open day is how a grassroots club reaches players) and the two scout
     // planning pages in their own group. No group holds more than four
     // pages; every id is a destination that already exists.
@@ -229,7 +229,7 @@ export function groupSiblings(section: NavSection, itemId: ScreenId | null): Nav
 }
 
 /**
- * P2.5 closure — how the PHONE strip lays a group out. A group of up to
+ * How the PHONE strip lays a group out. A group of up to
  * `max` pages is shown whole. A longer group shows its `primary` pages (or,
  * if none is flagged, its first `max - 1`) and puts the rest behind an
  * explicit "More" control, so every page is discoverable without scrolling
@@ -265,7 +265,7 @@ export function groupOf(section: NavSection, itemId: ScreenId | null): NavGroupV
 export function validateNavConfig(sections: NavSection[] = NAV_SECTIONS): string[] {
   const problems: string[] = [];
   for (const s of sections) {
-    // M24D — the five rule, at every level that is a list of choices.
+    // The five rule, at every level that is a list of choices.
     if (!s.groups && s.children.length > NAV_MAX_PER_CATEGORY) problems.push(`${s.id}: ${s.children.length} pages in an ungrouped section (max ${NAV_MAX_PER_CATEGORY})`);
     if (!s.groups) continue;
     const ids = s.children.map((c) => c.id);
@@ -295,7 +295,7 @@ export function searchNav(query: string, ctx: NavContext, translate: (key: strin
     section.children.map((item) => ({
       sectionId: section.id, itemId: item.id,
       sectionLabel: translate(section.labelKey), label: translate(item.labelKey),
-      // P2.5: the palette path names the group too ("Recruitment › Pipeline ›
+      // The palette path names the group too ("Recruitment › Pipeline ›
       // Rooms"), so a result says where it lives in the sidebar.
       groupLabel: (() => { const g = groupOf(section, item.id); return g?.labelKey ? translate(g.labelKey) : ''; })(),
       aliases: item.aliases ?? [],
@@ -317,23 +317,21 @@ export function searchNav(query: string, ctx: NavContext, translate: (key: strin
 }
 
 // ------------------------------------------------------------- deep links
-// The workspace historically had no URLs at all; screens now sync to
-// location.hash ("#/verification") so bookmarks and direct links work. Every
-// legacy screen id IS the route — nothing was renamed or broken.
+// Screens sync to location.hash ("#/verification") so bookmarks and direct
+// links work. Every screen id IS the route.
 //
-// M17 adds the FIRST parameterised route: "#/recruitment/rooms/:roomId". It is
-// parsed by its own strict pattern and resolved separately from the screen id,
-// so the flat "#/<screenId>" contract above is unchanged and every malformed
-// hash still rejects exactly as before.
-// M23 P8 — a room link may name the TAB the person should land on
+// The parameterised route "#/recruitment/rooms/:roomId" is parsed by its own
+// strict pattern and resolved separately from the screen id, so the flat
+// "#/<screenId>" contract above holds and every malformed hash rejects.
+// A room link may name the TAB the person should land on
 // ("#/recruitment/rooms/:roomId/offer"), so a notification, a colleague's link
 // or the journey's next action opens the right function of the case. An
 // unknown tab makes the whole hash malformed, exactly like an unknown id.
-// M24B — the Room's functions are arranged as CATEGORY → SUBCATEGORY (see
-// caseNav.ts). A link names "<category>/<sub>"; the old flat "<tab>" form and
-// the server's tab names ("offer", "signing", "trial", …) still resolve to the
-// subcategory that replaced them, so no notification, next action or bookmark
-// broke. An unknown segment makes the whole hash malformed, exactly as before.
+// The Room's functions are arranged as CATEGORY → SUBCATEGORY (see
+// caseNav.ts). A link names "<category>/<sub>"; a flat "<tab>" link and the
+// server's tab names ("offer", "signing", "trial", …) resolve to their
+// subcategory, so notifications, next actions and bookmarks that name a flat
+// tab keep working. An unknown segment makes the whole hash malformed.
 export const ROOM_TABS = [...new Set([...allSubs(ROOM_NAV), ...ROOM_NAV.categories.flatMap((c) => c.subs.flatMap((s) => [...(s.legacy ?? [])]))])] as readonly string[];
 export type RoomTab = string;
 const ROOM_HASH = /^#\/recruitment\/rooms\/([A-Za-z0-9][A-Za-z0-9_-]{0,63})((?:\/[a-z][a-z0-9-]*){0,2})$/;
@@ -362,13 +360,12 @@ export const hashForRoom = (roomId: string, tab?: string | null) => {
   return `#/recruitment/rooms/${roomId}${segs.map((s) => `/${s}`).join('')}`;
 };
 
-// M18 extends the SAME mechanism rather than inventing a second one:
+// Extends the SAME mechanism rather than inventing a second one:
 //   "#/recruitment/second-look"      → the Second Look queue
 //   "#/recruitment/nobody-missed"    → Evaluation Coverage for a brief
 //   "#/recruitment/briefs/:briefId"  → one Recruitment Brief
 // Each is parsed by its own strict pattern, so the flat "#/<screenId>"
-// contract is unchanged and every malformed hash still rejects exactly as
-// before.
+// contract holds and every malformed hash rejects.
 export const SECOND_LOOK_HASH = '#/recruitment/second-look';
 export const NOBODY_MISSED_HASH = '#/recruitment/nobody-missed';
 const BRIEF_HASH = /^#\/recruitment\/briefs\/([A-Za-z0-9][A-Za-z0-9_-]{0,63})$/;
@@ -380,7 +377,7 @@ export function briefFromHash(hash: string): string | null {
 }
 export const hashForBrief = (briefId: string) => `#/recruitment/briefs/${briefId}`;
 
-// M19 extends the SAME mechanism a third time rather than inventing another:
+// Extends the SAME mechanism a third time rather than inventing another:
 //   "#/recruitment/matching"            → the Player Matching workspace
 //   "#/recruitment/matching?c=<state>"  → …with the criteria that were run
 //   "#/recruitment/watchlists"          → the Dynamic Watchlist list
@@ -410,7 +407,7 @@ export function watchlistFromHash(hash: string): string | null {
 }
 export const hashForWatchlist = (id: string) => `${WATCHLISTS_HASH}/${id}`;
 
-// M20 extends the SAME mechanism a fourth time:
+// Extends the SAME mechanism a fourth time:
 //   "#/recruitment/dashboard"          → the Director Dashboard
 //   "#/recruitment/dashboard?<filters>" → …with the window and filters applied
 //
@@ -446,7 +443,7 @@ export function hashForDashboard(filters: Record<string, string | number | undef
   return s ? `${DASHBOARD_HASH}?${s}` : DASHBOARD_HASH;
 }
 
-/** Canonical hashes for the unparameterised M18/M19 destinations. */
+/** Canonical hashes for the unparameterised Second Look, Nobody Missed, matching, watchlist and dashboard destinations. */
 const PRETTY_HASH: Partial<Record<ScreenId, string>> = {
   secondlook: SECOND_LOOK_HASH,
   nobodymissed: NOBODY_MISSED_HASH,
@@ -461,18 +458,17 @@ export function screenFromHash(hash: string): ScreenId | null {
   if (briefFromHash(hash)) return 'briefs';
   if (hash === SECOND_LOOK_HASH) return 'secondlook';
   if (hash === NOBODY_MISSED_HASH) return 'nobodymissed';
-  // M18.2 — the PARENT of a deep link the app itself produces
+  // The PARENT of a deep link the app itself produces
   // ("#/recruitment/rooms/:id", "#/recruitment/briefs/:id") is a valid way to
-  // reach the list. Before this, trimming the id off a shared link landed on
-  // Home with nothing highlighted — a hidden assumption the M18.2 live suite
-  // tripped over.
+  // reach the list; trimming the id off a shared link must not land on Home
+  // with nothing highlighted.
   if (hash === '#/recruitment/rooms') return 'rooms';
   if (hash === '#/recruitment/briefs') return 'briefs';
-  // M19 — a matching link carries its criteria; a watchlist link carries an id.
+  // A matching link carries its criteria; a watchlist link carries an id.
   if (MATCHING_RE.test(hash ?? '')) return 'matching';
   if (watchlistFromHash(hash)) return 'watchlists';
   if (hash === WATCHLISTS_HASH) return 'watchlists';
-  // M20 — a dashboard link carries its window and filters.
+  // A dashboard link carries its window and filters.
   if (DASHBOARD_RE.test(hash ?? '')) return 'dashboard';
   const m = /^#\/([a-z]+)$/.exec(hash ?? '');
   if (!m) return null;

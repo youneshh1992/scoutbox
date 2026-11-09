@@ -1,4 +1,4 @@
-// M24F.3 — static minimalism gates. No browser: the source tree is the evidence.
+// Static minimalism gates. No browser: the source tree is the evidence.
 // Run from e2e/: node m24f3DensityAudit.test.mjs
 //
 //  1. root screens carry no banned long pattern (policy version, provenance
@@ -83,7 +83,7 @@ ok(secondsHits.length === 0, `no machine timestamp with seconds in the five appl
 
 // ------------------------------------------------------------ 4. the trial token
 // The Player is dark-only (approved 5 October 2026), so there is one palette. The trial accent is the code's
-// '#f6c376' (docs/design.md, "Contradictions resolved"), not M24F.3's '#e9c46a'.
+// '#f6c376' (docs/design.md, "Contradictions resolved"), not '#e9c46a'.
 const theme = read('scoutbox-player/src/theme.ts');
 const pal = (b) => Object.fromEntries([...b.matchAll(/(\w+): '(#[0-9a-fA-F]{6})'/g)].map((m) => [m[1], m[2].toLowerCase()]));
 const palettes = theme.slice(theme.indexOf('export const palettes'), theme.indexOf('export const AUTH_PANEL'));

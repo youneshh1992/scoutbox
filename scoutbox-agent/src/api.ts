@@ -32,7 +32,7 @@ export interface Session {
   token: string;
 }
 
-/** M23 P8 — the current, authorized resource a notification points to, resolved by the server at read time. */
+/** The current, authorized resource a notification points to, resolved by the server at read time. */
 export type NotificationTarget = { kind: 'client'; clientId: string; tab: string } | { kind: string; [k: string]: unknown };
 export interface Notification {
   id: string;
@@ -147,7 +147,7 @@ export const httpCore: CoreApi = {
         };
       } catch (e) {
         if (closed) return;
-        // PRE-M24 (PM-3): a 401 on the ticket means the session is gone; stop
+        // A 401 on the ticket means the session is gone; stop
         // asking every 15 s and let the app sign out.
         if (e instanceof ApiError && e.status === 401) { closed = true; cb('session_expired', {}); return; }
         dropped = true;
@@ -163,7 +163,7 @@ export const httpCore: CoreApi = {
 import { demoCore } from './agentDemo';
 export const api: CoreApi = DEMO_MODE ? demoCore : httpCore;
 
-/** PRE-M24 (PM-4): signing out revokes the session on the server (best effort, fire-and-forget). */
+/** Signing out revokes the session on the server (best effort, fire-and-forget). */
 export function revokeSession(s: Session | null): void {
   if (DEMO_MODE || !s?.token) return;
   try {

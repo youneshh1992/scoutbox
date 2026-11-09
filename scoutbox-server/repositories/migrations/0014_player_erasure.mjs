@@ -1,11 +1,7 @@
 /**
- * S4b-R — the retained player record (migration plan §D.6/§D.6.1; the Founder's decisions: the full birth date,
- * 12 October 2026, and the country code KEPT, 21 October 2026). REGISTERED in DATA_MIGRATIONS.
- *
- * No table is created and no column changes: `players.deleted_at` exists since 0005 and the retained row's
- * mapping (identity.mjs `retainedRowFor`) satisfies every constraint of the live table. The record is what
- * matters: once it exists, an account deletion keeps the row as the retained record (server.mjs
- * deletePlayerData → players.erase) instead of deleting it.
+ * The retained player record. No table or column changes: once this migration is recorded, an account deletion
+ * keeps the player row as the retained record (identity.mjs `retainedRowFor`, via players.erase) instead of
+ * deleting it. The full birth date and the country code are kept: Founder's decisions (docs/decisions.md).
  */
 import { migrationApplied } from '../database.mjs';
 import { SAFETY_AUDIT_MIGRATION } from '../safetyAudit.mjs';

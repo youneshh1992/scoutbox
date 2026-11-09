@@ -1,9 +1,6 @@
 /**
- * Recruitment cases (S8b), with the Room facet, decision draft, transaction handoff and budget, and the room
- * comments, snapshots, decisions and evidence states become typed tables (repositories/recruitmentCases.mjs).
- * REGISTERED in DATA_MIGRATIONS. `up()` is the DDL only: the tables start empty and are written through the
- * repository. Amended in place at §4.3 (typed columns, no lossless side columns, the idempotency keys as columns):
- * re-seed a development database.
+ * Recruitment cases (with the Room facet, decision draft, transaction handoff and budget) and the room comments,
+ * snapshots, decisions and evidence states (repositories/recruitmentCases.mjs).
  */
 import { migrationApplied } from '../database.mjs';
 import { RECRUITMENT_MIGRATION } from '../recruitment.mjs';

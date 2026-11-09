@@ -1,7 +1,7 @@
 /**
- * M21 — evidence links: references, resolved live, never copied.
+ * Evidence links: references, resolved live, never copied.
  *
- * This is the file where M21 could most easily have gone wrong. The tempting
+ * This is the file where the hub could most easily have gone wrong. The tempting
  * design is to copy the evidence into the development record: it makes the
  * plan self-contained, it makes rendering trivial, and it is wrong. A copy is
  * a second truth, and a second truth starts disagreeing with the first the
@@ -17,14 +17,14 @@
  * READ time, every time. Three consequences follow, and all three are wanted:
  *
  *   • an invalidated Combine result reads as invalid NOW, not as it was when
- *     someone linked it (§99);
+ *     someone linked it;
  *   • evidence the viewer may not see resolves to "unavailable" carrying no
- *     detail at all — not the label, not the value, not who recorded it (§100);
+ *     detail at all — not the label, not the value, not who recorded it;
  *   • the link itself survives. History honestly says something was cited and
  *     is no longer available, rather than quietly deleting the citation.
  *
  * The ownership rule is absolute and checked before anything else: a link may
- * only point at a record belonging to the same player as the plan (§95). It is
+ * only point at a record belonging to the same player as the plan. It is
  * the difference between a development plan and a way to read another player's
  * assessments.
  */
@@ -52,7 +52,7 @@ export const UNAVAILABLE_COPY = Object.freeze({
   evidence_not_visible: 'This evidence is not available to you.',
 });
 
-/** Passport evidence tier → the canonical M15 provenance vocabulary. No new labels (§24). */
+/** Passport evidence tier → the canonical Passport provenance vocabulary. No new labels. */
 const TIER_PROVENANCE = Object.freeze({
   self_reported: 'player_submitted',
   coach_confirmed: 'verified_coach_confirmed',
@@ -77,7 +77,7 @@ const unavailable = (link, reason) => ({
 /**
  * Can this viewer see the player at all? Org viewers go through the same live
  * gate every other surface uses; a block or a visibility change removes access
- * here at the same instant it removes it everywhere else (§77).
+ * here at the same instant it removes it everywhere else.
  */
 function viewerMaySeePlayer(viewer, player, { orgCanSee }) {
   if (!player) return false;
@@ -127,8 +127,8 @@ function resolvePassportEvidence(link, { reads, player, now }) {
 
 /**
  * An assessment is an organisation's own record. The player sees it only where
- * the club chose to publish feedback — the same rule M12 applies when an
- * objective is seeded — and another organisation never sees it at all.
+ * the club chose to publish feedback — the same rule objectives apply when one
+ * is seeded — and another organisation never sees it at all.
  */
 function resolveAssessment(link, { reads, player, viewer }) {
   const a = reads.assessments?.byId(link.sourceId) ?? null;
@@ -152,7 +152,7 @@ function resolveAssessment(link, { reads, player, viewer }) {
 }
 
 function resolveBoxSession(link, { reads, player }) {
-  const s = reads.boxCam?.sessions.byId(link.sourceId) ?? null; // S12b: read through SQL
+  const s = reads.boxCam?.sessions.byId(link.sourceId) ?? null;
   if (!s || s.playerId !== player.id) return unavailable(link, 'evidence_not_found');
   if (s.verificationState === 'invalidated') return unavailable(link, 'evidence_withdrawn');
   return {
@@ -163,16 +163,16 @@ function resolveBoxSession(link, { reads, player }) {
     provenance: 'box_cam_observed',
     occurredAt: s.endedAt ?? s.startedAt ?? s.createdAt ?? null,
     // Never hidden: a fixture-driven session is labelled simulated wherever it
-    // appears, including here (§149).
+    // appears, including here.
     simulated: !!PROVIDERS[s.provider]?.testOnly,
     // Observed training. Deliberately not a number, and deliberately not a
-    // count of hours — volume is not progress (§26/§27).
+    // count of hours — volume is not progress.
     note: 'Observed training. ScoutBox recorded activity consistent with the selected drill; it does not measure how much the player improved.',
   };
 }
 
 function resolveCombineAttempt(link, { reads, player }) {
-  const a = reads.boxCam?.attempts.byId(link.sourceId) ?? null; // S12b: read through SQL
+  const a = reads.boxCam?.attempts.byId(link.sourceId) ?? null;
   if (!a || a.playerId !== player.id) return unavailable(link, 'evidence_not_found');
   const session = reads.boxCam.sessions.byId(a.boxSessionId);
   const state = liveCombineState(a, session);
@@ -200,12 +200,11 @@ function resolveCombineAttempt(link, { reads, player }) {
 
 /**
  * A trial report belongs to the organisation that ran the trial. It is visible
- * to that organisation only, and even then M21 shows that it exists — never a
+ * to that organisation only, and even then the hub shows that it exists — never a
  * line of what it says. A trial report is a recruitment record; copying it into
- * a development plan the player can read is exactly the leak §56 forbids.
+ * a development plan the player can read would leak it.
  */
 function resolveTrialReport(link, { reads, player, viewer }) {
-  // §4.3 step 2: the trials are read through SQL (`reads.trials`, the recruitment repository's queries).
   const t = reads.trials?.byId(link.sourceId) ?? null;
   if (!t || t.playerId !== player.id) return unavailable(link, 'evidence_not_found');
   const isOwningOrg = (viewer.kind === 'org_staff' || viewer.kind === 'grassroots_staff') && t.orgId === viewer.org?.id;
@@ -217,8 +216,8 @@ function resolveTrialReport(link, { reads, player, viewer }) {
     available: true, reason: null,
     title: 'Trial report',
     provenance: 'verified_club_confirmed',
-    // P4A-D1: the one date validator; a stored day that is not a calendar
-    // day (legacy rows) falls back to acceptance rather than becoming NaN.
+    // The one date validator; a stored day that is not a calendar day falls back
+    // to acceptance rather than becoming NaN.
     occurredAt: (() => { const d = parseTrialDate(t.proposedDate); return d.ok && d.t !== null ? d.t : (Number.isFinite(t.acceptedAt) ? t.acceptedAt : null); })(),
     simulated: false,
   };

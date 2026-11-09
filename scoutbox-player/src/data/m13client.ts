@@ -1,4 +1,4 @@
-// M13 player/guardian data surface: private suitability preferences +
+// Player/guardian data surface: private suitability preferences +
 // opportunity fit, consent-based transitions, adult representation, coarse
 // exposure, and action-required acknowledgements.
 // Live implementation shares httpClient's per-account bearer tokens; the

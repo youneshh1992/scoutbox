@@ -1,13 +1,10 @@
-// F2 — Consent-based academy transition + second-chance network.
+// Consent-based academy transition + second-chance network.
 // A transition is a consent lifecycle: nothing is visible to any org without an
 // explicit, revocable, expiring grant; nothing about a player is labelled
 // "released"; agencies stay structurally walled from transition packs.
 //
-// S10c: a case, its pack, its grants and its history are rows of
-// repositories/transitionsVouches.mjs, written through `transitionsVouches`
-// (create / update, inside a unit of work with their notifications and ledger
-// rows) and read through SQL. Input is checked before anything is written;
-// junk is refused with 400 FIELD_INVALID naming the field.
+// Cases, packs, grants and history live in repositories/transitionsVouches.mjs. Input is checked before anything is
+// written; junk is refused with 400 FIELD_INVALID naming the field.
 import { isPlainObject } from '../../repositories/recruitment.mjs';
 import { TRANSITION_LIMITS as L, PACK_KINDS } from '../../repositories/transitionsVouches.mjs';
 
@@ -25,13 +22,13 @@ export function registerTransitions(ctx) {
 
   // ------------------------------------------------------------ input
   const fieldInvalid = (res, field, message) => { res.status(400).json({ error: 'FIELD_INVALID', field, message }); return undefined; };
-  /** Optional free text: null when absent or empty, shortened to `max` (as it always was); undefined after refusing junk. */
+  /** Optional free text: null when absent or empty, shortened to `max`; undefined after refusing junk. */
   const optText = (res, v, field, max) => {
     if (v === undefined || v === null || v === '') return null;
     if (typeof v !== 'string') return fieldInvalid(res, field, `${field} is text.`);
     return v.slice(0, max);
   };
-  /** A whole number of days in range, the default when absent; undefined after refusing anything else (never clamped). */
+  /** A whole number of days in range, the default when absent; undefined after refusing anything else (refused, not clamped). */
   const days = (res, v, field, { min, max, default: def }) => {
     if (v === undefined || v === null) return def;
     if (!Number.isInteger(v) || v < min || v > max) return fieldInvalid(res, field, `A whole number of days from ${min} to ${max}.`);
@@ -57,10 +54,10 @@ export function registerTransitions(ctx) {
     history: t.history.map((h) => ({ id: h.id, at: h.at, byKind: h.byKind, byId: h.byId, byName: h.byName, action: h.action, detail: h.detail && { ...h.detail } })),
   });
 
-  // ============================================================ F2 helpers
+  // ============================================================ helpers
   // Evidence pack whitelist: ONLY records the player side owns or was given.
   // Club-private material (assessments, notes, video annotations) can never
-  // ride along — publishing feedback (M12) is the one door, and only the
+  // ride along — publishing feedback is the one door, and only the
   // published text crosses it. Ids the player does not own are dropped.
   function buildPack(player, sel) {
     const own = (list, ok) => [...new Set(list ?? [])].filter(ok);
@@ -274,7 +271,7 @@ export function registerTransitions(ctx) {
     if (!['amateur', 'semi_pro', 'pro'].includes(level)) return res.status(400).json({ error: 'BAD_LEVEL' });
     if (!req.body?.reason?.trim()) return res.status(400).json({ error: 'REASON_REQUIRED', message: 'Level reviews are audited — record the basis for the change.' });
     const from = p.level;
-    // S4a: the level column and the ledger entry commit together or not at all.
+    // The level column and the ledger entry commit together or not at all.
     unit(() => {
       players.update(p.id, (d) => { d.level = level; });
       ledgerAppend({ type: 'level_review', playerId: p.id, orgId: null, orgName: 'Trust & Safety', userId: null, scoutName: 'T&S level review', detail: { from, to: level, reason: String(req.body.reason).slice(0, 300) } });
@@ -282,7 +279,7 @@ export function registerTransitions(ctx) {
     res.json({ playerId: p.id, from, to: level, note: 'Recorded in the append-only ledger. An academy departure never changes level automatically — this review is the deliberate, audited path.' });
   });
 
-  // Transition follow-ups + expiry — piggybacks the shared m13 sweep. Indexed
+  // Transition follow-ups + expiry — runs on the shared slow tick (m13/index.mjs). Indexed
   // queries find only the due cases; each change commits on its own unit (with
   // its notification), and a failure is logged, so one never holds back the rest
   // or escapes the timer.

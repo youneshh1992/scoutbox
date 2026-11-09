@@ -24,7 +24,7 @@ export function syntheticPopulation({ players: PLAYERS, now = Date.now() }) {
       stats: { appearances: i % 40, goals: i % 15, assists: i % 9, paceKmh: 28 + (i % 7), passCompletionPct: 60 + (i % 35), duelSuccessPct: 40 + (i % 50) },
       seasonHistory: [{ season: '2024/25', appearances: 20, goals: 3, assists: 2 }], academyPlus: i % 5 === 0, badges: ['Fresh Start'],
       availability: pick(['available_now', 'end_of_season', 'not_seeking'], i), contractStatus: 'unknown', identityVerified: i % 2 === 0,
-      // S14i: a fixture holds a squad's worth of players (not the whole population), and one clip in four is playable.
+      // A fixture holds a squad's worth of players (not the whole population), and one clip in four is playable.
       attendance: [{ id: `att-${i}`, fixture: `Match ${i % Math.max(1, Math.round(PLAYERS / 30))}`, venue: 'Ground', date: `2026-09-${String(1 + (i % 28)).padStart(2, '0')}`, gps: { lat: 51.5, lng: -0.1 }, verified: true }],
       timeline: [{ year: '2024', event: 'Joined' }], media: [{ id: `media-${i}`, title: 'Clip', kind: 'video', uploadedAt: new Date(now - (i % 30) * DAY).toISOString(), url: i % 4 === 0 ? `https://media.example/clip-${i}` : null, views: i % 97, tags: {}, verifiedClip: null }],
       trialReports: [], medical: { shared: false, records: [], conditionStatus: 'unknown' }, guardianId, drills: [], drillResults: [],

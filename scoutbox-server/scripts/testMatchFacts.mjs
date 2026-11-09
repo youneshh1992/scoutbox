@@ -1,4 +1,4 @@
-// S14j: the match facts (repositories/matchFacts.mjs, domains/discovery/matchFacts.mjs) and the match reads over them
+// The match facts (repositories/matchFacts.mjs, domains/discovery/matchFacts.mjs) and the match reads over them
 // (domains/discovery/matching/match.mjs criterionSql, query.mjs). Throwaway databases, synthetic records only.
 // Run with: npm test -- testMatchFacts
 //
@@ -8,7 +8,7 @@
 //   - the keeper: start derives every player, a write is re-derived before its COMMIT, a retained player loses the
 //     row, the sweep re-derives what time alone changed, a new policy rebuilds everything;
 //   - the reads: every criterion's SQL admits exactly the players its JS test meets, over generated players, facts
-//     and criteria, for a Pro and a Grassroots club; the keyset orders are the old comparators' orders;
+//     and criteria, for a Pro and a Grassroots club; the keyset orders match reference comparators;
 //   - adulthood: adulthoodAt is the first instant isAdult holds.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -227,7 +227,7 @@ test('reads: every criterion\'s SQL admits exactly the players its JS test meets
       checked += 1;
       if (js.length > 0 && js.length < facts.length) informative += 1;
     }
-    // The orders: each the old comparator (orderMatches), ending on the player id.
+    // The orders: each matches a reference comparator, ending on the player id.
     const BANDS = TRUST_BAND_IDS;
     const cmp = {
       recent_evidence: (a, b) => (b.lastEvidenceAt ?? 0) - (a.lastEvidenceAt ?? 0),

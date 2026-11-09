@@ -1,4 +1,4 @@
-// M24F.5 — capture the 50 screens M24F.4 kept with a reason. Usage (from e2e/, after buildDemos.mjs): node tools/captureKeptScreens.mjs <outdir> [club|grassroots|agent|admin|player]
+// Capture the 50 screens kept with a reason. Usage (from e2e/, after buildDemos.mjs): node tools/captureKeptScreens.mjs <outdir> [club|grassroots|agent|admin|player]
 //   optional env: DEMO_DIR (default e2e/dist), PORT, CHROMIUM_PATH
 import http from 'node:http'; import fs from 'node:fs'; import path from 'node:path';
 import { chromium } from 'playwright-core';

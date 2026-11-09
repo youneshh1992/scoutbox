@@ -1,4 +1,4 @@
-// ScoutBox Agent — Compliance (M23 P5.6C). The agent's own regulatory
+// ScoutBox Agent — Compliance. The agent's own regulatory
 // standing, the jurisdiction policy versions in effect, attributed review
 // items, minimal compliance contexts with their conflict clearance, and the
 // party-specific consent ledger.

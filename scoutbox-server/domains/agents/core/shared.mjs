@@ -1,25 +1,20 @@
 /**
- * M23 P5.6B — ScoutBox Agent core: the pure layer.
+ * ScoutBox Agent core: the pure layer.
  *
- * Everything here is a function over plain records and a clock. Nothing reads
- * `db`, nothing answers HTTP. The routes in ./index.mjs call these and the
+ * Everything here is a function over plain records and a clock. Nothing touches
+ * storage, nothing answers HTTP. The routes in ./index.mjs call these and the
  * acceptance suite exercises them directly, so a permission decision or a
  * status derivation can never differ between a route and a test.
  *
- * The frozen P5.6A contract this implements (M23_P56A_AGENT_AUTHORIZATION_CONTRACT.md,
- * M23_P56A_AGENT_STORE_PROPOSAL.md):
- *
- *   - the licensed natural person is an `org_users` row + an `agentProfiles`
- *     row; the agency is an `orgs` row of type 'agency' and holds no licence;
- *   - membership is an `agencyAffiliations` row with a window and roles;
+ *   - the licensed natural person is an org user plus an agent profile; the
+ *     agency is an org of type 'agency' and holds no licence;
+ *   - membership is an agency affiliation with a window and roles;
  *     membership alone authorises no regulated action;
  *   - verification is a set of FACETS with fail-honest states; a self-entered
  *     licence number is never a verified licence; there is no register API
  *     and none is pretended;
  *   - private client access exists only through an ACTIVE, client-confirmed
- *     relationship, re-derived from the record and the clock on every read;
- *   - no route here performs conflict adjudication, transaction
- *     representation, fee enforcement or Offer work (P5.6C/D).
+ *     relationship, re-derived from the record and the clock on every read.
  */
 
 import { isExpiredAt, readInstant } from '../../../temporal.mjs';
@@ -28,7 +23,7 @@ export const AGENT_POLICY_VERSION = 1;
 
 // -------------------------------------------------------------- verification
 
-/** Honest verification states for one facet (P5.6B mandate §10). */
+/** Honest verification states for one facet. */
 export const VERIFICATION_STATES = Object.freeze([
   'UNVERIFIED',              // nothing declared, or declared and nothing submitted
   'PENDING',                 // submitted; a provider or attributed review has not answered
@@ -39,17 +34,16 @@ export const VERIFICATION_STATES = Object.freeze([
 ]);
 
 /**
- * The regulatory facets P5.6A keeps separate (never one boolean). P5.6C adds
- * `domestic_authorisation` (P5.6A DR-53: a FIFA licence, a national
- * registration and a domestic activity authorisation — e.g. the U.S. Soccer
- * background check + SafeSport — are three different facts with three clocks).
+ * The regulatory facets, kept separate (never one boolean): a FIFA licence, a
+ * national registration and a domestic activity authorisation — e.g. the U.S.
+ * Soccer background check + SafeSport — are different facts with different clocks.
  */
 export const FACETS = Object.freeze(['fifa_licence', 'national_registration', 'domestic_authorisation', 'minors_authorisation']);
 
-/** How long a VERIFIED facet stays current before it must be re-checked (P5.6A DR-6). */
+/** How long a VERIFIED facet stays current before it must be re-checked. */
 export const RECHECK_MS = 30 * 24 * 60 * 60 * 1000;
 
-/** Member associations a facet may be scoped to in P5.6B. `INT` = FIFA level. */
+/** Member associations a facet may be scoped to. `INT` = FIFA level. */
 export const JURISDICTIONS = Object.freeze(['INT', 'ENG', 'USA']);
 
 const emptyFacet = () => ({
@@ -60,19 +54,16 @@ const emptyFacet = () => ({
 export const newFacets = () => ({
   fifa_licence: emptyFacet(),
   national_registration: {},   // keyed by member association, e.g. ENG
-  domestic_authorisation: {},  // keyed by member association (P5.6C), e.g. USA background check + SafeSport
+  domestic_authorisation: {},  // keyed by member association, e.g. USA background check + SafeSport
   minors_authorisation: {},    // keyed by member association
 });
 
 /**
  * Effective state of one facet at `now`: VERIFIED decays to STALE past
- * recheckAt. M23 P5.7 (T-1): a VERIFIED facet whose recheck clock is PRESENT
- * but cannot be read (NaN, an ISO string, a numeric string) used to stay
- * VERIFIED for ever, because the decay test was `typeof === 'number' && <=
- * now` and an unreadable clock failed the first half. It now reads STALE.
- * An ABSENT clock (null/undefined) keeps the frozen P5.6B reading — a legacy
- * row without a shelf life does not decay — exactly the absent-versus-
- * unreadable distinction the F-2/F-3 repair drew for agreement terms.
+ * recheckAt. A recheck clock that is PRESENT but cannot be read (NaN, an ISO
+ * string, a numeric string) reads STALE: fail closed. An ABSENT clock
+ * (null/undefined) means no shelf life and does not decay — the same
+ * absent-versus-unreadable rule as agreement terms below.
  */
 export function effectiveFacetState(facet, now = Date.now()) {
   if (!facet || !facet.state) return 'UNVERIFIED';
@@ -81,7 +72,7 @@ export function effectiveFacetState(facet, now = Date.now()) {
 }
 
 /**
- * Verification provider abstraction (mandate §11). Production has NO provider:
+ * Verification provider abstraction. Production has NO provider:
  * a submission goes PENDING and then MANUAL_REVIEW_REQUIRED, and it says so.
  * The synthetic local provider exists for development and tests only, is
  * switched on by an environment flag, and its provenance names it.
@@ -111,14 +102,14 @@ export function evaluateSubmission({ facet, reference, testProviderEnabled = fal
   };
 }
 
-/** The facet states the frozen contract requires for a regulated action in a jurisdiction. */
+/** The facets a regulated action in a jurisdiction requires. */
 export function requiredFacetsFor(jurisdiction) {
   const req = [{ facet: 'fifa_licence', ma: null }];
   if (jurisdiction === 'ENG') req.push({ facet: 'national_registration', ma: 'ENG' });
   return req;
 }
 
-/** Objective step-5 check: every required facet is VERIFIED now. Returns the first failure or null. */
+/** Objective verification check: every required facet is VERIFIED now. Returns the first failure or null. */
 export function verificationGap(profile, jurisdiction, now = Date.now()) {
   if (!profile) return { error: 'AGENT_PROFILE_REQUIRED', facet: null, state: null };
   for (const { facet, ma } of requiredFacetsFor(jurisdiction)) {
@@ -131,7 +122,7 @@ export function verificationGap(profile, jurisdiction, now = Date.now()) {
 
 // -------------------------------------------------------------- affiliation
 
-/** Agency staff roles (P5.6A §12). One affiliation may hold several. */
+/** Agency staff roles. One affiliation may hold several. */
 export const TIERS = Object.freeze(['licensed_agent', 'agency_admin', 'analyst', 'assistant', 'finance']);
 
 export const normaliseTiers = (raw) => {
@@ -142,9 +133,8 @@ export const normaliseTiers = (raw) => {
 };
 
 /**
- * M23 P5.7 (T-14): the same absent-versus-unreadable rule as an agreement
- * term. `typeof -Infinity === 'number'` made a membership that "started at
- * minus infinity" active, and one that "ends at infinity" active for ever.
+ * The same absent-versus-unreadable rule as an agreement term: a start or end
+ * that is not a finite instant (e.g. ±Infinity) is unreadable and fails closed.
  */
 export const affiliationActive = (a, now = Date.now()) =>
   !!a && readInstant(a.startedAt) !== null && a.startedAt <= now
@@ -153,7 +143,7 @@ export const affiliationActive = (a, now = Date.now()) =>
 export const tiersOf = (a) => (a ? normaliseTiers(a.tiers) : []);
 
 /**
- * The server-side permission matrix (mandate §15). Capability → the roles
+ * The server-side permission matrix. Capability → the roles
  * that hold it. Enforced by `can()` on every route; the client only mirrors
  * it for convenience. A capability absent from this table is held by nobody.
  *
@@ -171,7 +161,7 @@ export const PERMISSIONS = Object.freeze(Object.assign(Object.create(null), {
   'clients.request':            ['licensed_agent'],
   'clients.terminate':          ['licensed_agent'],
   'clients.opportunities.read': ['licensed_agent'],
-  // M23 P5.6E: bringing an opportunity to a client's attention is a regulated
+  // Bringing an opportunity to a client's attention is a regulated
   // act of the licensed individual, not agency admin work.
   'clients.opportunities.share': ['licensed_agent'],
   'players.lookup':             ['licensed_agent'],
@@ -182,16 +172,15 @@ export const PERMISSIONS = Object.freeze(Object.assign(Object.create(null), {
   'agency.settings.write':      ['agency_admin'],
   'agency.audit.read':          ['agency_admin'],
   'agency.compliance.read':     ['agency_admin', 'licensed_agent'],
-  // M23 P5.6C: the compliance workspace. Reading one's own compliance state is
+  // The compliance workspace. Reading one's own compliance state is
   // every member's; opening a context, declaring a representation and
   // requesting consent are regulated acts of the licensed individual only.
   'compliance.read':            TIERS,
   'compliance.contexts.write':  ['licensed_agent'],
-  // M23 P5.6D: the transaction workspace. Reading the agency's transactions is
-  // every member's; opening one, changing its parties, binding a
-  // representation, recording terms and moving its status are regulated acts of
-  // the licensed individual only (mandate §62 "Do not permit generic agency
-  // staff", P5.6A store proposal §4 "Opened by the agent").
+  // The transaction workspace. Reading the agency's transactions is every
+  // member's; opening one, changing its parties, binding a representation,
+  // recording terms and moving its status are regulated acts of the licensed
+  // individual only, never generic agency staff.
   'transactions.read':          TIERS,
   'transactions.write':         ['licensed_agent'],
 }));
@@ -207,9 +196,8 @@ export function can(tiers, capability) {
 export const capabilitiesOf = (tiers) => Object.keys(PERMISSIONS).filter((c) => can(tiers, c));
 
 /**
- * Role-change invariants (copied from M14's verification admins, P5.6A §3):
- * nobody grants themselves agency_admin, and the last admin cannot be
- * demoted or removed. Returns an error code or null.
+ * Role-change invariants: nobody grants themselves agency_admin, and the last
+ * admin cannot be demoted or removed.
  */
 export function affiliationChangeProblem({ affiliations, target, actorUserId, nextTiers, now = Date.now(), ending = false }) {
   const admins = affiliations.filter((a) => affiliationActive(a, now) && tiersOf(a).includes('agency_admin'));
@@ -222,7 +210,7 @@ export function affiliationChangeProblem({ affiliations, target, actorUserId, ne
 
 // -------------------------------------------------------------- agreements
 
-/** P5.6A store proposal §3 statuses. `expired` is derived, never written by a user. */
+/** `expired` is derived, never written by a user. */
 export const AGREEMENT_STATUSES = Object.freeze([
   'proposed', 'active', 'declined', 'expired', 'terminated_by_client', 'terminated_by_agent', 'disputed',
 ]);
@@ -253,8 +241,7 @@ export function termMonthsOf(raw) {
 export const termEndAt = (startAt, months) => startAt + months * MONTH_MS;
 
 /**
- * A temporal boundary on an agreement is one of exactly two things, and telling
- * them apart is the whole of the P5.6F F-2/F-3 repair:
+ * A temporal boundary on an agreement is one of exactly two things:
  *
  *   ABSENT (null / undefined) — an OPEN boundary. This is legal and common: a
  *     proposal is written with `startAt: null, endAt: null` (domains/agents/core/index.mjs), and
@@ -268,12 +255,8 @@ export const termEndAt = (startAt, months) => startAt + months * MONTH_MS;
  *     we cannot evaluate, and an unevaluable boundary in a security decision must
  *     REFUSE, never be ignored.
  *
- * The pre-P5.6F code got both directions wrong. `startAt` was never consulted
- * anywhere, so a mandate whose term began in a year granted access today. And
- * `typeof a.endAt === 'number'` let every non-number fall straight through the
- * expiry guard into "not expired", so a mandate that ended in 2024 granted access
- * for ever — and `NaN` did the same, being a number for which `NaN <= now` is
- * false.
+ * Both boundaries matter: a mandate whose term starts next year grants no access
+ * today, and `NaN` must not pass as "not expired" just because `NaN <= now` is false.
  */
 const boundaryAbsent = (v) => v === null || v === undefined;
 /** A present boundary as a finite number, or null when it cannot be read. */
@@ -300,8 +283,8 @@ function startBoundaryReached(startAt, now) {
  * asserted directly rather than only through a route's response.
  *
  * Note on the status vocabulary: a not-yet-started mandate is still an `active`
- * agreement — AGREEMENT_STATUSES has no "not yet in force" value, and P5.6F does
- * not invent one, because that would change a frozen contract. So a future-start
+ * agreement — AGREEMENT_STATUSES has no "not yet in force" value, deliberately,
+ * because adding one would change the API contract. So a future-start
  * row keeps reading as `active` in a projection (truthfully: it is a live
  * agreement) while granting no access at all. Access is the question this
  * function answers; status is a different question.
@@ -319,12 +302,12 @@ export function effectiveAgreementStatus(a, now = Date.now()) {
 }
 
 /**
- * THE access predicate (P5.6A step 6, P5.6B §17/§29/§30/§31): private client
+ * THE access predicate: private client
  * access exists only for the agent named on an ACTIVE, client-confirmed,
  * unexpired relationship WHOSE TERM COVERS NOW. Nothing else — not a proposal,
  * not a dispute, not a colleague's agreement, not agency membership, not a
  * mandate that has yet to begin — grants it. The caller applies the block and
- * visibility gates separately (step 8).
+ * visibility gates separately.
  */
 export function agreementGrantsAccess(a, agentUserId, now = Date.now()) {
   return agreementInForce(a, now) && a.agentUserId === agentUserId;
@@ -333,8 +316,8 @@ export function agreementGrantsAccess(a, agentUserId, now = Date.now()) {
 /**
  * Is the agreement a CURRENT representation at `now`, whoever asks: it names an agent, the client confirmed it, its
  * status is active and its term covers now (started, not ended). The one rule behind the access predicate above and
- * every "is this player represented" read (Trust, the Passport headline); S11a replaced their stored-status copies,
- * which counted a mandate that had not started yet.
+ * every "is this player represented" read (Trust, the Passport headline), so none of them counts a mandate that has
+ * not started yet.
  */
 export function agreementInForce(a, now = Date.now()) {
   if (!a || typeof a.agentUserId !== 'string' || !a.agentUserId || a.confirmedAt == null) return false;
@@ -344,7 +327,7 @@ export function agreementInForce(a, now = Date.now()) {
 }
 
 /**
- * M23 P5.6E — the client's DISCLOSURE choices, stored on the agreement they are
+ * The client's DISCLOSURE choices, stored on the agreement they are
  * choices about. Each is a separate answer to a separate question, and each
  * DEFAULTS TO FALSE: a player who has said nothing has not agreed to their agent
  * being routed a club's message, shown on a club's screen, or given their trial
@@ -352,28 +335,25 @@ export function agreementInForce(a, now = Date.now()) {
  * those three; they are asked and answered one at a time.
  *
  * This lives here, beside `shareWithAgencyStaff`, because it is a field of the
- * relationship record — not in a new store (P5.6E §103) and not in a second
- * consent ledger (P5.6C owns the regulatory one).
+ * relationship record — not in a separate store and not in a second consent
+ * ledger (the compliance domain owns the regulatory one).
  *
  * There is deliberately no key for "my agent may receive a club's message
- * INSTEAD of me". §21 lists that routing as an illustrative option, but it
- * cannot be delivered honestly: the player's Inbox row is what "delivered"
+ * INSTEAD of me". That routing cannot be delivered honestly: the player's Inbox row is what "delivered"
  * means for a Contact, so a message with no player row would need an
- * agent-side Inbox with its own response path — a second contact system, which
- * §20 forbids outright. A club may add the agent beside the player; it cannot
- * replace them. See M23_P56E_INTEGRATION_BOUNDARIES.md.
+ * agent-side Inbox with its own response path — a second contact system. A club
+ * may add the agent beside the player; it cannot replace them.
  */
 export const DISCLOSURE_KEYS = Object.freeze(['clubPresence', 'contactRouting', 'trialVisibility']);
 export const DISCLOSURE_DEFAULT = Object.freeze({ clubPresence: false, contactRouting: false, trialVisibility: false });
 
 /**
- * M23 P5.6E §18 — the opportunity shares an agent has made to this client, held
- * ON the relationship they were made under. Not a new store: a share is an act
- * inside one representation relationship, it dies with it, and there is nowhere
- * else it could live without duplicating the relationship's own authority
- * (§103). Capped, because an unbounded array on a hot row is a defect waiting
- * to happen — and the cap answers with a named refusal rather than losing the
- * oldest, because an audit trail that silently forgets is not one.
+ * The opportunity shares an agent has made to this client belong to the
+ * relationship they were made under: a share is an act inside one
+ * representation relationship, it dies with it, and it carries no authority of
+ * its own. Capped per relationship, and the cap answers with a named refusal
+ * rather than losing the oldest, because an audit trail that silently forgets
+ * is not one.
  */
 export const MAX_OPPORTUNITY_SHARES = 200;
 
@@ -421,7 +401,7 @@ export function requestConflict(agreements, { agentUserId, playerId, now = Date.
   return null;
 }
 
-/** Which transitions each side may make (P5.6B §19–§31). */
+/** Which transitions each side may make. */
 const nullProto = (o) => Object.freeze(Object.assign(Object.create(null), o));
 export const AGENT_TRANSITIONS = nullProto({
   proposed: ['terminated_by_agent'],       // cancel a pending request
@@ -442,7 +422,6 @@ export const agentTransitionAllowed = (a, to, now = Date.now()) => transitionAll
 
 // -------------------------------------------------------------- projections
 
-/** A history entry in the M23 shape. */
 export const historyEntry = (id, at, action, by, detail = null) => ({ id, at, action, by, detail });
 
 /** What an agreement looks like to the AGENT side. No client PII beyond the id; the caller adds the live client identity it is allowed to show. */

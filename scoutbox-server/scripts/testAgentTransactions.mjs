@@ -1,15 +1,8 @@
-// S11c — the Agent Transaction Workspace as typed tables with explicit writes (repositories/agentTransactions.mjs,
-// migration 0029). What this suite proves: the migration creates the sixteen STRICT tables (no JSON column), empty; the
-// typers refuse junk with the record and field named (an unknown field, a status the machine does not know, a player
-// who is not the individual, a snapshot naming both an evaluation and a gate, a revision that is not a digest, a
-// document whose history does not repeat it); a transaction is created whole and read back whole (parties, notes,
-// threads, terms, replay keys, history with its lists), deep-frozen; what never changes does not, notes, terms, keys
-// and history only grow, a removed party does not return and an update inside its own update is refused; a snapshot
-// names an evaluation of its own context; a withdrawn binding is final and one binding per (role, agent) is live; a
-// document version is superseded once; the lists page newest first by cursor and the agent's counts are SQL; the
-// duplicate rule's candidates are indexed; an account deletion keeps ids and loses the person; a rolled-back unit
-// leaves nothing; and a fixture written through the repositories is typed, refuses a row naming a
-// missing context and reads back what it wrote. Temporary databases only. Run with: npm test
+// The Agent Transaction Workspace (repositories/agentTransactions.mjs, migration 0029): the STRICT tables, the typers'
+// refusals, a transaction created and read back whole, what never changes and what only grows, a snapshot naming an
+// evaluation of its own context, a withdrawn binding final and one live binding per (role, agent), document
+// supersession, cursor paging and SQL counts, account deletion keeping ids only, units of work and fixtures.
+// Temporary databases only. Run with: npm test
 
 import assert from 'node:assert/strict';
 import fs from 'node:fs';

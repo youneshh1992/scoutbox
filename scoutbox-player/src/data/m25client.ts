@@ -1,4 +1,4 @@
-// M23 P5.6C — the party's side of a multiple-representation consent.
+// The party's side of a multiple-representation consent.
 //
 // An agent who would act for more than one party in the same transaction needs
 // each party's prior written consent. This is the player's copy of that ask:

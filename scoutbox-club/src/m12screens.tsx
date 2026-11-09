@@ -1,6 +1,6 @@
 import { ProSquadBoard } from './proExperience';
 import { RecordFacts, DetailItems, sentenceCase } from './RecordDetails';
-// M12 org screens: Assessments (with offline drafts), Recruitment cases,
+// Org screens: Assessments (with offline drafts), Recruitment cases,
 // Squad Planner, Opportunities, Campaigns, Video Workspace, Outcomes,
 // Trial Days — plus the Evidence Passport panel.
 // Accessibility: every interactive control carries a label, status changes
@@ -200,7 +200,7 @@ function AssessmentEditor({ session, assessment, notify, onClose }: { session: S
   const [reasons, setReasons] = useState(existing?.recommendation.reasons ?? assessment.recommendation?.reasons ?? '');
   const [saveState, setSaveState] = useState<'idle' | 'local' | 'synced'>(existing ? 'local' : 'idle');
 
-  // Offline drafts (F12C): every edit lands in identity-scoped local storage
+  // Offline drafts: every edit lands in identity-scoped local storage
   // first, so a dropped connection or closed laptop loses nothing.
   const persistLocal = useCallback((r: AssessmentRating[], v: string, re: string) => {
     try {
@@ -379,7 +379,7 @@ export function SquadPlannerScreen({ session, tick, notify }: ScreenProps) {
   const showCandidates = async (v: Vacancy) => {
     try {
       const r = await m12.vacancyCandidates(session, v.id);
-      // S14i: the candidates are paged (r.nextCursor); this shows the first page only. "Load more" is needed.
+      // The candidates are paged (r.nextCursor); this shows the first page only. "Load more" is needed.
       setCands({ candidates: r.candidates, note: r.note, roleName: r.role.name });
     } catch (e) { notify(e instanceof Error ? e.message : 'Failed', true); }
   };
@@ -483,7 +483,7 @@ export function OpportunitiesScreen({ session, tick, notify }: ScreenProps) {
                 </span>
                 <span className={`pill ${a.status === 'accepted' ? 'green' : a.status === 'declined' ? 'red' : ''}`}>{a.status}</span>
                 <button onClick={async () => {
-                  // M13 (F3): the club sees only a player/guardian-APPROVED
+                  // The club sees only a player/guardian-APPROVED
                   // verdict summary — never raw preferences or reasons.
                   const { m13 } = await import('./m13api');
                   try {
@@ -635,7 +635,7 @@ export function VideoScreen({ session, tick, notify, openPlayer }: ScreenProps) 
   );
 }
 
-// ----------------------------------------------------- outcomes (F11 org)
+// ----------------------------------------------------- outcomes (org)
 export function OutcomesScreen({ session, tick, notify }: ScreenProps) {
   const [list, reload] = useAsync<FollowUp[]>(() => m12.listFollowUps(session), [tick]);
   const stateClass = (s: string) => s === 'confirmed' ? 'green' : s === 'disputed' ? 'red' : s === 'unknown_pending' ? 'gold' : '';

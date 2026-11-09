@@ -1,9 +1,8 @@
 /**
  * Product catalogue — constants that are NOT user data.
  *
- * The billing plans and the positional archetypes are product configuration: no route writes them. Since S13e they
- * are read from here and nowhere else (they were `db.plans` and `db.archetypes`, restored by a migration step so an
- * old snapshot could not lose them: M23-D2). Changing one is a release. `orgs.plan` is one of the PLANS keys (its
+ * The billing plans and the positional archetypes are product configuration: no route writes them, and they are read
+ * from here and nowhere else. Changing one is a release. `orgs.plan` is one of the PLANS keys (its
  * CHECK; repositories/orgs.mjs ORG_PLANS is derived from this object), so a plan lookup never falls back.
  */
 
@@ -16,7 +15,6 @@ function deepFreeze(v) {
  * Billing plans, keyed by the value stored on `org.plan`.
  *
  * Read by the signing route and the plan view for the attribution window.
- * A missing key already falls back safely; a missing TABLE does not.
  */
 export const PLANS = deepFreeze({
   Grassroots: {

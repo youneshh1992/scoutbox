@@ -1,5 +1,5 @@
 /**
- * The one paging convention for lists that grow without limit (migration.md §4.3 step 2): "continue from here".
+ * The one paging convention for lists that grow without limit: "continue from here".
  *
  *   GET …?limit=<1..100>&cursor=<opaque>  →  { items, nextCursor }
  *

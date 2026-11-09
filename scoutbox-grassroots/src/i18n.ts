@@ -1,8 +1,8 @@
-// EN/FR string catalogue (F12D). French strings are MACHINE-TRANSLATED and
+// EN/FR string catalogue. French strings are MACHINE-TRANSLATED and
 // labelled as such in the language picker — no professional review has
 // happened, and the original English is always retained here.
-// Coverage: app chrome + every M12 screen. Pre-M12 screens remain English;
-// extending them is mechanical follow-up work, not a different mechanism.
+// Coverage: app chrome and the feature screens; parts of the core screens in
+// screens.tsx remain English; extending them is mechanical follow-up work, not a different mechanism.
 
 const en = {
   'nav.feed': 'Home', 'nav.filmroom': 'Film Room', 'nav.search': 'Search', 'nav.shortlist': 'Shortlist',
@@ -47,7 +47,7 @@ const en = {
   'day.gateNote': 'Check-in is blocked until a named staff member has a REVIEWED, unexpired check and the player/guardian has consented.',
   'passport.title': 'Evidence passport', 'passport.corroborate': 'Corroborate', 'passport.dispute': 'Dispute',
   'passport.insufficient': 'Not enough evidence yet — this is stated, never padded.',
-  // ---- M13
+  // ---- imports, coverage, calibration, insight, network, budgets, organisation
   'nav.imports': 'Imports & Integrations', 'nav.coverage': 'Coverage', 'nav.calibration': 'Calibration',
   'nav.insight': 'Scouting Insight', 'nav.network': 'Club Network', 'nav.budgets': 'Deal Budgets',
   'nav.organisation': 'Organisation',
@@ -91,12 +91,12 @@ const en = {
   'm13.org.quietHours': 'Set quiet hours 21:00–07:30', 'm13.org.needsAck': 'Needs your acknowledgement',
   'm13.org.ack': 'Acknowledge', 'm13.org.ackBy': 'by',
 
-  // ---- M14 Verification & Trust
+  // ---- Verification & Trust
   'nav.verification': 'Verification',
-  // M15-Nav: sections, secondary labels, palette, shortcuts (EN)
+  // Sections, secondary labels, palette, shortcuts (EN)
   'navsec.home': 'Home', 'navsec.recruitment': 'Recruitment',
   'navsec.planning': 'Squad & Planning', 'navsec.network': 'Network', 'navsec.organisation': 'Organisation',
-  // P2.5: Players and Club sections, the groups inside Recruitment, and the shell's own labels.
+  // Players and Club sections, the groups inside Recruitment, and the shell's own labels.
   'navsec.players': 'Players', 'navsec.club': 'Club',
   'navgrp.discover': 'Discover', 'navgrp.pipeline': 'Pipeline', 'navgrp.outreach': 'Outreach', 'navgrp.evaluation': 'Evaluation',
   'navgrp.intelligence': 'Intelligence', 'navgrp.outcomes': 'Outcomes', 'navgrp.analytics': 'Analytics', 'navgrp.planning': 'Planning',
@@ -122,7 +122,7 @@ const en = {
   'nav2.network': 'Clubs & Groups', 'nav2.organisation': 'Staff & Security', 'nav2.imports': 'Integrations',
   'nav2.budgets': 'Finance',
   'navsec.attnTitle': 'Needs your attention', 'navsec.attnMessages': 'Unread player & guardian messages', 'navsec.attnVerification': 'Verification requests awaiting a decision',
-  // M24F.2 — the Home (EN)
+  // The Home (EN)
   "desk.scouting": "Scouting desk",
   "desk.activity": "Player activity",
   "desk.operations": "Club operations",
@@ -208,7 +208,7 @@ const en = {
   'm14.coi.note': 'Declared explicitly by you — never inferred. Visible to your organisation’s verification administrators and Trust & Safety only.',
   'm14.lic.add': 'Add a credential', 'm14.ref.add': 'Add a reference', 'm14.inv.add': 'Invite a player', 'm14.coi.add': 'Declare a conflict',
   'm14.coi.kind': 'Kind', 'm14.coi.subject': 'Subject', 'm14.coi.noteField': 'Note', 'm14.coi.declare': 'Declare', 'm14.coi.declared': 'Declared.',
-  // ---- M15 Football Passport
+  // ---- Football Passport
   'fp.title': 'Football Passport', 'fp.show': 'Show', 'fp.hide': 'Hide', 'fp.since': 'since',
   'fp.noClub': 'No confirmed current club', 'fp.represented': 'Represented',
   'fp.identityCopy': 'A ScoutBox document review — not a government identity check.',
@@ -238,7 +238,7 @@ const en = {
   'fp.shareOpen': 'Open a shared passport', 'fp.open': 'Open', 'fp.close': 'Close',
   'fp.shareOpenNote': 'Paste a recruitment share link a player (or guardian) sent your club. The link locates the passport — every standing visibility rule still applies.',
   'fp.sharePlaceholder': 'Share link or token',
-  // ---- M16 Box Training (coach)
+  // ---- Box Training (coach)
   'bt.title': 'Box Training', 'bt.show': 'Show', 'bt.hide': 'Hide', 'bt.none': 'No Box Training assigned yet.',
   'bt.boxCam': 'Box Cam', 'bt.summary': 'This player', 'bt.partial': 'Partial', 'bt.notStarted': 'Not started',
   'bt.assign': 'Assign Box Training', 'bt.drill': 'Drill', 'bt.target': 'Target', 'bt.minutes': 'Minutes', 'bt.reps': 'Reps',
@@ -251,7 +251,7 @@ const en = {
   'bt.wallSuspended': 'This organisation is suspended and cannot assign Box Training.',
   'bt.wallMinor': 'The under-18 wall applies — this player is not assignable by your organisation.',
   'bt.wallNotVisible': 'This player is not visible to your organisation under the standing rules (distance, verification or a block).',
-  // M16.1 — At-Home Combine (club)
+  // At-Home Combine (club)
   'cmb.title': 'At-Home Combine', 'cmb.show': 'Show', 'cmb.hide': 'Hide',
   'cmb.tagline': 'Real numbers. Real evidence. From anywhere.', 'cmb.poweredBy': 'Powered by Box Cam.',
   'cmb.results': 'Combine Verified results', 'cmb.verified': 'Combine Verified', 'cmb.noResults': 'No verified Combine result yet.',
@@ -267,7 +267,7 @@ const en = {
   'cmb.wallUnverified': 'Only a verified organisation can create a Club Combine.',
   'cmb.wallSuspended': 'This organisation is suspended and cannot create a Club Combine.',
   'cmb.wallNotVisible': 'This player is not visible to your organisation under the standing rules (distance, verification or a block).',
-  // M16.2 — ScoutBox Trust Score. Evidence confidence only: never football
+  // ScoutBox Trust Score. Evidence confidence only: never football
   // ability, potential, character or recruitment suitability. A low score means
   // limited evidence, and the club projection never exposes evidence gaps.
   'trs.title': 'ScoutBox Trust Score', 'trs.show': 'Show', 'trs.hide': 'Hide', 'trs.loading': 'Loading Trust Profile…',
@@ -279,7 +279,7 @@ const en = {
   'trs.demo': 'demo', 'trs.wallNotVisible': 'This player is not visible to your organisation under the standing rules (distance, verification or a block).',
   'trs.compIdentity': 'Identity', 'trs.compFootballHistory': 'Football history', 'trs.compRelationships': 'Relationships',
   'trs.compEvidence': 'Evidence', 'trs.compCombine': 'Combine', 'trs.compReferences': 'References',
-  // ---- M17 Recruitment Rooms (the club's private decision layer)
+  // ---- Recruitment Rooms (the club's private decision layer)
   'nav2.rooms': 'Recruitment Rooms',
   'rm.title': 'Recruitment Rooms',
   'rm.intro': 'A Recruitment Room is your organisation’s private decision layer over a player. The Football Passport stays the player’s record of truth.',
@@ -310,7 +310,7 @@ const en = {
   'rm.source': 'Source', 'rm.demo': 'demo', 'rm.noClub': 'No current club on record',
   'rm.headerLabel': 'Room header', 'rm.tabsLabel': 'Room sections', 'rm.details': 'Room details',
   'rm.tab.overview': 'Overview', 'rm.tab.passport': 'Passport', 'rm.tab.evidence': 'Evidence',
-  // M24B — category → subcategory navigation of the Room, and its read-oriented pages.
+  // Category → subcategory navigation of the Room, and its read-oriented pages.
   'rm.cat.overview': 'Overview', 'rm.cat.player': 'Player', 'rm.cat.evaluation': 'Evaluation', 'rm.cat.engagement': 'Engagement', 'rm.cat.deal': 'Deal', 'rm.cat.history': 'History', 'rm.cat.playerReview': 'Player review', 'rm.cat.recruitment': 'Recruitment', 'rm.cat.agreement': 'Agreement',
   'rm.tab.summary': 'Summary', 'rm.tab.journey': 'Journey', 'rm.tab.tasks': 'Tasks', 'rm.tab.secondlook': 'Second Look', 'rm.tab.inbox': 'Inbox', 'rm.tab.documents': 'Documents', 'rm.tab.timeline': 'Timeline', 'rm.tab.past-decisions': 'Previous decisions', 'rm.tab.past-trials': 'Previous trials', 'rm.tab.past-offers': 'Previous offers', 'rm.tab.past-signings': 'Previous signings',
   'rm.areasLabel': 'Areas of this case', 'rm.pagesIn': 'Pages in',
@@ -362,7 +362,7 @@ const en = {
   'rm.st.trial_completed': 'Trial completed', 'rm.st.offer_consideration': 'Offer consideration',
   'rm.st.offer_made': 'Offer made', 'rm.st.signed': 'Signed', 'rm.st.withdrawn': 'Withdrawn',
   'rm.st.archived': 'Archived', 'rm.st.closed': 'Closed',
-  // The five states M23 added. Without these the dynamic `rm.st.${code}`
+  // The five contact-to-signing states. Without these the dynamic `rm.st.${code}`
   // lookup falls back to the de-underscored code, which is safe but wrong:
   // `offer_accepted` renders as "offer accepted", and the server calls it
   // "Accepted in ScoutBox" precisely because a signing is a SEPARATE legal
@@ -448,13 +448,13 @@ const en = {
   'rm.errReasonRequired': 'Recording why keeps the decision useful later — at least one reason is needed.',
   'rm.errReasonProhibited': 'A protected characteristic can never be recorded as a recruitment reason.',
   'rm.errRateLimited': 'Too many requests in a short time — try again shortly.',
-  // ---- M23 P3 Contact. A page-local tab in the Room. Every string below is
+  // ---- Contact. A page-local tab in the Room. Every string below is
   // club-facing; the recipient's copy lives in the player app.
-  // ---- M23 P4B Trial. A page-local tab in the Room (Recruitment → Pipeline →
+  // ---- Trial. A page-local tab in the Room (Recruitment → Pipeline →
   // Trials). Club-facing strings only; the family's copy lives in the player app.
   'rm.tab.trial': 'Trial',
   'confirm.cancelTrial': 'Cancel the trial for {name}?',
-  // ---- M23 P5 formal decision (club-facing only; nothing here reaches a player)
+  // ---- formal decision (club-facing only; nothing here reaches a player)
   'confirm.finalizeDecision': 'Record the club’s internal decision: {name}?',
   'confirm.finalizeDecisionBody': 'This records your organisation’s formal recruitment decision on this case and moves the case accordingly. It does not create or send an offer, and the player and their guardian are not notified. A later decision can replace it; nothing is rewritten.',
   'confirm.discardDecisionDraft': 'Discard this draft decision?',
@@ -708,7 +708,7 @@ const en = {
   'ct.title': 'Contact',
   'ct.intro': 'A draft stays inside your organisation. Only a sent message or a recorded external contact is a contact — and only that moves the case to Contacted.',
   'ct.routingLabel': 'Who this reaches',
-  // M23 P5.6E — the client's own agent as a second party on a club contact.
+  // The client's own agent as a second party on a club contact.
   'ct.agentParty': 'Also reaching their agent', 'ct.modeLegend': 'Who this message goes to',
   'ct.mode.player_only': 'The player only', 'ct.mode.both': 'The player and their agent',
   'ct.modeNote': 'A message always reaches the player. Asking for their agent as well is a request: whether it is permitted is decided by the relationship, the agent\u2019s licence and the player\u2019s own choice \u2014 and decided again when you send. There is no option that reaches an agent instead of the player.',
@@ -718,16 +718,16 @@ const en = {
   'ct.agentRefusal.SCOPE_INSUFFICIENT': 'Outside their agent\u2019s remit', 'ct.agentRefusal.LICENCE_NOT_CURRENT': 'Their agent cannot be a party right now',
   'ct.agentRefusal.COMPLIANCE_NOT_CLEAR': 'Their agent cannot be a party right now', 'ct.agentRefusal.BLOCKED': 'No agent on this message',
   'ct.agentRefusal.MINOR_PATHWAY_DISABLED': 'No agent on this message', 'ct.agentRefusal.SUBJECT_UNAVAILABLE': 'No agent on this message',
-  // The P5 decision \u2192 transaction handoff.
+  // The formal decision \u2192 transaction handoff.
   'hof.title': 'Transaction workspace', 'hof.intro': 'A separate, explicit decision. ScoutBox never opens a workspace from a recruitment decision by itself.',
   'hof.invite': 'Invite a transaction workspace', 'hof.withdraw': 'Withdraw the invitation',
   'hof.invited': 'Invited', 'hof.accepted': 'A workspace was opened', 'hof.withdrawn': 'Withdrawn', 'hof.expired': 'Expired',
   'hof.represented': 'This player is represented.', 'hof.notRepresented': 'This player has no agent on record.',
   'hof.honest': 'An invitation is not an offer. It carries no terms and no fee and commits nobody to anything. A licensed agent opens the workspace, and every party confirms their own participation.',
-  // ---- M23 P6 — the canonical Offer. Recruitment decision ≠ Offer ≠ acceptance ≠ signing.
+  // ---- the canonical Offer. Recruitment decision ≠ Offer ≠ acceptance ≠ signing.
   'rm.tab.offer': 'Offer',
   'rm.tab.signing': 'Signing',
-  // M23 P8 — the journey strip, next actions, timeline and the legacy move's refusals.
+  // The journey strip, next actions, timeline and the legacy move's refusals.
   'jn.title': 'Recruitment journey', 'jn.railLabel': 'Journey stages', 'jn.nextLabel': 'Next', 'jn.open': 'Open', 'jn.moved': 'The case moved.', 'jn.asOf': 'As of', 'jn.revision': 'revision',
   'jn.notPermitted': 'Your role cannot take this step; a room lead or recruitment lead can.',
   'jn.blocked.BLOCKED': 'The player (or their guardian) has blocked your club, so nothing can proceed.', 'jn.blocked.SUBJECT_REMOVED': 'The player has left ScoutBox; the record stays, nothing can proceed.',
@@ -922,7 +922,7 @@ const en = {
   'ct.err.CONTACT_REV_REQUIRED': 'Reload the contact and try again.',
   'ct.err.MODERATION_BLOCKED': 'Moderation refused this text: personal contact details and off-platform contact are not allowed.',
   'ct.err.RATE_LIMITED': 'Too many contact actions in a short time — try again shortly.',
-  // ---- M18 Second Look · Nobody Missed · Recruitment Briefs
+  // ---- Second Look · Nobody Missed · Recruitment Briefs
   // Neither system is player-facing: no string below is ever shown to a player
   // or a guardian. Second Look reports what CHANGED and never judges the club's
   // decision; Nobody Missed is Evaluation Coverage — workflow coverage, never
@@ -975,7 +975,7 @@ const en = {
   'common.retry': 'Try again',
   'common.open': 'Open',
   'common.reload': 'Reload',
-  // ---- M18.2 shared HTTP states, conflict, provenance, preferences, audit, confirmations
+  // ---- shared HTTP states, conflict, provenance, preferences, audit, confirmations
   'http.sessionExpired': 'Your session has ended. Sign in again to continue.',
   'http.forbidden': 'You do not have permission to do that in this organisation.',
   'http.notFound': 'That record is not available to your organisation.',
@@ -1056,7 +1056,7 @@ const en = {
   'discover.orderingGrassroots': 'Ordered by First Team Seekers, then distance, then profile completeness, then player id — not ability, not the Trust Score (Evidence confidence).',
   'brief.unsaved': 'You have unsaved changes to this Recruitment Brief. Leave without saving?',
   'common.conflict': 'Someone else changed this while you were working on it. Reload to see their change, then apply yours — nothing of theirs was overwritten.',
-  // M23 P5.7 — the platform's temporal refusals, in the person's language.
+  // The platform's temporal refusals, in the person's language.
   'err.DATE_INVALID': 'That is not a real calendar day. Write it as YYYY-MM-DD.',
   'err.DOB_INVALID': 'That is not a real date of birth. Write it as YYYY-MM-DD, in the past.',
   'err.TIMESTAMP_INVALID': 'That is not a real date and time.',
@@ -1195,11 +1195,11 @@ const en = {
   'm18.br.err.BRIEF_WINDOW_INVALID': 'The start date is after the end date',
   'm18.br.err.BRIEF_CRITERION_PROHIBITED': 'A protected characteristic can never be a recruitment criterion',
 
-  // ---- M18.1 canonical terminology.
-  // Two different numbers used to be shown to scouts as "Trust". One is M16.2
-  // evidence confidence; the other is the older completeness signal the server
-  // still returns as `trustScore` and now also as `profileSignal`. They are
-  // named apart here so no surface can imply the wrong one.
+  // ---- canonical terminology.
+  // Two different numbers could both read as "Trust". One is the Trust Score's
+  // evidence confidence; the other is the completeness signal the server
+  // returns as `trustScore` and as `profileSignal`. They are named apart here
+  // so no surface can imply the wrong one.
   'term.profileSignal': 'Profile completeness',
   'term.profileSignalNote': 'How complete this player’s profile is — identity, recorded attendance, filed reports and clips. It is not the ScoutBox Trust Score, and it is not a rating of ability.',
   'term.trustScore': 'Trust Score',
@@ -1207,7 +1207,7 @@ const en = {
   'term.trustUnavailable': 'Evidence confidence temporarily unavailable',
   'term.trustUnavailableNote': 'The Trust Score could not be read just now. That is a loading failure, not a score of zero — try again in a moment.',
 
-  // ---- M19 Explainable Matching + Dynamic Watchlists.
+  // ---- Explainable Matching + Dynamic Watchlists.
   // Approved vocabulary only. There is no match score, no talent score, no
   // "best match" and no recommended player anywhere in this section.
   'nav2.matching': 'Player Matching',
@@ -1375,7 +1375,7 @@ const en = {
   'm19.err.sortUnavailable': 'Distance ordering is only available where your organisation is authorised to see distance.',
   'm19.err.playerNotFound': 'That player could not be found.',
 
-  // ---------------------------------------------------------------- M20
+  // ---------------------------------------------------------------- Director Dashboard
   // The Director Dashboard. Every string here is written to keep one rule
   // visible: these figures measure the recruitment PROCESS. None of them
   // measures a player, and none of them measures a colleague.
@@ -1519,7 +1519,7 @@ const en = {
   'm20.bucket.31_60': '31–60 days',
   'm20.bucket.60_plus': 'Over 60 days',
 
-  // ------------------------------------------------------------------ M21
+  // ------------------------------------------------------------------ Development Hub
   // Development Hub. There is no key here for a progress percentage, an
   // overall figure or a rating, because no surface renders one.
   'm21.title': 'Development',
@@ -1691,7 +1691,7 @@ const fr: typeof en = {
   'day.gateNote': 'Le pointage est bloqué tant qu’aucun membre nommé n’a une vérification EXAMINÉE et valide, et sans consentement du joueur/tuteur.',
   'passport.title': 'Passeport de preuves', 'passport.corroborate': 'Corroborer', 'passport.dispute': 'Contester',
   'passport.insufficient': 'Preuves encore insuffisantes — c’est affiché, jamais maquillé.',
-  // ---- M13 (traduction automatique)
+  // ---- imports, couverture, calibration, analyse, réseau, budgets, organisation (traduction automatique)
   'nav.imports': 'Imports et intégrations', 'nav.coverage': 'Couverture', 'nav.calibration': 'Calibrage',
   'nav.insight': 'Analyse de détection', 'nav.network': 'Réseau de clubs', 'nav.budgets': 'Budgets de transfert',
   'nav.organisation': 'Organisation',
@@ -1735,12 +1735,12 @@ const fr: typeof en = {
   'm13.org.quietHours': 'Heures calmes 21:00–07:30', 'm13.org.needsAck': 'Accusé de réception requis',
   'm13.org.ack': 'Accuser réception', 'm13.org.ackBy': 'avant le',
 
-  // ---- M14 Vérification et confiance
+  // ---- Vérification et confiance
   'nav.verification': 'Vérification',
-  // M15-Nav (FR)
+  // (FR)
   'navsec.home': 'Accueil', 'navsec.recruitment': 'Recrutement',
   'navsec.planning': 'Effectif et planification', 'navsec.network': 'R\u00e9seau', 'navsec.organisation': 'Organisation',
-  // P2.5 (FR)
+  // (FR)
   'navsec.players': 'Joueurs', 'navsec.club': 'Club',
   'navgrp.discover': 'D\u00e9couvrir', 'navgrp.pipeline': 'Pipeline', 'navgrp.outreach': 'Prospection', 'navgrp.evaluation': '\u00c9valuation',
   'navgrp.intelligence': 'Analyse', 'navgrp.outcomes': 'R\u00e9sultats', 'navgrp.analytics': 'Statistiques', 'navgrp.planning': 'Planification',
@@ -1766,7 +1766,7 @@ const fr: typeof en = {
   'nav2.network': 'Clubs et groupes', 'nav2.organisation': 'Personnel et s\u00e9curit\u00e9', 'nav2.imports': 'Int\u00e9grations',
   'nav2.budgets': 'Finances',
   'navsec.attnTitle': 'Requiert votre attention', 'navsec.attnMessages': 'Messages joueurs et tuteurs non lus', 'navsec.attnVerification': 'Demandes de v\u00e9rification en attente de d\u00e9cision',
-  // M24F.2 \u2014 l\u2019accueil (FR)
+  // \u2014 l\u2019accueil (FR)
   "desk.scouting": "Bureau de recrutement",
   "desk.activity": "Activité des joueurs",
   "desk.operations": "Gestion du club",
@@ -1852,7 +1852,7 @@ const fr: typeof en = {
   'm14.coi.note': 'Déclarées explicitement par vous — jamais déduites. Visibles uniquement des administrateurs de vérification et de Trust & Safety.',
   'm14.lic.add': 'Ajouter un justificatif', 'm14.ref.add': 'Ajouter une référence', 'm14.inv.add': 'Inviter un joueur', 'm14.coi.add': 'Déclarer un conflit',
   'm14.coi.kind': 'Type', 'm14.coi.subject': 'Sujet', 'm14.coi.noteField': 'Note', 'm14.coi.declare': 'Déclarer', 'm14.coi.declared': 'Déclaré.',
-  // ---- M15 Passeport Football
+  // ---- Passeport Football
   'fp.title': 'Passeport Football', 'fp.show': 'Afficher', 'fp.hide': 'Masquer', 'fp.since': 'depuis',
   'fp.noClub': 'Aucun club actuel confirmé', 'fp.represented': 'Représenté',
   'fp.identityCopy': 'Un examen documentaire ScoutBox — pas un contrôle d’identité gouvernemental.',
@@ -1882,7 +1882,7 @@ const fr: typeof en = {
   'fp.shareOpen': 'Ouvrir un passeport partagé', 'fp.open': 'Ouvrir', 'fp.close': 'Fermer',
   'fp.shareOpenNote': 'Collez un lien de partage recrutement envoyé à votre club par un joueur (ou tuteur). Le lien localise le passeport — toutes les règles de visibilité s’appliquent toujours.',
   'fp.sharePlaceholder': 'Lien ou jeton de partage',
-  // ---- M16 Box Training (entraîneur)
+  // ---- Box Training (entraîneur)
   'bt.title': 'Box Training', 'bt.show': 'Afficher', 'bt.hide': 'Masquer', 'bt.none': 'Aucun Box Training assigné.',
   'bt.boxCam': 'Box Cam', 'bt.summary': 'Ce joueur', 'bt.partial': 'partiel', 'bt.notStarted': 'non commencé',
   'bt.assign': 'Assigner un Box Training', 'bt.drill': 'Exercice', 'bt.target': 'Objectif', 'bt.minutes': 'Minutes', 'bt.reps': 'Répétitions',
@@ -1895,7 +1895,7 @@ const fr: typeof en = {
   'bt.wallSuspended': 'Cette organisation est suspendue et ne peut pas assigner de Box Training.',
   'bt.wallMinor': 'Le mur des moins de 18 ans s’applique — ce joueur n’est pas assignable par votre organisation.',
   'bt.wallNotVisible': 'Ce joueur n’est pas visible pour votre organisation selon les règles en vigueur (distance, vérification ou blocage).',
-  // M16.1 — At-Home Combine (club)
+  // At-Home Combine (club)
   'cmb.title': 'At-Home Combine', 'cmb.show': 'Afficher', 'cmb.hide': 'Masquer',
   'cmb.tagline': 'Des chiffres réels. Des preuves réelles. De partout.', 'cmb.poweredBy': 'Propulsé par Box Cam.',
   'cmb.results': 'Résultats Combine Verified', 'cmb.verified': 'Combine Verified', 'cmb.noResults': 'Aucun résultat Combine vérifié pour l’instant.',
@@ -1911,7 +1911,7 @@ const fr: typeof en = {
   'cmb.wallUnverified': 'Seule une organisation vérifiée peut créer un Club Combine.',
   'cmb.wallSuspended': 'Cette organisation est suspendue et ne peut pas créer de Club Combine.',
   'cmb.wallNotVisible': 'Ce joueur n’est pas visible pour votre organisation selon les règles en vigueur (distance, vérification ou blocage).',
-  // M16.2 — ScoutBox Trust Score
+  // ScoutBox Trust Score
   'trs.title': 'ScoutBox Trust Score', 'trs.show': 'Afficher', 'trs.hide': 'Masquer', 'trs.loading': 'Chargement du Trust Profile…',
   'trs.disclaimer': 'Le ScoutBox Trust Score reflète la vérification et la confiance dans les preuves — pas les qualités footballistiques ni l’intérêt pour un recrutement.',
   'trs.note': 'Confiance dans les preuves — pas les qualités footballistiques.',
@@ -1921,7 +1921,7 @@ const fr: typeof en = {
   'trs.demo': 'démo', 'trs.wallNotVisible': 'Ce joueur n’est pas visible pour votre organisation selon les règles en vigueur (distance, vérification ou blocage).',
   'trs.compIdentity': 'Identité', 'trs.compFootballHistory': 'Parcours football', 'trs.compRelationships': 'Relations',
   'trs.compEvidence': 'Preuves', 'trs.compCombine': 'Combine', 'trs.compReferences': 'Références',
-  // ---- M17 Salles de recrutement (traduction automatique)
+  // ---- Salles de recrutement (traduction automatique)
   'nav2.rooms': 'Salles de recrutement',
   'rm.title': 'Salles de recrutement',
   'rm.intro': 'Une Salle de recrutement est la couche de décision privée de votre organisation au sujet d’un joueur. Le Football Passport reste le registre de vérité du joueur.',
@@ -2003,7 +2003,7 @@ const fr: typeof en = {
   'rm.st.trial_completed': 'Essai effectué', 'rm.st.offer_consideration': 'Offre à l’étude',
   'rm.st.offer_made': 'Offre faite', 'rm.st.signed': 'Signé', 'rm.st.withdrawn': 'Retiré',
   'rm.st.archived': 'Archivé', 'rm.st.closed': 'Clôturé',
-  // Les cinq états ajoutés par M23. `offer_accepted` suit le libellé serveur :
+  // Les cinq états du contact à la signature. `offer_accepted` suit le libellé serveur :
   // accepté DANS ScoutBox, ce qui n'est pas une signature.
   'rm.st.contact_planned': 'Prise de contact prévue', 'rm.st.contacted': 'Contacté',
   'rm.st.offer_accepted': 'Accepté dans ScoutBox', 'rm.st.offer_declined': 'Offre refusée par le joueur',
@@ -2086,11 +2086,11 @@ const fr: typeof en = {
   'rm.errReasonRequired': 'Consigner le motif garde la décision utile plus tard — au moins un motif est nécessaire.',
   'rm.errReasonProhibited': 'Une caractéristique protégée ne peut jamais être enregistrée comme motif de recrutement.',
   'rm.errRateLimited': 'Trop de demandes en peu de temps — réessayez sous peu.',
-  // ---- M23 P3 Contact (trad. automatique)
-  // ---- M23 P4B Trial (trad. automatique)
+  // ---- Contact (trad. automatique)
+  // ---- Trial (trad. automatique)
   'rm.tab.trial': 'Essai',
   'confirm.cancelTrial': 'Annuler l’essai de {name} ?',
-  // ---- M23 P5 décision formelle (trad. automatique)
+  // ---- décision formelle (trad. automatique)
   'confirm.finalizeDecision': 'Enregistrer la décision interne du club : {name} ?',
   'confirm.finalizeDecisionBody': 'Ceci enregistre la décision formelle de recrutement de votre organisation sur ce dossier et fait avancer le dossier en conséquence. Aucune offre n’est créée ni envoyée, et ni le joueur ni son tuteur ne sont prévenus. Une décision ultérieure peut la remplacer ; rien n’est réécrit.',
   'confirm.discardDecisionDraft': 'Abandonner ce brouillon de décision ?',
@@ -2344,7 +2344,7 @@ const fr: typeof en = {
   'ct.title': 'Contact',
   'ct.intro': 'Un brouillon reste dans votre organisation. Seuls un message envoyé ou un contact externe enregistré constituent un contact — et seul cela fait passer le dossier à « Contacté ».',
   'ct.routingLabel': 'Destinataire',
-  // M23 P5.6E
+  // l'agent du joueur comme seconde partie
   'ct.agentParty': 'Atteint aussi son agent', 'ct.modeLegend': '\u00c0 qui ce message parvient',
   'ct.mode.player_only': 'Au joueur seulement', 'ct.mode.both': 'Au joueur et \u00e0 son agent',
   'ct.modeNote': 'Un message parvient toujours au joueur. Demander aussi son agent est une requ\u00eate : l\u2019autorisation d\u00e9pend de la relation, de la licence de l\u2019agent et du choix du joueur \u2014 et elle est re\u00e9valu\u00e9e \u00e0 l\u2019envoi. Aucune option n\u2019atteint un agent au lieu du joueur.',
@@ -2359,10 +2359,10 @@ const fr: typeof en = {
   'hof.invited': 'Invit\u00e9', 'hof.accepted': 'Un espace a \u00e9t\u00e9 ouvert', 'hof.withdrawn': 'Retir\u00e9', 'hof.expired': 'Expir\u00e9',
   'hof.represented': 'Ce joueur est repr\u00e9sent\u00e9.', 'hof.notRepresented': 'Ce joueur n\u2019a aucun agent au dossier.',
   'hof.honest': 'Une invitation n\u2019est pas une offre. Elle ne porte aucune condition ni honoraires et n\u2019engage personne. Un agent licenci\u00e9 ouvre l\u2019espace, et chaque partie confirme sa propre participation.',
-  // ---- M23 P6 — l’Offre canonique. Décision de recrutement ≠ Offre ≠ acceptation ≠ signature.
+  // ---- l’Offre canonique. Décision de recrutement ≠ Offre ≠ acceptation ≠ signature.
   'rm.tab.offer': 'Offre',
   'rm.tab.signing': 'Signature',
-  // M23 P8 — la bande Parcours, les prochaines étapes, la chronologie et les refus du déplacement manuel.
+  // La bande Parcours, les prochaines étapes, la chronologie et les refus du déplacement manuel.
   'jn.title': 'Parcours de recrutement', 'jn.railLabel': 'Étapes du parcours', 'jn.nextLabel': 'Prochaine étape', 'jn.open': 'Ouvrir', 'jn.moved': 'Le dossier a avancé.', 'jn.asOf': 'Au', 'jn.revision': 'révision',
   'jn.notPermitted': 'Votre rôle ne permet pas cette étape ; un responsable de salle ou de recrutement le peut.',
   'jn.blocked.BLOCKED': 'Le joueur (ou son tuteur) a bloqué votre club : rien ne peut avancer.', 'jn.blocked.SUBJECT_REMOVED': 'Le joueur a quitté ScoutBox ; le dossier reste, rien ne peut avancer.',
@@ -2557,7 +2557,7 @@ const fr: typeof en = {
   'ct.err.CONTACT_REV_REQUIRED': 'Rechargez le contact et réessayez.',
   'ct.err.MODERATION_BLOCKED': 'La modération a refusé ce texte : coordonnées personnelles et contact hors plateforme interdits.',
   'ct.err.RATE_LIMITED': 'Trop d’actions de contact en peu de temps — réessayez sous peu.',
-  // ---- M18 Second Look · Nobody Missed · Briefs de recrutement (trad. automatique)
+  // ---- Second Look · Nobody Missed · Briefs de recrutement (trad. automatique)
   'nav2.secondlook': 'Second regard',
   'nav2.nobodymissed': 'Personne d’oublié',
   'nav2.briefs': 'Briefs de recrutement',
@@ -2605,7 +2605,7 @@ const fr: typeof en = {
   'common.retry': 'Réessayer',
   'common.open': 'Ouvrir',
   'common.reload': 'Recharger',
-  // ---- M18.2 états HTTP partagés, conflit, provenance, préférences, activité, confirmations
+  // ---- états HTTP partagés, conflit, provenance, préférences, activité, confirmations
   'http.sessionExpired': 'Votre session est terminée. Reconnectez-vous pour continuer.',
   'http.forbidden': 'Vous n’avez pas l’autorisation de faire cela dans cette organisation.',
   'http.notFound': 'Cet enregistrement n’est pas disponible pour votre organisation.',
@@ -2822,7 +2822,7 @@ const fr: typeof en = {
   'm18.br.err.BRIEF_WINDOW_INVALID': 'la date de début est postérieure à la date de fin',
   'm18.br.err.BRIEF_CRITERION_PROHIBITED': 'une caractéristique protégée ne peut jamais être un critère de recrutement',
 
-  // ---- M18.1 terminologie canonique.
+  // ---- terminologie canonique.
   'term.profileSignal': 'Complétude du profil',
   'term.profileSignalNote': 'À quel point le profil de ce joueur est complet — identité, présences enregistrées, rapports déposés et séquences vidéo. Ce n’est pas le Trust Score ScoutBox, et ce n’est pas une note de talent.',
   'term.trustScore': 'Trust Score',
@@ -2830,7 +2830,7 @@ const fr: typeof en = {
   'term.trustUnavailable': 'Confiance dans les preuves momentanément indisponible',
   'term.trustUnavailableNote': 'Le Trust Score n’a pas pu être lu pour l’instant. Il s’agit d’un échec de chargement, pas d’un score nul — réessayez dans un instant.',
 
-  // ---- M19 (traduction automatique). Aucun score de correspondance, aucun
+  // ---- Explainable Matching + Dynamic Watchlists (traduction automatique). Aucun score de correspondance, aucun
   // classement, aucun « meilleur profil » : le vocabulaire interdit en anglais
   // l’est aussi ici.
   'nav2.matching': 'Correspondance joueurs',
@@ -2996,7 +2996,7 @@ const fr: typeof en = {
   'm19.err.sortUnavailable': 'Le tri par distance n’est disponible que là où votre organisation est autorisée à voir la distance.',
   'm19.err.playerNotFound': 'Ce joueur est introuvable.',
 
-  // ---------------------------------------------------------------- M20
+  // ---------------------------------------------------------------- Director Dashboard
   'nav2.dashboard': 'Tableau de bord du directeur',
   'm20.title': 'Tableau de bord du directeur',
   'm20.kpi.open': 'Dossiers ouverts', 'm20.kpi.trials': 'Essais terminés', 'm20.kpi.offers': 'Offres émises', 'm20.kpi.signed': 'Signés',
@@ -3137,7 +3137,7 @@ const fr: typeof en = {
   'm20.bucket.31_60': '31–60 jours',
   'm20.bucket.60_plus': 'Plus de 60 jours',
 
-  // ------------------------------------------------------------------ M21
+  // ------------------------------------------------------------------ Development Hub
   'm21.title': 'Développement',
   'm21.open': 'Ouvrir le Development Hub',
   'm21.blurb': 'Objectifs, actions, preuves et bilans. Un enregistrement du travail convenu — pas une note du joueur.',
@@ -3279,11 +3279,11 @@ export function t(key: keyof typeof en | (string & {}), fallback?: string): stri
   return dict[key] ?? (en as Record<string, string>)[key] ?? fallback ?? key;
 }
 // Locale-aware formatting (dates/numbers follow the chosen language).
-// M23 P5.7 (§6): a calendar day (`YYYY-MM-DD`) has no zone, so it is rendered
+// A calendar day (`YYYY-MM-DD`) has no zone, so it is rendered
 // as that day everywhere — `new Date('2027-06-30')` is UTC midnight, which a
-// browser west of Greenwich used to print as 29 June.
+// browser west of Greenwich would print as 29 June.
 const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
-// PRE-M24 (PM-12): a missing or unreadable stamp (legacy or damaged row) shows a
+// A missing or unreadable stamp (legacy or damaged row) shows a
 // dash, never the browser's "Invalid Date".
 const badStamp = (ts: unknown) => ts === null || ts === undefined || ts === '' || Number.isNaN(new Date(ts as number | string).getTime());
 export const fmtDate = (ts: number | string) => badStamp(ts) ? '—' :

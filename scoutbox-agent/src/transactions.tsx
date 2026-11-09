@@ -1,4 +1,4 @@
-// ScoutBox Agent — Transactions (M23 P5.6D). The multi-party workspace: the
+// ScoutBox Agent — Transactions. The multi-party workspace: the
 // parties and their confirmations, the representation bindings, the compliance
 // snapshot with its staleness, the consent view, classified documents, scoped
 // notes, linked correspondence and the audience-filtered timeline.
@@ -51,7 +51,7 @@ const Section = ({ title, children, testId }: { title: string; children: ReactNo
 const Stat = ({ v, k, testId }: { v: ReactNode; k: string; testId?: string }) => <div className="stat" data-testid={testId}><div className="v">{v}</div><div className="k">{k}</div></div>;
 
 /**
- * The status pill. A word, never only a colour (§84): the class is decoration
+ * The status pill. A word, never only a colour: the class is decoration
  * and the text is the state.
  */
 const statusClass = (s: string) => (s === 'READY' || s === 'ACTIVE' ? 'green' : s === 'COMPLIANCE_BLOCKED' ? 'red' : s === 'COMPLIANCE_PENDING' || s === 'ON_HOLD' ? 'gold' : s === 'CANCELLED' || s === 'CLOSED' || s === 'ARCHIVED' ? 'grey' : 'blue');
@@ -236,7 +236,7 @@ function NewTransactionForm({ s, clubs, onCreated }: { s: Session; clubs: ClubHi
 }
 
 // ------------------------------------------------------------ detail tabs
-// M24B — the workspace's six functions sit in two categories (caseNav.ts).
+// The workspace's six functions sit in two categories (caseNav.ts).
 type Tab = TransactionTab;
 
 function PartiesTab({ s, tx, reload }: { s: Session; tx: Transaction; reload: () => void }) {
@@ -365,7 +365,7 @@ function DocumentsTab({ s, tx, reload }: { s: Session; tx: Transaction; reload: 
   const act = async (fn: () => Promise<unknown>) => { setBusy(true); setErr(null); try { await fn(); reloadDocs(); reload(); } catch (e) { setErr(e); } finally { setBusy(false); } };
   // Reading a document's reference changes nothing, so it must NOT reload: the
   // parent shows a loading state while it refetches, which unmounts this tab and
-  // throws away the answer the user just asked for (D10).
+  // throws away the answer the user just asked for.
   const read = async (fn: () => Promise<unknown>) => { setBusy(true); setErr(null); try { await fn(); } catch (e) { setErr(e); } finally { setBusy(false); } };
   if (loading) return <Loading />;
   if (error) return <Refusal error={error} onRetry={reloadDocs} />;
@@ -599,13 +599,13 @@ export function TransactionsScreen({ session, me, transactionId, transactionTab,
 }) {
   const s = session;
   // The tab lives in the hash, so a deep link and the Back button agree with what
-  // is on screen (D14). This screen renders it; it never keeps its own copy.
+  // is on screen. This screen renders it; it never keeps its own copy.
   const tab = transactionTab;
   const setTab = onTransactionTab;
   const [filter, setFilter] = useState('');
   const { data: list, error: listError, loading: listLoading, reload: reloadList } = useLoad(() => agent.transactions(s), []);
   const { data: clubs } = useLoad(() => agent.clubs(s), []);
-  // M23 P5.6E §39 — clubs that have invited a workspace for one of this agent's
+  // Clubs that have invited a workspace for one of this agent's
   // clients. Shown on the Transactions screen because that is where a workspace
   // is opened; nothing about the club's recruitment thinking comes with it.
   const { data: handoffs } = useLoad(() => agent.handoffs(s), []);

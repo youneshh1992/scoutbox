@@ -1,5 +1,5 @@
 /**
- * Lookups by id through the repositories' indexes (migration.md §4.3.1): a player, guardian, staff member or
+ * Lookups by id through the repositories' indexes: a player, guardian, staff member or
  * organisation is found by its id in constant time, never by scanning the whole collection. Every route module
  * receives these as `byId` in its context.
  *

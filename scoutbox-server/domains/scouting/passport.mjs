@@ -1,4 +1,4 @@
-// F1 — Player evidence passport · F10 — Coach identity and affiliations.
+// Player evidence passport, and coach identity and affiliations.
 //
 // The principle: evidence reliability is a property of HOW a claim was
 // verified, never of how often someone opens the app. Tiers are earned by
@@ -9,12 +9,8 @@ import { parseDateOrInstant, parseStrictDateOnly, isAbsent, readInstant } from '
 import { offsetPage } from '../platform/paging.mjs';
 import { CLAIM_TYPES, EVIDENCE_LIMITS as LIMITS } from '../../repositories/scoutingEvidence.mjs';
 
-// S9a (migration 0019): the evidence, coach affiliations and squad invitations are typed tables of the scouting evidence
-// repository. Every change is an explicit operation (create / update) — a correction, a corroboration with its
-// notification, a resolution and an approved invitation with its squad row each commit as one unit of work — and every
-// read is a query (scoutingReads). Junk a client sends (a value that is neither a number nor text, a label or reason
-// that is not text, a start date that is not a day) is refused with the field named; over-long text is shortened, as
-// it always was.
+// Evidence, coach affiliations and squad invitations live in the scouting evidence repository. Over-long text is
+// shortened.
 
 /** A text field from a request: undefined/null → null; text → shortened to `max`; anything else → a 400 sent, returns undefined. */
 export function textOrRefuse(res, raw, field, max, { required = false } = {}) {
@@ -39,8 +35,8 @@ export function registerPassport(ctx) {
     orgRouter, playerRouter, guardianRouter, adminRouter,
     orgCanSee, paginate, audit, guardianOwnsChild, freshness, activeAffiliation,
     moderateOrRefuse, isAdult, scoutingReads, scoutingEvidence, unit,
-    clubSetup, // S9c: an approved invitation adds the squad row through the club setup repository
-    transitionsVouches, verificationReads, // S10c: coach references are rows of vouches (the T&S withdrawal is a repository write)
+    clubSetup, // an approved invitation adds the squad row through the club setup repository
+    transitionsVouches, verificationReads, // coach references are rows of vouches
   } = ctx;
   if (typeof scoutingEvidence?.evidence?.create !== 'function' || typeof unit !== 'function') throw new TypeError('registerPassport needs the scouting evidence repository and unit from the data layer');
   /** The player's own record, or null. */
@@ -50,26 +46,14 @@ export function registerPassport(ctx) {
   // ------------------------------------------------------------ evidence core
   /** The evidence record a route creates (not yet written): one event, one clock read. */
   function newEvidence({ player, claimType, label, value, units, season, source, mediaIds, observedAt, note, tier, method, reviewer, correctionOf }) {
-    // ONE EVENT, ONE CLOCK READ.
-    //
-    // This used to call `Date.now()` three times — for `recordedAt`, for
-    // `verification.reviewedAt` and for `expiresAt`. Creating a record is one
-    // event, so those are one instant; reading the clock three times made them
-    // *usually* equal and occasionally 1ms apart, whenever a millisecond
-    // boundary fell between two statements.
-    //
-    // That 1ms was not cosmetic. M18's Second Look asks "was this evidence
-    // UPGRADED after it was recorded?" by testing `reviewedAt > recordedAt` —
-    // the honest way to tell a later confirmation from a tier the record was
-    // born with. A one-millisecond drift made a brand-new upload look like a
-    // later upgrade of itself, so the same record produced two material
-    // changes (`full_match_added` AND `evidence_quality_improved`) and a club
-    // was told its evidence had improved when nothing had been reviewed.
-    //
-    // Nondeterministically: same action, different product output, depending
-    // on where a clock tick fell. Taking the instant once makes
+    // ONE EVENT, ONE CLOCK READ: `recordedAt`, `verification.reviewedAt` and
+    // `expiresAt` are one instant. Second Look asks "was this evidence
+    // UPGRADED after it was recorded?" by testing `reviewedAt > recordedAt`;
+    // separate clock reads could land 1ms apart and make a brand-new upload
+    // look like a later upgrade of itself (a club told its evidence improved
+    // when nothing had been reviewed). Reading the clock once makes
     // `reviewedAt === recordedAt` true by construction for evidence created
-    // with a tier, so `>` means exactly what M18 reads it to mean.
+    // with a tier.
     const at = Date.now();
     const rec = {
       id: nextId('evd'),
@@ -80,8 +64,8 @@ export function registerPassport(ctx) {
       units: units ? String(units).slice(0, LIMITS.units) : null,
       season: season ? String(season).slice(0, LIMITS.season) : null,
       source: { kind: source.kind, id: source.id, name: storedName(source.name, LIMITS.sourceName) ?? '' }, // kind: 'player'|'guardian'|'org'
-      // M23 P5.7: an evidence date the route has already validated (readInstant
-      // keeps a legacy row's finite number and drops anything else to null).
+      // An evidence date the route has already validated (readInstant keeps a
+      // finite number and drops anything else to null).
       observedAt: readInstant(observedAt),
       recordedAt: at,
       mediaIds: Array.isArray(mediaIds) ? mediaIds.filter((m) => player.media.some((x) => x.id === m)) : [],
@@ -118,8 +102,8 @@ export function registerPassport(ctx) {
     };
   }
 
-  // The composed passport: M12 evidence records PLUS the honest relabelling
-  // of every pre-M12 "verified" surface. Reliability ≠ ability: nothing here
+  // The composed passport: evidence records PLUS the honest relabelling
+  // of every other "verified" surface. Reliability ≠ ability: nothing here
   // scores the player, it only describes how each claim was checked.
   function composePassport(player) {
     const records = scoutingReads.evidence.forPlayer(player.id).map(evidenceView);
@@ -172,7 +156,7 @@ export function registerPassport(ctx) {
     if (!(mediaIds === undefined || mediaIds === null || (Array.isArray(mediaIds) && mediaIds.every((m) => typeof m === 'string')))) return res.status(400).json({ error: 'FIELD_INVALID', field: 'mediaIds', message: 'mediaIds is a list of media ids.' });
     if (note && !moderateOrRefuse(res, note, { kind: 'evidence_note', playerId: player.id })) return;
     if (!moderateOrRefuse(res, label, { kind: 'evidence_label', playerId: player.id })) return;
-    // M23 P5.7 (§16): an observation date is a calendar day or an instant that
+    // An observation date is a calendar day or an instant that
     // exists, and not in the future — evidence of something that has not happened is not evidence.
     let observed = null;
     if (!isAbsent(observedAt)) {
@@ -350,7 +334,7 @@ export function registerPassport(ctx) {
     res.json({ dispute: fresh.disputes.find((x) => x.id === d.id), evidence: evidenceView(fresh) });
   });
 
-  // ================================================================== F10
+  // ============================================================ affiliations
   // Coach affiliations: the club vouches for the coach, with dates, a
   // conflict declaration and a revocation switch. A confirmed affiliation
   // grants exactly ONE privilege — the coach-confirmed evidence tier at that
@@ -451,14 +435,14 @@ export function registerPassport(ctx) {
     });
     res.status(201).json({ invite });
   });
-  // The answer, the squad row (S9c: a row of org_squad_members) and the notification commit together.
+  // The answer, the squad row and the notification commit together.
   function respondSquadInvite(req, res, invite, approverLabel) {
     const { accept } = req.body ?? {};
     const at = Date.now();
     const fresh = unit(() => {
       const next = scoutingEvidence.squadInvites.update(invite.id, (i) => { i.status = accept ? 'approved' : 'declined'; i.respondedAt = at; });
       if (accept) {
-        // A player the club shadowed joins the squad all the same: the shadow list is not the squad (S9c).
+        // A player the club shadowed joins the squad all the same: the shadow list is not the squad.
         if (!clubSetup.squad.has(invite.orgId, invite.playerId)) {
           const name = invite.playerName ?? findPlayer(invite.playerId)?.name ?? 'Player';
           clubSetup.squad.create({ id: nextId('sq'), orgId: invite.orgId, playerId: invite.playerId, name: storedName(name), position: null, source: 'invite_approved', approvedBy: storedName(approverLabel), addedAt: at });

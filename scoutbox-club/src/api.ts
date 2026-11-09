@@ -271,7 +271,7 @@ export interface Channel {
   closed?: boolean;
 }
 
-/** M23 P8 — the current, authorized resource a notification points to, resolved by the server at read time (null when nothing current is open to this person). */
+/** The current, authorized resource a notification points to, resolved by the server at read time (null when nothing current is open to this person). */
 export type NotificationTarget =
   | { kind: 'room'; roomId: string; tab: string }
   | { kind: 'client'; clientId: string; tab: string }
@@ -362,7 +362,7 @@ export interface Trial {
   guardianApproved?: boolean;
   status: 'awaiting_report' | 'reported';
   report?: TrialReport;
-  /** M23 P4B workflow state; absent on rows written before the workflow existed. */
+  /** Workflow state; absent on rows written before the workflow existed. */
   workflowState?: 'legacy_accepted' | 'accepted' | 'scheduled' | 'completed' | 'cancelled';
   caseId?: string | null;
   subjectRemovedAt?: number | null;
@@ -403,7 +403,7 @@ export interface Reputation {
 
 export class ApiError extends Error {
   /**
-   * M18.2: the response body and the contract headers travel with the error.
+   * The response body and the contract headers travel with the error.
    * `details` is what a 409 uses to name who moved the record (currentRev,
    * updatedBy); `retryAfterS` is the server's Retry-After on a 429;
    * `retryable` is the server's own X-ScoutBox-Retry verdict when it spoke.
@@ -530,12 +530,12 @@ export const httpApi: ScoutboxApi = {
     if (f.country) params.set('country', f.country);
     if (f.ageGroup) params.set('ageGroup', f.ageGroup);
     if (f.newDays) params.set('newDays', String(f.newDays));
-    // S14i: the directory is paged ({ items, nextCursor }); this reads the first page only. "Load more" is needed.
+    // The directory is paged ({ items, nextCursor }); this reads the first page only. "Load more" is needed.
     return request<{ items: Player[]; nextCursor: string | null }>(`/org/players?${params}`, { headers: headers(s) }).then((page) => page.items);
   },
 
   async allPlayers(s) {
-    // S14i: the directory is paged; a picker walks every page so no player it may choose is missing.
+    // The directory is paged; a picker walks every page so no player it may choose is missing.
     // A picker over a large directory needs a search box instead.
     const out: Player[] = [];
     let cursor: string | null = null;
@@ -561,7 +561,7 @@ export const httpApi: ScoutboxApi = {
       body: JSON.stringify({ type, message, ...details }),
     }),
 
-  // Pages by cursor (S14c), most recently active first: the first page (50) is read; "load more" (nextCursor) is still needed.
+  // Pages by cursor, most recently active first: the first page (50) is read; "load more" (nextCursor) is still needed.
   getChannels: (s, opts) => request<{ items: Channel[]; nextCursor: string | null }>(`/org/channels${opts?.playerId ? `?playerId=${encodeURIComponent(opts.playerId)}` : ''}`, { headers: headers(s) }).then((r) => r.items),
 
   getChannelCounts: (s) => request<{ threads: number; unreadMessages: number }>('/org/channels/counts', { headers: headers(s) }),
@@ -577,7 +577,7 @@ export const httpApi: ScoutboxApi = {
 
   getFeed: (s) => request<FeedItem[]>('/org/feed', { headers: headers(s) }),
 
-  // S14i: the Film Room deck is paged ({ items, nextCursor }); this reads the first page only. "Load more" is needed.
+  // The Film Room deck is paged ({ items, nextCursor }); this reads the first page only. "Load more" is needed.
   getFilmRoom: (s) => request<{ items: FilmRoomItem[]; nextCursor: string | null }>('/org/filmroom', { headers: headers(s) }).then((page) => page.items),
 
   recordClipView: (s, playerId, mediaId) =>
@@ -588,7 +588,7 @@ export const httpApi: ScoutboxApi = {
 
   getScoutTags: (s) => request<string[]>('/org/tags', { headers: headers(s) }),
 
-  // S14i: the fixture graph is paged ({ items, nextCursor }); this reads the first page only. "Load more" is needed.
+  // The fixture graph is paged ({ items, nextCursor }); this reads the first page only. "Load more" is needed.
   getFixtures: (s) => request<{ items: FixtureGroup[]; nextCursor: string | null }>('/org/fixtures', { headers: headers(s) }).then((page) => page.items),
 
   getSavedSearches: (s) => request<SavedSearch[]>('/org/searches', { headers: headers(s) }),
@@ -614,7 +614,7 @@ export const httpApi: ScoutboxApi = {
 
   getFunnel: (s) => request<Funnel>('/org/funnel', { headers: headers(s) }),
 
-  // Pages by cursor (S13e), newest first: the first page is read; "load more" (nextCursor) is still needed.
+  // Pages by cursor, newest first: the first page is read; "load more" (nextCursor) is still needed.
   getInvoices: async (s) => (await request<{ items: Invoice[]; nextCursor: string | null }>('/org/invoices', { headers: headers(s) })).items,
 
   requestEmailVerification: (s, email) =>
@@ -647,7 +647,7 @@ export const httpApi: ScoutboxApi = {
       body: JSON.stringify(report),
     }),
 
-  // Pages by cursor (S14b), newest first: the first page is read; the ledger screen still needs a "load more" (nextCursor).
+  // Pages by cursor, newest first: the first page is read; the ledger screen still needs a "load more" (nextCursor).
   getLedger: async (s) => (await request<{ items: LedgerEntry[]; nextCursor: string | null }>('/org/ledger', { headers: headers(s) })).items,
   getProofPack: (s, playerId) => request<ProofPack>(`/org/players/${playerId}/proofpack`, { headers: headers(s) }),
   getPlan: (s) => request<PlanInfo>('/org/plan', { headers: headers(s) }),
@@ -693,7 +693,7 @@ export const httpApi: ScoutboxApi = {
         };
       } catch (e) {
         if (closed) return;
-        // PRE-M24 (PM-3): a 401 on the ticket means the session is gone
+        // A 401 on the ticket means the session is gone
         // (expired, revoked, the user removed). Retrying would ask every 15 s
         // for ever; instead the stream stops and the app signs out.
         if (e instanceof ApiError && e.status === 401) { closed = true; cb('session_expired', {}); return; }
@@ -712,9 +712,8 @@ import { demoApi } from './demo';
 export const api: ScoutboxApi = DEMO_MODE ? demoApi : httpApi;
 
 /**
- * PRE-M24 (PM-4): signing out revokes the session on the server. Before this,
- * "Switch org" only forgot the token in this browser, so it stayed valid
- * server-side. Best effort and fire-and-forget (`keepalive` survives the page
+ * Signing out revokes the session on the server, so a token forgotten by
+ * "Switch org" does not stay valid server-side. Best effort and fire-and-forget (`keepalive` survives the page
  * change); the local sign-out never waits on the network.
  */
 export function revokeSession(s: Session | null): void {

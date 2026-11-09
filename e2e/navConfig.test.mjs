@@ -1,4 +1,4 @@
-// M15-Nav — navigation configuration acceptance (no browser).
+// Navigation configuration acceptance (no browser).
 // Compiles the REAL nav.ts of Pro and Grassroots with esbuild and asserts:
 // every legacy destination is mapped exactly once, the resolver is
 // deterministic, role filtering hides what it should (client convenience),
@@ -40,7 +40,7 @@ const PRO_IDS = ['feed', 'filmroom', 'search', 'shortlist', 'requests', 'message
   'campaigns', 'video', 'outcomes', 'trialdays', 'imports', 'coverage', 'calibration', 'insight',
   'network', 'budgets', 'representation', 'organisation', 'verification', 'rooms',
   'secondlook', 'nobodymissed', 'briefs', 'matching', 'watchlists',
-  // M20 — the Director Dashboard, inside Recruitment rather than a new section.
+  // The Director Dashboard, inside Recruitment rather than a new section.
   'dashboard'];
 const GRASS_IDS = ['feed', 'filmroom', 'search', 'shortlist', 'requests', 'messages', 'trials', 'opendays',
   'squad', 'friendlies', 'fixtures', 'ledger', 'funnel', 'plan', 'assessments', 'recruitment', 'coaches',
@@ -62,7 +62,7 @@ const LEAD = { role: 'Head of Recruitment', verLevel: null };
 const REVIEWER = { role: 'Analyst', verLevel: 'verification_reviewer' };
 const TREASURER = { role: 'Club Treasurer', verLevel: null };
 
-// P2.5: every label key the configuration names must exist in BOTH
+// Every label key the configuration names must exist in BOTH
 // dictionaries of its app — a raw key in the sidebar is a defect, and the
 // French half is where one would hide.
 function dictionaries(app) {
@@ -72,8 +72,8 @@ function dictionaries(app) {
   return { en: keys(src.slice(0, frAt)), fr: keys(src.slice(frAt)) };
 }
 
-// P2.5: five sections in Pro, four in Grassroots. Discover folded into
-// Recruitment; Grassroots' Network folded into Club and Team became Players.
+// Five sections in Pro, four in Grassroots. Discover is inside Recruitment;
+// Grassroots' Network is inside Club, and its Team section is Players.
 for (const [app, IDS, expectSections] of [['scoutbox-club', PRO_IDS, 5], ['scoutbox-grassroots', GRASS_IDS, 4]]) {
   const nav = await loadNav(app);
   section(`${app} — configuration integrity`);
@@ -92,7 +92,7 @@ for (const [app, IDS, expectSections] of [['scoutbox-club', PRO_IDS, 5], ['scout
   const rec = nav.NAV_SECTIONS.find((s) => s.id === 'recruitment');
   ok(!!rec?.groups && rec.groups.length >= 5, `Recruitment is grouped (${rec?.groups?.length ?? 0} groups)`);
   const views = nav.groupedChildren(rec);
-  // M24D — the five rule: no group lists more than five pages (three to four is the target).
+  // The five rule: no group lists more than five pages (three to four is the target).
   ok(views.every((g) => g.children.length <= nav.NAV_MAX_PER_CATEGORY), `no group has more than ${nav.NAV_MAX_PER_CATEGORY} pages (max ${Math.max(...views.map((g) => g.children.length))})`);
   ok(views.every((g) => g.children.length <= 4), `M24D: every Recruitment group holds four pages or fewer (${views.map((g) => `${g.id} ${g.children.length}`).join(', ')})`);
   ok(views.map((g) => g.id).join(',') === (app === 'scoutbox-club' ? 'discover,pipeline,outreach,evaluation,intelligence,outcomes,analytics' : 'discover,pipeline,outreach,evaluation,intelligence,outcomes,analytics,planning'), `M24D: the Recruitment groups are Discover · Pipeline · Outreach · Evaluation · Intelligence · Outcomes · Analytics${app === 'scoutbox-club' ? '' : ' · Planning'} (${views.map((g) => g.id).join(',')})`);
@@ -164,7 +164,7 @@ for (const [app, IDS, expectSections] of [['scoutbox-club', PRO_IDS, 5], ['scout
     ok(over.length === 0, `every phone strip fits a 360px row by label budget (${over.join('; ') || 'all ≤ 34 chars'})`);
   }
   const pipe = nav.stripLayout(rec, 'rooms');
-  // M24D — Pipeline is four pages and shows whole on a phone; the More
+  // Pipeline is four pages and shows whole on a phone; the More
   // mechanism now serves Intelligence, whose four names fit a row only two at a time.
   ok(pipe.visible.map((c) => c.id).join() === 'recruitment,rooms,requests,opportunities' && pipe.overflow.length === 0, `M24D: Pipeline (Cases, Rooms, Requests, Opportunities) shows whole — no More (${pipe.visible.map((c) => c.id)})`);
   const intel = nav.stripLayout(rec, 'secondlook');
@@ -240,7 +240,7 @@ for (const [app, IDS, expectSections] of [['scoutbox-club', PRO_IDS, 5], ['scout
     ok(!scoutSections.some((s) => s.id === 'organisation'), 'ordinary scout: Organisation absent (no empty category shown)');
     ok(scoutSections.length === expectSections - 1, 'scout sees the compact set');
   } else {
-    // P2.5: Grassroots' Club holds Clubs & Groups (always visible, exactly as
+    // Grassroots' Club holds Clubs & Groups (always visible, exactly as
     // it was under Network) plus the gated admin pages. A non-lead therefore
     // sees Club with ONE child — and nothing that was hidden before.
     const club = scoutSections.find((s) => s.id === 'organisation');
@@ -259,7 +259,7 @@ for (const [app, IDS, expectSections] of [['scoutbox-club', PRO_IDS, 5], ['scout
     const treasurerOrg = nav.filterSections(TREASURER).find((s) => s.id === 'organisation');
     ok(!!treasurerOrg && treasurerOrg.children.map((c) => c.id).join(',') === 'budgets', 'a finance role gains Finance only, not other lead or admin pages');
   }
-  // P2.5: regrouping widened nothing. The set of ids a role can see is the
+  // Regrouping widened nothing. The set of ids a role can see is the
   // same set it could see before, computed from the same predicates.
   const visibleIds = (ctx) => new Set(nav.filterSections(ctx).flatMap((s) => s.children.map((c) => c.id)));
   const scoutIds = visibleIds(SCOUT), leadIds = visibleIds(LEAD);
@@ -281,11 +281,11 @@ for (const [app, IDS, expectSections] of [['scoutbox-club', PRO_IDS, 5], ['scout
   ok(nav.screenFromHash('#/verification') === 'verification', 'valid hash parses');
   ok(nav.screenFromHash('#/nope') === null && nav.screenFromHash('#foo') === null && nav.screenFromHash('') === null, 'unknown/malformed hashes rejected');
   ok(nav.hashForScreen('coverage') === '#/coverage', 'hash round-trip');
-  // M17 — the first parameterised route. It resolves to the Rooms destination
+  // The first parameterised route. It resolves to the Rooms destination
   // and carries the room id; every malformed variant must still reject.
   ok(nav.screenFromHash('#/rooms') === 'rooms', 'Rooms destination has a flat hash');
   ok(nav.screenFromHash('#/recruitment/rooms/case-7') === 'rooms', 'room deep link resolves to the Rooms destination');
-  // M18.2: the parent of a deep link the app produces is reachable too.
+  // The parent of a deep link the app produces is reachable too.
   ok(nav.screenFromHash('#/recruitment/rooms') === 'rooms', 'the parent of a room deep link resolves to Rooms');
   ok(nav.screenFromHash('#/recruitment/briefs') === 'briefs', 'the parent of a brief deep link resolves to Briefs');
   ok(nav.screenFromHash('#/recruitment/nope') === null && nav.screenFromHash('#/recruitment/rooms/') === null, 'other two-segment hashes stay rejected');
@@ -296,9 +296,9 @@ for (const [app, IDS, expectSections] of [['scoutbox-club', PRO_IDS, 5], ['scout
     && nav.roomFromHash('') === null, 'malformed room deep links rejected');
   ok(nav.hashForRoom('case-7') === '#/recruitment/rooms/case-7', 'room hash round-trip');
   ok(nav.resolveNavigationLocation('rooms').sectionId === 'recruitment', 'Rooms highlights Recruitment');
-  // M18 — three more destinations inside Recruitment (still six sections), two
+  // Three more destinations inside Recruitment (still six sections), two
   // named deep links and a second parameterised route, all on the SAME strict
-  // mechanism M17 introduced.
+  // mechanism as the Rooms route.
   ok(nav.screenFromHash('#/recruitment/second-look') === 'secondlook', 'Second Look deep link resolves');
   ok(nav.screenFromHash('#/recruitment/nobody-missed') === 'nobodymissed', 'Nobody Missed deep link resolves');
   ok(nav.screenFromHash('#/secondlook') === 'secondlook' && nav.screenFromHash('#/briefs') === 'briefs', 'M18 destinations keep a flat hash too');
@@ -354,7 +354,7 @@ for (const [app, IDS, expectSections] of [['scoutbox-club', PRO_IDS, 5], ['scout
 }
 
 
-// ---------------------------------------------------------------- M23 P5.6B
+// ---------------------------------------------------------------- Agent
 // ScoutBox Agent: the same nav contract (one source of truth, strict hashes,
 // EN/FR labels, convenience-only filtering) on a four-section workspace.
 {
@@ -371,9 +371,9 @@ for (const [app, IDS, expectSections] of [['scoutbox-club', PRO_IDS, 5], ['scout
   ok(missing.length === 0 && extra.length === 0, `all ${AGENT_IDS.length} destinations mapped exactly once (missing: ${missing.join(',') || '—'}; extra: ${extra.join(',') || '—'})`);
   ok(nav.validateNavConfig().length === 0, 'the configuration is structurally sound');
   ok(nav.INBOX_ITEM.id === 'inbox', 'Inbox is the utility destination');
-  // P5.6D added Transactions and nothing else: the workspace is a destination,
-  // an Offer, a negotiation and a fee workflow are still not.
-  ok(mapped.includes('transactions'), 'Transactions is a real destination (P5.6D)');
+  // The transaction workspace is a destination; an Offer, a negotiation and a
+  // fee workflow are not.
+  ok(mapped.includes('transactions'), 'Transactions is a real destination');
   ok(!mapped.includes('offers') && !mapped.includes('offer') && !mapped.includes('negotiation') && !mapped.includes('fees') && !mapped.includes('signings'), 'no Offers, Negotiation, Fees or Signings destination exists');
   for (const sec of nav.NAV_SECTIONS) for (const c of sec.children) if (c.shortKey && !c.shortKey.startsWith('navshort.')) fail(`${c.id}: short label key must be a navshort.* key`);
 
@@ -410,7 +410,7 @@ for (const [app, IDS, expectSections] of [['scoutbox-club', PRO_IDS, 5], ['scout
   console.log(`✓ resolver maps every destination (${AGENT_IDS.length} checks folded)`);
   ok(nav.resolveNavigationLocation('profile').sectionId === 'home', 'direct /profile highlights Home');
   ok(nav.resolveNavigationLocation('compliance').sectionId === 'home', 'direct /compliance highlights Home (P5.6C)');
-  ok(nav.resolveNavigationLocation('transactions').sectionId === 'transactions', 'direct /transactions highlights Transactions (P5.6D)');
+  ok(nav.resolveNavigationLocation('transactions').sectionId === 'transactions', 'direct /transactions highlights Transactions');
   ok(nav.resolveNavigationLocation('nonexistent').sectionId === null && nav.resolveNavigationLocation('nonexistent').itemId === null, 'unknown path highlights nothing');
 
   section(`${app} — role-aware filtering (client convenience only; the server matrix decides)`);
@@ -441,7 +441,7 @@ for (const [app, IDS, expectSections] of [['scoutbox-club', PRO_IDS, 5], ['scout
   ok(nav.hashForClient('rep-7') === '#/clients/rep-7' && nav.hashForClient('rep-7', 'activity') === '#/clients/rep-7/overview/activity' && nav.clientFromHash('#/clients/rep-7/activity')?.tab === 'activity', 'client hashes round-trip (M24B: a link names its category; the legacy flat form still reads)');
   ok(nav.screenFromHash('#/agency/team') === 'agency' && nav.agencyTabFromHash('#/agency/team') === 'team' && nav.agencyTabFromHash('#/agency/billing') === null && nav.screenFromHash('#/agency/billing') === null, 'agency tab deep links are strict');
   ok(nav.hashForAgency('overview') === '#/agency' && nav.hashForAgency('settings') === '#/agency/settings', 'agency hashes round-trip');
-  // P5.6D transaction deep links. Strict: the id shape is fixed, and a tab the
+  // Transaction deep links. Strict: the id shape is fixed, and a tab the
   // detail screen does not have (offer, signing, fees) is rejected outright, so
   // no hash can conjure a surface that does not exist.
   ok(nav.screenFromHash('#/transactions') === 'transactions' && nav.screenFromHash('#/transactions/atx-7') === 'transactions', 'transaction hashes parse');
@@ -469,7 +469,7 @@ for (const [app, IDS, expectSections] of [['scoutbox-club', PRO_IDS, 5], ['scout
   ok(nav.loadShortcuts('org1', 'u1', LICENSED).join(',') === 'agency', 'invalid ids and types filtered out');
 }
 
-// ---------------------------------------------------------------- M24D
+// ---------------------------------------------------------------- the five rule
 // The five rule across the remaining applications: the Agent's sections,
 // the Trust & Safety console's groups, the Player's bottom navigation and
 // recruitment categories. Every list of choices a person is shown holds at

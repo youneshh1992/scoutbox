@@ -1,18 +1,18 @@
 /**
- * M23 P5 — the formal recruitment decision engine: pure functions over the
- * canonical `db.roomDecisions` row and the case's single draft.
+ * The formal recruitment decision engine: pure functions over the canonical
+ * room decision row and the case's single draft.
  *
- * THE CHAIN OF TRUTH THIS FILE ENFORCES (mandate §1)
+ * THE CHAIN OF TRUTH THIS FILE ENFORCES
  *
  *   evidence ≠ observation ≠ assessment ≠ discussion ≠ decision ≠ offer ≠ signing
  *
- * A formal decision is a row in the SAME append-only decision memory M17
- * created (`db.roomDecisions`), with additive fields:
+ * A formal decision is a row in the SAME append-only decision memory as the
+ * room's recommendations, with additional fields:
  *
- *   kind              'formal'   (legacy rows: absent → read as 'recommendation')
+ *   kind              'formal'   (absent → read as 'recommendation')
  *   outcome           progress | hold | reject
- *   recommendation    the M17 value the outcome maps onto, so every legacy
- *                     reader — Second Look, journey, M20, Nobody Missed —
+ *   recommendation    the recommendation value the outcome maps onto, so every
+ *                     reader — Second Look, journey, analytics, Nobody Missed —
  *                     keeps reading ONE chain (offer / continue_watching / archive)
  *   state             'final' (a formal row is only ever final; a DRAFT lives
  *                     on the case as `kase.decisionDraft` and is not a decision)
@@ -40,13 +40,13 @@ const isPlain = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 
 // ------------------------------------------------------------------ vocabulary
 
-/** The three operational outcomes a club can formally decide (§9). */
+/** The three operational outcomes a club can formally decide. */
 export const DECISION_OUTCOMES = Object.freeze(['progress', 'hold', 'reject']);
 
 /**
- * Outcome → the M17 recommendation the row also carries, the semantic
+ * Outcome → the recommendation the row also carries, the semantic
  * lifecycle action the outcome asks for, and the lifecycle reason codes that
- * action needs (LIFECYCLE taxonomy, never the decision taxonomy — §46).
+ * action needs (LIFECYCLE taxonomy, never the decision taxonomy).
  */
 export const OUTCOME_MAP = table({
   progress: { recommendation: 'offer', action: 'considerOffer', lifecycleReasons: [], label: 'Progress to offer consideration' },
@@ -81,7 +81,7 @@ export function normaliseDecisionClientKey(raw) {
 }
 export { payloadFingerprint };
 
-/** A legacy M17 row (no `kind`) reads as an advisory recommendation, final. */
+/** A row with no `kind` reads as an advisory recommendation, final. */
 export const decisionKind = (d) => (d?.kind === 'formal' ? 'formal' : 'recommendation');
 export const isFormal = (d) => decisionKind(d) === 'formal';
 
@@ -96,7 +96,7 @@ export function validateOutcome(raw) {
 }
 
 /**
- * Decision reasons come from the M17 DECISION taxonomy (opinions about a
+ * Decision reasons come from the DECISION taxonomy (opinions about a
  * player's fit), never from the lifecycle taxonomy (events that happened to a
  * case). A reject needs at least one, like an archive always has.
  */
@@ -142,17 +142,17 @@ export function validateEvidenceRefShapes(raw) {
 }
 
 /**
- * Resolve each reference against THIS case's own records (§76, §77, §78).
+ * Resolve each reference against THIS case's own records.
  * A reference to another organisation's assessment, another player's trial,
  * a Box Cam session not linked on one of this case's trials, or a test-only
  * session in production is refused as `DECISION_CASE_MISMATCH` — the same
  * body whether the record exists elsewhere or not at all. The metadata kept
- * is the minimum needed to read the decision later without re-querying
- * (§51): who assessed and when, the trial's state, the session's verification
+ * is the minimum needed to read the decision later without re-querying:
+ * who assessed and when, the trial's state, the session's verification
  * state, the claim type. Never a rating, a note, a trace or a value.
  */
 export function resolveEvidenceRefs(refs, { reads = {}, kase, testProviderEnabled = false, providers = {} }) {
-  // §4.3 step 2: the trials are read through SQL — this club's trials of this player, the only ones a ref may name.
+  // This club's trials of this player: the only ones a ref may name.
   const caseTrials = typeof reads.trials?.forOrgPlayer === 'function' ? reads.trials.forOrgPlayer(kase.orgId, kase.playerId) : [];
   const out = [];
   for (const ref of refs) {
@@ -176,7 +176,7 @@ export function resolveEvidenceRefs(refs, { reads = {}, kase, testProviderEnable
         .flatMap((t) => (t.schedule?.sessions ?? []).flatMap((s) => (s?.evidence ?? []).map((e) => ({ trial: t, session: s, e }))))
         .find(({ e }) => e && e.kind === 'box_cam_session' && e.sessionId === ref.id && !e.removedAt);
       if (!link) return mismatch('That Box Cam session is not cited on any trial of this case.');
-      const found = reads.boxCam?.sessions.byId(ref.id) ?? null; // S12b: read through SQL
+      const found = reads.boxCam?.sessions.byId(ref.id) ?? null;
       const bs = found && found.playerId === kase.playerId ? found : null;
       if (!bs) return mismatch('That Box Cam session is not available to this case.');
       if (providers[bs.provider]?.testOnly && !testProviderEnabled) return mismatch('That Box Cam session is not available to this case.');
@@ -197,9 +197,9 @@ export function resolveEvidenceRefs(refs, { reads = {}, kase, testProviderEnable
 // ------------------------------------------------------------------ integrity
 
 /**
- * A formal row this build can read. Anything else is omitted from P5 lists,
- * counted, logged — and never repaired (§120). Legacy recommendation rows are
- * not judged here; M17 owns their reading.
+ * A formal row this build can read. Anything else is omitted from decision
+ * lists, counted, logged — and never repaired. Recommendation rows are not
+ * judged here; the rooms module owns their reading.
  */
 export function decisionIntegrity(d, { orgId = null, caseId = null } = {}) {
   const problems = [];
@@ -230,7 +230,7 @@ export function duplicateFinalHeads(rows) {
 
 // ------------------------------------------------------------------ chain
 
-/** The chain head: the one row nothing supersedes. Exact, like M18's reader. */
+/** The chain head: the one row nothing supersedes. */
 export function chainHead(rows) {
   const heads = rows.filter((d) => d && !d.supersededById);
   if (heads.length === 0) return null;
@@ -238,14 +238,14 @@ export function chainHead(rows) {
   return heads[heads.length - 1];
 }
 
-/** Stable order for history: createdAt, then id (§118). */
+/** Stable order for history: createdAt, then id. */
 export const byCreatedThenId = (a, b) => ((a.createdAt ?? 0) - (b.createdAt ?? 0)) || String(a.id).localeCompare(String(b.id));
 
 // ------------------------------------------------------------------ summaries
 
 /**
  * The assessment inputs a decision maker may see, summarised WITHOUT a single
- * number that stands for the player (§21, §22). Per assessor: their verdict,
+ * number that stands for the player. Per assessor: their verdict,
  * how many attributes they rated, how many they marked not observed, their
  * confidence mix, how many evidence references they attached. Across
  * assessors: the verdict counts and whether they agree. Never an average.
@@ -289,7 +289,7 @@ export function summariseAssessments(visible, { withheld = 0 } = {}) {
   };
 }
 
-/** The immutable metadata a formal row keeps about the assessments it saw (§51): ids and counts. */
+/** The immutable metadata a formal row keeps about the assessments it saw: ids and counts. */
 export function assessmentSnapshot(summary) {
   return {
     submitted: summary.submitted,
@@ -300,12 +300,11 @@ export function assessmentSnapshot(summary) {
 }
 
 /**
- * Evidence a decision maker can cite, listed as ids and neutral metadata
- * (§106). Box Cam observations appear as a STATE — observed, no reliable
- * observation, withdrawn — never as a recommendation (§26, §27).
+ * Evidence a decision maker can cite, listed as ids and neutral metadata.
+ * Box Cam observations appear as a STATE — observed, no reliable
+ * observation, withdrawn — never as a recommendation.
  */
 export function evidenceCandidates({ reads = {}, kase, assessmentsVisible, trialEvidenceViews = null, providers = {}, testProviderEnabled = false }) {
-  // §4.3 step 2: this club's trials of this player, read through SQL.
   const caseTrials = typeof reads.trials?.forOrgPlayer === 'function' ? reads.trials.forOrgPlayer(kase.orgId, kase.playerId) : [];
   const trials = caseTrials
     .filter((t) => t && t.orgId === kase.orgId && t.playerId === kase.playerId && (!t.caseId || t.caseId === kase.id))
@@ -408,7 +407,7 @@ export function decisionMilestone(d) {
 
 /**
  * Workflow completeness for a decision — what has been DONE, never whether the
- * player is good enough (§30). Every item is a fact a person could check.
+ * player is good enough. Every item is a fact a person could check.
  */
 export function decisionRequirements({ role, canFinalize, status, submittedAssessments, completedTrials, blocked, subjectRemoved, draft, hasFinal, availability }) {
   return {

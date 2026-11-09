@@ -1,8 +1,7 @@
 /**
- * Discovery gets its own typed tables (S12c): Recruitment Briefs (criteria as columns and rows, the audit trail),
- * Nobody Missed reviews, Second Look items (fingerprints, resolved reasons and trail as rows), and Dynamic Watchlists
- * (criteria by kind, the last derived membership, the lifecycle trail and the membership transitions). REGISTERED in
- * DATA_MIGRATIONS. `up()` is the DDL only: nothing is carried over (no production data; rollback means re-seed).
+ * Discovery: Recruitment Briefs (criteria as columns and rows, the audit trail), Nobody Missed reviews, Second Look
+ * items (fingerprints, resolved reasons and trail as rows), and Dynamic Watchlists (criteria by kind, the last derived
+ * membership, the lifecycle trail and the membership transitions).
  */
 import { migrationApplied } from '../database.mjs';
 import { BOX_CAM_MIGRATION } from '../boxCam.mjs';

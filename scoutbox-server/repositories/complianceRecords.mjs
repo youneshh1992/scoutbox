@@ -1,6 +1,5 @@
 /**
- * S11b-2 — the compliance engine's records as typed tables (migration `0028_compliance_records`;
- * docs/architecture/migration.md §4.5 S11; sql/06_agent_compliance_transactions.sql).
+ * The compliance engine's records: contexts with their evaluations, regulatory reviews and consents.
  *
  * Records:
  *   - A compliance context: the minimal conflict-evaluation record an agent (or a transaction, through the seam) opens:
@@ -26,7 +25,7 @@
  * an update from inside its own update are refused. History only grows. An evaluation is recorded with
  * `contexts.recordEvaluation`; a revocation with `consents.revoke`; an account deletion with `forgetPlayer`.
  *
- * READS are SQL: no mirror. Records are fresh and deep-frozen. A context carries its latest evaluation and the count.
+ * Records are deep-frozen. A context carries its latest evaluation and the count.
  *
  * References. Agencies → orgs and staff → org_users (RESTRICT); a reviewer → ts_reviewers; a policy version →
  * jurisdiction_policies; an agreement → representation_agreements; within the domain, a review's context, evaluation
@@ -1043,9 +1042,9 @@ function decodeConsents(sqlite, rows) {
   });
 }
 
-// ------------------------------------------------------------------ snapshot (fixtures and the persistence batteries)
+// ------------------------------------------------------------------ whole-domain read (the test suites)
 export const complianceRecordsLive = (sqlite) => migrationApplied(sqlite, COMPLIANCE_RECORDS_MIGRATION);
-/** The snapshot shape: a context with its evaluations; a consent ledger with its revocation rows (as the blob kept them). */
+/** A context with its evaluations; a consent ledger with its revocation rows. */
 function readAll(sqlite) {
   const contexts = decodeContexts(sqlite, sqlite.prepare('SELECT * FROM compliance_contexts ORDER BY rowid').all());
   const evs = groupBy(decodeEvaluations(sqlite, sqlite.prepare('SELECT * FROM compliance_evaluations ORDER BY context_id, position').all()), (e) => e.contextId);
@@ -1056,17 +1055,10 @@ function readAll(sqlite) {
     regulatoryConsents: consents.flatMap(({ revocation, ...k }) => [k, ...(revocation ? [{ id: revocation.id, kind: 'revocation', of: k.id, at: revocation.at, by: revocation.by }] : [])]),
   };
 }
-/** The whole domain read back as plain records (`readAllRecords` in index.mjs: the test suites' read-back); null before its migration. */
+/** The whole domain read back as plain records (`readAllRecords` in index.mjs: the test suites' read-back). */
 export const COMPLIANCE_RECORDS_RECORDS = {
   names: COMPLIANCE_RECORDS_COLLECTIONS,
   read(sqlite) { return complianceRecordsLive(sqlite) ? readAll(sqlite) : null; },
-  /**
-   * Set the records aside before the tables they name (agreements, profiles, policies, reviewers) are rewritten: read
-   * them, then empty the tables. `replace(…, { kept })` writes them back (or the snapshot's own).
-   */
-
-
-
 };
 const playerRefCount = (sqlite, sql) => sqlite.prepare(sql).get().n;
 export const unresolvedPlayerReferences = (sqlite) => (complianceRecordsLive(sqlite) ? { complianceRecords: playerRefCount(sqlite, "SELECT count(*) AS n FROM compliance_context_parties x WHERE subject_kind = 'player' AND NOT EXISTS (SELECT 1 FROM players p WHERE p.id = x.subject_id)") } : null);

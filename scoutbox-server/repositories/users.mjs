@@ -1,25 +1,18 @@
 /**
- * Organisation staff as typed tables with explicit writes (S0, migration `0001_org_users`; explicit since S14f,
- * docs/architecture/migration.md §4.6; sql/01_identity.sql).
+ * Organisation staff (`org_users`, `org_user_recovery_codes`).
  *
- * Record (the keys every reader sees, all always present):
- *   { id, orgId, name, role, email, ssoSubject, createdAt, removedAt, removedById, provenance,
- *     mfa: null | { enabledAt },                       enabledAt null: set up but not yet confirmed
- *     deliveryPrefs: { quietStart, quietEnd, channels: { email } } }
+ * Record: { id, orgId, name, role, email, ssoSubject, createdAt, removedAt, removedById, provenance,
+ *   mfa: null | { enabledAt },                       enabledAt null: set up but not yet confirmed
+ *   deliveryPrefs: { quietStart, quietEnd, channels: { email } } }
  * The TOTP secret and the recovery-code hashes are never on a record: `mfaSecretOf` gives the secret to the code
  * checks and `useRecoveryCode` spends a code. Responses are allowlists, never the record.
  *
- * Tables:
- *   org_users                one row per staff account; removed softly (`removed_at`), never deleted by a route
- *   org_user_recovery_codes  the hashes of a staff member's unused recovery codes, one row each
- * Staff sign in by name, so a name is unique in its organisation (case-insensitive, removed staff included; the
- * repository writes `name_key`); an e-mail is unique among an organisation's current staff, an SSO subject within
- * an organisation. `org_id` and `removed_by_id` are RESTRICT keys; `(id, org_id)` is unique so an org session can
- * name its staff member and organisation together (sessions, migration 0002).
+ * Staff are removed softly (`removed_at`), never deleted by a route. Staff sign in by name, so a name is unique in its
+ * organisation (case-insensitive, removed staff included; the repository writes `name_key`); an e-mail is unique among
+ * an organisation's current staff, an SSO subject within an organisation. `org_id` and `removed_by_id` are RESTRICT
+ * keys; `(id, org_id)` is unique so an org session can name its staff member and organisation together.
  *
- * WRITES are explicit operations, each joining the open unit of work, the caller's transaction or its own. READS
- * are SQL: no mirror and no db.* view; fresh, deep-frozen records. Refusals carry a code and name the id and the
- * field, never a value.
+ * Refusals carry a code and name the id and the field, never a value.
  */
 import { transaction, migrationApplied } from './database.mjs';
 import { deepFreeze } from './scoutingEvidence.mjs';
@@ -156,13 +149,10 @@ function readSnapshot(sqlite) {
   }));
 }
 
-/** The whole domain read back as plain records (`readAllRecords` in index.mjs: the test suites' read-back); null before its migration. */
+/** The whole domain read back as plain records (`readAllRecords` in index.mjs: the test suites' read-back). */
 export const USERS_TABLE = {
   name: 'users',
   read(sqlite) { return usersLive(sqlite) ? readSnapshot(sqlite) : null; },
-
-  /** Delete every staff row whose id is absent from `rows` (their sessions and recovery codes cascade; the caller owns the transaction). */
-
 };
 
 // ------------------------------------------------------------------ the repository

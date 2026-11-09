@@ -1,4 +1,4 @@
-// M24D LIVE — the sidebar's collapse behaviour, driven through the real Pro
+// LIVE — the sidebar's collapse behaviour, driven through the real Pro
 // and Grassroots interfaces against a real server.
 //
 //   C1  initial state      Home: nothing expanded; opening Recruitment shows

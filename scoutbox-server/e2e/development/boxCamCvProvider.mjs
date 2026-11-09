@@ -1,9 +1,10 @@
-// M22 acceptance suite — production CV provider, frame transport, integration.
+// Production CV provider, frame transport, integration.
 //
-// §99 requires a minimum of 60% negative/integrity/security checks, and that
-// ratio is not decoration. The whole risk surface of this phase is "a pixel
-// endpoint that accepts something it should not", so the suite is weighted
-// toward what must be REFUSED.
+// The suite requires a minimum of 60% negative/integrity/security checks
+// (enforced in the report at the end), and that ratio is not decoration. The
+// whole risk surface of the provider is "a pixel endpoint that accepts
+// something it should not", so the suite is weighted toward what must be
+// REFUSED.
 //
 // Structure:
 //   §85  twenty frame-transport security cases, over real HTTP
@@ -30,7 +31,7 @@ import {
 } from '../../domains/development/boxcam/cv/scenes.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const PORT = pickPort(4960, 200, [0]); // TH-6: never a fetch-blocked port
+const PORT = pickPort(4960, 200, [0]); // never a fetch-blocked port
 const BASE = `http://localhost:${PORT}`;
 const DATA_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-m22-'));
 const SERVER = path.join(HERE, '..', '..', 'server.mjs');
@@ -53,22 +54,14 @@ async function boot() {
   const proc = spawn(process.execPath, [SERVER], { env: ENV, stdio: 'ignore' });
   children.push(proc);
 
-  // Do not let the spawned server hold this process open.
-  //
-  // THE DEFECT THIS FIXES. The exit hook above is the only thing that stops
-  // the server, and it runs when the event loop drains — but a ref'd child
-  // handle IS something on the loop, so the loop could never drain and the
-  // hook could never fire. The suite therefore printed its full summary, all
-  // 112 checks green, and then hung forever.
-  //
-  // That is worse than a failure, because it looks like a pass to a human
-  // reading the tail of the log and like a timeout to any harness running the
-  // battery unattended — two different wrong conclusions from one bug. M22's
-  // own `e2e/demoHost.mjs` hit the identical trap and fixed it the same way;
-  // this file was written before that lesson and never got it.
+  // Do not let the spawned server hold this process open. The exit hook above
+  // is the only thing that stops the server, and it runs when the event loop
+  // drains — but a ref'd child handle IS something on the loop, so the suite
+  // would print a green summary and then hang forever: a pass to a human
+  // reading the log, a timeout to a harness.
   //
   // unref() detaches the handle from the loop without detaching the process:
-  // the child still dies in the exit hook, which can now actually run.
+  // the child still dies in the exit hook, which can then actually run.
   proc.unref();
 
   for (let i = 0; i < 160; i++) {
@@ -450,9 +443,8 @@ section('§91 — identity, biometric and audio absence, swept in code');
 section('§93 — rate limits on the expensive endpoints');
 // =====================================================================
 {
-  // The policy is 120 per hour, so the loop has to exceed that to prove it —
-  // an earlier cut stopped at 40 and "passed" only because it never reached
-  // the limit, which would have asserted nothing at all.
+  // The policy is 120 per hour, so the loop has to exceed that to prove it:
+  // a loop that never reaches the limit asserts nothing at all.
   let limitedAt = null;
   for (let i = 0; i < 140 && limitedAt == null; i++) {
     const r = await j('POST', '/player/box-cam/cv/ready-check', { protocolId: 'combine-box-touch-60' }, kola.token);
@@ -510,7 +502,7 @@ section('§58/§59 — the Combine blocker, over HTTP, end to end');
   neg(fin.body.result.experimental.status === 'experimental_unvalidated',
     '§32/§33. the exact count travels labelled experimental, never as a published measurement');
 
-  // §58 — the M16.1 attempt path refuses the same protocol.
+  // §58 — the Combine attempt path refuses the same protocol.
   const attempt = await j('POST', '/player/combine/attempts', { protocolId: 'combine-box-touch-60', provider: 'production_cv' }, kola.token);
   neg(attempt.status === 422 && attempt.body.reason === 'REAL_WORLD_VALIDATION_NOT_COMPLETED',
     '§58. a production_cv Combine attempt is refused as unvalidated');
@@ -549,9 +541,6 @@ section('§2 — the release state, restated at the end');
 section('§116–§122 — migration, clean boot, upgrade and restart');
 // =====================================================================
 {
-  // Rewritten in S14a: §116–§120 described the retired snapshot registry (step m220_001 at 2200, runMigrations over
-  // in-memory databases, schemaReport). They now check the table migration 0031 and a real file; the in-memory
-  // upgrade from an M21-era snapshot (§119) is gone with the blob store (no compatibility with old dev files).
   const { DATA_MIGRATIONS } = await import('../../repositories/index.mjs');
   const { BOX_CAM_MIGRATION } = await import('../../repositories/boxCam.mjs');
   const { openLayer } = await import('../../scripts/dataLayerFixture.mjs');
@@ -560,7 +549,7 @@ section('§116–§122 — migration, clean boot, upgrade and restart');
   ok(DATA_MIGRATIONS.filter((m) => m.id === BOX_CAM_MIGRATION).length === 1, `§116. the Box Cam migration (${BOX_CAM_MIGRATION}) is registered once`);
   ok(SCHEMA_VERSION >= 31, `§116. the schema is at or beyond 0031 (now ${SCHEMA_VERSION})`);
 
-  // §117/§118 (S12b): the CV results are a typed table, created by data migration 0031 and owned by
+  // §117/§118: the CV results are a typed table, created by data migration 0031 and owned by
   // repositories/boxCam.mjs — with no frame, pixel or video column — asserted on a real store.
   const freshDir = mkdtempSync(path.join(tmpdir(), 'sbx-m22-table-'));
   {

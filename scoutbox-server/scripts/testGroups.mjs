@@ -1,14 +1,7 @@
-// S13c — group workspaces and group grants as typed tables with explicit writes (repositories/groups.mjs, migration
-// 0036). What this suite proves: the migration creates the STRICT tables (no JSON column, no group_admins table),
-// empty; the typers refuse junk naming the record and field (an admin who is not a member, an invite for a member, a
-// shortlist grant naming one record, a revocation without a reason, a grant to its own owner); a group is created with
-// its admin as its one member, invites once, joins by accepting, and leaves; two organisations share a group exactly
-// while both are members; a grant is created only between members and revoked once; a departure ends a grant only
-// when its owner shares no group with any recipient (not when just the first recipient leaves); the given list pages
-// by cursor and the received list keeps only live grants of fellow members; a rolled-back unit leaves nothing; the
-// db.* names throw; and a fixture written through the repository is typed, names a missing reference and reads back what it wrote. Temporary
-// databases only; nothing touches DATA_DIR.
-// Run with: npm test
+// Group workspaces and group grants (repositories/groups.mjs, migration 0036): the STRICT tables, the typers'
+// refusals, membership (two organisations share a group exactly while both are members), grants only between members,
+// and a departure ending a grant only when its owner shares no group with any recipient. Also paging, units of work
+// and fixtures. Temporary databases only; nothing touches DATA_DIR. Run with: npm test
 
 import assert from 'node:assert/strict';
 import fs from 'node:fs';

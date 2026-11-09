@@ -1,4 +1,4 @@
-// M23 P8 LIVE — the full recruitment journey driven through the real Pro
+// Live: the full recruitment journey driven through the real Pro
 // workspace, the real player app and the real agent app against a real
 // server. The exhaustive invariants live in
 // scoutbox-server/e2e/recruitment/journey.mjs; this suite proves that
@@ -216,7 +216,7 @@ ok(await waitNext(lead.page, 'DECIDE_APPROACH') && (await journey(RID, lead.toke
 const railDone = async () => lead.page.locator('.journey-step.done').count();
 const railCurrent = async () => lead.page.locator('.journey-step.current').getAttribute('data-stage', { timeout: 5000 }).catch(() => null);
 ok(await railDone() >= 1 && await railCurrent() === 'review', 'A4: the rail marks watching done and review current');
-// Plan the contact from the strip's tab (DECIDE_APPROACH opens Overview); the manual picker is the M17 move.
+// Plan the contact from the strip's tab (DECIDE_APPROACH opens Overview); the manual picker is the Rooms move.
 await lifecycle(RID, 'planContact', lead.token);
 ok(await waitNext(lead.page, 'SEND_CONTACT'), 'A5: contact planned (server event): next "Send the contact" on the Contact tab');
 await goBtn(lead.page).click();
@@ -284,11 +284,11 @@ const cur = (await j('GET', `/org/signings/${SID}`, undefined, lead.token, at(T0
 const done = await j('POST', `/org/signings/${SID}/complete`, { expectedRev: cur.rev, clientKey: key() }, lead.token, at(T0));
 ok(done.status === 200 && await waitNext(lead.page, 'RECRUITMENT_COMPLETE') && await stageOf(lead.page) === 'signed', 'A27: completed: signed, "Recruitment complete"');
 ok(await railDone() === 9 && await railCurrent() === 'signed' && /✓\s*Signed/.test(await lead.page.locator('.journey-step.current').innerText()), 'A28: nine stages done and signed current, itself ticked');
-// §78 — accessibility: the rail is a list with the current step marked, the strip is a labelled region, state is text + glyph (never colour alone), the tabs are real tabs.
+// Accessibility: the rail is a list with the current step marked, the strip is a labelled region, state is text + glyph (never colour alone), the tabs are real tabs.
 ok(await lead.page.locator('[data-testid="journey-strip"][aria-label]').count() === 1 && await lead.page.locator('.journey-rail li[aria-current="step"]').count() >= 1 && await lead.page.locator('[role="tablist"] [role="tab"][aria-selected="true"]').count() === 1, 'A28a: the strip is a labelled region, the current step carries aria-current, the tabs are ARIA tabs');
 const railText = await lead.page.locator('.journey-rail').innerText();
 ok(/✓/.test(railText) && /Signed/.test(railText), 'A28b: done steps are marked by a glyph and a word, not by colour alone');
-await roomTab(lead.page, 'Timeline'); // M24B — the journey timeline lives under History › Timeline
+await roomTab(lead.page, 'Timeline'); // the journey timeline lives under History › Timeline
 await lead.page.locator('[data-testid="journey-timeline"]').waitFor({ timeout: 15000 });
 const tl = await lead.page.locator('[data-testid="journey-timeline"]').innerText();
 ok(/Signing completed/.test(tl) && /Offer accepted/.test(tl) && /Trial completed/.test(tl) && /Contact sent/.test(tl) && /Decision finalized/.test(tl), 'A29: the journey timeline carries the milestones: contact, trial, decision, Offer, signing');

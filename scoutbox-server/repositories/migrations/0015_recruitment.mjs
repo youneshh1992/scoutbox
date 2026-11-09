@@ -1,10 +1,6 @@
 /**
- * Recruitment requests and accepted trials (S8a) get their typed tables (recruitment_requests, request_trial_slots,
- * trials and its thirteen owned child tables; repositories/recruitment.mjs). (`channels` names its request with a real
- * key since 0012 was amended in S14c, so nothing is rebuilt here.)
- * REGISTERED in DATA_MIGRATIONS. `up()` is the DDL only: the tables start empty and are written through the
- * repository. Amended in place on 3 November 2026 (§4.3: typed columns, explicit writes); re-seed a development
- * database. The `case_id` keys name recruitment_cases, which 0016 creates in the same boot.
+ * Recruitment requests, request trial slots, trials and the trials' owned child tables
+ * (repositories/recruitment.mjs). The `case_id` keys name recruitment_cases, which 0016 creates in the same boot.
  */
 import { migrationApplied } from '../database.mjs';
 import { PLAYER_ERASURE_MIGRATION } from '../identity.mjs';

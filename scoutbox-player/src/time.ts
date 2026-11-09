@@ -1,4 +1,4 @@
-// M24F.3 — human time. The product never shows a machine timestamp
+// Human time. The product never shows a machine timestamp
 // ("10/3/2026, 8:45:24 PM"); a list shows how long ago, a record shows the
 // day, and a precise moment shows the day and the minute — never seconds.
 import { getPLang } from './i18n';

@@ -1,13 +1,13 @@
-// Milestone 17 registration point — Recruitment Rooms.
+// Recruitment Rooms registration point.
 //
-// Registered LAST, because a Room consumes every layer beneath it: M12 cases,
-// assessments, evidence and trials; M13 missing evidence and transitions; M15
-// the Football Passport; M16 Box Cam; M16.1 the At-Home Combine; M16.2 the
-// Trust Score. It owns the club's decision layer and nothing else.
+// Registered LAST, because a Room consumes every layer beneath it: cases,
+// assessments, evidence, trials, missing evidence and transitions, the
+// Football Passport, Box Cam, the At-Home Combine and the Trust Score. It owns
+// the club's decision layer and nothing else.
 //
 // Every route registers on the EXISTING authenticated `orgRouter`, so bearer
 // sessions, removed users, org suspension, `visibleToOrg`, blocks and
-// moderation all run before any M17 handler — a Room grants no access.
+// moderation all run before any Room handler — a Room grants no access.
 import { buildShared } from '../../../m12/shared.mjs';
 import { metrics } from '../../enterprise/enterprise.mjs';
 import { registerRooms } from './rooms.mjs';
@@ -20,7 +20,7 @@ import {
 export function registerM17(ctx) {
 
   // Boot assertions. These are cheap and they catch the two ways this design
-  // could rot silently: a room status that maps to no stage, and the M12 stage
+  // could rot silently: a room status that maps to no stage, and the case stage
   // vocabulary drifting away from the copy this module maps onto.
   for (const s of ROOM_STATUSES) {
     for (const level of ['pro', 'grassroots']) {
@@ -56,8 +56,8 @@ export function registerM17(ctx) {
   // Counters only. No player id, no player name, no organisation name.
   const vmetric = (k, n = 1) => { metrics.rooms[k] = (metrics.rooms[k] ?? 0) + n; };
 
-  // M12's shared helpers are the ones a Room must use — `isLead`, `orgCanSee`
-  // and the append-only `audit` are reused verbatim rather than re-derived.
+  // The case layer's shared helpers are the ones a Room must use — `isLead`,
+  // `orgCanSee` and the append-only `audit` are reused rather than re-derived.
   const shared = { ...ctx, ...buildShared(ctx), vmetric };
   registerRooms(shared);
   return shared;

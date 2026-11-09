@@ -1,4 +1,4 @@
-// M24C — ScoutBox Player is a phone application on every surface.
+// ScoutBox Player is a phone application on every surface.
 //
 // On iOS and Android this wrapper is transparent. On the web it is the one
 // place the application's width is decided: the whole app — header, content
@@ -17,7 +17,7 @@ export const MOBILE_VIEWPORT_MAX = 430;
 export function MobileViewport({ children }: { children: ReactNode }) {
   const colors = useColors();
   const { width } = useWindowDimensions();
-  // M24E — the entry screen has ONE appearance: around it the surround is the
+  // The entry screen has ONE appearance: around it the surround is the
   // entry page's own green, never the light or dark frame the person saved.
   const pathname = usePathname();
   const onAuth = pathname === '/onboarding';

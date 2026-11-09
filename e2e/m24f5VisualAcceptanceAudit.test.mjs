@@ -1,4 +1,4 @@
-// M24F.5 — static visual-acceptance gates. No browser: the source tree is the
+// Static visual-acceptance gates. No browser: the source tree is the
 // evidence for what a root screen may render. Run from e2e/:
 //   node m24f5VisualAcceptanceAudit.test.mjs
 //
@@ -55,7 +55,7 @@ ok(/<TimelineItem[^>]*testID="home-recent-row"/.test(home) && !/activityRow|acti
 ok(/homeClubsWithinOne|homeClubsWithinMany/.test(home) && !/· 50 km`/.test(home), 'Home: "1 club within 50 km" — never the cryptic "1 · 50 km"');
 const activity = strip(read('scoutbox-player/src/app/activity.tsx'));
 ok(/<TimelineItem/.test(activity) && /activity-group-\$\{g\.key\}/.test(activity), 'Activity: grouped Today / This week / Earlier, timeline rows');
-// TimelineItem moved to components/Timeline.tsx in the approved Player; ui.tsx re-exports it.
+// TimelineItem lives in components/Timeline.tsx; ui.tsx re-exports it.
 const ui = read('scoutbox-player/src/components/ui.tsx'); const timeline = read('scoutbox-player/src/components/Timeline.tsx');
 ok(/export \{ EventRow, TimelineItem \} from '\.\/Timeline'/.test(ui) && /export function TimelineItem/.test(timeline) && !/borderBottomWidth/.test(timeline.slice(timeline.indexOf('export function TimelineItem'), timeline.indexOf('export function EventRow'))), 'TimelineItem: no dividers');
 
@@ -78,8 +78,8 @@ const offer = strip(read('scoutbox-player/src/components/M23Offer.tsx'));
 ok(!/<FactRow k=\{pt\('offerStatus'\)\}/.test(offer) && /humanDate\(cur\.terms\.startDate\)\} – \$\{humanDate\(cur\.terms\.endDate\)\}/.test(offer), 'Offer: status on its own line; term dates as a range');
 ok(/testID=\{`offer-terms-\$\{o\.id\}`\}/.test(offer) && /testID=\{`offer-not-signature-\$\{o\.id\}`\}/.test(offer), 'Offer: "View terms" holds the detail; "Offer acceptance is not a signature." stays on screen');
 const inbox = strip(read('scoutbox-player/src/app/(tabs)/inbox.tsx'));
-// The approved Player (99de825) heads a trial thread and a trial request with the shared InvitationCard
-// (docs/design.md, Player › Invitations) instead of M24F.5's warm edge and kicker. What remains: no filled yellow card.
+// The approved Player heads a trial thread and a trial request with the shared InvitationCard
+// (docs/design.md, Player › Invitations), not a warm edge and kicker. What remains: no filled yellow card.
 ok(!/trialBg/.test(inbox) && /<InvitationCard[^\n]*testID="thread-trial-card"/.test(inbox) && /<InvitationCard[^\n]*testID=\{trial \? 'trial-card'/.test(inbox), 'Trial thread: the shared invitation card — no filled yellow card');
 
 // ------------------------------------------------------------ 4. Director Dashboard, Nobody Missed

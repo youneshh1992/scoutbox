@@ -1,4 +1,4 @@
-// M24C — the approved Player components, one for one with the reference
+// The approved Player components, one for one with the reference
 // phone screens in ScoutBox-Design-Explorer.html (Home, Football Passport,
 // Box Cam, Messages). Every size below is the reference's computed value at
 // phone width; every colour comes from the active palette so light and dark
@@ -149,8 +149,8 @@ export function HistoryList({ rows, testID }: { rows: { index: string; title: st
   );
 }
 
-/** `.p-training-visual` — the Box Cam hero: a glyph in a disc, a title and a line on the soft green (M24F: no pitch drawing). */
-export function TrainingVisual({ title, sub, bare }: { title: string; sub: string; /** M24F.4 — the visual alone; the row under it carries the words */ bare?: boolean }) {
+/** `.p-training-visual` — the Box Cam hero: a glyph in a disc, a title and a line on the soft green (no pitch drawing). */
+export function TrainingVisual({ title, sub, bare }: { title: string; sub: string; /** The visual alone; the row under it carries the words */ bare?: boolean }) {
   const s = useStyles(makeStyles);
   const c = useColors();
   return (
@@ -209,7 +209,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   count: { width: 22, height: 22, borderRadius: 11, backgroundColor: c.count, alignItems: 'center', justifyContent: 'center' },
   countText: { color: c.text, fontSize: 11 },
   iconTile: { backgroundColor: c.iconBg, borderRadius: 16, padding: 10, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
-  // M24F — an attention row is a row, not a card: hairline-separated, full width
+  // An attention row is a row, not a card: hairline-separated, full width
   row: { flexDirection: 'row', alignItems: 'center', gap: 12, width: '100%', paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: c.line },
   rowTitle: { color: c.text, fontSize: 14.5, fontWeight: '600', lineHeight: 19 },
   rowSub: { color: c.muted, fontSize: 12.5, lineHeight: 17, marginTop: 3 },

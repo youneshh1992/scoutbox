@@ -1,10 +1,8 @@
 /**
- * Verification claims (S10a) get their own typed tables: claims (codes, evidence links), the event log, evidence, tokens,
- * verification administrators, root transfers, root applications (codes), disputes, references, squad invitations by
- * code, conflict declarations, domain requests (codes), an organisation's verified domains and the M14 boot marker.
- * REGISTERED in DATA_MIGRATIONS. `up()` is the DDL. (The organisation facet `verification` became these tables: its
- * revokedAt is the orgs.verification_revoked_at column, read as `verificationRevokedAt`; its domains are
- * org_verified_domains rows. Since S14g the organisations have no facet storage or verification_org_type column.)
+ * Verification claims: claims (codes, evidence links), the event log, evidence, tokens, verification administrators,
+ * root transfers, root applications (codes), disputes, references, squad invitations by code, conflict declarations,
+ * domain requests (codes), an organisation's verified domains and the verification boot marker. An organisation's
+ * revocation is the orgs.verification_revoked_at column.
  */
 import { migrationApplied } from '../database.mjs';
 import { OPPORTUNITIES_CAMPAIGNS_MIGRATION } from '../opportunitiesCampaigns.mjs';

@@ -1,4 +1,4 @@
-// M12 player/guardian data surface: evidence passport, published feedback,
+// Player/guardian data surface: evidence passport, published feedback,
 // development objectives, opportunity board, campaigns, trial safety packs,
 // squad invites, post-signing follow-ups, resumable uploads, captions.
 // Live implementation shares httpClient's bearer tokens; the demo mirror
@@ -40,7 +40,7 @@ export interface CampaignView {
   drills: { name: string; instructions: string; recording: Record<string, string> }[];
   mySubmission: { attempts: { id: string; drillName: string; status: string; fileChecks: { passed: boolean; issues: string[] }; review: { reasons: string | null; kind?: string } | null }[] } | null;
 }
-// M23 P4B — the family's view of the Trial workflow (the shared operational
+// The family's view of the Trial workflow (the shared operational
 // edge): state, the confirmed sessions with the address and instructions,
 // whether a revision awaits their answer, and the completion state. Never a
 // case id, a note, an observation or an assessment. A minor's own device
@@ -79,7 +79,7 @@ export interface SquadInvite { id: string; orgName: string; playerName: string; 
 export interface FollowUpView { id: string; playerId: string; orgName: string; milestone: string; dueAt: number; outcomeState: string; report: { registrationStatus: string; matchesPlayed: number | null; progression: string | null } | null }
 export interface UploadSession { id: string; chunkSize: number; totalChunks: number; received: number[]; status: string; finalisedMediaId: string | null }
 
-// M23 P6 — the recipient's view of the canonical Offer: the ISSUED revisions
+// The recipient's view of the canonical Offer: the ISSUED revisions
 // exactly as the club issued them, the recipient message, the expiry, the
 // documents by their Offer id. Never the club's internal note, never a
 // decision or transaction reference. Accepting is the recipient's own act and
@@ -101,7 +101,7 @@ export interface FamilyOfferHistory { id: string; at: number; action: string; by
 export interface OfferAnswerResult { offer: FamilyOffer; lifecycle: unknown; signing?: { created: false; note: string }; idempotent?: boolean }
 export interface OfferDocumentFile { document: { id: string; label: string | null; mime: string | null; bytes: number | null; filename: string | null }; file: { mime: string; base64: string } | null }
 
-// M23 P7 — the recipient's view of a signing package: the presented revisions
+// The recipient's view of a signing package: the presented revisions
 // only, the document by its digest, the parties by kind, and what (if
 // anything) is the player's next act. Never the club's note, never a draft.
 export type SigningStatus = 'DRAFT' | 'READY' | 'IN_PROGRESS' | 'COMPLETED' | 'CANCELLED' | 'VOIDED' | 'EXPIRED' | 'SUPERSEDED';
@@ -123,7 +123,7 @@ export interface FamilySigningHistory { id: string; at: number; action: string; 
 export interface SigningDocumentFile { document: FamilySigningDocument; file: { mime: string; base64: string } | null }
 export interface SigningCompleteResult { signing: FamilySigning; idempotent?: boolean }
 
-// M23 P8 — the player-facing journey. Only stages that involve the recipient; never a club's internal state.
+// The player-facing journey. Only stages that involve the recipient; never a club's internal state.
 export type PlayerJourneyStage = 'contacted' | 'trial_invited' | 'trial_scheduled' | 'trial_completed' | 'offer_received' | 'offer_accepted' | 'offer_declined' | 'signing' | 'signed' | 'none';
 export type PlayerNextActionCode = 'RESPOND_TO_CONTACT' | 'RESPOND_TO_TRIAL_INVITATION' | 'CONFIRM_TRIAL_SCHEDULE' | 'RESPOND_TO_OFFER' | 'SIGN' | 'NONE';
 export interface PlayerJourney {
@@ -161,7 +161,7 @@ export interface PlayerM12 {
   respondFollowUp(playerId: string, followUpId: string, agree: boolean, note?: string, experienceRating?: number): Promise<void>;
   setFootballCategory(playerId: string, category: string | null): Promise<void>;
   setCaptions(playerId: string, mediaId: string, vtt: string): Promise<void>;
-  // Resumable uploads (F12A). No success is reported before finalisation.
+  // Resumable uploads. No success is reported before finalisation.
   startUpload(playerId: string, input: { size: number; mime: string; title: string; sha256?: string }): Promise<UploadSession>;
   putChunk(playerId: string, uploadId: string, index: number, base64: string): Promise<{ received: number; totalChunks: number; complete: boolean }>;
   finaliseUpload(playerId: string, uploadId: string): Promise<{ mediaId: string }>;
@@ -191,17 +191,17 @@ export interface PlayerM12 {
   gRespondSquadInvite(guardianId: string, inviteId: string, accept: boolean): Promise<void>;
   gFollowUps(guardianId: string): Promise<FollowUpView[]>;
   gRespondFollowUp(guardianId: string, followUpId: string, agree: boolean, note?: string): Promise<void>;
-  // M23 P6 — Offers, the recipient's side. A guardian route acts only where the server addressed the revision to that guardian.
+  // Offers, the recipient's side. A guardian route acts only where the server addressed the revision to that guardian.
   getOffers(playerId: string): Promise<FamilyOffer[]>;
   getOffer(playerId: string, offerId: string): Promise<{ offer: FamilyOffer; history: FamilyOfferHistory[] }>;
   acceptOffer(playerId: string, offerId: string, revisionId: string, clientKey: string): Promise<OfferAnswerResult>;
   declineOffer(playerId: string, offerId: string, revisionId: string, clientKey: string, reason?: string): Promise<OfferAnswerResult>;
   shareOfferWithAgent(playerId: string, offerId: string, share: boolean, agreementId?: string): Promise<{ offer: FamilyOffer }>;
   getOfferDocument(playerId: string, offerId: string, docId: string): Promise<OfferDocumentFile>;
-  // M23 P8 — the recipient's journeys, one per club that reached them (server-derived stage and next action).
+  // The recipient's journeys, one per club that reached them (server-derived stage and next action).
   getJourneys(playerId: string): Promise<PlayerJourney[]>;
   gJourneys(guardianId: string, childId: string): Promise<PlayerJourney[]>;
-  // M23 P7 — signing (player only; the guardian pathway is closed and lists nothing)
+  // Signing (player only; the guardian pathway is closed and lists nothing)
   getSignings(playerId: string): Promise<FamilySigning[]>;
   getSigning(playerId: string, signingId: string): Promise<{ signing: FamilySigning; history: FamilySigningHistory[] }>;
   getSigningDocument(playerId: string, signingId: string, revisionId?: string): Promise<SigningDocumentFile>;
@@ -227,7 +227,7 @@ const live: PlayerM12 = {
   addObjectiveProgress: (pid, oid, note) => post(`/player/objectives/${oid}/progress`, pid, { note }),
   shareObjective: (pid, oid, orgId, enabled) => post(`/player/objectives/${oid}/share`, pid, { orgId, enabled }),
   requestReassessment: (pid, oid) => post(`/player/objectives/${oid}/reassessment`, pid),
-  // The board pages by cursor (S13d): this reads the first page; "load more" (nextCursor) is still needed.
+  // The board pages by cursor: this reads the first page; "load more" (nextCursor) is still needed.
   getBoard: (pid) => req('/player/opportunity-board', pid),
   applyToOpportunity: (pid, oid, note) => post(`/player/opportunities/${oid}/apply`, pid, { note }),
   withdrawApplication: (pid, aid) => post(`/player/applications/${aid}/withdraw`, pid),
@@ -265,7 +265,7 @@ const live: PlayerM12 = {
   gCreateObjective: (gid, cid, feedbackId, texts) => post(`/guardian/children/${cid}/objectives`, gid, { feedbackId, objectives: texts.map((t) => ({ text: t })) }),
   gShareObjective: (gid, oid, orgId, enabled) => post(`/guardian/objectives/${oid}/share`, gid, { orgId, enabled }),
   gRequestReassessment: (gid, oid) => post(`/guardian/objectives/${oid}/reassessment`, gid),
-  // First page only (S13d): "load more" (nextCursor) is still needed.
+  // First page only: "load more" (nextCursor) is still needed.
   gBoard: (gid, cid) => req(`/guardian/children/${cid}/opportunity-board`, gid),
   gApply: (gid, cid, oid, note) => post(`/guardian/children/${cid}/opportunities/${oid}/apply`, gid, { note }),
   gApplications: (gid) => req('/guardian/applications', gid),
@@ -285,7 +285,7 @@ const live: PlayerM12 = {
   gRespondSquadInvite: (gid, iid, accept) => post(`/guardian/squad-invites/${iid}/respond`, gid, { accept }),
   gFollowUps: (gid) => req('/guardian/followups', gid),
   gRespondFollowUp: (gid, fid, agree, note) => post(`/guardian/followups/${fid}/respond`, gid, { agree, note }),
-  // ---- M23 P6
+  // ---- Offers, signing and the journey
   getOffers: async (pid) => (await req<{ items: FamilyOffer[] }>('/player/offers', pid)).items,
   getOffer: (pid, oid) => req(`/player/offers/${oid}`, pid),
   acceptOffer: (pid, oid, revisionId, clientKey) => post(`/player/offers/${oid}/accept`, pid, { revisionId, clientKey }),

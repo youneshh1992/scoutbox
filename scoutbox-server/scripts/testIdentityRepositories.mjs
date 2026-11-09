@@ -1,4 +1,4 @@
-// The player and guardian repositories (repositories/identity.mjs; explicit since S14h), exercised on temporary
+// The player and guardian repositories (repositories/identity.mjs), exercised on temporary
 // databases through the real data layer (attachDataLayer runs the registered migrations and attaches every
 // repository). Nothing here touches DATA_DIR. Synthetic records only; the clock is fixed where age matters.
 // Run with: npm test
@@ -46,7 +46,7 @@ test('authority and initialisation: the repositories attach only behind the cuto
   const s = new DatabaseSync(':memory:'); s.exec('PRAGMA foreign_keys = ON;');
   runDataMigrations(s, DATA_MIGRATIONS.filter((m) => /^000[1-4]_/.test(m.id)));
   assert.throws(() => createIdentityRepositories({ sqlite: s }), /cutover record 0005_core_identity_live is missing/);
-  assert.equal(s.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE name IN ('players', 'guardians', 'guardian_children')").get().n, 0, 'S14h: 0002 creates no identity shadow');
+  assert.equal(s.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE name IN ('players', 'guardians', 'guardian_children')").get().n, 0, '0002 creates no identity shadow');
   const t = boot();
   assert.equal(t.layer.firstInstallation, true);
   assert.deepEqual(t.layer.boot.identity, { engine: 'sqlite', players: 5, guardians: 3, links: 5, imported: 8 });
@@ -255,7 +255,7 @@ test('scans: visibleCandidates applies the under-18 wall (by the country\'s age 
   assert.deepEqual(ids('org-agency'), adultsAll, 'an agency sees adults only (the KR 18-year-old is a minor)');
   assert.deepEqual(ids('org-unverified'), adultsAll, 'an unverified club too');
   assert.deepEqual(ids('org-pro'), [...adultsAll, 'pl-child1', 'pl-child2', 'pl-kr'].sort(), 'a verified club may see minors');
-  assert.deepEqual(ids('org-grass'), ['pl-adult', 'pl-gb18'], 'a grassroots club: not pro, within 50 km of its ground, exactly (S14i: Manchester is inside the index box but beyond the radius)');
+  assert.deepEqual(ids('org-grass'), ['pl-adult', 'pl-gb18'], 'a grassroots club: not pro, within 50 km of its ground, exactly (Manchester is inside the index box but beyond the radius)');
   assert.deepEqual(ids('org-pro', { position: 'CB' }), ['pl-gb18']);
   assert.deepEqual(ids('org-pro', { ageBelow: 18 }), ['pl-child1', 'pl-child2'].sort(), 'ageBelow is exactly ageOn\'s rule');
   assert.deepEqual(ids('org-pro', { ageAtLeast: 18, ageBelow: 19 }), ['pl-gb18', 'pl-kr'].sort());
@@ -265,7 +265,7 @@ test('scans: visibleCandidates applies the under-18 wall (by the country\'s age 
   t.close();
 });
 
-test('S14i: players.profile_signal is computeTrustScore of the record after every kind of write (create, update, addItem, setItems, the seed import), and is never written by update', () => {
+test('players.profile_signal is computeTrustScore of the record after every kind of write (create, update, addItem, setItems, the seed import), and is never written by update', () => {
   const t = boot();
   const check = (label) => { for (const p of t.players.list({})) assert.equal(t.get('SELECT profile_signal AS v FROM players WHERE id = ?', p.id).v, computeTrustScore(p), `${label}: ${p.id}`); };
   check('the seed import');
@@ -280,11 +280,11 @@ test('S14i: players.profile_signal is computeTrustScore of the record after ever
   t.players.setItems('pl-new', 'media', []);
   check('setItems (clips cleared)');
   assert.throws(() => t.players.update('pl-new', (d) => { d.profileSignal = 99; }), /unknown field profileSignal/, 'the figure is not a field of the record');
-  assert.throws(() => t.players.addItem('pl-new', 'media', { id: 'med-bad', title: 'Bad', kind: 'video', uploadedAt: '1 May 2026' }), /uploadedAt is not a UTC instant/, 'S14i: a clip\'s upload time is an ISO instant');
+  assert.throws(() => t.players.addItem('pl-new', 'media', { id: 'med-bad', title: 'Bad', kind: 'video', uploadedAt: '1 May 2026' }), /uploadedAt is not a UTC instant/, 'a clip\'s upload time is an ISO instant');
   t.close();
 });
 
-test('S14i: the directory page is exact and in its declared order: the whole visibility rule in SQL (the wall, the 50 km radius on both sides of ±180°, the blocks), the search over name, country and an adult\'s city (as JavaScript lowers text), and cursor pages that lose and repeat nobody at any size', () => {
+test('the directory page is exact and in its declared order: the whole visibility rule in SQL (the wall, the 50 km radius on both sides of ±180°, the blocks), the search over name, country and an adult\'s city (as JavaScript lowers text), and cursor pages that lose and repeat nobody at any size', () => {
   const t = boot();
   for (let i = 0; i < 23; i += 1) t.players.create({ id: `pl-d${String(i).padStart(2, '0')}`, name: `Dir ${i}`, dob: '1998-02-02', country: i % 2 ? 'GB' : 'ES', city: i === 4 ? 'Ávila' : null, academyPlus: i % 5 === 0, identityVerified: i % 3 === 0, firstTeamSeeker: i % 4 === 0, location: { lat: 53.8 + i * 0.01, lng: -1.55 } });
   t.layer.safetyAudit.blocks.add({ id: 'blk-1', playerId: 'pl-d07', orgId: 'org-pro', by: 'player', reason: 'synthetic', ts: NOW });
@@ -315,7 +315,7 @@ test('S14i: the directory page is exact and in its declared order: the whole vis
   t.close();
 });
 
-test('S14i: the light scan, the Film Room clip page, the fixture graph, the feed\'s recent rows and the drill bests read what the decoded records say', () => {
+test('the light scan, the Film Room clip page, the fixture graph, the feed\'s recent rows and the drill bests read what the decoded records say', () => {
   const t = boot();
   const pro = orgOf(t, 'org-pro');
   const light = []; t.players.scanLight({ visibleTo: pro }, (p) => { light.push(p); });

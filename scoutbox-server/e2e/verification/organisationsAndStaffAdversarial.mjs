@@ -1,6 +1,4 @@
-// M14.1 adversarial suite — hardening-pass regression/abuse tests.
-// Every finding from the independent architectural review gets negative
-// tests proving the fix: root identity linking, licence assurance,
+// Verification adversarial battery: negative tests for root identity linking, licence assurance,
 // removed-account suppression, invite recipient binding, evidence content
 // signatures, identity provenance, reviewer attribution, authority
 // revocation semantics and effective dashboard counts.
@@ -124,7 +122,7 @@ section('U4 — subjectRemoved + peekToken primitives');
   ok(alive.badges.some((b) => b.current), 'active account: current badge displays');
   ok(!removed.badges.some((b) => b.current), 'subjectRemoved: NO current badge survives the projector');
   ok(removed.badges.some((b) => b.historical), 'closed historical periods remain as history (policy: truth preserved)');
-  const fdb = { verTokens: [] }; const ts = arrayTokenStore(fdb.verTokens); // S10a: the token functions take a store (the server's is the repository)
+  const fdb = { verTokens: [] }; const ts = arrayTokenStore(fdb.verTokens); // the token functions take a store (the server's is the repository)
   const nid = (() => { let n = 0; return (p) => `${p}-${++n}`; })();
   const secret = mintToken(ts, nid, { purpose: 'player_invite', subjectId: 'alice' });
   ok(peekToken(ts, { purpose: 'player_invite', secret }).token && !fdb.verTokens[0].usedAt, 'peek validates WITHOUT consuming');
@@ -190,9 +188,8 @@ let provisionedSamId;
   ok(r.body.candidates.some((c) => c.id === sam.userId && c.matched === 'name_similarity_only'), 'the name match is surfaced as a review candidate only');
   r = await j('POST', `/admin/verification/root-requests/${req1}/approve`, { reason: 'x', linkUserId: 'usr-does-not-exist' }, null, A);
   ok(r.status === 404 && r.body.error === 'LINK_USER_NOT_FOUND', 'explicit selection of a non-existent account refused');
-  // S14f (Founder): staff sign in by name, so a second "Sam Cole" account is refused — even when T&S provisions it
-  // deliberately — and nothing is written. Rewritten: this used to provision a same-named account that could never
-  // sign in by name.
+  // Product decision (Founder): staff sign in by name, so a second "Sam Cole" account is refused — even when T&S
+  // provisions it deliberately — and nothing is written.
   r = await j('POST', `/admin/verification/root-requests/${req1}/approve`, { reason: 'new person, provisioned deliberately', provisionNewUser: true }, null, REV);
   ok(r.status === 409 && r.body.error === 'STAFF_NAME_TAKEN', 'provisioning a new account with an existing staff member\'s name is refused');
   r = await j('POST', `/admin/verification/root-requests/${req1}/reject`, { reason: 'please re-apply with a name that tells you apart from your colleague' }, null, A);
@@ -287,7 +284,7 @@ section('H4 — removed accounts lose current public verification immediately');
   await verifyAffiliation(eve, 'Analyst', 'eve.adams', { action: 'mark_former', validUntil: Date.now() });
   let evePub = await j('GET', `/org/verification/public/user/${eve.userId}`, undefined, alex.token);
   ok(evePub.body.badges.some((b) => b.historical) && !evePub.body.badges.some((b) => b.current), 'closed period reads as history');
-  // Remove both accounts (existing M12 structural removal).
+  // Remove both accounts (the existing structural removal).
   let r = await j('POST', `/org/staff/${tom.userId}/remove`, {}, maria.token);
   ok(r.status === 200, 'account removed via the existing staff-removal route');
   await j('POST', `/org/staff/${eve.userId}/remove`, {}, maria.token);
@@ -402,7 +399,7 @@ section('H7 — dashboard counts follow the effective engine');
   ok(umaBack.body.badges.some((b) => b.organisation?.id === 'org-eastport' && b.current), 'lifting the suspension restores display — nothing was destroyed');
 }
 
-section('H8 — the legacy verification toggle refuses junk instead of coercing it (S14g)');
+section('H8 — the legacy verification toggle refuses junk instead of coercing it');
 {
   const before = (await j('GET', '/admin/clubs', undefined, null, A)).body.items.find((o) => o.id === 'org-harbour');
   for (const [body, field] of [[{ verified: 'yes' }, 'verified'], [{ suspended: 'false' }, 'suspended'], [{ safeguardingContractSigned: 1 }, 'safeguardingContractSigned'], [{ verifiedDomain: { d: 1 } }, 'verifiedDomain']]) {

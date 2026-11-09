@@ -1,14 +1,8 @@
-// S13a — import batches, prospects, identity reviews, API keys, webhook endpoints and webhook deliveries as typed
-// tables with explicit writes (repositories/integrations.mjs, migration 0034). What this suite proves: the migration
-// creates the STRICT tables (no JSON column), empty; the typers refuse junk naming the record and field (an unknown
-// scope or event, a mapping to a column the CSV lacks, a summary that does not count the rows, a payload that does not
-// fit its event); a batch keeps its header, mapping, rows, messages and history as rows and reads back the literal the
-// route wrote; a commit writes its prospects, reviews and history at once, and one live prospect per provider and
-// external id holds (a reversal frees the identity); a review's record is its batch row's; a key is found by its hash
-// only while live and records its use; a rotation keeps the old secret; a delivery's attempts are numbered rows and the
-// due query finds only open ones; a rolled-back unit leaves nothing; and a fixture written through the repository is
-// typed, names a missing reference and reads back what it wrote. Temporary databases only; nothing touches DATA_DIR.
-// Run with: npm test
+// Import batches, prospects, identity reviews, API keys, webhook endpoints and webhook deliveries
+// (repositories/integrations.mjs, migration 0034): the STRICT tables, the typers' refusals, a batch and its commit,
+// one live prospect per provider and external id (a reversal frees the identity), a key found by its hash only while
+// live, a rotation keeping the old secret, numbered delivery attempts, units of work and fixtures. Temporary databases
+// only; nothing touches DATA_DIR. Run with: npm test
 
 import assert from 'node:assert/strict';
 import fs from 'node:fs';

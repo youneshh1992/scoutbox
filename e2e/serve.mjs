@@ -16,7 +16,7 @@ const PORT = Number(process.env.PORT || 8099);
 // will serve. A host left running from an earlier session keeps answering with
 // the marker of the bundles it started with, which is exactly what lets a
 // caller tell "the demo host is up" apart from "the demo host is up and
-// serving what I just built" (§76).
+// serving what I just built".
 const { marker: BUILD_MARKER } = buildMarker({ dist: DIST });
 const FILES = {
   '/club/': 'scoutbox-club-demo.html',

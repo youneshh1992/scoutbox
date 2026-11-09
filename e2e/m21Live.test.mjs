@@ -1,4 +1,4 @@
-// M21 LIVE browser journeys — the Development Hub, driven through the real
+// LIVE browser journeys — the Development Hub, driven through the real
 // player app and the real Pro workspace against a real server.
 //
 // H1   an adult player creates a plan and a goal; reload; it persists
@@ -123,13 +123,13 @@ const watch = (page, who) => {
   return page;
 };
 
-// P2.5: the Development section sits on Football › Development. Its root
+// The Development section sits on Football › Development. Its root
 // carries aria-label="Development" only once a plan exists; before that the
 // empty / loading state renders the section title alone. Wait for the
 // section TITLE (a second "Development" text beside the page tab), whatever
 // the state.
 const waitDev = (p) => p.waitForFunction(
-  () => [...document.querySelectorAll('div, h1, h2, h3')].filter((d) => d.children.length === 0 && d.textContent.trim() === 'Development').length >= 2, // M24F: section titles are real headings (role="heading")
+  () => [...document.querySelectorAll('div, h1, h2, h3')].filter((d) => d.children.length === 0 && d.textContent.trim() === 'Development').length >= 2, // section titles are real headings (role="heading")
   null, { timeout: 30000 },
 );
 // ---------------------------------------------------------------- the player
@@ -171,7 +171,7 @@ async function reopenYou(p) {
   await p.waitForTimeout(1200);
 }
 
-// M24F.4 — the Development root is four rows; the goal cards, the plan
+// The Development root is four rows; the goal cards, the plan
 // switcher and the forms live on the Goals page behind "Current focus".
 const devText = (p) => p.locator('[data-testid="dev-page-goals"], [aria-label="Development"]').first().innerText().catch(() => '');
 async function openGoals(p) {
@@ -193,7 +193,7 @@ async function backToRoot(p) {
  * switcher.
  */
 async function selectPlan(p, title) {
-  await openGoals(p); // M24F.4 — the switcher sits on the Goals page
+  await openGoals(p); // the switcher sits on the Goals page
   const section = p.locator('[data-testid="dev-page-goals"]').first();
   await section.waitFor({ timeout: 30000 });
   for (let i = 0; i < 30; i++) {
@@ -205,7 +205,7 @@ async function selectPlan(p, title) {
   for (let i = 0; i < 25; i++) {
     await p.waitForTimeout(400);
     const lines = (await section.innerText().catch(() => '')).trimStart().toUpperCase().split('\n').map((l) => l.trim());
-    // M24A: section headings are sentence case now; M24F.4: the page reads back-link, "My goals", then the plan name — the plan name must still lead the page.
+    // Section headings are sentence case; the page reads back-link, "My goals", then the plan name — the plan name must still lead the page.
     if (lines.slice(0, 4).includes(title.toUpperCase())) return true;
   }
   return false;
@@ -214,13 +214,13 @@ async function selectPlan(p, title) {
 // ---------------------------------------------------------------------- H1
 {
   await player.getByText('Start a plan', { exact: true }).click();
-  await player.locator('[data-testid="dev-root"]').waitFor({ timeout: 20000 }); // M24F.4 — the four-row root
+  await player.locator('[data-testid="dev-root"]').waitFor({ timeout: 20000 }); // the four-row root
   say('H1: the player starts a plan from the empty state');
-  await player.locator('[data-testid="dev-about"] > [role="button"]').first().click().catch(() => {}); // M24F.5 — the counts' note sits in the root's one "About this plan"
+  await player.locator('[data-testid="dev-about"] > [role="button"]').first().click().catch(() => {}); // the counts' note sits in the root's one "About this plan"
   const body = await seeDev(player);
   ok(/active goals?/i.test(body) && /no overall figure/i.test(body),
     'H1: the overview shows counts, and says out loud that there is no overall figure');
-  await openGoals(player); // M24F.4 — the plan and its goals sit behind "Current focus"
+  await openGoals(player); // the plan and its goals sit behind "Current focus"
   await player.waitForSelector('text=/My development plan/', { timeout: 20000 });
 
   await player.fill('[aria-label="What do you want to work on?"]', 'Improve weak-foot passing consistency');
@@ -229,14 +229,14 @@ async function selectPlan(p, title) {
   say('H1: the player adds a goal');
 
   await reopenYou(player);
-  await openGoals(player); // M24F.4 — the root names the current focus only; every goal is on the Goals page
+  await openGoals(player); // the root names the current focus only; every goal is on the Goals page
   await player.waitForSelector('text=Improve weak-foot passing consistency', { timeout: 30000 });
   say('H1: after a reload the plan and its goal are still there — this is server state, not a draft');
 }
 
 // ---------------------------------------------------------------------- H2
 {
-  await openGoals(player); // M24F.4
+  await openGoals(player);
   await player.getByText('Add action', { exact: true }).first().click();
   await player.fill('[aria-label="What is the next concrete step?"]', 'Two weak-foot passing sessions');
   await player.getByText('Add', { exact: true }).first().click();
@@ -269,7 +269,7 @@ async function selectPlan(p, title) {
   await j('POST', `/player/combine/attempts/${attempt.id}/complete`, { nonce }, KOLA);
 
   await reopenYou(player);
-  await openGoals(player); // M24F.4
+  await openGoals(player);
   await player.getByText('Link evidence', { exact: true }).first().click();
   await player.waitForSelector('text=Link', { timeout: 20000 });
   await player.getByText('Link', { exact: true }).first().click();
@@ -290,12 +290,12 @@ async function selectPlan(p, title) {
     target: { sourceType: 'combine_attempt', protocolId: 'combine-box-control-60', operator: 'gte', value: 30 },
   }, KOLA);
   await reopenYou(player);
-  await openGoals(player); // M24F.4
+  await openGoals(player);
   const body = await seeDev(player);
   ok(/Box Control 60 ≥ 30 seconds/.test(body), 'H7: the objective target states itself in words');
   ok(/No current valid measurement/.test(body),
     'H7: a simulated 42s does not satisfy a production target of ≥30s');
-  await player.getByText('About this target', { exact: true }).first().click().catch(() => {}); // M24F.3 — the explanation sits behind About
+  await player.getByText('About this target', { exact: true }).first().click().catch(() => {}); // the explanation sits behind About
   ok(/simulated or test result cannot satisfy a target/i.test(await player.locator('body').innerText()), 'H7: and the screen says exactly why');
   ok(!FORBIDDEN.some((re) => re.test(denials(body))), 'H7: no Development Score appears anywhere on the player screen');
 }
@@ -341,7 +341,7 @@ const MARIA = await maria.evaluate(() => { try { return JSON.parse(localStorage.
 ok(!!MARIA, 'a Head of Recruitment is signed in to the Pro workspace');
 
 {
-  // §54 — no new top-level destination.
+  // No new top-level destination.
   const sidebar = await maria.locator('nav.sidebar').innerText();
   ok(!/^Development$/m.test(sidebar), 'H4: Development is not a new sidebar section — it lives inside a player');
   await openPlayerDrawer(maria);
@@ -446,7 +446,7 @@ let clubPlanId = null; let clubGoalId = null;
   ok(!/\bmeasured\b.*\d/i.test(clubPanel.split('Evidence unavailable')[1] ?? ''), 'H8: the withdrawn citation carries no measurement');
 
   await reopenYou(player);
-  await openGoals(player); // M24F.4
+  await openGoals(player);
   const body = await player.locator('body').innerText();
   ok(/Evidence unavailable|Not available/.test(body), 'H8: and the player sees the same, on the plan the club shared with them');
   ok(!FORBIDDEN.some((re) => re.test(denials(body))), 'H8: still no score anywhere');
@@ -551,7 +551,7 @@ let clubPlanId = null; let clubGoalId = null;
     if (txt && !/Loading your development plan/.test(txt) && /Current focus|MY GOALS|No development plan/i.test(txt)) break;
     await small.waitForTimeout(500);
   }
-  // M24F.4 — the root is four rows; the goals and the history are each one tap deep. Read all three.
+  // The root is four rows; the goals and the history are each one tap deep. Read all three.
   const rootText = await small.locator('body').innerText();
   await openGoals(small);
   const goalsText = await small.locator('body').innerText();

@@ -1,7 +1,7 @@
 /**
- * S14j — the match facts: a projection of each live player's facts that matching (M19), the Dynamic Watchlists and
- * Nobody Missed (M18) test, kept in tables so those reads are SQL queries over the visible players instead of a
- * per-player assembly in code (migration `0040_match_facts`, docs/architecture/migration.md §4.6).
+ * The match facts: a projection of each live player's facts that matching, the Dynamic Watchlists and Nobody Missed
+ * test, kept in tables so those reads are SQL queries over the visible players instead of a per-player assembly in
+ * code.
  *
  * WHAT IS STORED: only what the `players` row cannot answer by itself. Name, age, level, foot and the Grassroots
  * distance stay on `players` (the visibility query already reads that row). Here, per player:
@@ -19,7 +19,7 @@
  * database.mjs, the builder registered by the discovery domain), so a committed write never leaves a stale row. A
  * change to an organisation's standing (verified, suspended, revoked) marks the players linked to it. Time-only
  * changes are the sweep's (`markDue`, run at boot and every minute). The facts are derived: they are never a source,
- * never in a snapshot, and a policy change rebuilds them all (`policyKey` in meta).
+ * and a policy change rebuilds them all (`policyKey` in meta).
  *
  * References: `player_id` → players ON DELETE CASCADE (a projection of the player row, never outliving it); the
  * child rows cascade from their facts row. The dirty markers carry no key (a trigger may mark an id that is not a
@@ -146,7 +146,7 @@ END;`);
 /** The policy the stored facts were derived under: a change rebuilds every row at boot. */
 export const matchFactsPolicyKey = ({ trustPolicyVersion, simulatedEvidence }) => `facts1|trust${trustPolicyVersion}|sim${simulatedEvidence ? 1 : 0}`;
 
-/** A name's sort key (S14j `name_key`): case and accents folded, so "Émile" sorts with "Emile"; then code-point order. */
+/** A name's sort key (`name_key`): case and accents folded, so "Émile" sorts with "Emile"; then code-point order. */
 export function foldName(v) { return typeof v === 'string' ? v.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase() : v; }
 
 // ------------------------------------------------------------------ typing a facts record (from the builder)

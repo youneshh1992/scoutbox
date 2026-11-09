@@ -1,7 +1,7 @@
-// M22 — the real-world validation record (§38–§42).
+// The real-world validation record.
 //
 // This is the hard blocker, and it is deliberately the most boring file in
-// the milestone.
+// the engine.
 //
 // The failure mode it exists to prevent is specific and very easy to fall
 // into: synthetic fixtures all pass, the numbers look excellent, someone
@@ -11,11 +11,11 @@
 // still be false.
 //
 // So real-world validation is not a boolean and not an environment variable
-// (§41). It is a VERSIONED RECORD that must name what was validated, with
-// which engine, against which dataset, and who released it. A future
-// milestone enables production by supplying such a record. Nothing else can.
+// either. It is a VERSIONED RECORD that must name what was validated, with
+// which engine, against which dataset, and who released it. A
+// release enables production by supplying such a record. Nothing else can.
 //
-// §40: this can never come from a client, a request body, or a provider
+// This can never come from a client, a request body, or a provider
 // session payload. It is read from server-side release configuration only.
 
 import { CV_ENGINE_VERSION, BOX_CAM_CV_POLICY_VERSION, CANDIDATE_PROTOCOLS } from './policy.mjs';
@@ -23,7 +23,7 @@ import { CV_ENGINE_VERSION, BOX_CAM_CV_POLICY_VERSION, CANDIDATE_PROTOCOLS } fro
 export const VALIDATION_STATUSES = Object.freeze(['not_completed', 'in_progress', 'failed', 'passed']);
 
 /**
- * The fields a record MUST carry to be considered at all (§41).
+ * The fields a record MUST carry to be considered at all.
  * A record missing any of these is not a weak record — it is not a record.
  */
 export const REQUIRED_RECORD_FIELDS = Object.freeze([
@@ -43,10 +43,10 @@ export const REQUIRED_RECORD_FIELDS = Object.freeze([
  *
  * It is `not_completed` for every protocol, and that is the true state of
  * the world: no real football video has been observed by this engine,
- * because none exists in this environment and M22 is forbidden from
- * collecting any.
+ * because none exists in this environment and ScoutBox does not collect
+ * any.
  *
- * This constant is the single place a future milestone edits — and editing
+ * This constant is the single place a release edits — and editing
  * it alone is not enough, because `validateRecord()` below rejects a record
  * that does not name a matching engine, policy and dataset.
  */
@@ -122,7 +122,7 @@ export function realWorldValidationPass(protocolId, {
   return { pass: check.valid, status: entry.status, problems: check.problems };
 }
 
-/** Reporting view for `/capabilities` and the docs (§42). */
+/** Reporting view for `/capabilities` and the docs. */
 export function validationSummary({ table = REAL_WORLD_VALIDATION } = {}) {
   const out = {};
   for (const id of Object.keys(CANDIDATE_PROTOCOLS)) {

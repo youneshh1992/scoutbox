@@ -1,9 +1,5 @@
-// M18.2 — one conflict, one experience.
-//
-// M18.1 refused a stale write and told the person so in two different shapes:
-// a persistent notice on the Room panel, and a form message on the Brief. The
-// wording, the actions and the recovery differed. This is the single pattern
-// every rev-guarded action uses — Room status, archive and reopen, decision
+// One conflict, one experience: the single pattern every rev-guarded action
+// uses — Room status, archive and reopen, decision
 // submit, owner and lead changes, Brief edits and status changes.
 //
 // The contract, from the server's 409 body:

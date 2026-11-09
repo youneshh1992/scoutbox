@@ -1,6 +1,5 @@
 /**
- * S11a — the agent core as typed tables (migration `0026_agent_core`; docs/architecture/migration.md §4.5 S11;
- * sql/06_agent_compliance_transactions.sql).
+ * The agent core: agent profiles, agency affiliations, representation agreements and agency settings.
  *
  * Records:
  *   - An agent profile: the licensed natural person's declared details and their verification facets. The declared
@@ -10,7 +9,7 @@
  *   - A representation agreement: the client-confirmed relationship, with ordered scope and policy-version rows, the
  *     client's disclosure choices as three columns and the agent's opportunity shares as rows. `isRegulatoryMinor` is
  *     not stored (always false: a minor is refused before a request exists); `policyVersion` likewise.
- *   - An agency's settings (the retired `orgs.agencySettings` facet): a description and ordered jurisdiction rows.
+ *   - An agency's settings: a description and ordered jurisdiction rows.
  *
  * History. Each record's history is ordered rows whose detail is typed columns, by action (no JSON): a facet change
  * names the facet, member association and states; an affiliation change its roles (rows); an agreement change its
@@ -26,12 +25,12 @@
  * agency, user and start, and an agreement's parties, scope, jurisdiction, exclusivity, term and policy versions never
  * change; shares only gain rows.
  *
- * READS are SQL: no mirror. Queries decode fresh, deep-frozen records in insertion (rowid) order unless they say
- * otherwise. Modules receive them as `agentReads`.
+ * Queries decode deep-frozen records in insertion (rowid) order unless they say otherwise. Modules receive them as
+ * `agentReads`.
  *
  * References. Staff ids → org_users and agencies → orgs are immediate RESTRICT keys; a client (player) id carries no key
  * (tolerant, as recruitment: an agreement outlives an account deletion as an id-only tombstone). Child rows cascade.
- * Policy versions are checked against the seeded policy ids in code until S11b makes the policies rows.
+ * Policy versions are checked in code through `policyVersionKnown` (the compliance policies repository).
  */
 import { isPlainObject, describe, ids } from './recruitment.mjs';
 import { transaction, migrationApplied, childRowsOf } from './database.mjs';
@@ -702,7 +701,7 @@ function decodeAgreements(sqlite, rows) {
   });
 }
 
-// ------------------------------------------------------------------ snapshot (fixtures and the persistence batteries)
+// ------------------------------------------------------------------ whole-domain read (the test suites)
 export const agentCoreLive = (sqlite) => migrationApplied(sqlite, AGENT_CORE_MIGRATION);
 function readAll(sqlite) {
   return {
@@ -711,7 +710,7 @@ function readAll(sqlite) {
     representationAgreements: decodeAgreements(sqlite, sqlite.prepare('SELECT * FROM representation_agreements ORDER BY rowid').all()),
   };
 }
-/** The whole domain read back as plain records (`readAllRecords` in index.mjs: the test suites' read-back); null before its migration. */
+/** The whole domain read back as plain records (`readAllRecords` in index.mjs: the test suites' read-back). */
 export const AGENT_CORE_RECORDS = {
   names: AGENT_CORE_COLLECTIONS,
   read(sqlite) { return agentCoreLive(sqlite) ? readAll(sqlite) : null; },
@@ -884,7 +883,7 @@ export function createAgentCoreRepository({ sqlite, unit = null, now = Date.now,
     }),
   };
 
-  // ---- agency settings (the retired orgs.agencySettings facet)
+  // ---- agency settings
   const settings = {
     /** The agency's settings; the empty settings when none were saved. */
     forOrg: (orgId) => {

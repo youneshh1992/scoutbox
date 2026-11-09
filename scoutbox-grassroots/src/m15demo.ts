@@ -1,4 +1,4 @@
-// M15 demo mirror (org side). Same honesty rules as the live projection:
+// Demo mirror (org side). Same honesty rules as the live projection:
 // every item carries provenance; own-org assessments/trials only; the
 // player's private layers (objectives, conflicts, prefs) never appear.
 import type { FpSummary, M15Api, RecruitmentPassport } from './m15api';

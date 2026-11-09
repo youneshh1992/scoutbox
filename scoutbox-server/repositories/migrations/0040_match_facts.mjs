@@ -1,7 +1,7 @@
 /**
- * S14j: the match facts (repositories/matchFacts.mjs). Creates the facts tables, the dirty markers and the triggers
- * on every input table, and marks every live player so the first boot after it derives their facts. REGISTERED in
- * DATA_MIGRATIONS. Nothing is imported: the facts are derived, never a source.
+ * The match facts (repositories/matchFacts.mjs): the facts tables, the dirty markers and the triggers on every input
+ * table. Marks every live player so the first boot after it derives their facts. Nothing is imported: the facts are
+ * derived, never a source.
  */
 import { migrationApplied } from '../database.mjs';
 import { MATCH_FACTS_DDL, matchFactsTriggersDdl } from '../matchFacts.mjs';

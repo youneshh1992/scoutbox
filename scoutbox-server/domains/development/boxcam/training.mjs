@@ -1,4 +1,4 @@
-// M16 — Box Training: coach assignments, the Development Plan, Box
+// Box Training: coach assignments, the Development Plan, Box
 // Challenges, disputes and Trust & Safety tooling.
 //
 // Assignments and challenges NEVER widen access: every org action passes
@@ -7,8 +7,8 @@
 // Agencies cannot assign Box Training at all. Coaches receive session
 // RESULTS, never raw home footage — no such footage exists server-side.
 //
-// S12b: every record is a row of repositories/boxCam.mjs, written by an explicit operation (inside one unit of work
-// with its ledger rows and notifications), read through `boxCamReads`.
+// Every record is a row of repositories/boxCam.mjs, written by an explicit operation (inside one unit of work with
+// its ledger rows and notifications), read through `boxCamReads`.
 import { isAdult, visibleToOrg } from '../../../domain.mjs';
 import { isAbsent, parseStrictDateOnly } from '../../../temporal.mjs';
 import { challengeProgress, developmentActivity, fmtMs, TERMINAL_STATES, pageNewestFirst } from './shared.mjs';
@@ -30,7 +30,7 @@ export function registerBoxTraining(ctx) {
   const drillsById = new Map(DRILLS.map((d) => [d.id, d]));
   const standing = (s) => TERMINAL_STATES.has(s.status) && !['cancelled', 'invalidated'].includes(s.verificationState);
 
-  // S12b: reading the preferences never creates a row; a player who never saved has the defaults.
+  // Reading the preferences never creates a row; a player who never saved has the defaults.
   const prefsFor = (playerId) => reads.prefs.forPlayer(playerId);
   ctx.boxPrefsFor = prefsFor;
 
@@ -70,11 +70,11 @@ export function registerBoxTraining(ctx) {
     const drill = latestDrill(String(req.body?.drillId ?? ''));
     if (!drill) return res.status(404).json({ error: 'DRILL_UNKNOWN', message: 'Only supported Box Cam drills can be assigned as Box Training.' });
     const t = req.body?.target ?? {};
-    // S12b: the value is a positive number as sent (a numeric string was accepted before).
+    // The value is a positive number as sent: a numeric string is refused.
     if (!drill.targetTypes.includes(t.type) || typeof t.value !== 'number' || !Number.isFinite(t.value) || t.value <= 0) {
       return res.status(400).json({ error: 'TARGET_INVALID', allowed: drill.targetTypes });
     }
-    // S12b: refused, not coerced: a frequency is a whole number of sessions a week, a due date a real day.
+    // Refused, not coerced: a frequency is a whole number of sessions a week, a due date a real day.
     const freq = req.body?.frequencyPerWeek;
     if (!isAbsent(freq) && !isInt(freq, 1, 14)) return fieldInvalid(res, 'frequencyPerWeek', 'A frequency is a whole number of sessions a week, from 1 to 14.');
     const due = req.body?.dueDate;
@@ -84,7 +84,7 @@ export function registerBoxTraining(ctx) {
     if (instructions && !moderateOrRefuse(res, instructions, { kind: 'box_assignment', orgId: req.org.id, playerId: p.id })) return;
     let objectiveId = null;
     if (req.body?.objectiveId) {
-      const found = typeof req.body.objectiveId === 'string' ? ctx.developmentReads.objectives.byId(req.body.objectiveId) : null; // S12a: read through SQL
+      const found = typeof req.body.objectiveId === 'string' ? ctx.developmentReads.objectives.byId(req.body.objectiveId) : null;
       const obj = found && found.playerId === p.id && found.orgId === req.org.id ? found : null;
       if (!obj) return res.status(404).json({ error: 'OBJECTIVE_NOT_FOUND' });
       objectiveId = obj.id;
@@ -114,7 +114,7 @@ export function registerBoxTraining(ctx) {
 
   orgRouter.get('/box-cam/assignments', (req, res) => {
     // A block or visibility change after assignment hides the player again. Bounded by one club's assignments: the
-    // visibility rule is applied in code, then the page is cut (S12b).
+    // visibility rule is applied in code, then the page is cut.
     const mine = reads.assignments.forOrg(req.org.id, { playerId: req.query.playerId ? String(req.query.playerId) : null })
       .filter((a) => { const p = findPlayer(a.playerId); return p && orgCanSee(req.org, p); });
     const page = pageNewestFirst(req, res, mine, { readPage, pageOf, sendPageError });
@@ -227,9 +227,9 @@ export function registerBoxTraining(ctx) {
     if (metric === 'reps' && !drill.verificationCapabilities.includes('rep_count')) {
       return res.status(400).json({ error: 'METRIC_NOT_SUPPORTED', message: `${drill.title} cannot verify repetition counts — use active_minutes.` });
     }
-    // S12b: a total is a whole number of reps or minutes (a numeric string was accepted before).
+    // A total is a whole number of reps or minutes: a numeric string is refused.
     if (!isInt(targetTotal, 1, 100_000)) return res.status(400).json({ error: 'TARGET_INVALID' });
-    // S12b: refused, not clamped or dropped.
+    // Refused, not clamped or dropped.
     if (!isAbsent(days) && !isInt(days, 1, 60)) return fieldInvalid(res, 'days', 'A challenge runs for a whole number of days, from 1 to 60.');
     if (!isAbsent(cap) && !isInt(cap, 1, 1_000_000)) return fieldInvalid(res, 'cap', 'A cap is a whole number of participants, at least 1.');
     if (!isAbsent(adultOnly) && typeof adultOnly !== 'boolean') return fieldInvalid(res, 'adultOnly', 'adultOnly is true or false.');
@@ -321,7 +321,7 @@ export function registerBoxTraining(ctx) {
 
   // -------------------------------------------------------- development plan
   function developmentPlan(player) {
-    const objectives = ctx.developmentReads.objectives.forPlayer(player.id); // S12a: read through SQL
+    const objectives = ctx.developmentReads.objectives.forPlayer(player.id);
     const assignments = reads.assignments.forPlayer(player.id).filter((a) => a.state !== 'cancelled');
     const sessions = reads.sessions.finishedForPlayer(player.id).filter(standing);
     return {
@@ -349,7 +349,7 @@ export function registerBoxTraining(ctx) {
   function applyPrefs(res, player, body, by) {
     const current = prefsFor(player.id);
     if (body.shareDevelopmentActivity !== undefined && !['private', 'recruitment'].includes(body.shareDevelopmentActivity)) return res.status(400).json({ error: 'SHARE_INVALID', allowed: ['private', 'recruitment'] });
-    // S12b: a boolean as sent (anything truthy counted as true before).
+    // A boolean as sent: anything else is refused, not read as truthy.
     if (body.retainClips !== undefined && typeof body.retainClips !== 'boolean') return fieldInvalid(res, 'retainClips', 'retainClips is true or false.');
     const next = {
       playerId: player.id,
@@ -404,7 +404,7 @@ export function registerBoxTraining(ctx) {
   });
 
   // ------------------------------------------------------------------ T&S
-  // The queue grows with the platform: one page, oldest first (S12b).
+  // The queue grows with the platform: one page, oldest first.
   adminRouter.get('/box-cam/disputes', (req, res) => {
     let page;
     try { page = readPage(req.query, ['number', 'string']); } catch (e) { return sendPageError(res, e); }
@@ -436,7 +436,7 @@ export function registerBoxTraining(ctx) {
           x.verificationState = 'invalidated';
           x.status = 'invalidated';
           x.invalidatedAt = at;
-          // M18.1: an append-only integrity history on the session itself, so a
+          // An append-only integrity history on the session itself, so a
           // later restore never erases the fact or the moment of invalidation.
           x.integrityEvents.push({ type: 'invalidated', at, disputeId: d.id, outcome });
         });
@@ -468,7 +468,7 @@ export function registerBoxTraining(ctx) {
     res.json({ session: ctx.boxSessionView(restored) });
   });
 
-  // The ScoutBox challenges are a seeded catalogue: migration 0031 inserts them (S12b), never a boot.
+  // The ScoutBox challenges are a seeded catalogue: migration 0031 inserts them, never boot.
 
   return { assignmentView, challengeView, developmentPlan };
 }

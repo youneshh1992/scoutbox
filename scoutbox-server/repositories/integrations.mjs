@@ -1,29 +1,27 @@
 /**
- * S13a — integrations as typed tables (migration `0034_integrations`; docs/architecture/migration.md §4.5 S13;
- * sql/08_operations_integrations.sql).
+ * Integrations: CSV import batches, prospects, identity reviews, API keys, webhook endpoints and deliveries.
  *
  * Records:
- *   - An import batch (F1): one CSV upload's dry run. Its header row and the column mapping it was given are ordered
+ *   - An import batch: one CSV upload's dry run. Its header row and the column mapping it was given are ordered
  *     column rows (`field` is the prospect field the mapping named for that column, or null); every data row is a row
  *     with the record's fields as columns (a field the CSV did not map is NULL, a mapped empty cell is ''), its
  *     validation messages as ordered child rows, its disposition and the platform player it matched. The summary
  *     counts are columns. Its history (validated, committed, reversed) is typed rows: a commit's detail is the number
  *     created, a reversal's the numbers removed and kept, a validation's the batch summary itself.
- *   - A prospect (F1): an organisation-private record an import created (or an identity review kept separate), never
+ *   - A prospect: an organisation-private record an import created (or an identity review kept separate), never
  *     a platform account. At most one live (not reversed) prospect per (organisation, provider, external id).
  *     The batch lists the prospects its commit created, in order: the ones a reversal undoes.
- *   - An identity review (F1): an ambiguous row awaiting a lead. Its record is the batch row it names (a key), never
+ *   - An identity review: an ambiguous row awaiting a lead. Its record is the batch row it names (a key), never
  *     a copy.
- *   - An API key (F1): stored only as the sha-256 of the plain key; its scopes are ordered rows.
- *   - A webhook endpoint (F1): its signing secrets are stored plain (the server signs with them; OPERATIONS.md) and
+ *   - An API key: stored only as the sha-256 of the plain key; its scopes are ordered rows.
+ *   - A webhook endpoint: its signing secrets are stored plain (the server signs with them; OPERATIONS.md) and
  *     never served by a list; its events are ordered rows.
- *   - A webhook delivery (F1): one event for one endpoint. The payload is typed by event: every event names one
+ *   - A webhook delivery: one event for one endpoint. The payload is typed by event: every event names one
  *     record (`subject_id`: the batch, review, transition or dispatch), an import commit also carries the number
  *     created and an identity resolution its resolution. Attempts are ordered rows, each an HTTP status or an error.
  *
- * WRITES are explicit operations; every write joins the open unit of work, the caller's transaction or its own.
- * READS are SQL: no mirror. Fresh, deep-frozen records; lists decode child rows in one batch. Modules receive the
- * queries as `integrationReads`.
+ * Every write joins the open unit of work, the caller's transaction or its own. Records are deep-frozen; lists decode
+ * child rows in one batch. Modules receive the queries as `integrationReads`.
  *
  * References. Player ids carry no key (tolerant: a match survives an account deletion as a tombstone). Organisations
  * and the staff named are RESTRICT keys; so are the keys inside the domain (a prospect's batch, a review's batch row,
@@ -490,7 +488,7 @@ function decodeDeliveries(sqlite, rows) {
   });
 }
 
-// ------------------------------------------------------------------ snapshot (fixtures and the persistence batteries)
+// ------------------------------------------------------------------ whole-domain read (the test suites)
 export const integrationsLive = (sqlite) => migrationApplied(sqlite, INTEGRATIONS_MIGRATION);
 function readAll(sqlite) {
   const all = (t) => sqlite.prepare(`SELECT * FROM ${t} ORDER BY rowid`).all();
@@ -503,7 +501,7 @@ function readAll(sqlite) {
     webhookDeliveries: decodeDeliveries(sqlite, all('webhook_deliveries')),
   };
 }
-/** The whole domain read back as plain records (`readAllRecords` in index.mjs: the test suites' read-back); null before its migration. */
+/** The whole domain read back as plain records (`readAllRecords` in index.mjs: the test suites' read-back). */
 export const INTEGRATIONS_RECORDS = {
   names: INTEGRATIONS_COLLECTIONS,
   read(sqlite) { return integrationsLive(sqlite) ? readAll(sqlite) : null; },

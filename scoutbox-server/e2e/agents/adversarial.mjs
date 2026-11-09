@@ -1,37 +1,9 @@
-// M23 P5.6F — ScoutBox Agent FINAL HARDENING suite (reconstructed).
-//
-// RECONSTRUCTION NOTE. P5.6F was originally completed and then lost when the
-// execution container was rebuilt before its backup push. This suite is a
-// RECONSTRUCTION against the frozen b8556c1 base, written from the P5.6F mandate
-// rather than recovered from the lost source. The historical run reported 181
-// checks / 127 negative; that is a historical figure, NOT a target, and nothing
-// here is padded to approach it.
-//
-// The governing question is not "does the Agent domain work?" — five earlier
-// milestones answered that. It is: treat P5.6A–E as a candidate production
-// subsystem and try to BREAK it. So the bias is negative: most checks here are
-// an attempt to obtain something the caller must not have.
-//
-// Three product defects the original pass found, each re-proved here as a
-// regression:
-//   F-2  a mandate whose term began in the FUTURE granted access today, because
-//        startAt was never consulted anywhere (groups B, Z).
-//   F-3  a PRESENT but unreadable endAt (an ISO string, a NaN) fell through the
-//        expiry guard into "not expired" and granted access for ever (group Z).
-//   F-5  the only login throttle was per-IP and counted successes, so it could
-//        not bound guessing at one account and one tenant's ordinary traffic
-//        denied another's sign-in (group AA — which runs LAST, see below).
-//
-// Groups: A auth/session revocation · B canonical representation · C legacy ·
-//   D same-agency privacy · E licence facets · F policy versions · G conflict
-//   severity · H consent · I reviewer attribution · J minors · K guardian ·
-//   L Contact · M Inbox · N Trial · O Passport · P Trust · Q Transaction ·
-//   R documents · S P5 handoff · T club/agency boundary · U search/count
-//   privacy · V deep links · W events/notifications · X audit · Y tombstones ·
-//   Z corruption/legacy temporal rows · AA rate limits · AB idempotency ·
-//   AC rev/concurrency · AD strict input validation · AE error privacy ·
-//   AF EN/FR contract · AG accessibility contract · AH responsive contract ·
-//   AI persistence · AJ recovery invariants.
+// Agent domain hardening battery: treats the Agent subsystem as a candidate for
+// production and tries to BREAK it, so most checks are an attempt to obtain
+// something the caller must not have. It pins three regressions: a mandate whose
+// term begins in the future grants nothing today; a present but unreadable endAt
+// (an ISO string, a NaN) is expired, not open; and failed logins are budgeted per
+// identifier, not only per IP (group AA, which runs LAST, see below).
 //
 // No assertion is `status !== 200`, and none is a tautology: every refusal names
 // its status and its code.
@@ -83,7 +55,7 @@ const YEAR = 365 * DAY;
 
 // =================================================================== PURE
 
-section('A/pure — the temporal rule, stated as a rule (F-2 + F-3 regression)');
+section('A/pure — the temporal rule, stated as a rule');
 {
   const live = { status: 'active', confirmedAt: T0 - DAY, agentUserId: 'u', clientId: 'p', startAt: T0 - DAY, endAt: T0 + DAY };
   const g = (patch) => agreementGrantsAccess({ ...live, ...patch }, 'u', T0);
@@ -94,19 +66,19 @@ section('A/pure — the temporal rule, stated as a rule (F-2 + F-3 regression)')
   ok(g({ startAt: undefined, endAt: undefined }) === true, 'A3b undefined reads the same as null: absent is absent');
   ok(g({ endAt: T0 + YEAR }) === true, 'A4 a readable future end is in term');
 
-  // F-2: the start boundary. Before the repair, startAt was never read at all.
-  neg(g({ startAt: T0 + YEAR, endAt: T0 + 2 * YEAR }) === false, 'A5 F-2: a mandate whose term BEGINS IN A YEAR grants nothing today');
+  // The start boundary.
+  neg(g({ startAt: T0 + YEAR, endAt: T0 + 2 * YEAR }) === false, 'A5 a mandate whose term BEGINS IN A YEAR grants nothing today');
   neg(g({ startAt: T0 + 1 }) === false, 'A5b and one that begins a millisecond from now has not begun');
-  neg(g({ startAt: NaN }) === false, 'A6 F-2: a NaN start is a boundary that cannot be read — refuse, never ignore');
+  neg(g({ startAt: NaN }) === false, 'A6 a NaN start is a boundary that cannot be read — refuse, never ignore');
   neg(g({ startAt: '2026-01-01T00:00:00.000Z' }) === false, 'A6b an ISO-string start — the shape of an imported row — is unreadable, so refused');
   neg(g({ startAt: Infinity }) === false, 'A6c an infinite start never arrives');
 
-  // F-3: the end boundary. Before the repair `typeof endAt === 'number'` let
-  // every non-number fall through the expiry guard into "not expired".
+  // The end boundary: a present end that is not a finite number must not fall
+  // through the expiry guard into "not expired".
   neg(g({ endAt: T0 }) === false, 'A7 a term ending exactly now is over');
   neg(g({ endAt: T0 - DAY }) === false, 'A7b a readable past end is over');
-  neg(g({ endAt: '2024-01-01T00:00:00.000Z' }) === false, 'A8 F-3: an ISO-string end that already passed no longer grants access FOR EVER');
-  neg(g({ endAt: NaN }) === false, 'A8b F-3: NaN is a number for which NaN <= now is false — the exact shape that fell through');
+  neg(g({ endAt: '2024-01-01T00:00:00.000Z' }) === false, 'A8 an ISO-string end that already passed no longer grants access FOR EVER');
+  neg(g({ endAt: NaN }) === false, 'A8b NaN is a number for which NaN <= now is false — the exact shape that fell through');
   neg(g({ endAt: String(T0 - DAY) }) === false, 'A8c a numeric STRING end is still not a readable number');
   neg(g({ endAt: Infinity }) === false, 'A8d an infinite end is not an open end: absent means open, present means readable');
 
@@ -116,8 +88,8 @@ section('A/pure — the temporal rule, stated as a rule (F-2 + F-3 regression)')
 
   // The status vocabulary is NOT extended: a future-start row still reads as
   // `active` (it is a live agreement) while granting nothing. Status and access
-  // are two different questions, and P5.6F does not invent a frozen-contract value.
-  ok(effectiveAgreementStatus({ ...live, startAt: T0 + YEAR }, T0) === 'active', 'A10 a not-yet-started mandate still READS as active — P5.6F adds no status value to a frozen contract');
+  // are two different questions, and the status contract is frozen.
+  ok(effectiveAgreementStatus({ ...live, startAt: T0 + YEAR }, T0) === 'active', 'A10 a not-yet-started mandate still READS as active — no status value is added to a frozen contract');
   ok(effectiveAgreementStatus({ ...live, endAt: NaN }, T0) === 'expired', 'A10b but an unreadable end reads as EXPIRED everywhere, so a projection cannot disagree with the access decision');
   ok(!AGREEMENT_STATUSES.includes('not_started'), 'A10c and no new status was smuggled into AGREEMENT_STATUSES');
 }
@@ -136,7 +108,7 @@ section('B/pure — every non-active state, and every wrong caller');
   neg(agreementGrantsAccess(undefined, 'u', T0) === false, 'B5 no record at all grants nothing');
 }
 
-section('C/pure — a legacy M13 mirror is history, not authority');
+section('C/pure — a legacy mirror is history, not authority');
 {
   const mirror = { id: 'rep-legacy', agentUserId: null, clientId: 'p', status: 'active', confirmedAt: T0 - DAY, startAt: T0 - DAY, endAt: T0 + YEAR, legacy: { fromRepresentationId: 'old-1' } };
   neg(agreementGrantsAccess(mirror, 'u', T0) === false, 'C1 a legacy mirror grants no access');
@@ -144,7 +116,7 @@ section('C/pure — a legacy M13 mirror is history, not authority');
   ok(effectiveAgreementStatus(mirror, T0) === 'active', 'C3 the row may still read as active: the PREDICATE withholds authority rather than the record being rewritten');
 }
 
-section('G/pure — conflict severity: a prohibition is never softened (§6)');
+section('G/pure — conflict severity: a prohibition is never softened');
 {
   ok(CONFLICT_OUTCOMES.length === 5, 'G1 five outcomes, no sixth escape hatch');
   for (const a of CONFLICT_OUTCOMES) {
@@ -155,7 +127,7 @@ section('G/pure — conflict severity: a prohibition is never softened (§6)');
   }
   neg(mostSevere('PROHIBITED_CONFLICT', PERMITTED_WITH_CONSENT) === 'PROHIBITED_CONFLICT', 'G3 a prohibition is not downgraded to "permitted with consent"');
   neg(mostSevere('PROHIBITED_CONFLICT', 'CLEAR') === 'PROHIBITED_CONFLICT', 'G4 nor to CLEAR');
-  neg(mostSevere('PROHIBITED_CONFLICT', 'MANUAL_REGULATORY_REVIEW_REQUIRED') === 'PROHIBITED_CONFLICT', 'G5 nor to manual review — review is the ABSENCE of an answer and cannot soften a definite one (§6)');
+  neg(mostSevere('PROHIBITED_CONFLICT', 'MANUAL_REGULATORY_REVIEW_REQUIRED') === 'PROHIBITED_CONFLICT', 'G5 nor to manual review — review is the ABSENCE of an answer and cannot soften a definite one');
   neg(mostSevere('PROHIBITED_CONFLICT', 'INSUFFICIENT_DATA') === 'PROHIBITED_CONFLICT', 'G5b nor to insufficient data: a missing fact cannot unmake a known prohibition');
   neg(mostSevere('INSUFFICIENT_DATA', 'CLEAR') === 'INSUFFICIENT_DATA', 'G5c uncertainty is never resolved AS permission');
   neg(mostSevere('MANUAL_REGULATORY_REVIEW_REQUIRED', 'CLEAR') === 'MANUAL_REGULATORY_REVIEW_REQUIRED', 'G5d and "needs review" outranks "clear"');
@@ -183,7 +155,7 @@ section('F/pure — policy versions and rule status');
   neg(ruleStatusAt({ status: 'suspended' }, T0) !== 'active', 'F4 a suspended rule is not active');
 }
 
-section('J/pure — the minor threshold is canonical, and the pathway is shut (§12)');
+section('J/pure — the minor threshold is canonical, and the pathway is shut');
 {
   ok(MINOR_PATHWAY_PRODUCTION_ENABLED.ENG === false && MINOR_PATHWAY_PRODUCTION_ENABLED.INT === false && MINOR_PATHWAY_PRODUCTION_ENABLED.USA === false, 'J1 the minor pathway is production-disabled in every jurisdiction this build knows');
   ok(Object.values(MINOR_PATHWAY_PRODUCTION_ENABLED).every((v) => v === false), 'J1b every value, not just the three named — a jurisdiction added later cannot default to open');
@@ -195,12 +167,11 @@ section('J/pure — the minor threshold is canonical, and the pathway is shut (�
   // of birth answers "unknown" rather than "adult", and the GATE is what turns
   // unknown into a refusal. Asserting the gate rather than the helper is the
   // point — a helper returning null is only safe if every caller fails closed.
-  // F-8 regression. `new Date(null)` is the EPOCH, not an invalid date, so a
-  // null date of birth used to compute as a 56-year-old and read as an ADULT on
-  // both age paths. `0` and `false` did the same. A missing date of birth is
-  // exactly the shape an imported record has (domains/integrations/imports.mjs treats dob as
-  // optional and projects a missing one as null), so this was a reachable
-  // safeguarding fail-open, not a theoretical one.
+  // `new Date(null)` is the EPOCH, not an invalid date, so a null date of birth
+  // (as are `0` and `false`) would otherwise compute as a 56-year-old ADULT. A
+  // missing dob is exactly the shape an imported record has
+  // (domains/integrations/imports.mjs projects a missing one as null), so this is
+  // a reachable safeguarding fail-open.
   for (const bad of [null, undefined, '', 0, false, [], {}, 'not-a-date']) {
     const label = typeof bad === 'object' && bad !== null ? JSON.stringify(bad) : String(bad);
     ok(isRegulatoryMinor(bad, T0) === null, `J3 a dob of \`${label}\` answers "unknown" — neither minor nor adult`);
@@ -213,17 +184,17 @@ section('J/pure — the minor threshold is canonical, and the pathway is shut (�
   neg(evaluateMinorGate({ dob: dob17, memberAssociation: 'ENG' }).pathwayEnabledInProduction === false, 'J3g even a correctly-aged minor finds the pathway production-disabled');
 }
 
-section('Q/pure — the transaction contract, and what it deliberately lacks (§15)');
+section('Q/pure — the transaction contract, and what it deliberately lacks');
 {
   ok(TRANSACTION_STATUSES.length === 10, 'Q1 ten transaction states');
-  neg(!TRANSACTION_STATUSES.some((s) => /offer|signed|commission|fee/i.test(s)), 'Q2 NO transaction state names an offer, a signing, a commission or a fee — P5.6F implements no Offer workflow');
+  neg(!TRANSACTION_STATUSES.some((s) => /offer|signed|commission|fee/i.test(s)), 'Q2 NO transaction state names an offer, a signing, a commission or a fee — the Agent domain implements no Offer workflow');
   neg(!DOCUMENT_TYPES.some((t) => /offer|signature|signed/i.test(t)), 'Q2b nor does any document type');
   ok(DOCUMENT_VISIBILITY.length === 9, 'Q3 nine document visibility classes');
   ok(DOCUMENT_VISIBILITY.includes('T_AND_S_ONLY') && DOCUMENT_VISIBILITY.includes('AGENT_PRIVATE'), 'Q3b including the two that exist to withhold: T&S-only and agent-private');
   ok(TIMELINE_AUDIENCES.length === 6 && TIMELINE_AUDIENCES.includes('audit_only'), 'Q4 six timeline audiences, one of which is audit-only');
 }
 
-section('AD/pure — strict input validation: no security decision rests on truthiness (§16)');
+section('AD/pure — strict input validation: no security decision rests on truthiness');
 {
   ok(DISCLOSURE_KEYS.length === 3, 'AD1 exactly three disclosure questions, so an unknown key reaches no field');
   const coercions = ['yes', 'true', 'false', '0', '1', 0, 1, -1, '', 'on', 'off', [], {}, null, undefined, NaN];
@@ -239,9 +210,9 @@ section('AD/pure — strict input validation: no security decision rests on trut
   neg(termMonthsOf('12abc') === null && termMonthsOf(0) === null && termMonthsOf(MAX_TERM_MONTHS + 1) === null, 'AD5 a term length is an integer in range or it is refused — FFAR 12(3) caps it at two years');
   neg(termMonthsOf(NaN) === null && termMonthsOf([]) === null && termMonthsOf({}) === null, 'AD5b and NaN, an array and an object are not term lengths');
   ok(termMonthsOf(undefined) === 12 && termMonthsOf(24) === 24, 'AD5c an absent term takes the documented default and a legal one is kept');
-  // F-12b. `new Date('2010-02-30')` is not invalid in V8 — it is 2 March — so a
-  // format check let birthdays that do not exist through as readable. The
-  // platform's one dob reading now round-trips the day.
+  // `new Date('2010-02-30')` is not invalid in V8 — it is 2 March — so a format
+  // check alone lets birthdays that do not exist through. The platform's one dob
+  // reading round-trips the day.
   for (const [label, dob] of [['30 February', '2010-02-30'], ['31 April', '2011-04-31'], ['29 February in a non-leap year', '2023-02-29']]) {
     neg(parseDob(dob) === null, `AD8 ${label} (${dob}) is not a date of birth — V8 would have rolled it over, and the platform refuses to`);
     neg(Number.isNaN(ageOn(dob, new Date(T0))), `AD8b so it has no age`);
@@ -253,7 +224,7 @@ section('AD/pure — strict input validation: no security decision rests on trut
   neg(parseDob('1990-1-1') === null && parseDob('01/01/1990') === null && parseDob('1990-01-01T00:00:00Z') === null, 'AD8g only the canonical YYYY-MM-DD shape is a date of birth — every dob the seed and the import write is that shape, so nothing valid is refused');
 }
 
-section('D/pure — the role matrix: which tier may act (§10)');
+section('D/pure — the role matrix: which tier may act');
 {
   const licensedOnly = ['clients.request', 'clients.opportunities.share'];
   for (const perm of licensedOnly.filter((p) => PERMISSIONS[p])) {
@@ -268,11 +239,11 @@ section('D/pure — the role matrix: which tier may act (§10)');
 
 section('AA/pure — the rate-limit catalogue, including the new failed-login budget');
 {
-  ok(!!RATE_LIMIT_POLICY.login_failure, 'AA-p1 a login_failure policy exists (F-5)');
+  ok(!!RATE_LIMIT_POLICY.login_failure, 'AA-p1 a login_failure policy exists');
   ok(RATE_LIMIT_POLICY.login_failure.scope === 'actor', 'AA-p2 and it is scoped per ACTOR (the identifier tried), which is the whole point: an IP-scoped budget cannot bound guessing at one account');
   ok(RATE_LIMIT_POLICY.login_failure.windowMs === 900_000 && RATE_LIMIT_POLICY.login_failure.max === 20, 'AA-p3 20 per 15 minutes');
-  ok(RATE_LIMIT_POLICY.opportunity_share?.max === 60 && RATE_LIMIT_POLICY.opportunity_share?.scope === 'actor', 'AA-p4 the P5.6E opportunity_share quota survived the base: 60/hour per actor (§4)');
-  ok(RATE_LIMIT_POLICY.transaction_handoff?.max === 30 && RATE_LIMIT_POLICY.transaction_handoff?.scope === 'org', 'AA-p5 and transaction_handoff: 30/hour per org (§4)');
+  ok(RATE_LIMIT_POLICY.opportunity_share?.max === 60 && RATE_LIMIT_POLICY.opportunity_share?.scope === 'actor', 'AA-p4 the opportunity_share quota survived the base: 60/hour per actor');
+  ok(RATE_LIMIT_POLICY.transaction_handoff?.max === 30 && RATE_LIMIT_POLICY.transaction_handoff?.scope === 'org', 'AA-p5 and transaction_handoff: 30/hour per org');
   ok(Object.values(RATE_LIMIT_POLICY).every((p) => Number.isFinite(p.max) && p.max > 0 && Number.isFinite(p.windowMs) && p.windowMs > 0), 'AA-p6 every policy has a finite positive budget and window — an unreadable quota is an absent quota');
   ok(Object.values(RATE_LIMIT_POLICY).every((p) => typeof p.note === 'string' && p.note.length > 0), 'AA-p7 and every policy says in words what it protects');
 }
@@ -281,11 +252,10 @@ section('W/pure — events, and the vocabulary that must not appear');
 {
   const names = Object.keys(EVENT_REGISTRY);
   ok(names.length > 0, 'W1 the event registry is populated');
-  neg(!names.some((n) => /offer_made|offer_accepted|offer_declined/.test(n)), 'W2 no offer lifecycle event exists (§15)');
-  // P7 added the signing workflow's own club-private events (signing_*); the AGENT domain still emits none, and no `signed_contract` vocabulary exists.
-  neg(!names.some((n) => /signed_contract/.test(n)) && names.filter((n) => /signing/.test(n)).every((n) => /^signing_/.test(n) && EVENT_REGISTRY[n].audience === 'org_private') && !names.some((n) => /^(agent|representation|transaction).*sign/.test(n)), 'W2b nor an agent-domain signing event — the P7 signing_* events are the club\'s own, org_private');
+  neg(!names.some((n) => /offer_made|offer_accepted|offer_declined/.test(n)), 'W2 no offer lifecycle event exists');
+  // The signing workflow has its own club-private events (signing_*); the AGENT domain emits none, and no `signed_contract` vocabulary exists.
+  neg(!names.some((n) => /signed_contract/.test(n)) && names.filter((n) => /signing/.test(n)).every((n) => /^signing_/.test(n) && EVENT_REGISTRY[n].audience === 'org_private') && !names.some((n) => /^(agent|representation|transaction).*sign/.test(n)), 'W2b nor an agent-domain signing event — the signing_* events are the club\'s own, org_private');
   neg(!names.some((n) => /commission|fee_agreed/.test(n)), 'W2c nor a commission event');
-  // Rewritten in S14a: it described the retired snapshot registry (2308). The schema is the latest table migration.
   ok(DATA_MIGRATIONS.length === SCHEMA_VERSION, 'W3 the schema is 40, the latest table migration (0040_match_facts)');
 }
 
@@ -338,7 +308,7 @@ await stop(server);
   const before = readRecords(DATA_DIR);
   const { password: _password, ...agency } = before.orgs.find((o) => o.type === 'agency');
   // A password-protected guardian reachable by id AND by email, for the
-  // failed-login alias check (F-11). The seeded guardians have open (null)
+  // failed-login alias check. The seeded guardians have open (null)
   // passwords in development, so nothing about them can ever fail to
   // authenticate — and a budget that is never charged cannot be tested.
   const { password: _pw, emailCodeHash: _code, ...guardianBase } = before.guardians[0];
@@ -381,7 +351,7 @@ const CONF = await j('POST', `/player/agent/relationships/${REP}/confirm`, { exp
 ok(CONF.status === 200 && CONF.body?.relationship?.status === 'active', 'fixture: the client confirmed it — the root of every authority below');
 let REV = CONF.body?.relationship?.rev;
 
-section('D/live — same-agency membership grants no confidential client access (§10)');
+section('D/live — same-agency membership grants no confidential client access');
 {
   const colleagues = [['a licensed colleague', ben], ['an analyst', cleo], ['an assistant', dov], ['finance', eve]];
   for (const [who, tok] of colleagues) {
@@ -408,7 +378,7 @@ section('T/live — the club/agency boundary, in both directions');
   neg(expect(foreign, 404, null), `T2 a FOREIGN agency cannot open another agency's mandate — concealed as 404 ${foreign.body?.error}`);
 }
 
-section('A/live — authority is re-derived on the NEXT request, not at login (§11)');
+section('A/live — authority is re-derived on the NEXT request, not at login');
 {
   // Ada's session stays valid; her AFFILIATION ends underneath it. Every agent
   // route must refuse on the next request with no re-login in between. This is
@@ -424,7 +394,7 @@ section('A/live — authority is re-derived on the NEXT request, not at login (�
   }
 }
 
-section('J/live — a minor is indistinguishable from a player who does not exist (§12)');
+section('J/live — a minor is indistinguishable from a player who does not exist');
 {
   const minor = await j('POST', '/org/agent/clients/request', { playerId: 'pl-guni', scope: ['employment'], jurisdiction: 'ENG' , clientKey: key() }, ada.token);
   const ghost = await j('POST', '/org/agent/clients/request', { playerId: 'pl-does-not-exist-at-all', scope: ['employment'], jurisdiction: 'ENG' , clientKey: key() }, ada.token);
@@ -459,12 +429,11 @@ section('V/live — deep links after authority loss, and history is not access')
   const term = await j('POST', `/org/agent/clients/${REP}/terminate`, { reason: 'ending it' , clientKey: key() }, ada.token);
   ok(term.status === 200, `V2 the agent terminated her own mandate (${term.status})`);
   const after = collect('terminated client detail', await j('GET', `/org/agent/clients/${REP}`, undefined, ada.token));
-  // P5.6B deliberately keeps an ENDED mandate as the agent's own history, so the
-  // assertion is about CONTENTS, not about a status code.
-  // Pinned, not either-way: P5.6B keeps an ended mandate as the agent's own
-  // history, so the record MUST still answer 200. A test that also accepted a
-  // refusal here would pass under two contradictory products.
-  ok(after.status === 200, `V3 the relationship record itself still answers 200 — an ended mandate is the agent's own history, deliberately (P5.6B) (${after.status})`);
+  // An ENDED mandate is deliberately kept as the agent's own history, so the
+  // record MUST still answer 200 and the privacy assertions are about CONTENTS.
+  // A test that also accepted a refusal here would pass under two contradictory
+  // products.
+  ok(after.status === 200, `V3 the relationship record itself still answers 200 — an ended mandate is the agent's own history, deliberately (${after.status})`);
   const txt = JSON.stringify(after.body ?? {});
   ok(/terminated/i.test(txt), 'V3a and reads as terminated, so history says what happened');
   neg(!/Passport|passport/.test(txt), 'V3b but it carries no Passport');
@@ -493,8 +462,8 @@ section('AC/live — rev conflicts: two answers to one question cannot both land
 
 section('AB/live — idempotency: a replay is an answer, not a second act');
 {
-  // The key travels in the BODY as `clientKey` (domains/recruitment/lifecycle/contact.mjs normaliseClientKey,
-  // used by m24/m25/m26 alike), not in an Idempotency-Key header.
+  // The key travels in the BODY as `clientKey` (normaliseClientKey in
+  // domains/recruitment/lifecycle/contact.mjs), not in an Idempotency-Key header.
   const k = key();
   const body = { playerId: 'pl-martin', scope: ['employment'], jurisdiction: 'ENG', clientKey: k };
   const a = await j('POST', '/org/agent/clients/request', body, ada.token);
@@ -542,18 +511,18 @@ section('N/live — private club recruitment intelligence stays private');
 {
   for (const [what, url] of [['second look', '/org/second-look'], ['nobody missed', '/org/nobody-missed'], ['watchlists', '/org/watchlists'], ['assessments', '/org/assessments'], ['analytics overview', '/org/analytics/overview'], ['rooms', '/org/rooms']]) {
     const r = await j('GET', url, undefined, ada.token);
-    // A1 category D: intentionally generic org surfaces. Each is either absent
-    // for an agency (404) or answered about the caller's OWN org, which for an
-    // agency is EMPTY. Both halves are asserted — a `neg(true)` in the 404
-    // branch would be an unconditional pass, the shape F-9 records.
+    // Intentionally generic org surfaces. Each is either absent for an agency
+    // (404) or answered about the caller's OWN org, which for an agency is EMPTY.
+    // Both halves are asserted — a `neg(true)` in the 404 branch would be an
+    // unconditional pass.
     const b = r.body ?? {};
     const items = Array.isArray(b) ? b : (b.items ?? []);
     const emptyOwn = r.status === 200 && items.length === 0 && (b.total === undefined || b.total === 0);
     neg(r.status === 404 || emptyOwn, `N1 the club's ${what} is absent for an agency (404) or answered about its OWN org and EMPTY — got ${r.status}, ${items.length} rows, total ${b.total ?? '—'}`);
     const txt = JSON.stringify(b);
-    neg(!/org-eastport|org-harbour|Maria Keane|Rita Vale/.test(txt), `N2 the agency's own ${what} contains no other org's case, player or user (A1 category D)`);
+    neg(!/org-eastport|org-harbour|Maria Keane|Rita Vale/.test(txt), `N2 the agency's own ${what} contains no other org's case, player or user`);
   }
-  // A1 category B, proved against a case that REALLY EXISTS. Comparing two
+  // Proved against a case that REALLY EXISTS. Comparing two
   // invented ids would be worthless: both 404 whatever the rule is. So the club
   // opens a genuine case first, confirms it can read it, and only then is the
   // agency's refusal compared against an id that never existed.
@@ -596,9 +565,8 @@ section('AI/live — the store survives a restart with its authority intact');
 
 section('AD/live — sign-up refuses a date of birth it cannot read');
 {
-  // Registration already refused an ABSENT dob. It did not refuse an UNREADABLE
-  // one, so `dob: 12345` created an account whose age could never be
-  // established — and before F-8 that account computed as a 56-year-old.
+  // An UNREADABLE dob, not only an absent one, must be refused: `dob: 12345`
+  // would create an account whose age can never be established.
   const signup = (dob) => j('POST', '/auth/player/signup', { name: 'Dob Probe', dob, country: 'GB', password: 'a-long-enough-password' });
   for (const [label, dob] of [['a number', 12345], ['garbage', 'not-a-date'], ['an array', ['1990-01-01']], ['an object', { y: 1990 }], ['30 February (V8 rolls it to 2 March)', '1990-02-30'], ['31 April', '1991-04-31'], ['29 February in a non-leap year', '1993-02-29']]) {
     const r = collect(`signup dob ${label}`, await signup(dob));
@@ -623,11 +591,10 @@ section('AD/live — sign-up refuses a date of birth it cannot read');
 // `app.use('/auth', authLimiter)` bounds the WHOLE /auth surface at 40 requests
 // per minute per IP, and every login in this suite spends that budget. A burst of
 // wrong credentials placed earlier would therefore starve the logins of every
-// later group — which is exactly what happened in the original P5.6F run before
-// this group was moved to the end. Nothing here is a sleep or a retry: the group
-// is simply last, and it is the last thing the file does.
+// later group. Nothing here is a sleep or a retry: the group is simply last,
+// and it is the last thing the file does.
 // ---------------------------------------------------------------------------
-section('AA/live — the failed-login budget, per identifier (F-5)');
+section('AA/live — the failed-login budget, per identifier');
 {
   const tryRev = (id, secret) => j('POST', '/auth/reviewer/login', { reviewerId: id, secret });
   let lockedAt = 0;
@@ -648,10 +615,10 @@ section('AA/live — the failed-login budget, per identifier (F-5)');
 
 section('AA/live — one account, two names, ONE budget');
 {
-  // A guardian can be named by id or by email. Until the review pass those were
-  // two failed-login buckets for one password — a guesser alternating them got
-  // 42 attempts per window instead of 21. A fresh server: fresh per-IP AND
-  // per-identifier buckets, so this measures only what it claims to.
+  // A guardian can be named by id or by email; separate buckets would give a
+  // guesser alternating them twice the attempts per window. A fresh server:
+  // fresh per-IP AND per-identifier buckets, so this measures only what it
+  // claims to.
   await stop(server); server = await boot();
   const byId = (pw) => j('POST', '/auth/guardian/login', { guardianId: 'gd-locktest', password: pw });
   const byEmail = (pw) => j('POST', '/auth/guardian/login', { email: 'locktest@example.test', password: pw });

@@ -1,13 +1,7 @@
-// S8a — recruitment requests and accepted trials as typed tables with EXPLICIT writes (repositories/recruitment.mjs,
-// migration 0015; docs/architecture/migration.md §4.3). What this suite proves: the migration creates the sixteen typed
-// tables (no lossless side column, the vocabulary CHECKs, the case key immediate and the trial key deferred to COMMIT) and channels with
-// the real request key; a fixture written through the repository types every writer shape into its columns and reads back
-// the typed record, refuses a record it cannot type and names every missing reference with ids; the player references are
-// counted, never refused (Q7a), and a missing guardian is refused (Q7c); the repository's operations write rows at once
-// and return fresh read-only records, there is no db.* view (§4.3 step 2) and every query matches a table scan, a unit
-// of work rolls the rows back and a read inside it sees its writes,
-// and a request or a trial may name a case the staged S8b repository writes at the same unit's COMMIT; the deletion
-// unit's tombstones; the derived trial reports; the live report.
+// Recruitment requests and accepted trials (repositories/recruitment.mjs, migration 0015): the typed tables, typed
+// writes and refusals, SQL reads that match a table scan, units of work, the deletion unit's tombstones and the derived
+// trial reports. The trial key is deferred to COMMIT so a request or trial may name a case written later in the same
+// unit. Player references are counted, never refused (Q7a); a missing guardian is refused (Q7c; docs/decisions.md).
 // Temporary databases only; nothing touches DATA_DIR. Run with: npm test
 import assert from 'node:assert/strict';
 import { checkHistoryFeed } from './historyFeedCheck.mjs';
@@ -40,7 +34,7 @@ const CHANNEL = (over = {}) => ({ id: 'chan-1', requestId: 'req-p4b', playerId: 
 /** The typed expectation of a writer's literal: what every read returns. */
 const typed = (name, raw) => { const t = (name === 'requests' ? rec.typeRequest : rec.typeTrial)(persisted(raw)); assert.ok(t.ok, t.reason); return plain(t.record); };
 
-/** Every writer shape: the accepted P4B pair (req-p4b ↔ trial-1, thread chan-1), a contact, an open-day invitation, a pending date-only invitation, the minor's invitation, and the M12-shaped reported trial on req-old. */
+/** Every writer shape: the accepted P4B pair (req-p4b ↔ trial-1, thread chan-1), a contact, an open-day invitation, a pending date-only invitation, the minor's invitation, and the legacy reported trial on req-old. */
 const FIX = () => ({ requests: [acceptedRequest(p4bInvitation(), 'trial-1'), contactRequest(), openDayRequest(), legacyTrialRequest(), minorInvitation(), legacyTrialRequest({ id: 'req-old', status: 'accepted', respondedAt: T.accepted - 30 * 86_400_000, respondedBy: 'player', contactChannel: null })], trials: [scheduledTrial(), preP4bTrial()] });
 /** FIX plus the accepted, worked (every child table) and cancelled trials, with their requests. */
 const EVERY_TRIAL_SHAPE = () => {
@@ -81,7 +75,7 @@ test('[schema] migration 0015 is registered before 0016–0018 and creates the s
   assert.match(ddlOf(f, 'trials'), /request_id TEXT NOT NULL UNIQUE REFERENCES recruitment_requests\(id\) ON DELETE RESTRICT/);
   assert.match(ddlOf(f, 'recruitment_requests'), /status IN \('pending','accepted','declined','suspended'\)/); assert.match(ddlOf(f, 'trials'), /workflow_state IN \('legacy_accepted'/); assert.match(ddlOf(f, 'trial_attendance'), /source IN \('checkin','manual'\)/);
   assert.deepEqual(f.prepare('PRAGMA foreign_key_list(channels)').all().map((x) => [x.from, x.table, x.on_delete]).sort(), [['org_id', 'orgs', 'RESTRICT'], ['request_id', 'recruitment_requests', 'RESTRICT']]);
-  assert.equal(hasBlobTable(f), false, 'no blob table'); // rewritten in S14a: it described the blob
+  assert.equal(hasBlobTable(f), false, 'no blob table');
   F.close(); rm(d);
 });
 
@@ -145,7 +139,7 @@ test('[repository] a unit of work: a request and a trial written in a unit with 
   L.close(); rm(d);
 });
 
-test('[repository] SQL reads (§4.3 step 2): byId and every list query return exactly what a scan of the tables would, in insertion order; the counts agree; the sweep queries are the old filters (report overdue, completed a week ago without the reminder); the staff-check pages walk every check, pending only or all, at every page size; `reads` carries no write', () => {
+test('[repository] SQL reads: byId and every list query return exactly what a scan of the tables would, in insertion order; the counts agree; the sweep queries are the old filters (report overdue, completed a week ago without the reminder); the staff-check pages walk every check, pending only or all, at every page size; `reads` carries no write', () => {
   const d = file('reads'); const L = serverOpen(d); const { requests, trials } = L.repo;
   const all = L.repo.exportAll();
   assert.ok(all.requests.length >= 3 && all.trials.length >= 1, 'the fixture has records to query');
@@ -175,7 +169,7 @@ test('[repository] SQL reads (§4.3 step 2): byId and every list query return ex
   L.close(); rm(d);
 });
 
-test('[repository] batched trial lists (§4.3 step 4): every list, page and sweep decodes its trials\' child rows in one batch, and each trial is exactly the one byId decodes on its own (the worked trial exercises every child table); a page of five trials runs as many SQL statements as a page of two', () => {
+test('[repository] batched trial lists: every list, page and sweep decodes its trials\' child rows in one batch, and each trial is exactly the one byId decodes on its own (the worked trial exercises every child table); a page of five trials runs as many SQL statements as a page of two', () => {
   const d = file('batch', EVERY_TRIAL_SHAPE()); const L = serverOpen(d); const { trials } = L.repo;
   const all = L.repo.exportAll().trials;
   assert.ok(all.length >= 5 && all.some((t) => t.id === 'trial-worked'), 'the fixture has the worked trial among five or more');
@@ -196,7 +190,7 @@ test('[repository] batched trial lists (§4.3 step 4): every list, page and swee
   L.close(); rm(d);
 });
 
-test('[repository] the reminder sweep query (§4.3 step 4): remindersDue(now) is exactly the confirmed, open trials the sweep would remind at that instant — a session starting within 48 hours whose marker for the current revision is unset, or the last session ended over a day ago without completionPending — at every boundary', () => {
+test('[repository] the reminder sweep query: remindersDue(now) is exactly the confirmed, open trials the sweep would remind at that instant — a session starting within 48 hours whose marker for the current revision is unset, or the last session ended over a day ago without completionPending — at every boundary', () => {
   const H = 3_600_000; const D = 24 * H;
   const copy = ({ evidence: _e, ...x }) => x;
   const multi = (id, starts, over = {}) => {
@@ -242,7 +236,7 @@ test('[repository] the deletion unit: tombstoneForPlayer writes every request an
   L.close(); rm(d);
 });
 
-test('[repository] S14i: a player\'s stored profile figure (players.profile_signal) counts the reports filed on their trials: right after the fixture is written, and refreshed by the trial write that files one, in its own unit (a unit that fails leaves it as it was)', () => {
+test('[repository] a player\'s stored profile figure (players.profile_signal) counts the reports filed on their trials: right after the fixture is written, and refreshed by the trial write that files one, in its own unit (a unit that fails leaves it as it was)', () => {
   const d = file('signal'); const L = serverOpen(d);
   const stored = () => withRo(d, (s) => col(s, "SELECT profile_signal FROM players WHERE id = 'pl-adult'"));
   const derived = () => computeTrustScore(L.layer.players.byId('pl-adult'));

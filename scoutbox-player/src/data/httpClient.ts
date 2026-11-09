@@ -67,7 +67,7 @@ const SEED_IDENTITIES: DemoIdentity[] = [
 export const httpClient: PlayerClient = {
   mode: 'live',
 
-  // PRE-M24 (PM-11): the seed identities are passwordless DEVELOPMENT logins.
+  // The seed identities are passwordless DEVELOPMENT logins.
   // A production server refuses them (DEV_LOGIN_DISABLED), so offering them
   // there showed four "Enter" buttons that could only fail. The server says
   // whether they work (`/health` → devLogins); none are offered when it says no
@@ -99,7 +99,7 @@ export const httpClient: PlayerClient = {
     return r;
   },
 
-  // PRE-M24 (PM-4): signing out revokes the session server-side and removes the
+  // Signing out revokes the session server-side and removes the
   // token from this device. Before this, sign-out only forgot the identity:
   // the token stayed in localStorage and stayed valid on the server.
   logout: async (accountId) => {
@@ -199,7 +199,7 @@ export const httpClient: PlayerClient = {
   deleteAccount: (playerId) =>
     request<void>('/player/account', playerId, { method: 'DELETE' }),
 
-  // The directory pages by cursor (S14g): the first page is read; "load more" (nextCursor) is still needed.
+  // The directory pages by cursor: the first page is read; "load more" (nextCursor) is still needed.
   getDirectory: async () => (await request<{ items: DirectoryClub[]; nextCursor: string | null }>('/orgs/directory')).items,
 
   // ---- the Grassroots journey ----
@@ -270,7 +270,7 @@ export const httpClient: PlayerClient = {
   guardianRespond: (guardianId, requestId, accept, chosenSlot, message) =>
     guardianRequest<void>(`/guardian/requests/${requestId}/respond`, guardianId, { method: 'POST', body: JSON.stringify({ accept, chosenSlot, ...(message ? { message } : {}) }) }),
 
-  // Paged by cursor (S14b), newest 50 first; only the first page is read, a "load more" is not built yet (by decision).
+  // Paged by cursor, newest 50 first; only the first page is read, a "load more" is not built yet (by decision).
   guardianLog: async (guardianId) => (await guardianRequest<{ items: { id: string; ts: number; type: string; orgName: string; scoutName: string; playerId: string }[]; nextCursor: string | null }>('/guardian/log', guardianId)).items,
 
   guardianSetMedicalShared: (guardianId, childId, shared) =>
@@ -355,7 +355,7 @@ export const httpClient: PlayerClient = {
       if (stopped) return;
       try {
         const res = await fetch(`${API_URL}/events/ticket`, { method: 'POST', headers: { ...authHeader(auth.id) } });
-        // PRE-M24 (PM-3): a 401 means the session is gone — stop asking every 15 s and let the app end it.
+        // A 401 means the session is gone — stop asking every 15 s and let the app end it.
         if (res.status === 401) { stopped = true; cb('session_expired', {}); return; }
         if (!res.ok) throw new Error('ticket refused');
         const { ticket } = (await res.json()) as { ticket: string };
@@ -399,7 +399,7 @@ export const httpClient: PlayerClient = {
   },
 };
 
-// M12: the request helper + auth header are shared with the m12client module
+// The request helper + auth header are shared with the m12client module
 // so the new feature surface uses the exact same session tokens.
 export { request as m12Request };
 export const m12AuthHeader = authHeader;

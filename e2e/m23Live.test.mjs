@@ -1,19 +1,17 @@
-// M23 P2 LIVE — the corrections the total sweep made, exercised end to end.
-//
-// P2 ships no M23 client surface, so this is not a UI feature test. It is a
-// test of the things the sweep CHANGED about production behaviour, driven
+// Live: role resolution, the stage routes and the `signed` gate, exercised end
+// to end. This is not a UI feature test: it tests server behaviour, driven
 // through a real browser login against a real backend:
 //
 //   L1  a recruitment lead's role is resolved correctly by the server
 //   L2  a role that should not have that permission is refused
 //   L3  the legacy stage route refuses a Room and changes nothing
-//   L4  a plain M12 case still moves through that route
+//   L4  a plain recruitment case (no Room) still moves through that route
 //   L5  `signed` is evidence-gated through the real HTTP route
 //   L6  every refusal carries its specific, semantic status code
 //
 // WHY THE SESSION COMES FROM THE BROWSER
 //
-// The defect this suite exists to cover (D5) was a server-side role resolution
+// The defect this suite guards against is a server-side role resolution
 // bug: `isLead(req)` instead of `isLead(req.orgUser)`. A synthesised token
 // would have exercised the same path, but a session established by a real
 // login through the real client proves the whole chain — the UI's login, the
@@ -21,7 +19,7 @@
 //
 // WHY NO ASSERTION HERE IS `status !== 200`
 //
-// That is the exact shape that let D5 hide. `confirmSignedOutcome` refused
+// That is the exact shape that let the role bug hide. `confirmSignedOutcome` refused
 // with 403 (not permitted) where the test author expected 422 (no evidence),
 // and `!== 200` was true either way. Every assertion below names the status it
 // expects and the error code that must come with it.
@@ -144,7 +142,7 @@ const readBack = await j(`/org/rooms/${ROOM_ID}`, {}, lead.auth);
 if (readBack.status !== 200) fail(`L1: the room the UI created is not readable through the API (${readBack.status})`);
 say(`L1: the room is readable through the API the UI is talking to (${ROOM_ID})`);
 
-// --- the assertion that covers D5 ---
+// --- the assertion that covers the role bug ---
 //
 // `confirmSignedOutcome` is admin-only, and the validator checks ROLE BEFORE
 // the transition table. So from `watching` the two outcomes are distinct and
@@ -177,7 +175,7 @@ say('L1: and performs a lead-authorized lifecycle action successfully (200, watc
 const resumed = await j(`/org/rooms/${ROOM_ID}/lifecycle`, {
   method: 'POST', body: JSON.stringify({ action: 'resumeCase', expectedRev: hold.body.currentRev }),
 }, lead.auth);
-// M23 P8.1 (D-P81-1): a resume returns the case to the state it was held FROM (here `watching`), never to a fixed state.
+// A resume returns the case to the state it was held FROM (here `watching`), never to a fixed state.
 if (resumed.status !== 200 || resumed.body?.to !== 'watching') fail(`L1: resume failed — ${resumed.status} ${resumed.body?.to ?? ''}`);
 say('L1: and resumes it (200, on_hold → watching, the held-from state)');
 
@@ -236,7 +234,7 @@ if (afterStage.body.lifecycle.stage !== beforeStage.body.lifecycle.stage) {
 }
 say('L3: and the derived M12 stage is unchanged, which is the invariant the refusal exists to protect');
 
-// L4 — a plain M12 case (no Room) still works. Refusing a Room must not
+// L4 — a plain recruitment case (no Room) still works. Refusing a Room must not
 // become a licence to break the cases that have no lifecycle to protect.
 const players = await j('/org/players', {}, lead.auth);
 const spare = (players.body?.items ?? []).find((p) => p.name !== PLAYER_NAME && p.id);
@@ -257,7 +255,7 @@ say('L4: and still moves through the legacy stage route exactly as before (200, 
 // ================================ L5 — `signed` through the real route
 
 // Both routes that can reach `signed` are exercised. Neither may arrive there
-// without a `db.signings` record for this org and this player.
+// without a signing record for this org and this player.
 const cur = await j(`/org/rooms/${ROOM_ID}/journey`, {}, lead.auth);
 const legacyStatus = await j(`/org/rooms/${ROOM_ID}/status`, {
   method: 'POST', body: JSON.stringify({ status: 'signed', expectedRev: cur.body.case.rev }),
@@ -400,6 +398,6 @@ try { serverProc.kill('SIGTERM'); } catch { /* gone */ }
 console.log(`\nm23Live: ${passed} checks passed — P2 sweep corrections verified end to end`);
 // EXPLICIT EXIT. The spawned backend and the two static servers are ref'd
 // handles, so without this the process prints its summary and then hangs
-// forever — success to a human reading the tail, a timeout to a harness. This
-// is the m22E2E D1 defect, and every other Live suite ends the same way.
+// forever — success to a human reading the tail, a timeout to a harness.
+// Every other Live suite ends the same way.
 process.exit(0);

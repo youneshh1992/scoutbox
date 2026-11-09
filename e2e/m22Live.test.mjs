@@ -1,4 +1,4 @@
-// M22 LIVE browser journeys — real camera stream, real transport, real engine.
+// LIVE browser journeys — real camera stream, real transport, real engine.
 //
 // C1   Ready Check renders; observation ready AND Combine unavailable, together
 // C2   low light produces a readable refusal and no official result
@@ -6,8 +6,8 @@
 // C4   client-side count tampering changes nothing the server says
 // C5   an old session's nonce is rejected by the live endpoint
 // C6   the hard Combine blocker survives a full live observation  (MANDATORY)
-// C7   the M21 development target does not become met
-// C8   the M19 matching criterion does not become satisfied
+// C7   the development target does not become met
+// C8   the matching criterion does not become satisfied
 // C9   a test-only validation record proves the future wiring, then is gone
 // C10  invalidating a controlled valid result removes it downstream
 // C11  a provider failure mid-attempt does not crash the page; retry works
@@ -15,7 +15,7 @@
 //
 // The camera is a Y4M rendered from m22/scenes.mjs and handed to Chromium as a
 // fake capture device, so getUserMedia returns a real MediaStream of frames we
-// chose. §43 stands: that is precisely what a replay spoof looks like, which is
+// chose. That is precisely what a replay spoof looks like, which is
 // why this suite asserts TRANSPORT and UI behaviour and never counting accuracy.
 
 import { spawn, execSync } from 'node:child_process';
@@ -44,7 +44,7 @@ const neg = (cond, m) => { negatives++; ok(cond, `[neg] ${m}`); };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const J = (o) => JSON.stringify(o);
 
-/** Nothing on any M22 surface may claim these. */
+/** Nothing on any Box Cam surface may claim these. */
 const FORBIDDEN = [
   /Combine Verified/i, /verifies football ability/i, /AI scout/i,
   /Player Rating/i, /Match Score/i, /Potential/i,
@@ -141,7 +141,7 @@ async function playerPage({ width = 1280, height = 900 } = {}) {
   // Box Training lives on the You tab, not the landing screen.
   await page.click('a[href="/football"]');
   await page.getByRole('tab', { name: 'Box Cam' }).click();
-  await page.waitForSelector('[data-testid="boxcam-start"]', { timeout: 30000 }); // M24F.4 — the session-led root
+  await page.waitForSelector('[data-testid="boxcam-start"]', { timeout: 30000 }); // the session-led root
   return { ctx, page };
 }
 
@@ -185,7 +185,7 @@ async function waitForOutcome(page, timeout = 60000) {
     'C1 and Combine verification is shown as NOT YET AVAILABLE on the same screen');
   neg(/real.world|validation/i.test(body), 'C1 with the reason given in plain words');
 
-  // §130 — the marketing claim must not appear anywhere on the surface.
+  // The marketing claim must not appear anywhere on the surface.
   for (const re of FORBIDDEN.filter((r) => !/Combine Verified/i.test(String(r)))) {
     neg(!re.test(body), `C1 no forbidden claim on the CV surface: ${re}`);
   }
@@ -221,13 +221,13 @@ let liveResult = null;
   const observed = /Box Cam observed/i.test(after);
   const refused = /Could not verify/i.test(after);
   // Either outcome is legitimate here and the suite says which, because the
-  // fake camera is a downscaled synthetic scene and §106 only promises that
+  // fake camera is a downscaled synthetic scene and the product only promises that
   // Box Cam observed "may succeed if its independent gate permits".
   const refusalLine = (after.match(/Could not verify[\s\S]{0,160}/i) ?? [''])[0].replace(/\s+/g, ' ').trim();
   ok(observed || refused,
     `C3 the attempt reaches a decided outcome (${observed ? 'observed' : `refused — ${refusalLine.slice(0, 120)}`})`);
 
-  // §59/§109 — MANDATORY. Whatever the outcome, Combine stays closed.
+  // MANDATORY. Whatever the outcome, Combine stays closed.
   neg(/Combine verification/i.test(after) && /not available|Not yet available/i.test(after),
     'C6 (MANDATORY) after a full live observation, Combine verification is still unavailable');
   neg((after.match(/Combine Verified/gi) ?? []).length === 0,
@@ -242,7 +242,7 @@ let liveResult = null;
     'C6 and real-world validation as not_completed');
   liveResult = { token: kola.token };
 
-  // §79 — the experimental count is behind a disclosure, not the headline.
+  // The experimental count is behind a disclosure, not the headline.
   if (observed) {
     neg(!/Touches counted/i.test(after), 'C3/§79 the experimental count is not shown by default');
     const toggle = page.getByRole('button', { name: /experimental/i }).first();
@@ -270,7 +270,7 @@ let liveResult = null;
   await page.waitForSelector('text=Your visibility right now', { timeout: 30000 });
   await page.click('a[href="/football"]');
   await page.getByRole('tab', { name: 'Box Cam' }).click();
-  await page.waitForSelector('[data-testid="boxcam-start"]', { timeout: 30000 }); // M24F.4 — the session-led root
+  await page.waitForSelector('[data-testid="boxcam-start"]', { timeout: 30000 }); // the session-led root
   await openCv(page);
   await page.getByRole('button', { name: /^Start$/ }).first().click();
   await page.waitForSelector('text=Observing', { timeout: 30000 });
@@ -363,7 +363,7 @@ let liveResult = null;
 // C9/C10 — the future-validated fixture, and invalidation
 // =====================================================================
 //
-// §112 permits this only as a controlled TEST-ONLY exercise. There is no route
+// This is permitted only as a controlled TEST-ONLY exercise. There is no route
 // that injects a validation record, and that absence is itself the assertion:
 // the wiring is proven in-process by e2e/development/combineProductionGate.mjs, which constructs
 // the record in a local object that no request can reach.
@@ -436,7 +436,7 @@ let liveResult = null;
   neg(/Combine verification/i.test(t) && /Not yet available/i.test(t),
     'C12 and the Combine notice survives the narrow layout — it is not the thing that gets cut');
 
-  // §82 — the start control is reachable and operable from the keyboard.
+  // The start control is reachable and operable from the keyboard.
   const start = page.getByRole('button', { name: /^Start$/ }).first();
   if (await start.count()) {
     await start.focus();

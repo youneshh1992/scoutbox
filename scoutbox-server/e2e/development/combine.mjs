@@ -1,14 +1,13 @@
-// M16.1 acceptance suite — At-Home Combine (measurement layer over Box Cam).
+// At-Home Combine (measurement layer over Box Cam).
 //
 // Pure-engine fixtures (protocol registry, measurement derivation, personal
-// best, comparison), then full HTTP journeys C1–C10 and the §76 abuse
+// best, comparison), then full HTTP journeys C1–C10 and the abuse
 // catalogue. Well over 40% of checks are negative/edge/security cases.
 //
 // The honesty gate is exercised directly: only metrics a real provider
-// supports can be Combine Verified. In this environment the production web
-// provider supports neither ball observation nor rep counting, so every
-// first-library Combine is device-unsupported in production and is exercised
-// via the gated, always-labelled test provider; future athletic protocols
+// supports can be Combine Verified. No production provider is validated to
+// verify a first-library Combine, so each one is exercised via the gated,
+// always-labelled test provider; future athletic protocols
 // need capabilities NO provider has, so they can never be Combine Verified.
 import { spawn } from 'node:child_process';
 import { mkdtempSync } from 'node:fs';
@@ -23,7 +22,7 @@ import {
 import { PROVIDERS } from '../../domains/development/boxcam/drills.mjs';
 import { pickPort } from '../../scripts/testPort.mjs';
 
-const PORT = pickPort(4900, 180, [0]); // TH-6: never a fetch-blocked port
+const PORT = pickPort(4900, 180, [0]); // never a fetch-blocked port
 const BASE = `http://localhost:${PORT}`;
 const DATA_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-m161-'));
 const SERVER = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'server.mjs');
@@ -304,8 +303,8 @@ section('C8 — invalidation recalculates PB and Passport; restore brings it bac
   ok(mc2.body.verifiedResults.some((x) => x.protocolId === 'combine-box-touch-60' && x.measuredValue === 184), 'C8: restore brings the verified 184 back (history preserved)');
 }
 
-// ============================================================ §76 abuse catalogue
-section('§76 — abuse / edge / security catalogue');
+// ============================================================ abuse catalogue
+section('abuse / edge / security catalogue');
 {
   // 1-3 forge value/state/provenance already covered in C2; re-assert state forge
   // (juggle — touch-60's daily verified attempts are exhausted by C1–C3)
@@ -380,11 +379,11 @@ section('§76 — abuse / edge / security catalogue');
   neg((await j('GET', '/org/players/pl-guni/football-passport', undefined, alex.token)).body?.combine == null, 'extra: agency passport view of a minor carries no Combine block');
 }
 
-// ============================================================ S12b
-section('S12b — typed rows: the nonce stored only as its hash, junk refused, the request list pages');
+// ============================================================ typed rows
+section('typed rows: the nonce stored only as its hash, junk refused, the request list pages');
 {
   const created = await j('POST', '/player/combine/attempts', { protocolId: 'combine-box-touch-60', provider: 'local_test', mode: 'practice' }, kola.token);
-  ok(created.status === 201, 'a practice attempt is minted for the S12b checks');
+  ok(created.status === 201, 'a practice attempt is minted for the checks');
   const { attempt, boxSession, nonce } = created.body;
   const { DatabaseSync } = await import('node:sqlite');
   const file = new DatabaseSync(path.join(DATA_DIR, 'scoutbox.db'), { readOnly: true });

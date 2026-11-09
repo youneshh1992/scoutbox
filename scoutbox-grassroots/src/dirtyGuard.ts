@@ -1,4 +1,4 @@
-// M18.2 — unsaved-change protection.
+// Unsaved-change protection.
 //
 // A form that has been edited and not saved registers itself here. Every way
 // of leaving the page — the sidebar, a hash change, the browser Back button,
@@ -13,9 +13,8 @@
 // Why the hash decision lives in the app's own handler (guardHashChange) and
 // not in a second window listener: React may render synchronously inside the
 // first hashchange listener, unmounting the dirty form before a later
-// listener gets to ask it anything. The M18.2 live suite (J3) caught exactly
-// that — a second listener saw zero registered forms and let a dirty form go.
-// One handler, one decision, before any state changes.
+// listener gets to ask it anything: a second listener sees zero registered
+// forms and lets a dirty form go. One handler, one decision, before any state changes.
 
 type IsDirty = () => boolean;
 

@@ -1,13 +1,12 @@
-// M24F.2 — static density / categorisation / brand gates. No browser: the
+// Static density / categorisation / brand gates. No browser: the
 // source tree is the evidence. Run from e2e/: node m24f2DensityAudit.test.mjs
 //
 //  1. Player › Clubs and › Account are ≤ 5 categories each, with the four
 //     agreed names, and Suitability preferences live under Account › Preferences;
-//  2. the Grassroots entry introduction has NO diagonal gradient; the
-//     centre-circle / halfway-line motif over the photograph is declared in
-//     the Grassroots stylesheet only; the photograph is referenced nowhere else;
+//  2. the Grassroots entry introduction is the green panel: no photograph,
+//     no centre-circle motif, no bullet points;
 //  3. the Agent active-navigation tokens are gold in both themes;
-//  4. the M24F.1 profile keeps its four sections;
+//  4. the profile keeps its four sections;
 //  5. Sign out is present in every application;
 //  6. the ™ recipe: raised over the square, 2 px optical gap, no old gap;
 //     the Player Wordmark stacks TM over the square;
@@ -37,7 +36,7 @@ ok(/testID="account-back"/.test(you) && /chevron-left/.test(you), 'Account categ
 // ------------------------------------------------------------ 2. Grassroots entry
 const platform = read('design-system/platform.css');
 const grassCss = read('scoutbox-grassroots/src/styles.css');
-// The Founder's direction after M24F.2: the entry introduction is the M24E green panel again — no photograph, no centre circle, anywhere.
+// The Founder's direction: the entry introduction is the green panel — no photograph, no centre circle, anywhere.
 ok(/:root\[data-app="grass"\] \.auth-promo \{[^}]*background-color: var\(--auth-promo\)/.test(platform), 'Grassroots entry: the M24E green introduction panel (restored)');
 ok(!/grassroots-auth-grass|radial-gradient\(circle at 50% 52%/.test(platform + grassCss + read('design-system/tokens.css') + read('scoutbox-club/src/styles.css') + read('scoutbox-agent/src/styles.css') + read('scoutbox-admin/src/styles.css')), 'no stylesheet carries the photograph or the centre-circle motif');
 ok(!fs.existsSync(path.join(ROOT, 'design-system/assets/grassroots-auth-grass.jpg')), 'the grass photograph asset is not on disk');
@@ -56,7 +55,7 @@ ok(!!agentDark && /--sb-nav-active-bg: rgba\(199, 169, 107, 0?\.14\)/.test(agent
 ok(!/--sb-nav-active-(bg|fg|icon): #00e676|--sb-nav-active-(bg|fg|icon): #33ee7c/.test((agentLight?.[1] ?? '') + (agentDark?.[1] ?? '')), 'Agent: no green in the active navigation tokens');
 ok(/:root\[data-app="agent"\] \.sidebar button\.active[^{]*\{[^}]*var\(--sb-nav-active-fg\)/.test(platform) && /inset 3px 0 0/.test(platform.split('Agent')[1] ?? platform), 'Agent: the active destination reads the gold tokens and carries an inset bar (not colour-only)');
 
-// ------------------------------------------------------------ 4. the M24F.1 profile
+// ------------------------------------------------------------ 4. the profile
 const profile = read('scoutbox-player/src/app/(tabs)/profile.tsx');
 const sections = [...(profile.match(/const SECTION_KEYS[^=]*=\s*\[([\s\S]*?)\];/)?.[1].matchAll(/'([a-z]+)'/g) ?? [])].map((m) => m[1]);
 ok(sections.join(',') === 'overview,performance,evidence,journey', `Profile: the four M24F.1 sections intact (${sections.join(' / ')})`);

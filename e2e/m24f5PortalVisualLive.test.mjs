@@ -1,4 +1,4 @@
-// M24F.5 — final visual acceptance of the portals, in a real browser, on the demo
+// Final visual acceptance of the portals, in a real browser, on the demo
 // bundles, at 1024 / 1280 / 1440: Grassroots Home, local radar (Open Days) and
 // squad; Pro Nobody Missed and the Director Dashboard; the Agent home and a dense
 // Agent screen; the Trust & Safety review queue; plus the Film Room and the

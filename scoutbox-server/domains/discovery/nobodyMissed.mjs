@@ -1,4 +1,4 @@
-// M18 — Recruitment Briefs and Nobody Missed.
+// Recruitment Briefs and Nobody Missed.
 //
 // A Recruitment Brief is an EXPLICIT expression of what a club is looking for.
 // It is not a talent model, it has no weights, and it has no hidden criteria:
@@ -34,30 +34,29 @@ export function registerNobodyMissed(ctx) {
   } = ctx;
   if (typeof matchFacts?.query !== 'function') throw new TypeError('registerNobodyMissed needs the matchFacts repository (S14j)');
   const { matchQuery, factsOfRows, readMatchPage, matchOrder, keyOfRow } = createMatchReads({ players, matchFacts });
-  // S12c: briefs and reviews are rows of the discovery repository, written only through its operations.
   const dreads = ctx.discoveryReads;
   if (typeof dreads?.briefs?.forOrg !== 'function' || typeof discovery?.briefs?.create !== 'function') throw new TypeError('registerNobodyMissed needs the discovery repository and discoveryReads from the data layer');
-  // §4.3 step 2: the signings are read through SQL (the signings repository's queries).
   const reads = ctx.recruitmentReads;
   if (typeof reads?.signings?.forPlayer !== 'function') throw new TypeError('registerNobodyMissed needs recruitmentReads (signings) from the data layer');
 
   const now = () => Date.now();
-  // M18.1: the shared limiter and its named policy (see domains/platform/rateLimit.mjs).
+  // The shared limiter and its named policy (see domains/platform/rateLimit.mjs).
   const limited = (action, keyPart) => !!ctx.rateLimit?.limited(action, keyPart);
   const SUPPRESS_MIN = 3;
 
   // ------------------------------------------------------------ match facts
-  // S14j: a candidate's facts are stored per player (repositories/matchFacts.mjs, kept by domains/discovery/
-  // matchFacts.mjs) and read through the match query (matching/query.mjs), the same reads matching uses.
+  // A candidate's facts are stored per player (repositories/matchFacts.mjs, kept by domains/discovery/matchFacts.mjs)
+  // and read through the match query (matching/query.mjs), the same reads matching uses.
 
 
   /**
    * Has this organisation meaningfully evaluated this player? The nine signals the coverage policy names
-   * (EVALUATION_SIGNALS; a profile view and a search impression are deliberately absent), since S14j the one
-   * definition, as SQL: the players this organisation has evaluated, one set per query (a Room, open or ended, is a
-   * case with a room; an open case is one without a room that is not closed; a deferral counts until it is due). The set is the organisation's own workflow, so it is built once
-   * and probed by id, never looked up per candidate. Each line names the same table and columns as the read it restates
-   * (the repositories' forOrgPlayer / has / isListedBy / isDeferred queries); keep the two together when either changes.
+   * (EVALUATION_SIGNALS; a profile view and a search impression are deliberately absent), as SQL: the players this
+   * organisation has evaluated, one set per query (a Room, open or ended, is a case with a room; an open case is one
+   * without a room that is not closed; a deferral counts until it is due). The set is the organisation's own workflow,
+   * so it is built once and probed by id, never looked up per candidate. Each line names the same table and columns as
+   * the read it restates (the repositories' forOrgPlayer / has / isListedBy / isDeferred queries); keep the two
+   * together when either changes.
    */
   const evaluatedSql = (orgId, at) => ({
     // NULLs are filtered out: one NULL in the set would make every NOT IN unknown, and hide every candidate.
@@ -89,7 +88,7 @@ export function registerNobodyMissed(ctx) {
   const briefView = (b) => ({
     id: b.id, title: b.title, status: b.status, version: b.version,
     // `version` is the CRITERIA version historical coverage points at; `rev` is
-    // the concurrency token that moves on every accepted write (M18.1).
+    // the concurrency token that moves on every accepted write.
     ...revMeta(b),
     criteria: b.criteria, criteriaExplained: explainBriefCriteria(b.criteria),
     activeFrom: b.activeFrom, activeUntil: b.activeUntil,
@@ -99,7 +98,7 @@ export function registerNobodyMissed(ctx) {
   });
 
   orgRouter.get('/recruitment-briefs', (req, res) => {
-    // At most LIMITS.briefsPerOrg per organisation, so the offset page stays.
+    // At most LIMITS.briefsPerOrg per organisation, so offset paging is enough.
     const list = briefsFor(req.org.id);
     const limit = clampPage(req.query.limit);
     const offset = Math.max(0, Number(req.query.offset) || 0);
@@ -119,7 +118,7 @@ export function registerNobodyMissed(ctx) {
     const v = validateRecruitmentBrief(req.body ?? {}, { orgLevel: req.org.level, protocols: ctx.combineProtocolIds?.() ?? null });
     // An invalid brief is refused, never silently repaired.
     if (!v.ok) return res.status(400).json(v);
-    // S12c: a role or vacancy reference is a short id, or absent; anything else is refused, never stored as it came.
+    // A role or vacancy reference is a short id, or absent; anything else is refused, never stored as it came.
     const refs = {};
     for (const k of ['roleId', 'vacancyId']) {
       const raw = req.body?.[k];
@@ -157,7 +156,7 @@ export function registerNobodyMissed(ctx) {
     if (limited('brief_write', req.org.id)) return res.status(429).json(rateLimitedBody('brief_write'));
     if (b.status === 'archived') return res.status(409).json({ error: 'BRIEF_ARCHIVED' });
     // A brief is a collaborative record: refuse a write built on a stale read
-    // rather than quietly discarding a colleague's edit (M18.1).
+    // rather than quietly discarding a colleague's edit.
     if (!guardRev(req, res, b, {
       errorCode: 'BRIEF_VERSION_CONFLICT',
       current: { currentVersion: b.version, status: b.status, updatedAt: b.updatedAt, updatedBy: b.revBy?.name ?? null },
@@ -210,14 +209,14 @@ export function registerNobodyMissed(ctx) {
 
   // --------------------------------------------------------- nobody missed
 
-  // M18.2: the window rule lives in shared.mjs so its boundaries are testable.
+  // The window rule lives in shared.mjs so its boundaries are testable.
   const briefIsLive = (b) => briefIsLiveOn(b);
 
   /** The organisation's reviews for this brief, by player: one query per page, not one per candidate. */
   const reviewsByPlayer = (orgId, briefId) => new Map(dreads.reviews.forBrief(orgId, briefId).map((r) => [r.playerId, r]));
 
   /**
-   * The brief's sets, gates first, always (S14j: as SQL). Every query starts from the players this organisation may
+   * The brief's sets, gates first, always. Every query starts from the players this organisation may
    * see (1-3: standing, visibility, blocks/minors/radius), then the club's own criteria (4), then this
    * organisation's evaluation history (5). `eligible` and `evaluated` are counts; `candidates` is the query of the
    * eligible players not yet evaluated and not dismissed or already added to a Room for this brief.
@@ -354,8 +353,8 @@ export function registerNobodyMissed(ctx) {
   });
 
   /**
-   * Add a candidate to a Recruitment Room. Bridges M17's canonical creator, so
-   * the room, its visibility check and its uniqueness rule are all M17's.
+   * Add a candidate to a Recruitment Room. Bridges the rooms' canonical creator,
+   * so the room, its visibility check and its uniqueness rule are all the rooms'.
    */
   orgRouter.post('/nobody-missed/add-to-room', (req, res) => {
     const ctxp = briefAndPlayer(req, res);
@@ -379,9 +378,9 @@ export function registerNobodyMissed(ctx) {
     });
     if (!out.ok) return res.status(out.status).json(out);
     vmetric('nobody_missed_player_added_to_room');
-    // M18.1: a double click adds the candidate ONCE. M17's creator already
-    // returns the existing open room rather than making a second one; the
-    // response now says so instead of reporting a creation that did not happen.
+    // A double click adds the candidate ONCE: the rooms' creator returns the
+    // existing open room rather than making a second one, and the response
+    // says so instead of reporting a creation that did not happen.
     res.status(out.existed ? 200 : 201).json({
       review: reviewView(r), roomId: out.roomId, room: out.room, idempotent: !!out.existed,
     });

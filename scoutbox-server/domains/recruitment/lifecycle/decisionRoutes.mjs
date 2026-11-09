@@ -1,5 +1,5 @@
 /**
- * M23 P5 — formal recruitment decision routes: the club's internal decision
+ * Formal recruitment decision routes: the club's internal decision
  * boundary. Everything here ends at `offer_consideration`; nothing here knows
  * what an offer is.
  *
@@ -7,7 +7,7 @@
  *   POST   /org/rooms/:id/decision/draft            open the case's ONE draft
  *   PATCH  /org/rooms/:id/decision/draft            edit it (own rev)
  *   DELETE /org/rooms/:id/decision/draft            discard it (own rev)
- *   POST   /org/rooms/:id/decision/finalize         the formal decision: row + case move, one save
+ *   POST   /org/rooms/:id/decision/finalize         the formal decision: row + case move, one unit
  *   POST   /org/rooms/:id/decision/supersede        finalize, explicitly replacing the current formal decision
  *   GET    /org/recruitment/decision-policy         vocabulary
  *
@@ -39,9 +39,9 @@ export function registerDecision(ctx) {
   const {
     orgRouter, nextId, notify, broadcast, findPlayer, isBlocked,
     rateLimit, isLead, moderateOrRefuse, audit, testProviderEnabled = false,
-    recruitmentCases, unit, // S8b: drafts, formal rows and the case move are explicit repository writes, one unit per act
-    recruitmentReads, scoutingReads, // §4.3 step 2: the trials (and, since S9a, the evidence) are read through SQL
-    boxCamReads, // S12b: a cited Box Cam session is read through SQL
+    recruitmentCases, unit, // drafts, formal rows and the case move are explicit repository writes, one unit per act
+    recruitmentReads, scoutingReads,
+    boxCamReads, // a cited Box Cam session
   } = ctx;
   const reads = { ...recruitmentReads, ...scoutingReads, boxCam: boxCamReads };
   if (typeof reads?.trials?.forOrgPlayer !== 'function') throw new TypeError('registerDecision needs recruitmentReads (trials) from the data layer');
@@ -70,7 +70,7 @@ export function registerDecision(ctx) {
     return { room, role };
   }
 
-  /** This case's rows in chain order; corrupt FORMAL rows omitted and counted, legacy rows left to M17's reading. */
+  /** This case's rows in chain order; corrupt FORMAL rows omitted and counted, recommendation rows left to the rooms' reading. */
   function rowsOf(kase) {
     const good = [];
     let omitted = 0;
@@ -88,7 +88,7 @@ export function registerDecision(ctx) {
     return { rows: good, omitted, duplicateHeads: dup };
   }
 
-  /** The same blind rule the Room applies (M12/M13): a scout reads a peer's submitted assessment only after submitting their own. */
+  /** The same blind rule the Room applies: a scout reads a peer's submitted assessment only after submitting their own. */
   function assessmentsVisible(req, kase) {
     const mine = reads.assessments.forOrgPlayer(kase.orgId, kase.playerId);
     const lead = isLead(req.orgUser);
@@ -118,7 +118,7 @@ export function registerDecision(ctx) {
     });
   }
 
-  /** `expectedRev` is REQUIRED and is an integer — never coerced (P4B rule, mandate §45). */
+  /** `expectedRev` is REQUIRED and is an integer — never coerced (the Trial routes' rule). */
   function revGate(req, res, record) {
     const exp = expectedRevOf(req.body);
     if (exp === null) { err(res, 'DECISION_REV_REQUIRED', 'expectedRev is required: send the rev you were looking at.'); return false; }
@@ -158,7 +158,7 @@ export function registerDecision(ctx) {
     const { room: kase, role } = got;
     const { rows, omitted, duplicateHeads } = rowsOf(kase);
     // Two formal rows both claiming to be current is corruption, not a tie —
-    // there is no honest "current decision" to show (§120). Say so.
+    // there is no honest "current decision" to show. Say so.
     if (duplicateHeads.length) return err(res, 'DECISION_STATE_UNKNOWN', 'This case\'s decision record cannot be read.');
     const head = chainHead(rows);
     const current = head && isFormal(head) ? decisionView(head) : null;
@@ -324,7 +324,7 @@ export function registerDecision(ctx) {
       const refs = resolveRefs(content.refShapes, kase);
       if (!refs.ok) return err(res, refs.error, refs.message, { ref: refs.ref });
 
-      // Supersession: a current FORMAL decision must be named and its rev matched (§43, §44). An advisory recommendation at the head is simply superseded.
+      // Supersession: a current FORMAL decision must be named and its rev matched. An advisory recommendation at the head is simply superseded.
       const head = chainHead(rows);
       const headFormal = head && isFormal(head) ? head : null;
       let supersession = null;
@@ -346,15 +346,15 @@ export function registerDecision(ctx) {
         return err(res, 'DECISION_INVALID_STATE', 'There is no formal decision with that id to supersede.', { supersedes: supersedesRaw });
       }
 
-      // A blocked family: a hold or a rejection is internal; progressing toward an offer is not taken while the block stands (§72).
+      // A blocked family: a hold or a rejection is internal; progressing toward an offer is not taken while the block stands.
       if (outcome === 'progress' && isBlocked(kase.playerId, kase.orgId)) return err(res, 'DECISION_BLOCKED', 'This player (or their guardian) has blocked your organisation. A decision to progress is not recorded while the block stands; a hold or a rejection may be.');
       if (limited('decision_finalize', req.org.id)) return res.status(429).json(rateLimitedBody('decision_finalize'));
       if (content.note && !moderateOrRefuse(res, content.note, { kind: 'recruitment_decision', orgId: req.org.id, userId: req.orgUser.id })) return;
       if (supersession?.reason && !moderateOrRefuse(res, supersession.reason, { kind: 'recruitment_decision', orgId: req.org.id, userId: req.orgUser.id })) return;
 
-      // Failure injection (M13 mechanism): the write refuses BEFORE anything is
-      // recorded — no row, no history, no case move, no notification (§54).
-      if (ctx.operations.delivery.consumeInjectedFailure('decision')) { // S13e: used up through the delivery bookkeeping (a row)
+      // Failure injection: the write refuses BEFORE anything is
+      // recorded — no row, no history, no case move, no notification.
+      if (ctx.operations.delivery.consumeInjectedFailure('decision')) { // used up through the delivery bookkeeping (a row)
         console.error(`DECISION transport_failed finalize case=${kase.id}`);
         return err(res, 'DECISION_TRANSPORT_REFUSED', 'The decision could not be recorded. Nothing was changed; try again.');
       }
@@ -411,15 +411,14 @@ export function registerDecision(ctx) {
       }
       if (refused) return err(res, 'DECISION_LIFECYCLE_CONFLICT', `The case at "${ROOM_STATUS_LABELS[from] ?? from}" cannot take the step this decision asks for (${map.action}). ${refused.message ?? ''}`.trim(), { lifecycle: refused.error, allowed: refused.allowed ?? [], current: { status: from } });
 
-      // Literal names (PRE-M24 PM-15): the M18.2 source scan only sees call
-      // sites with a literal event name, and EMITTED_EVENTS must match it. With a
-      // variable name neither listed these two events, so every boot warned that
-      // the registry names events the server never emits.
+      // Literal event names: the source scan that checks EMITTED_EVENTS only
+      // sees call sites with a literal name; with a variable name every boot
+      // would warn that the registry names events the server never emits.
       const decisionEvent = { orgId: kase.orgId, roomId: kase.id, decisionId: row.id };
       if (headFormal) broadcast?.('room_decision_superseded', decisionEvent);
       else broadcast?.('room_decision_finalized', decisionEvent);
       if (TERMINAL_ROOM_STATUSES.includes(fresh.room.status)) {
-        // The Second Look contract: the same ids-only event M17 broadcasts when a room is archived.
+        // The Second Look contract: the same ids-only event the rooms broadcast when a room is archived.
         broadcast?.('recruitment_room_archived', { orgId: kase.orgId, roomId: kase.id });
       }
       for (const uid of new Set([fresh.ownerUserId, fresh.room?.leadScoutUserId])) {

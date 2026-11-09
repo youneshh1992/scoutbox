@@ -1,16 +1,16 @@
-// M22 — LAYER 1: DETECTION (§23, §26).
+// LAYER 1: DETECTION.
 //
 //   input:  one frame
 //   output: observed objects and features
 //
 // This layer has NO knowledge of Box Touch, Box Juggle, counts, protocols or
 // verification. It cannot: nothing here is passed a protocol id. That is the
-// point of the separation — a future milestone can replace this file with a
-// learned detector without touching a single line of protocol semantics
-// (§27), and conversely no protocol rule can reach in and bias a detection.
+// point of the separation — a learned detector can replace this file without
+// touching a single line of protocol semantics, and conversely no protocol
+// rule can reach in and bias a detection.
 //
 // It never produces, stores or returns anything that could identify a
-// person: a person is a bounding box and an area, and that is all (§10, §110).
+// person: a person is a bounding box and an area, and that is all.
 
 import { DETECTION } from './policy.mjs';
 import { frameStats, meanAbsDiff } from './frames.mjs';
@@ -61,7 +61,7 @@ function components(frame, thr, { maxComponents = 64 } = {}) {
   return out;
 }
 
-/** Ball candidate, plus the count of comparable rivals (§34 needs that). */
+/** Ball candidate, plus the count of comparable rivals (the multiple-ball check needs that). */
 export function detectBall(frame, stats) {
   const area = frame.w * frame.h;
   const comps = components(frame, brightThreshold(stats));

@@ -285,7 +285,7 @@ demoOpenTrials.unshift({
   ],
 });
 
-// M10 club-toolkit state: squad, match days, friendlies.
+// Club-toolkit state: squad, match days, friendlies.
 const demoSquad: Omit<SquadEntry, 'onPlatform' | 'trustScore'>[] = [
   { id: 'sq-1', name: 'Mateus Carvalho', position: 'CM', playerId: 'pl-carvalho', source: 'signing', addedAt: NOW - 200 * DAY },
   { id: 'sq-2', name: 'Danny Whitworth', position: 'CB', playerId: null, source: 'manual', addedAt: NOW - 100 * DAY },

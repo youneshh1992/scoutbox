@@ -1,5 +1,5 @@
 // TEST SUPPORT ONLY — synthetic fixtures and temporary-database helpers shared
-// by scripts/testCoreIdentityMigration.mjs and the other migration suites.
+// by the data-layer suites.
 // Nothing here is reached by server boot. Every database is a throwaway file
 // under the OS temp directory (or in memory); every record is invented.
 import crypto from 'node:crypto';
@@ -10,9 +10,9 @@ import { DatabaseSync } from 'node:sqlite';
 import { runDataMigrations } from '../repositories/database.mjs';
 import { DATA_MIGRATIONS } from '../repositories/index.mjs';
 
-/** The registered steps up to S3 (0001–0004): what an S3-shaped file has applied before migration 0005 runs. */
+/** The registered migrations 0001–0004: what an old-format file (s3File) has applied before migration 0005 runs. */
 export const S3_MIGRATIONS = Object.freeze(DATA_MIGRATIONS.filter((m) => /^000[1-4]_/.test(m.id)));
-/** The ids 0005 and later add on a cutover, in order. */
+/** The ids 0005 and later, in order. */
 export const S4_MIGRATION_IDS = Object.freeze(DATA_MIGRATIONS.filter((m) => !S3_MIGRATIONS.includes(m)).map((m) => m.id));
 
 export const DAY = 86_400_000;
@@ -39,7 +39,7 @@ export const child = (id, guardianId, dob) => ({
   agentName: null, createdAt: T0 + DAY, password: null, level: 'amateur', location: null, medical: { shared: false, records: [], conditionStatus: 'unknown' },
   notificationPrefs: null, seasonHistory: [], firstTeamSeeker: false, programme: null,
 });
-/** A seeded adult with every S5 list and every composite (built from JSON, as a snapshot arrives). */
+/** A seeded adult with every sub-record list and every composite (built from JSON). */
 export const seeded = () => JSON.parse(JSON.stringify({
   id: 'pl-seeded', name: 'Seeded Adult', dob: '2004-03-14', country: 'GB', city: 'Manchester', position: 'ST', foot: 'right', heightCm: 184, weightKg: 79,
   badges: ['Finisher'], attendance: [{ id: 'att-1', fixture: 'Cup Final', venue: 'Hough End', date: '2026-06-01', gps: { lat: 53.43, lng: -2.26 }, verified: true }],
@@ -67,25 +67,25 @@ export const FIXTURE = () => ({
 });
 export const ORGS = () => [{ id: 'org-pro', name: 'Eastport FC', type: 'club', level: 'pro', plan: 'Pro', country: 'GB' }];
 export const USERS = () => [{ id: 'usr-1', orgId: 'org-pro', name: 'Maria', role: 'Head of Recruitment', createdAt: 1 }];
-/** Legacy (plain-token) sessions the way a pre-S2 blob held them; migration 0003 hashes them. One per kind. */
+/** Legacy (plain-token) sessions; migration 0003 hashes them. One per kind. */
 export const SESSIONS = (now = NOW) => [
   { token: 'legacy-guardian-token-0000000000000000000000000', sid: 'sid-guardian', kind: 'guardian', refId: 'gd-primary', createdAt: now - DAY },
   { token: 'legacy-player-token-000000000000000000000000000', sid: 'sid-player', kind: 'player', refId: 'pl-adult', createdAt: now - DAY },
   { token: 'legacy-staff-token-0000000000000000000000000000', sid: 'sid-staff', kind: 'org', refId: 'org-pro', userId: 'usr-1', createdAt: now - DAY },
 ];
-/** Further collections a fixture carries alongside the identity pair (every collection has a table since S14a). */
+/** Further collections a fixture carries alongside the identity pair. */
 export const EXTRA = () => ({ requests: [], ledger: [] });
 
 // ------------------------------------------------------------------ databases
 const BASE_DDL = 'CREATE TABLE IF NOT EXISTS collections (name TEXT PRIMARY KEY, value TEXT NOT NULL); CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);';
 
 /**
- * An S3-shaped database file: a saved snapshot (blobs for every collection,
- * players and guardians included), migrations 0001–0004 applied by the real
- * runner (staff, sessions and organisations live; the identity tables the S1
- * shadow). `omit: ['players']` leaves that blob out; `rawBlobs` writes a
- * collection's text verbatim (not-JSON, an object, …); `shadowRows` fills the
- * shadow tables with stale rows the way a validation run would have.
+ * An old-format database file: a legacy `collections` table holding every
+ * collection as JSON text (players and guardians included), migrations
+ * 0001–0004 applied by the real runner (staff, sessions and organisations live;
+ * the identity tables the shadow). `omit: ['players']` leaves that collection
+ * out; `rawBlobs` writes a collection's text verbatim (not-JSON, an object, …);
+ * `shadowRows` fills the shadow tables with stale rows.
  */
 export function s3File(dir, { players = FIXTURE().players, guardians = FIXTURE().guardians, users = USERS(), sessions = SESSIONS(), orgs = ORGS(), extra = EXTRA(), omit = [], rawBlobs = {}, shadowRows = null, saveSeq = 3 } = {}) {
   const s = new DatabaseSync(path.join(dir, 'scoutbox.db'));
@@ -114,12 +114,12 @@ export function freshFile(dir) {
 }
 
 export const openRaw = (dir) => { const s = new DatabaseSync(path.join(dir, 'scoutbox.db')); s.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;'); return s; };
-/** Run the REGISTERED migrations through the real runner: on an S3-shaped file that is 0005 (the cutover) and 0006 (the media-deletion queue). */
+/** Run the REGISTERED migrations through the real runner (on an old-format file: 0005 onwards). */
 export const migrate = (sqlite, { now = NOW } = {}) => runDataMigrations(sqlite, DATA_MIGRATIONS, { now, context: { sessionTtlMs: TTL } });
 export const applied = (sqlite) => sqlite.prepare('SELECT id FROM data_migrations ORDER BY id').all().map((r) => r.id);
 export const tableCols = (sqlite, t) => sqlite.prepare(`PRAGMA table_info(${t})`).all().map((c) => c.name);
 export const isLive = (sqlite, t) => tableCols(sqlite, t).includes('facets_json');
-/** Whether the file still has the retired blob table (dropped by migration 0039, S14a). */
+/** Whether the file still has the retired blob table (dropped by migration 0039). */
 export const hasBlobTable = (sqlite) => !!sqlite.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'collections'").get();
 export const meta = (sqlite, key) => sqlite.prepare('SELECT value FROM meta WHERE key = ?').get(key)?.value;
 export const sessionRows = (sqlite) => sqlite.prepare('SELECT token_hash, sid, kind, ref_id, org_user_id, via, created_at, expires_at FROM sessions ORDER BY sid').all().map((r) => ({ ...r }));

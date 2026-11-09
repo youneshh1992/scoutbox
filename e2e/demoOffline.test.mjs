@@ -8,7 +8,7 @@ import { chromium } from 'playwright-core';
 import { ensureDemoHost } from './demoHost.mjs';
 
 const DIST = path.join(path.dirname(fileURLToPath(import.meta.url)), 'dist');
-// §74: owns its demo host. The club and admin halves of this test load from
+// Owns its demo host. The club and admin halves of this test load from
 // file:// and need no host at all; the player half needs http because its
 // deep-path history shim is a SecurityError under file://.
 const demo = await ensureDemoHost();
@@ -26,7 +26,7 @@ const browser = await chromium.launch({ executablePath: EXE });
   await page.click('.org-card:has-text("Eastport FC")');
   await page.fill('.enter-row input', 'Maria Keane');
   await page.click('button:has-text("Enter workspace")');
-  await page.evaluate(() => { location.hash = '#/search'; }); // M15-Nav deep link (Search)
+  await page.evaluate(() => { location.hash = '#/search'; }); // deep link (Search)
   await page.waitForSelector('.player-card:not(.skeleton) .name');
   console.log('club demo: search shows', await page.locator('.player-card:not(.skeleton)').count(), 'players');
   await page.click('.player-card:not(.skeleton) >> nth=0');
@@ -56,7 +56,7 @@ const browser = await chromium.launch({ executablePath: EXE });
   await page.click('.org-card:has-text("Hackney Marsh Rovers")');
   await page.fill('.enter-row input', 'Dee Mensah');
   await page.click('button:has-text("Enter workspace")');
-  await page.evaluate(() => { location.hash = '#/search'; }); // M15-Nav deep link (Search)
+  await page.evaluate(() => { location.hash = '#/search'; }); // deep link (Search)
   await page.waitForSelector('text=within 50 km');
   await page.waitForSelector('.player-card:not(.skeleton) .name');
   const names = await page.locator('.player-card:not(.skeleton) .name').allInnerTexts();

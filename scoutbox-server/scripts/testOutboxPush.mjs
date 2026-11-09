@@ -1,5 +1,5 @@
 // The mail outbox, the push log and the device push tokens as typed tables with explicit writes
-// (repositories/outboxPush.mjs, migration 0011; explicit since S14d): the schema (the structural source CHECK, the
+// (repositories/outboxPush.mjs, migration 0011): the schema (the structural source CHECK, the
 // vocabulary and length CHECKs, an address on every outbox row, one row per device token); the repository's writes
 // (append, markDelivered, register: typed input, unknown fields and wrong types refused by field, never by address,
 // text or token) and SQL reads (frozen records, pages newest first by cursor, a person's tokens); units of work; no

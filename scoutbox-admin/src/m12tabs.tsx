@@ -1,4 +1,4 @@
-// M12 Trust & Safety additions: evidence disputes, coach affiliations,
+// Trust & Safety tabs: evidence disputes, coach affiliations,
 // trial-day staff-check review, post-signing outcome aggregates, and
 // drill-guidance coach review. VITE_DEMO=1 runs on canned synthetic rows.
 import { useCallback, useEffect, useState } from 'react';

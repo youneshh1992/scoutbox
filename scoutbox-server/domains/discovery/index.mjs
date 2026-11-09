@@ -1,14 +1,10 @@
-// Milestone 18 registration point — Second Look + Nobody Missed.
+// Discovery registration point: Second Look and Nobody Missed.
 //
-// Registered LAST, after M17, because both systems consume the whole stack:
-// M17 decision memory and rooms, M15 the Passport, M16/M16.1 observed
-// evidence, M16.2 evidence confidence, M12/M13 evidence, assessments, trials
-// and the missing-evidence engine.
-//
-// Every route registers on the EXISTING authenticated `orgRouter`, so bearer
-// sessions, removed users, organisation suspension, `visibleToOrg`, blocks and
-// moderation all run before any M18 handler. Neither system is player-facing:
-// there is no player, guardian or public route in this milestone at all.
+// Registered last because both systems read the whole stack (decision memory, rooms, the Passport, observed
+// evidence and its confidence, assessments, trials, the missing-evidence engine). Every route registers on the
+// authenticated `orgRouter`, so sessions, removed users, organisation suspension, `visibleToOrg`, blocks and
+// moderation all run before any discovery handler. Neither system is player-facing: there is no player, guardian or
+// public route here.
 import { buildShared } from '../../m12/shared.mjs';
 import { metrics } from '../enterprise/enterprise.mjs';
 import { registerSecondLook } from './secondLook.mjs';
@@ -20,9 +16,9 @@ import {
   SECOND_LOOK_TRANSITIONS, BRIEF_STATUSES, BRIEF_TRANSITIONS,
 } from './shared.mjs';
 
-// M18 persists WORKFLOW, never player truth: candidate eligibility and material changes are derived live on every read
-// so a block, a removal or a visibility change takes effect immediately. The workflow (briefs, Nobody Missed reviews,
-// Second Look items) lives in the discovery repository's tables since S12c (repositories/discovery.mjs).
+// Discovery persists WORKFLOW, never player truth: candidate eligibility and material changes are derived live on
+// every read so a block, a removal or a visibility change takes effect immediately. The workflow (briefs, Nobody
+// Missed reviews, Second Look items) lives in the discovery repository's tables (repositories/discovery.mjs).
 
 export function registerM18(ctx) {
   // Boot assertions: cheap, and they catch the two ways this design could rot.

@@ -1,27 +1,13 @@
-// M23 P5.6D acceptance suite — ScoutBox Agent Transaction Workspace.
+// Agent Transaction Workspace battery.
 //
-// The governing principle this suite enforces (mandate §104): a ScoutBox
+// The governing principle this suite enforces: a ScoutBox
 // transaction is a permissioned, auditable multi-party workspace. It must never
 // turn transaction membership, stale compliance, broad agency access, hidden
 // club information, unconfirmed representation or platform convenience into
 // authority or visibility that the actual party has not granted.
 //
-// Groups (mandate §89), pure first, then a real server:
-//   pure: the state machine and its two transition maps · the nine document
-//   visibility classes against roles AND sides · the compliance state machine ·
-//   the party revision and its eight inputs · timeline audiences · the offer
-//   readiness seam · the store contract, migration, events, notifications, rate
-//   policies and error table
-//   HTTP: A create · B party identity · C party history · D state transitions ·
-//   E representation bindings · F compliance snapshot · G stale compliance ·
-//   H consent integration · I party change invalidation · J document visibility ·
-//   K private notes · L messages · M timeline audiences · N Player view ·
-//   O Agent view · P engaging Club view · Q releasing Club view · R privacy ·
-//   S tenant isolation · T blocks · U unsupported jurisdiction · V minor closed
-//   path · W rev · X idempotency · Y concurrency · Z persistence · AA migration ·
-//   AB removal/tombstone · AC events · AD notifications · AE EN/FR · AF
-//   accessibility contract · AG mobile contract · AH live/browser · AI
-//   corruption/legacy — and the thirty adversarial cases (§90), numbered.
+// Pure groups first, then a real server; the adversarial cases are numbered (#n)
+// in their check labels.
 //
 // No assertion is `status !== 200`. Every refusal names its status and its code.
 
@@ -72,18 +58,18 @@ const expect = (r, status, code) => {
 const T0 = Date.UTC(2026, 8, 18);
 
 // =================================================================== PURE
-section('pure D/§11/§12 — the state machine: ten states, two maps, no offer and no signing');
+section('pure D — the state machine: ten states, two maps, no offer and no signing');
 {
   ok(TRANSACTION_STATUSES.length === 10 && TRANSACTION_STATUSES[0] === 'DRAFT' && TRANSACTION_STATUSES.at(-1) === 'ARCHIVED', 'D1 ten explicit states, DRAFT first and ARCHIVED last');
-  neg(!TRANSACTION_STATUSES.some((s) => /offer|signed|sign/i.test(s)), 'D2 no state names an offer or a signing (§11)');
-  neg(!TRANSACTION_STATUSES.includes('COMPLETED') && TRANSACTION_STATUSES.includes('CLOSED'), 'D3 the terminal is the neutral CLOSED, not COMPLETED — COMPLETED would read as a concluded transfer (§21)');
+  neg(!TRANSACTION_STATUSES.some((s) => /offer|signed|sign/i.test(s)), 'D2 no state names an offer or a signing');
+  neg(!TRANSACTION_STATUSES.includes('COMPLETED') && TRANSACTION_STATUSES.includes('CLOSED'), 'D3 the terminal is the neutral CLOSED, not COMPLETED — COMPLETED would read as a concluded transfer');
   for (const s of TRANSACTION_STATUSES) ok(Object.hasOwn(ACTOR_TRANSITIONS, s) && Object.hasOwn(COMPLIANCE_TRANSITIONS, s), `D4 ${s} appears in both transition maps`);
   const actorTargets = new Set(Object.values(ACTOR_TRANSITIONS).flat());
   neg(!actorTargets.has('READY') && !actorTargets.has('COMPLIANCE_PENDING') && !actorTargets.has('COMPLIANCE_BLOCKED'), 'D5 no actor transition reaches READY, COMPLIANCE_PENDING or COMPLIANCE_BLOCKED — those are the compliance layer\'s answer, not anyone\'s request');
   const complianceTargets = new Set(Object.values(COMPLIANCE_TRANSITIONS).flat());
   neg(!complianceTargets.has('ACTIVE') && !complianceTargets.has('CANCELLED') && !complianceTargets.has('CLOSED') && !complianceTargets.has('ARCHIVED'), 'D6 and the compliance layer never cancels, closes, archives or activates a transaction');
-  neg(COMPLIANCE_TRANSITIONS.DRAFT.length === 0, 'D7 a DRAFT is never told it is READY: a draft makes no compliance claim (§13)');
-  neg(ACTOR_TRANSITIONS.ARCHIVED.length === 0 && COMPLIANCE_TRANSITIONS.ARCHIVED.length === 0, 'D8 ARCHIVED is terminal for both maps — archive is retention, not a workflow state (§22)');
+  neg(COMPLIANCE_TRANSITIONS.DRAFT.length === 0, 'D7 a DRAFT is never told it is READY: a draft makes no compliance claim');
+  neg(ACTOR_TRANSITIONS.ARCHIVED.length === 0 && COMPLIANCE_TRANSITIONS.ARCHIVED.length === 0, 'D8 ARCHIVED is terminal for both maps — archive is retention, not a workflow state');
   neg(!actorTransitionAllowed('DRAFT', 'ACTIVE') && !actorTransitionAllowed('DRAFT', 'READY') && !actorTransitionAllowed('CLOSED', 'ACTIVE'), 'D9 a draft cannot jump to ACTIVE or READY, and a closed transaction cannot reopen');
   ok(actorTransitionAllowed('COMPLIANCE_PENDING', 'ACTIVE') && actorTransitionAllowed('COMPLIANCE_BLOCKED', 'ACTIVE'), 'D9b asking for ACTIVE from a compliance state IS a legal request — it is refused by the compliance gate, with the reason, rather than by the map with a generic one');
   ok(statusForComplianceState(complianceStateFrom({ outcome: 'CLEAR', representationCount: 0, partiesConfirmed: true })) === 'PARTIES_CONFIRMED', 'D9c a confirmed transaction with no representation rests at PARTIES_CONFIRMED: nothing has been asked of compliance yet');
@@ -94,18 +80,18 @@ section('pure D/§11/§12 — the state machine: ten states, two maps, no offer 
   ok(HOLD_REASON_CODES.length >= 5 && CANCEL_REASON_CODES.length >= 5 && CLOSE_REASON_CODES.length >= 3, 'D14 hold, cancel and close carry reason CODES, so analytics counts them without reading prose');
 }
 
-section('pure A/§7 — transaction types come from the frozen conflict-engine enum');
+section('pure A — transaction types come from the frozen conflict-engine enum');
 {
-  ok(TRANSACTION_TYPES === CONTEXT_TYPES, 'A-p1 the type enum is the P5.6C engine\'s own object, imported not copied');
-  ok(TRANSACTION_TYPES.join() === 'employment_contract,transfer,loan,other_services', 'A-p2 the four frozen P5.6A types, in order');
-  neg(!TRANSACTION_TYPES.includes('renewal') && !TRANSACTION_TYPES.includes('permanent_transfer'), 'A-p3 no "renewal" and no "permanent_transfer": neither was frozen, so both are deferred rather than invented (§7)');
+  ok(TRANSACTION_TYPES === CONTEXT_TYPES, 'A-p1 the type enum is the conflict engine\'s own object, imported not copied');
+  ok(TRANSACTION_TYPES.join() === 'employment_contract,transfer,loan,other_services', 'A-p2 the four frozen types, in order');
+  neg(!TRANSACTION_TYPES.includes('renewal') && !TRANSACTION_TYPES.includes('permanent_transfer'), 'A-p3 no "renewal" and no "permanent_transfer": neither was frozen, so both are deferred rather than invented');
   ok(PARTY_ROLES === ENGINE_PARTY_ROLES && PARTY_ROLES.join() === 'individual,engaging_entity,releasing_entity', 'B-p1 the three frozen party roles, also the engine\'s own');
   ok(RELEASING_PARTY_TYPES.join() === 'transfer,loan', 'B-p2 a releasing entity exists only where the individual leaves someone');
   ok(requiredPartyRoles('employment_contract').join() === 'individual,engaging_entity' && requiredPartyRoles('transfer').join() === 'individual,engaging_entity,releasing_entity', 'B-p3 required parties per type');
   ok(ROOM_ROLES.length === 7 && ROOM_ROLES.includes('party_guardian') && ROOM_ROLES.includes('agency_admin_observer'), 'B-p4 the seven frozen room roles, including the guardian role no build grants yet');
 }
 
-section('pure C/§14 — party confirmation is by the party itself');
+section('pure C — party confirmation is by the party itself');
 {
   const tx = (parties) => ({ type: 'transfer', parties, history: [] });
   const p = (partyRole, confirmed, removed = false) => ({ id: `p-${partyRole}`, partyRole, subjectKind: partyRole === 'individual' ? 'player' : 'club', subjectId: `s-${partyRole}`, confirmedAt: confirmed ? T0 : null, removed });
@@ -116,7 +102,7 @@ section('pure C/§14 — party confirmation is by the party itself');
   ok(partiesAwaitingConfirmation(tx([p('individual', true), p('engaging_entity', false)])).join() === 'engaging_entity,releasing_entity', 'C-p5 the awaiting list names exactly what is missing');
 }
 
-section('pure J/§33/§34 — nine visibility classes, resolved from roles AND side');
+section('pure J — nine visibility classes, resolved from roles AND side');
 {
   ok(DOCUMENT_VISIBILITY.length === 9 && DOCUMENT_VISIBILITY.includes('T_AND_S_ONLY'), 'J-p1 the nine classes the mandate names');
   ok(DOCUMENT_TYPES.length === 9 && DOCUMENT_TYPES.includes('term_sheet_draft') && DOCUMENT_TYPES.includes('employment_contract_draft'), 'J-p2 nine document types; the contract and term sheet are DRAFTS and say so in their names');
@@ -145,14 +131,14 @@ section('pure J/§33/§34 — nine visibility classes, resolved from roles AND s
   ok(NOTE_VISIBILITY.length === 8 && !NOTE_VISIBILITY.includes('T_AND_S_ONLY'), 'K-p1 notes reuse the document classes minus the Trust & Safety lane — one vocabulary, not two');
 }
 
-section('pure F/§15/§26 — the compliance state machine names its reason');
+section('pure F — the compliance state machine names its reason');
 {
   const st = (o) => complianceStateFrom(o);
   ok(st({ outcome: 'CLEAR', representationCount: 1, partiesConfirmed: true }).clear === true, 'F-p1 CLEAR with a representation is clear');
   neg(st({ outcome: 'CLEAR', representationCount: 0, partiesConfirmed: true }).pendingReason === 'REPRESENTATION_MISSING', 'F-p2 CLEAR with NO representation is not a clearance to proceed: nobody holds authority yet');
   neg(st({ outcome: 'CLEAR', representationCount: 1, partiesConfirmed: false }).pendingReason === 'PARTIES_NOT_CONFIRMED', 'F-p3 unconfirmed parties come before any engine answer');
   neg(st({ outcome: 'PROHIBITED_CONFLICT', representationCount: 1, partiesConfirmed: true }).blocked === true, 'F-p4 PROHIBITED_CONFLICT is blocked, not pending');
-  neg(st({ outcome: PERMITTED_WITH_CONSENT, representationCount: 1, partiesConfirmed: true }).pendingReason === 'CONSENT_REQUIRED', 'F-p5 consent outstanding is named CONSENT_REQUIRED, never a generic pending (§15)');
+  neg(st({ outcome: PERMITTED_WITH_CONSENT, representationCount: 1, partiesConfirmed: true }).pendingReason === 'CONSENT_REQUIRED', 'F-p5 consent outstanding is named CONSENT_REQUIRED, never a generic pending');
   neg(st({ outcome: 'MANUAL_REGULATORY_REVIEW_REQUIRED', representationCount: 1, partiesConfirmed: true }).pendingReason === 'MANUAL_REVIEW', 'F-p6 manual review is named');
   neg(st({ outcome: 'INSUFFICIENT_DATA', representationCount: 1, partiesConfirmed: true }).pendingReason === 'INSUFFICIENT_DATA', 'F-p7 insufficient data is named');
   neg(st({ gate: 'PROVIDER_UNAVAILABLE', partiesConfirmed: true }).pendingReason === 'PROVIDER_UNAVAILABLE' && st({ gate: 'JURISDICTION_UNSUPPORTED', partiesConfirmed: true }).pendingReason === 'JURISDICTION_UNSUPPORTED', 'F-p8 a gate refusal before the engine keeps its own reason');
@@ -162,7 +148,7 @@ section('pure F/§15/§26 — the compliance state machine names its reason');
   ok(PENDING_REASONS.length === 8 && PENDING_REASONS.every((r) => /^[A-Z_]+$/.test(r)), 'F-p12 eight named pending reasons, all codes');
 }
 
-section('pure G/§27 — the party revision covers the eight inputs staleness is measured on');
+section('pure G — the party revision covers the eight inputs staleness is measured on');
 {
   const base = { parties: [{ partyRole: 'individual', subjectKind: 'player', subjectId: 'pl-1', confirmedAt: T0 }], agentUserId: 'a1', representations: [{ agentUserId: 'a1', partyRole: 'individual', status: 'verified', agreementId: 'ag1' }], consents: [{ id: 'c1', status: 'granted' }], facetStates: { fifa_licence: 'VERIFIED' }, policyVersions: ['jp-eng-2026-27-1'], blockedSubjectIds: [], minorSubjectIds: [] };
   const h0 = partyRevisionOf(base);
@@ -187,14 +173,14 @@ section('pure G/§27 — the party revision covers the eight inputs staleness is
   neg(snapshotStaleness({ compliance: { evaluationId: 'e1', partyRevision: h0, evaluatedAt: T0 } }, h0, { now: T0 + 10, maxAgeMs: 5 }) === 'EXPIRED', 'G-p9 an age bound, where one is configured, is EXPIRED');
 }
 
-section('pure M/§39/§40 — timeline audiences, and the audit that is not a timeline');
+section('pure M — timeline audiences, and the audit that is not a timeline');
 {
   ok(TIMELINE_AUDIENCES.length === 6 && TIMELINE_AUDIENCES.includes('audit_only'), 'M-p1 six audiences, one of which reaches nobody\'s timeline');
-  ok(timelineAudienceOf('transaction_note_added') === 'audit_only', 'M-p2 a scoped note is audit-only: an internal note is not a club\'s timeline entry (§39)');
+  ok(timelineAudienceOf('transaction_note_added') === 'audit_only', 'M-p2 a scoped note is audit-only: an internal note is not a club\'s timeline entry');
   ok(timelineAudienceOf('transaction_representation_attached') === 'agent_only', 'M-p3 a representation is the agent\'s regulated act, in the agent\'s lane');
   ok(timelineAudienceOf('transaction_status_changed') === 'all_parties' && timelineAudienceOf('transaction_party_confirmed') === 'all_parties', 'M-p4 status and confirmation reach every party');
   ok(timelineAudienceOf('something_unregistered') === 'audit_only', 'M-p5 an unregistered action fails closed to audit-only');
-  neg(!timelineVisible('audit_only', ['representing_agent']) && !timelineVisible('audit_only', ['trust_safety']), 'M-p6 audit_only reaches nobody — not the agent, not a reviewer (§40)');
+  neg(!timelineVisible('audit_only', ['representing_agent']) && !timelineVisible('audit_only', ['trust_safety']), 'M-p6 audit_only reaches nobody — not the agent, not a reviewer');
   neg(!timelineVisible('agent_only', ['party_club_signatory'], 'engaging_entity') && !timelineVisible('agent_only', ['party_individual']), 'M-p7 the agent lane reaches no club and no player');
   ok(timelineVisible('all_parties', ['party_individual']) && timelineVisible('player_and_agent', ['party_individual']) && !timelineVisible('player_and_agent', ['party_club_signatory'], 'engaging_entity'), 'M-p8 all_parties and player_and_agent behave as named');
   neg(!timelineVisible('all_parties', []), 'M-p9 a non-party sees no timeline at all');
@@ -214,7 +200,7 @@ section('pure M/§39/§40 — timeline audiences, and the audit that is not a ti
   ok(actorLabel(null) === null, 'M-p15 no actor is no label');
 }
 
-section('pure §53/§54 — the offer boundary is a readiness boolean and its blockers');
+section('pure — the offer boundary is a readiness boolean and its blockers');
 {
   const tx = (status, confirmed = true) => ({ status, parties: [{ partyRole: 'individual', removed: false, confirmedAt: confirmed ? T0 : null }, { partyRole: 'engaging_entity', removed: false, confirmedAt: confirmed ? T0 : null }] });
   const clear = { clear: true };
@@ -228,7 +214,7 @@ section('pure §53/§54 — the offer boundary is a readiness boolean and its bl
   neg(!JSON.stringify(offerReadiness(tx('READY'), { complianceState: clear })).match(/offerId|offerRecord|offer_made|offer_accepted/), 'O-p7 the readiness object names no offer record, because none exists');
 }
 
-section('pure §66/§67/§68 — the error contract conceals, and never carries private material');
+section('pure — the error contract conceals, and never carries private material');
 {
   ok(M26_ERROR_HTTP.TRANSACTION_NOT_FOUND === 404 && M26_ERROR_HTTP.TRANSACTION_PARTY_NOT_FOUND === 404 && M26_ERROR_HTTP.DOCUMENT_NOT_FOUND === 404, 'Z-p1 every "you may not know whether this exists" answer is 404');
   ok(M26_ERROR_HTTP.TRANSACTION_COMPLIANCE_BLOCKED === 422 && M26_ERROR_HTTP.TRANSACTION_COMPLIANCE_STALE === 422 && M26_ERROR_HTTP.TRANSACTION_TRANSITION_NOT_ALLOWED === 409, 'Z-p2 a policy refusal is 422; a state refusal is 409');
@@ -241,12 +227,9 @@ section('pure §66/§67/§68 — the error contract conceals, and never carries 
 
 section('pure AA/AC/AD — stores, migration, events, notifications, rate policies, permissions');
 {
-  // S11c: the three stores are tables (migration 0029, repositories/agentTransactions.mjs), not collections.
-  // Rewritten in S14a: AA1–AA6 described the retired snapshot registry (step m260_001 at 2307, P7 at 2308) and the
-  // store contract. They now check the table migration and what a clean database holds.
   for (const s of ['agentTransactions', 'transactionRepresentations', 'transactionDocuments']) ok(TABLE_BACKED.includes(s), `AA1 ${s} is a table of the agent transactions repository, not a collection`);
   ok(DATA_MIGRATIONS.filter((m) => m.id === AGENT_TRANSACTIONS_MIGRATION).length === 1, `AA2 exactly one migration creates the transaction tables (${AGENT_TRANSACTIONS_MIGRATION})`);
-  neg(!AGENT_TRANSACTIONS_TABLES.some((t) => /offer|signing|recruitment_case|compliance_context/.test(t)), 'AA4 the migration reinterprets no existing record as a transaction and creates no offer or signing table (§3, §5)');
+  neg(!AGENT_TRANSACTIONS_TABLES.some((t) => /offer|signing|recruitment_case|compliance_context/.test(t)), 'AA4 the migration reinterprets no existing record as a transaction and creates no offer or signing table');
   const freshDir = mkdtempSync(path.join(tmpdir(), 'sbx-m26-fresh-'));
   const fresh = readRecords(freshDir);
   ok(fresh.agentTransactions.length === 0 && fresh.transactionRepresentations.length === 0 && fresh.transactionDocuments.length === 0, 'AA5 a clean database holds no transaction: the migration backfills nothing');
@@ -260,7 +243,7 @@ section('pure AA/AC/AD — stores, migration, events, notifications, rate polici
     neg(reg.payload.every((k) => ['orgId', 'txId', 'partyRole', 'status', 'outcome', 'docId'].includes(k)), `AC2 ${e} carries ids and state words only`);
   }
   neg(EVENTS.every((e) => !EVENT_REGISTRY[e].payload.includes('playerId') && !EVENT_REGISTRY[e].payload.includes('label')), 'AC3 no transaction event carries a player id or a document label');
-  neg(!EVENT_REGISTRY.offer_made && !EVENT_REGISTRY.agent_transaction_signed && !EVENT_REGISTRY.offer_accepted, 'AC4 P5.6D registered no offer and no signing event');
+  neg(!EVENT_REGISTRY.offer_made && !EVENT_REGISTRY.agent_transaction_signed && !EVENT_REGISTRY.offer_accepted, 'AC4 no offer and no signing event is registered');
   ok(TYPE_CATEGORY.agent_transaction === 'transaction_updates' && TYPE_CATEGORY.agent_transaction_action === 'transaction_updates', 'AD1 workspace traffic is the transaction_updates category');
   ok(TYPE_CATEGORY.agent_transaction_compliance === 'compliance' && CATEGORIES.compliance.mandatory === true, 'AD2 the compliance half goes to the mandatory category — a regulatory change cannot be muted');
   ok(CATEGORIES.transaction_updates.default === true && CATEGORIES.transaction_updates.mandatory === false, 'AD3 transaction_updates is on by default and mutable — operational traffic is not an obligation');
@@ -272,7 +255,7 @@ section('pure AA/AC/AD — stores, migration, events, notifications, rate polici
   ok(TRANSACTION_LIMITS.parties === 4 && TRANSACTION_LIMITS.note === 2000 && TRANSACTION_LIMITS.documents === 200, 'AA12 explicit bounds on parties, note length and document count');
 }
 
-section('pure §3/§4/§5 — the four separations are in the code, not only in the prose');
+section('pure — the four separations are in the code, not only in the prose');
 {
   // Comments are stripped first: the assertion is about what the module DOES,
   // and a comment that says "db.signings is never written" must not read as a
@@ -281,13 +264,13 @@ section('pure §3/§4/§5 — the four separations are in the code, not only in 
   const m26index = strip(readFileSync(path.join(HERE, '..', '..', 'domains', 'agents', 'transactions', 'index.mjs'), 'utf8'));
   const m26pure = strip(readFileSync(path.join(HERE, '..', '..', 'domains', 'agents', 'transactions', 'transaction.mjs'), 'utf8'));
   const both = `${m26index}\n${m26pure}`;
-  neg(!/db\.recruitmentCases/.test(both), '§3 the transaction module never reads or writes db.recruitmentCases');
-  neg(!/db\.signings/.test(both), '§5 nor db.signings — no signing writer exists');
-  neg(!/offer_made|offer_accepted|offer_declined|db\.recruitmentOffers/.test(both), '§4 and no offer lifecycle string appears in its code');
-  neg(!/db\.roomComments|db\.roomDecisions|db\.assessments/.test(both), '§46 club-private assessment, Room and decision stores are not read by the transaction module');
-  neg(!/db\.boxSessions|db\.passport/.test(both), '§47 nor Box Cam or Passport stores');
-  // S11c: the Inbox is read through the message-thread repository (channels.byId), not db.channels.
-  ok(/channels\.byId/.test(m26index) && !/messages\.push|new Message/.test(m26index), '§36 the canonical Inbox is referenced; no message store and no message writer is created');
+  neg(!/db\.recruitmentCases/.test(both), 'the transaction module never reads or writes db.recruitmentCases');
+  neg(!/db\.signings/.test(both), 'nor db.signings — no signing writer exists');
+  neg(!/offer_made|offer_accepted|offer_declined|db\.recruitmentOffers/.test(both), 'and no offer lifecycle string appears in its code');
+  neg(!/db\.roomComments|db\.roomDecisions|db\.assessments/.test(both), 'club-private assessment, Room and decision stores are not read by the transaction module');
+  neg(!/db\.boxSessions|db\.passport/.test(both), 'nor Box Cam or Passport stores');
+  // The Inbox is read through the message-thread repository (channels.byId).
+  ok(/channels\.byId/.test(m26index) && !/messages\.push|new Message/.test(m26index), 'the canonical Inbox is referenced; no message store and no message writer is created');
 }
 
 // =================================================================== HTTP
@@ -329,7 +312,7 @@ await stop(server);
   writeFixture(DATA_DIR, { orgs: [{ ...agency, id: 'org-southgate', name: 'Southgate Sports Management' }] });
   // The releasing club has to be a VERIFIED organisation, because root
   // verification authority — the recorded club signatory — only exists inside
-  // one (M14). The seeded academy is unverified, so the fixture verifies it.
+  // one. The seeded academy is unverified, so the fixture verifies it.
   const L = openLayer(DATA_DIR);
   try { L.unit(() => L.layer.orgs.update('org-harbour', (d) => { d.verified = true; d.verifiedDomain = 'harbourtownacademy.example'; })); } finally { L.close(); }
   const orgs = readRecords(DATA_DIR).orgs;
@@ -389,7 +372,7 @@ let ANA, DAN, BEN, FAY, ZOE, ANA_ID, DAN_ID, REL_KOLA, REL_THEO, REL_CHINEDU, RE
 }
 
 // ============================================================ A — create
-section('A/§62/§63 — who may open a transaction, and what opening one does NOT grant');
+section('A — who may open a transaction, and what opening one does NOT grant');
 let TX1;
 {
   const body = { type: 'transfer', jurisdictions: ['ENG'], parties: [{ partyRole: 'individual', subjectKind: 'player', subjectId: 'pl-adeyemi' }, { partyRole: 'engaging_entity', subjectKind: 'club', subjectId: 'org-eastport' }, { partyRole: 'releasing_entity', subjectKind: 'club', subjectId: 'org-harbour' }] };
@@ -399,13 +382,13 @@ let TX1;
   neg(expect(collect('A4', await j('POST', '/org/agent/transactions', body, kola.token)), 401, null), 'A4 a player token is no agency session');
   neg(expect(collect('A5', await j('POST', '/org/agent/transactions', { ...body, type: 'offer' }, ANA.token)), 400, 'TRANSACTION_INPUT_INVALID') && expect(collect('A5b', await j('POST', '/org/agent/transactions', { ...body, type: 'renewal' }, ANA.token)), 400, 'TRANSACTION_INPUT_INVALID'), 'A5 "offer" is not a transaction type, and neither is an unfrozen "renewal"');
   neg(expect(collect('A6', await j('POST', '/org/agent/transactions', { ...body, jurisdictions: [] }, ANA.token)), 400, 'TRANSACTION_INPUT_INVALID'), 'A6 jurisdictions are required');
-  neg(expect(collect('A7', await j('POST', '/org/agent/transactions', { ...body, jurisdictions: ['FRA'] }, ANA.token)), 422, 'JURISDICTION_UNSUPPORTED'), 'A7 an unsupported jurisdiction opens nothing — no silent allow (#24, §58)');
+  neg(expect(collect('A7', await j('POST', '/org/agent/transactions', { ...body, jurisdictions: ['FRA'] }, ANA.token)), 422, 'JURISDICTION_UNSUPPORTED'), 'A7 an unsupported jurisdiction opens nothing — no silent allow (#24)');
   neg(expect(collect('A8', await j('POST', '/org/agent/transactions', body, FAY.token)), 403, 'AGENT_VERIFICATION_REQUIRED'), 'A8 a licensed_agent with no profile at all cannot open one');
   const minorTry = collect('A9', await j('POST', '/org/agent/transactions', { ...body, parties: [{ partyRole: 'individual', subjectKind: 'player', subjectId: 'pl-guni' }] }, ANA.token));
   const ghostTry = collect('A9b', await j('POST', '/org/agent/transactions', { ...body, parties: [{ partyRole: 'individual', subjectKind: 'player', subjectId: 'pl-nobody-at-all' }] }, ANA.token));
   neg(expect(minorTry, 404, 'TRANSACTION_PARTY_NOT_FOUND') && expect(ghostTry, 404, 'TRANSACTION_PARTY_NOT_FOUND') && JSON.stringify(minorTry.body) === JSON.stringify(ghostTry.body), 'A9 a minor and a player who does not exist answer with byte-identical bodies (#23, V)');
   const forgedRes = collect('A10', await j('POST', '/org/agent/transactions', { ...body, parties: [{ partyRole: 'individual', subjectKind: 'player', subjectId: 'pl-adeyemi', dob: '2012-01-01', guardianConsent: true, complianceOutcome: 'CLEAR', status: 'ACTIVE', rev: 99, policyVersion: 'jp-forged-1' }] }, ANA.token));
-  neg(expect(forgedRes, 201, null), 'A10 a forged date of birth, guardian consent, compliance outcome, status, rev and policy version in the body are ignored (#19–#22, §67)');
+  neg(expect(forgedRes, 201, null), 'A10 a forged date of birth, guardian consent, compliance outcome, status, rev and policy version in the body are ignored (#19–#22)');
   const forged = forgedRes.body?.transaction;
   neg(forged?.status === 'DRAFT' && forged.rev === 1 && forged.compliance.clear === false && forged.compliance.pendingReason === 'PARTIES_NOT_CONFIRMED', `A10b …and the created transaction is a DRAFT at rev 1 whose compliance says parties are not confirmed (${forged?.status}/${forged?.rev}/${forged?.compliance?.pendingReason})`);
   neg(!JSON.stringify(forged).includes('jp-forged-1'), 'A10c the forged policy version reached no field of the record');
@@ -417,12 +400,12 @@ let TX1;
   TX1 = create.body?.transaction?.id;
   ok(create.status === 201 && create.body.transaction.status === 'DRAFT' && create.body.transaction.type === 'transfer' && create.body.transaction.parties.length === 3, 'A15 Ana opens an England transfer: Kola, Eastport engaging, Harbour releasing — status DRAFT');
   ok(create.body.transaction.playerId === 'pl-adeyemi' && create.body.transaction.engagingOrgId === 'org-eastport' && create.body.transaction.releasingOrgId === 'org-harbour', 'A16 the derived convenience ids are computed from parties[], which stays the single truth');
-  neg(create.body.transaction.representations.length === 0 && create.body.transaction.consents.length === 0 && create.body.transaction.partiesConfirmed === false, 'A17 opening one establishes no representation, no consent and no party confirmation (§63)');
-  neg(create.body.transaction.compliance.clear === false && create.body.transaction.compliance.pendingReason === 'PARTIES_NOT_CONFIRMED' && create.body.transaction.offerBoundary.canStartOfferWorkflow === false, 'A18 a DRAFT implies no compliance clearance and no offer readiness (§13)');
-  ok(/not a statement of legal validity/.test(create.body.transaction.honest) && /no offer exists/i.test(create.body.transaction.offerBoundary.honest), 'A19 the projection states plainly what "ready" does and does not mean (§17, §77)');
-  ok((await j('POST', '/org/agent/transactions', { ...body, clientKey: 'tx-1' }, ANA.token)).body.idempotent === true, 'X1 replaying the create with its key returns the same transaction (§69)');
+  neg(create.body.transaction.representations.length === 0 && create.body.transaction.consents.length === 0 && create.body.transaction.partiesConfirmed === false, 'A17 opening one establishes no representation, no consent and no party confirmation');
+  neg(create.body.transaction.compliance.clear === false && create.body.transaction.compliance.pendingReason === 'PARTIES_NOT_CONFIRMED' && create.body.transaction.offerBoundary.canStartOfferWorkflow === false, 'A18 a DRAFT implies no compliance clearance and no offer readiness');
+  ok(/not a statement of legal validity/.test(create.body.transaction.honest) && /no offer exists/i.test(create.body.transaction.offerBoundary.honest), 'A19 the projection states plainly what "ready" does and does not mean');
+  ok((await j('POST', '/org/agent/transactions', { ...body, clientKey: 'tx-1' }, ANA.token)).body.idempotent === true, 'X1 replaying the create with its key returns the same transaction');
   neg(expect(collect('X2', await j('POST', '/org/agent/transactions', { ...body, type: 'loan', clientKey: 'tx-1' }, ANA.token)), 409, 'TRANSACTION_IDEMPOTENCY_CONFLICT'), 'X2 the same key with a different payload is a collision (#28)');
-  // S9d: a transaction links an opportunity of its engaging club, read through SQL (this route reached no battery before).
+  // A transaction links an opportunity of its engaging club.
   neg(expect(collect('OL1', await j('POST', `/org/agent/transactions/${TX1}/links`, { opportunityId: 'opp-does-not-exist' }, ANA.token)), 400, 'TRANSACTION_INPUT_INVALID'), 'OL1 an unknown opportunity cannot be linked');
   const linkOpp = await j('POST', '/org/opportunities', { type: 'trial', title: 'Linkable trial', deadline: '2099-01-01' }, maria.token);
   const linked = await j('POST', `/org/agent/transactions/${TX1}/links`, { opportunityId: linkOpp.body?.opportunity?.id }, ANA.token);
@@ -430,7 +413,7 @@ let TX1;
 }
 
 // ============================================================ B/C — party identity and history
-section('B/C/§8/§9 — canonical ids, confirmation by the party itself, history that is never overwritten');
+section('B/C — canonical ids, confirmation by the party itself, history that is never overwritten');
 {
   const t0 = (await j('GET', `/org/agent/transactions/${TX1}`, undefined, ANA.token)).body.transaction;
   ok(t0.awaitingConfirmation.join() === 'individual,engaging_entity,releasing_entity' && t0.requiredPartyRoles.length === 3, 'B1 all three required parties are awaiting their own confirmation');
@@ -438,9 +421,9 @@ section('B/C/§8/§9 — canonical ids, confirmation by the party itself, histor
   neg(expect(collect('B3', await j('POST', `/org/transactions/${TX1}/confirm`, {}, maria.token)), 200, null), 'B3 Eastport\'s recorded signatory confirms the engaging club');
   const beforeRelease = (await j('GET', `/org/agent/transactions/${TX1}`, undefined, ANA.token)).body.transaction;
   ok(beforeRelease.parties.find((p) => p.partyRole === 'engaging_entity').confirmedByKind === 'club_user' && beforeRelease.awaitingConfirmation.join() === 'individual,releasing_entity', 'C1 the confirmation is recorded with its actor kind; two roles remain');
-  ok((await j('POST', `/org/transactions/${TX1}/confirm`, {}, devA.token)).status === 200 && (await j('POST', `/player/transactions/${TX1}/confirm`, {}, kola.token)).status === 200, 'C2 the releasing club and the individual confirm for themselves (§64, §65)');
+  ok((await j('POST', `/org/transactions/${TX1}/confirm`, {}, devA.token)).status === 200 && (await j('POST', `/player/transactions/${TX1}/confirm`, {}, kola.token)).status === 200, 'C2 the releasing club and the individual confirm for themselves');
   const t1 = (await j('GET', `/org/agent/transactions/${TX1}`, undefined, ANA.token)).body.transaction;
-  ok(t1.partiesConfirmed === true && t1.status === 'PARTIES_CONFIRMED' && t1.parties.every((p) => p.confirmedAt), `C3 with every party confirmed the status is PARTIES_CONFIRMED (${t1.status}) (§14)`);
+  ok(t1.partiesConfirmed === true && t1.status === 'PARTIES_CONFIRMED' && t1.parties.every((p) => p.confirmedAt), `C3 with every party confirmed the status is PARTIES_CONFIRMED (${t1.status})`);
   ok((await j('POST', `/player/transactions/${TX1}/confirm`, {}, kola.token)).body.idempotent === true, 'X3 confirming twice is idempotent');
   neg(t1.compliance.pendingReason === 'REPRESENTATION_MISSING' && t1.compliance.clear === false, 'F1 party confirmation is not a clearance: with no representation bound, nobody holds authority yet');
   const tl = (await j('GET', `/org/agent/transactions/${TX1}/timeline`, undefined, ANA.token)).body.items;
@@ -448,7 +431,7 @@ section('B/C/§8/§9 — canonical ids, confirmation by the party itself, histor
 }
 
 // ============================================================ E — representation bindings
-section('E/§23/§24 — a representation binding is transaction-specific and re-derived at mutation time');
+section('E — a representation binding is transaction-specific and re-derived at mutation time');
 let REP_KOLA;
 {
   neg(expect(collect('E1', await j('POST', `/org/agent/transactions/${TX1}/representations`, { partyRole: 'individual' }, ANA.token)), 403, 'REPRESENTATION_REQUIRED'), 'E1 no agreementId, no binding — an active relationship is not itself authority here');
@@ -465,18 +448,18 @@ let REP_KOLA;
   ok(declared?.status === 'pending_review' && declared.declaredOnly === true && declared.basis === 'declared' && declared.reviewId, 'E6 the declared binding is recorded as pending_review with its review id — never as effective');
   neg(expect(collect('E9', await j('POST', `/org/agent/transactions/${TX1}/representations`, { partyRole: 'individual', agreementId: REL_CHINEDU }, DAN.token)), 404, 'TRANSACTION_NOT_FOUND'), 'E9 a same-agency colleague cannot bind anything to Ana\'s transaction, nor learn it exists (#4)');
   const t = (await j('GET', `/org/agent/transactions/${TX1}`, undefined, ANA.token)).body.transaction;
-  ok(t.representations.find((r) => r.partyRole === 'individual').basis === 'client_confirmed_agreement' && t.representations.find((r) => r.partyRole === 'individual').agreementId === REL_KOLA, 'E10 the binding carries its provenance: the agreement it rests on (§23)');
+  ok(t.representations.find((r) => r.partyRole === 'individual').basis === 'client_confirmed_agreement' && t.representations.find((r) => r.partyRole === 'individual').agreementId === REL_KOLA, 'E10 the binding carries its provenance: the agreement it rests on');
   ok(t.compliance.pendingReason === 'MANUAL_REVIEW' || t.compliance.pendingReason === 'CONSENT_REQUIRED' || t.compliance.blocked, `E11 with an unverified entity declaration in play, compliance is not clear (${t.compliance.pendingReason ?? 'blocked'})`);
 }
 
 // ============================================================ D — state transitions
-section('D/§12/§16/§25/§26 — transitions are server-validated and compliance-driven states are unreachable by request');
+section('D — transitions are server-validated and compliance-driven states are unreachable by request');
 {
   for (const bad of ['READY', 'COMPLIANCE_PENDING', 'COMPLIANCE_BLOCKED']) {
     neg(expect(collect(`D-${bad}`, await j('POST', `/org/agent/transactions/${TX1}/status`, { to: bad }, ANA.token)), 409, 'TRANSACTION_TRANSITION_NOT_ALLOWED'), `D15 an actor cannot request ${bad}: it is the compliance layer's answer, not a request (#25, #26)`);
   }
-  neg(expect(collect('D16', await j('POST', `/org/agent/transactions/${TX1}/status`, { to: 'NOT_A_STATE' }, ANA.token)), 400, 'TRANSACTION_INPUT_INVALID'), 'D16 a freeform status string is refused (§11)');
-  // S11c: valid input only — the route refuses what it used to coerce, cut off or record unread, naming the field.
+  neg(expect(collect('D16', await j('POST', `/org/agent/transactions/${TX1}/status`, { to: 'NOT_A_STATE' }, ANA.token)), 400, 'TRANSACTION_INPUT_INVALID'), 'D16 a freeform status string is refused');
+  // Valid input only — the route refuses junk rather than coercing, truncating or ignoring it, naming the field.
   const junk = async (label, url, body) => { const r = collect(label, await j('POST', url, body, ANA.token)); return r.status === 400 && r.body?.error === 'TRANSACTION_INPUT_INVALID' ? r.body.field : `${r.status} ${r.body?.error}`; };
   neg(await junk('D16a', `/org/agent/transactions/${TX1}/status`, { to: 'ACTIVE', reasonCode: 'other' }) === 'reasonCode', 'D16a a move that takes no reason code is refused one (it used to be recorded unread)');
   neg(await junk('D16b', `/org/agent/transactions/${TX1}/status`, { to: 'CANCELLED', reasonCode: ['other'] }) === 'reasonCode', 'D16b a reason code that is not text is refused, not coerced');
@@ -495,7 +478,7 @@ section('D/§12/§16/§25/§26 — transitions are server-validated and complian
 }
 
 // ============================================================ H/I — consent and party change
-section('H/I/§10/§29 — consent comes from the P5.6C ledger; a party change invalidates the clearance');
+section('H/I — consent comes from the compliance ledger; a party change invalidates the clearance');
 let TX2, KOLA_CONSENT2;
 {
   // A clean two-party employment transaction, so the dual-representation path is
@@ -509,7 +492,7 @@ let TX2, KOLA_CONSENT2;
   ok(bind.status === 201, 'H2 Ana binds Kola');
   const t2 = (await j('GET', `/org/agent/transactions/${TX2}`, undefined, ANA.token)).body.transaction;
   ok(t2.compliance.clear === true && t2.status === 'READY', 'H3 one party represented, consents satisfied, England rules encoded → READY');
-  ok(t2.offerBoundary.canStartOfferWorkflow === true && t2.offerBoundary.blockers.length === 0, '§54 readiness for a future Offer is computed — and no offer record exists');
+  ok(t2.offerBoundary.canStartOfferWorkflow === true && t2.offerBoundary.blockers.length === 0, 'readiness for a future Offer is computed — and no offer record exists');
   const dual = collect('H4', await j('POST', `/org/agent/transactions/${TX2}/representations`, { partyRole: 'engaging_entity', agreementId: null }, ANA.token));
   neg(expect(dual, 422, 'REGULATORY_REVIEW_REQUIRED') && dual.body.contextId, 'H4 also acting for the club is a declared-only binding needing attributed review before any consent question arises');
   const declaredRep = (await j('GET', `/org/agent/transactions/${TX2}`, undefined, ANA.token)).body.transaction.representations.find((r) => r.partyRole === 'engaging_entity');
@@ -524,12 +507,12 @@ let TX2, KOLA_CONSENT2;
   neg(expect(h9, 422, 'TRANSACTION_COMPLIANCE_PENDING') && h9.body.pendingReason === 'CONSENT_REQUIRED', 'H9 the transaction cannot progress while consent is outstanding, and the refusal says so (#25)');
   const req1 = await j('POST', `/org/agent/transactions/${TX2}/consents/request`, { partyRole: 'individual', fullParticularsProvided: true, legalAdviceOffered: true, proposedFeeDisclosed: true }, ANA.token);
   KOLA_CONSENT2 = req1.body?.consent?.id;
-  ok(req1.status === 201 && KOLA_CONSENT2, 'H10 Ana requests Kola\'s consent from inside the workspace — through the P5.6C ledger, not a second store');
+  ok(req1.status === 201 && KOLA_CONSENT2, 'H10 Ana requests Kola\'s consent from inside the workspace — through the compliance ledger, not a second store');
   const req2 = await j('POST', `/org/agent/transactions/${TX2}/consents/request`, { partyRole: 'engaging_entity', fullParticularsProvided: true, legalAdviceOffered: true, proposedFeeDisclosed: true }, ANA.token);
   ok(req2.status === 201, 'H11 and the club\'s');
   const playerSide = (await j('GET', `/player/transactions/${TX2}`, undefined, kola.token)).body.transaction;
   const mine = playerSide.consents.find((k) => k.mine);
-  ok(mine && mine.id === KOLA_CONSENT2 && mine.particulars && playerSide.consents.filter((k) => !k.mine).every((k) => k.id === null && k.particulars === undefined), 'H12 the player sees their OWN consent in full and the club\'s as a state only, with no id and no particulars (§30)');
+  ok(mine && mine.id === KOLA_CONSENT2 && mine.particulars && playerSide.consents.filter((k) => !k.mine).every((k) => k.id === null && k.particulars === undefined), 'H12 the player sees their OWN consent in full and the club\'s as a state only, with no id and no particulars');
   ok((await j('POST', `/player/agent/consents/${KOLA_CONSENT2}/grant`, { acknowledgedParticulars: true, acknowledgedLegalAdvice: true }, kola.token)).status === 200, 'H13 Kola grants his own consent in the canonical player lane');
   const clubConsent = (await j('GET', '/org/compliance/consents', undefined, maria.token)).body.items.find((k) => k.status === 'requested');
   ok((await j('POST', `/org/compliance/consents/${clubConsent.id}/grant`, { acknowledgedParticulars: true, acknowledgedLegalAdvice: true }, maria.token)).status === 200, 'H14 the club\'s recorded signatory grants for the club');
@@ -541,7 +524,7 @@ let TX2, KOLA_CONSENT2;
 }
 
 // ============================================================ G — stale compliance
-section('G/§27/§28 — a stale snapshot authorises nothing, and says which fact moved');
+section('G — a stale snapshot authorises nothing, and says which fact moved');
 {
   const revoke = await j('POST', `/player/agent/consents/${KOLA_CONSENT2}/revoke`, {}, kola.token);
   ok(revoke.status === 200, 'G1 Kola revokes his consent mid-workflow');
@@ -549,7 +532,7 @@ section('G/§27/§28 — a stale snapshot authorises nothing, and says which fac
   neg(read.compliance.staleness === 'INPUTS_CHANGED', 'G2 the agent\'s read reports the snapshot as stale and names the reason — reported, never silently repaired');
   neg(read.offerBoundary.canStartOfferWorkflow === false && read.offerBoundary.blockers.includes('COMPLIANCE_SNAPSHOT_STALE'), 'G3 readiness for a future Offer is withdrawn by staleness alone (#11)');
   const hold = await j('POST', `/org/agent/transactions/${TX2}/status`, { to: 'ON_HOLD', reasonCode: 'awaiting_party_decision', reason: 'Client is reconsidering.' }, ANA.token);
-  ok(hold.status === 200 && hold.body.transaction.status === 'ON_HOLD' && hold.body.transaction.hold.reasonCode === 'awaiting_party_decision', 'D23 a hold needs a reason code and records it (§19)');
+  ok(hold.status === 200 && hold.body.transaction.status === 'ON_HOLD' && hold.body.transaction.hold.reasonCode === 'awaiting_party_decision', 'D23 a hold needs a reason code and records it');
   const resume = collect('G4', await j('POST', `/org/agent/transactions/${TX2}/status`, { to: 'ACTIVE' }, ANA.token));
   neg(expect(resume, 422, 'TRANSACTION_COMPLIANCE_STALE') && resume.body.staleness === 'INPUTS_CHANGED', 'G4 leaving the hold is refused BEFORE any re-check: a caller cannot enter the live workflow on facts they have not seen (#12)');
   const reeval = await j('POST', `/org/agent/transactions/${TX2}/evaluate`, {}, ANA.token);
@@ -560,14 +543,14 @@ section('G/§27/§28 — a stale snapshot authorises nothing, and says which fac
 }
 
 // ============================================================ I — party change invalidation
-section('I/§9/§10 — changing a party withdraws what rested on it and re-evaluates');
+section('I — changing a party withdraws what rested on it and re-evaluates');
 {
   const t = (await j('GET', `/org/agent/transactions/${TX1}`, undefined, ANA.token)).body.transaction;
   const engaging = t.parties.find((p) => p.partyRole === 'engaging_entity');
   const rm = await j('POST', `/org/agent/transactions/${TX1}/parties/${engaging.id}/remove`, {}, ANA.token);
   ok(rm.status === 200, 'I1 Ana removes the engaging club');
   const after = rm.body.transaction;
-  ok(after.parties.find((p) => p.id === engaging.id).removed === true && after.parties.find((p) => p.id === engaging.id).removedAt && after.parties.length === 3, 'I2 the party row STAYS with its removedAt — history is never overwritten invisibly (§9)');
+  ok(after.parties.find((p) => p.id === engaging.id).removed === true && after.parties.find((p) => p.id === engaging.id).removedAt && after.parties.length === 3, 'I2 the party row STAYS with its removedAt — history is never overwritten invisibly');
   neg(after.representations.find((r) => r.partyRole === 'engaging_entity').status === 'withdrawn', 'I3 every representation that named that role is withdrawn: authority cannot outlive its party');
   neg(after.partiesConfirmed === false && after.awaitingConfirmation.includes('engaging_entity') && after.compliance.clear === false, 'I4 the transaction falls out of any compliance claim it held and asks for the party again');
   ok((await j('POST', `/org/agent/transactions/${TX1}/parties/${engaging.id}/remove`, {}, ANA.token)).body.idempotent === true, 'X6 removing again is idempotent');
@@ -582,7 +565,7 @@ section('I/§9/§10 — changing a party withdraws what rested on it and re-eval
 }
 
 // ============================================================ J — documents
-section('J/§31–§34/§80 — document classification, and no leakage across parties');
+section('J — document classification, and no leakage across parties');
 let DOC_AGENT_PRIVATE, DOC_SHARED, DOC_ENG_PRIVATE, DOC_REL_PRIVATE, DOC_PLAYER_PRIVATE;
 {
   const post = (tok, body, url = `/org/agent/transactions/${TX2}/documents`) => j('POST', url, body, tok);
@@ -590,7 +573,7 @@ let DOC_AGENT_PRIVATE, DOC_SHARED, DOC_ENG_PRIVATE, DOC_REL_PRIVATE, DOC_PLAYER_
   neg(expect(collect('J2', await post(ANA.token, { documentType: 'mandate', visibility: 'T_AND_S_ONLY', label: 'x' })), 403, 'DOCUMENT_VISIBILITY_NOT_PERMITTED'), 'J2 nobody files into the Trust & Safety lane');
   neg(expect(collect('J3', await post(ANA.token, { documentType: 'mandate', visibility: 'PLAYER_PRIVATE', label: 'x' })), 403, 'DOCUMENT_VISIBILITY_NOT_PERMITTED'), 'J3 the agent cannot file into the player\'s private lane');
   neg(expect(collect('J4', await post(ANA.token, { documentType: 'mandate', visibility: 'AGENT_PRIVATE', label: '' })), 400, 'DOCUMENT_INPUT_INVALID'), 'J4 a document needs a label the other parties can read');
-  neg(expect(collect('J5', await post(ANA.token, { documentType: 'mandate', visibility: 'AGENT_PRIVATE', label: 'x', evidenceRef: { kind: 'assessment', id: 'a1' } })), 400, 'DOCUMENT_INPUT_INVALID'), 'J5 an evidence reference names the canonical evidence vault or nothing — a club assessment is not a transaction document (§46)');
+  neg(expect(collect('J5', await post(ANA.token, { documentType: 'mandate', visibility: 'AGENT_PRIVATE', label: 'x', evidenceRef: { kind: 'assessment', id: 'a1' } })), 400, 'DOCUMENT_INPUT_INVALID'), 'J5 an evidence reference names the canonical evidence vault or nothing — a club assessment is not a transaction document');
   neg(expect(collect('J6', await post(ANA.token, { documentType: 'mandate', visibility: 'AGENT_PRIVATE', label: 'x', evidenceRef: { kind: 'verification_evidence', id: 've-someone-else' } })), 400, 'DOCUMENT_INPUT_INVALID'), 'J6 and a reference to an evidence record that is not the uploader\'s is refused');
   neg(expect(collect('J7', await post(ANA.token, { documentType: 'mandate', visibility: 'AGENT_PRIVATE', label: 'x', expiresAt: 1000 })), 400, 'DOCUMENT_INPUT_INVALID'), 'J7 an expiry in the past is refused');
   const d1 = await post(ANA.token, { documentType: 'mandate', visibility: 'AGENT_PRIVATE', label: 'Internal mandate working copy', clientKey: 'doc-1' });
@@ -613,24 +596,24 @@ let DOC_AGENT_PRIVATE, DOC_SHARED, DOC_ENG_PRIVATE, DOC_REL_PRIVATE, DOC_PLAYER_
   const playerDocs = (await j('GET', `/player/transactions/${TX2}/documents`, undefined, kola.token)).body.items.map((d) => d.id);
   ok(agentDocs.includes(DOC_AGENT_PRIVATE) && agentDocs.includes(DOC_SHARED), 'J14 the representing agent reads their own document and the shared one');
   neg(!agentDocs.includes(DOC_PLAYER_PRIVATE) && !agentDocs.includes(DOC_ENG_PRIVATE), 'J15 …and NOT the player\'s private document, and NOT the engaging club\'s: "club-private" means private to the club, even from its own transaction agent (#9)');
-  neg(!clubDocs.includes(DOC_AGENT_PRIVATE) && !clubDocs.includes(DOC_PLAYER_PRIVATE) && clubDocs.includes(DOC_SHARED) && clubDocs.includes(DOC_ENG_PRIVATE), 'J16 the club reads the shared one and its own; never the agent\'s private note and never the player\'s (#10, §34)');
-  neg(!playerDocs.includes(DOC_AGENT_PRIVATE) && !playerDocs.includes(DOC_ENG_PRIVATE) && playerDocs.includes(DOC_SHARED) && playerDocs.includes(DOC_PLAYER_PRIVATE), 'J17 the player reads the shared one and their own; never a club-private document (§34)');
-  neg(expect(collect('J18', await j('GET', `/player/transactions/${TX2}/documents/${DOC_ENG_PRIVATE}/reference`, undefined, kola.token)), 404, 'DOCUMENT_NOT_FOUND'), 'J18 asking for a club-private reference by id answers as though it does not exist (§80)');
+  neg(!clubDocs.includes(DOC_AGENT_PRIVATE) && !clubDocs.includes(DOC_PLAYER_PRIVATE) && clubDocs.includes(DOC_SHARED) && clubDocs.includes(DOC_ENG_PRIVATE), 'J16 the club reads the shared one and its own; never the agent\'s private note and never the player\'s (#10)');
+  neg(!playerDocs.includes(DOC_AGENT_PRIVATE) && !playerDocs.includes(DOC_ENG_PRIVATE) && playerDocs.includes(DOC_SHARED) && playerDocs.includes(DOC_PLAYER_PRIVATE), 'J17 the player reads the shared one and their own; never a club-private document');
+  neg(expect(collect('J18', await j('GET', `/player/transactions/${TX2}/documents/${DOC_ENG_PRIVATE}/reference`, undefined, kola.token)), 404, 'DOCUMENT_NOT_FOUND'), 'J18 asking for a club-private reference by id answers as though it does not exist');
   neg(expect(collect('J19', await j('GET', `/org/transactions/${TX2}/documents/${DOC_AGENT_PRIVATE}/reference`, undefined, maria.token)), 404, 'DOCUMENT_NOT_FOUND'), 'J19 and so does a club asking for the agent\'s private document (#10)');
   const ref = await j('GET', `/org/agent/transactions/${TX2}/documents/${DOC_SHARED}/reference`, undefined, ANA.token);
   ok(ref.status === 200 && ref.body.reference === null && /no file has been attached/.test(ref.body.note), 'J20 a placeholder\'s reference read is honest about there being no file');
   const sup = await j('POST', `/org/agent/transactions/${TX2}/documents/${DOC_SHARED}/supersede`, { label: 'Draft term sheet v2', expectedRev: 1 }, ANA.token);
-  ok(sup.status === 201 && sup.body.document.version === 2 && sup.body.document.supersedes === DOC_SHARED, 'J21 a new version supersedes the old; the old row is kept, never edited (§32)');
+  ok(sup.status === 201 && sup.body.document.version === 2 && sup.body.document.supersedes === DOC_SHARED, 'J21 a new version supersedes the old; the old row is kept, never edited');
   neg(expect(collect('J22', await j('POST', `/org/agent/transactions/${TX2}/documents/${DOC_SHARED}/supersede`, { label: 'again' }, ANA.token)), 409, 'DOCUMENT_SUPERSEDED'), 'J22 a superseded version cannot be superseded twice');
   ok((await j('GET', `/org/agent/transactions/${TX2}/documents`, undefined, ANA.token)).body.items.some((d) => d.version === 2), 'J23 the current list shows version 2');
   neg(expect(collect('J24', await j('POST', `/org/agent/transactions/${TX2}/documents/${DOC_ENG_PRIVATE}/supersede`, { label: 'x' }, ANA.token)), 404, 'DOCUMENT_NOT_FOUND'), 'J24 the agent cannot version a document it does not own');
   const tsRead = await j('GET', `/ts/transactions/${TX2}`, undefined, PRIYA.token);
   ok(tsRead.status === 200 && typeof tsRead.body.transaction.documentCount === 'number' && tsRead.body.transaction.documents === undefined, 'J25 the reviewer sees a document COUNT and no document — their surface carries states and ids');
-  neg(!JSON.stringify(tsRead.body).match(/budget note|passport scan|mandate working copy/), 'J26 no document label reaches the Trust & Safety read (§34)');
+  neg(!JSON.stringify(tsRead.body).match(/budget note|passport scan|mandate working copy/), 'J26 no document label reaches the Trust & Safety read');
 }
 
 // ============================================================ K — notes
-section('K/§35 — scoped notes, absent rather than redacted for the lanes they exclude');
+section('K — scoped notes, absent rather than redacted for the lanes they exclude');
 {
   neg(expect(collect('K1', await j('POST', `/org/agent/transactions/${TX2}/notes`, { text: 'x', visibility: 'PLAYER_PRIVATE' }, ANA.token)), 403, 'DOCUMENT_VISIBILITY_NOT_PERMITTED'), 'K1 the agent cannot write into the player\'s private lane');
   neg(expect(collect('K2', await j('POST', `/org/agent/transactions/${TX2}/notes`, { text: '', visibility: 'AGENT_PRIVATE' }, ANA.token)), 400, 'NOTE_INPUT_INVALID'), 'K2 an empty note is refused');
@@ -641,29 +624,29 @@ section('K/§35 — scoped notes, absent rather than redacted for the lanes they
   const playerNotes = (await j('GET', `/player/transactions/${TX2}`, undefined, kola.token)).body.transaction.notes;
   ok(agentNotes.some((n) => /signing-on fee/.test(n.text)), 'K5 the agent reads their own note');
   neg(!JSON.stringify(clubNotes).match(/signing-on fee/), 'K6 the club never reads the agent\'s private note — it is absent, not redacted (#10)');
-  neg(!JSON.stringify(playerNotes).match(/wage ceiling|signing-on fee/), 'K7 the player reads neither the club\'s nor the agent\'s private note (#9 inverse, §34)');
+  neg(!JSON.stringify(playerNotes).match(/wage ceiling|signing-on fee/), 'K7 the player reads neither the club\'s nor the agent\'s private note (#9 inverse)');
   neg(!JSON.stringify(agentNotes).match(/wage ceiling/), 'K8 and the representing agent does not read the engaging club\'s private note either — a club-private lane excludes everyone outside the club (#9)');
   const tsRead = (await j('GET', `/ts/transactions/${TX2}`, undefined, PRIYA.token)).body;
   neg(typeof tsRead.transaction.noteCount === 'number' && !JSON.stringify(tsRead).match(/wage ceiling|signing-on fee/), 'K9 the reviewer sees a note COUNT and no note text');
   const tl = (await j('GET', `/org/agent/transactions/${TX2}/timeline`, undefined, ANA.token)).body.items;
-  neg(!tl.some((e) => e.action === 'transaction_note_added'), 'M1 a note is audit-only: it appears in NOBODY\'s timeline, including its author\'s (§39, §40)');
+  neg(!tl.some((e) => e.action === 'transaction_note_added'), 'M1 a note is audit-only: it appears in NOBODY\'s timeline, including its author\'s');
   const audit = (await j('GET', '/org/agent/agency/audit?limit=100', undefined, tomas.token)).body.items;
-  ok(audit.some((r) => r.domain === 'transaction' && r.action === 'transaction_note_added'), 'M2 …and it IS in the platform audit, which is the distinction (§40)');
-  neg(!JSON.stringify(audit).match(/signing-on fee|wage ceiling|Draft term sheet/), 'M3 the audit carries the action, never the note text or the document label (§75)');
+  ok(audit.some((r) => r.domain === 'transaction' && r.action === 'transaction_note_added'), 'M2 …and it IS in the platform audit, which is the distinction');
+  neg(!JSON.stringify(audit).match(/signing-on fee|wage ceiling|Draft term sheet/), 'M3 the audit carries the action, never the note text or the document label');
 }
 
 // ============================================================ L — messages
-section('L/§36/§37/§81 — the canonical Inbox is referenced; membership alone opens nothing');
+section('L — the canonical Inbox is referenced; membership alone opens nothing');
 {
   neg(expect(collect('L1', await j('POST', `/org/transactions/${TX2}/messages/link`, { channelId: 'chan-nope' }, maria.token)), 404, 'MESSAGE_THREAD_NOT_FOUND'), 'L1 a channel that is not this club\'s conversation with this individual cannot be linked');
-  const channels = (await j('GET', '/org/channels', undefined, maria.token)).body.items; // S14c: a page
+  const channels = (await j('GET', '/org/channels', undefined, maria.token)).body.items; // a page
   ok(Array.isArray(channels), 'L the club\'s inbox is a page of threads');
   const mineWithKola = channels.find((c) => c.playerId === 'pl-adeyemi');
   if (mineWithKola) {
     const link = await j('POST', `/org/transactions/${TX2}/messages/link`, { channelId: mineWithKola.id }, maria.token);
     ok(link.status === 201, 'L2 the club links its own canonical thread with the individual');
     const agentView = (await j('GET', `/org/agent/transactions/${TX2}/messages`, undefined, ANA.token)).body;
-    neg(agentView.items.length === 1 && agentView.items[0].readable === false, 'L3 the agent learns a conversation exists — the club\'s own act of sharing — and cannot read it: transaction membership is not Inbox authorisation (§81)');
+    neg(agentView.items.length === 1 && agentView.items[0].readable === false, 'L3 the agent learns a conversation exists — the club\'s own act of sharing — and cannot read it: transaction membership is not Inbox authorisation');
     const clubView = (await j('GET', `/org/transactions/${TX2}`, undefined, maria.token)).body.transaction;
     ok(clubView.linkedThreads[0].readable === true, 'L4 the club, which passes the channel\'s own gate, can');
   } else {
@@ -672,27 +655,27 @@ section('L/§36/§37/§81 — the canonical Inbox is referenced; membership alon
     ok(true, 'L4 (see L3)');
   }
   const msgs = await j('GET', `/org/agent/transactions/${TX2}/messages`, undefined, ANA.token);
-  ok(/never negotiates/.test(msgs.body.note) && /Inbox/.test(msgs.body.note), 'L5 the workspace states that correspondence lives in the canonical Inbox and that ScoutBox never negotiates (§37)');
+  ok(/never negotiates/.test(msgs.body.note) && /Inbox/.test(msgs.body.note), 'L5 the workspace states that correspondence lives in the canonical Inbox and that ScoutBox never negotiates');
   neg(expect(collect('L6', await j('POST', `/org/transactions/${TX2}/messages/link`, { channelId: 'chan-1' }, outsider.token)), 404, 'TRANSACTION_NOT_FOUND'), 'L6 a club that is not a party cannot link anything');
 }
 
 // ============================================================ N/O/P/Q — the four views
-section('N/O/P/Q/§41–§45 — four projections, each its own slice');
+section('N/O/P/Q — four projections, each its own slice');
 {
   const agent = (await j('GET', '/org/agent/transactions', undefined, ANA.token)).body;
   ok(agent.items.length >= 2 && agent.statuses.length === 10 && agent.transitions.length === 10 && agent.counts.live >= 1, 'O1 the agent list carries the transactions, the state vocabulary and live counts');
   ok(agent.items.every((t) => t.viewerRoles.includes('representing_agent')), 'O2 every row is one the agent represents in');
   const player = (await j('GET', '/player/transactions', undefined, kola.token)).body;
-  ok(player.items.length >= 2 && player.items.every((t) => t.viewerRoles.includes('party_individual')), 'N1 the player sees only transactions they are actually party to (§41)');
+  ok(player.items.length >= 2 && player.items.every((t) => t.viewerRoles.includes('party_individual')), 'N1 the player sees only transactions they are actually party to');
   const playerTx2 = player.items.find((t) => t.id === TX2);
   ok(playerTx2?.agency?.name && playerTx2.representations.length >= 1, 'N2 the player is told which agency and which representation acts, which they are entitled to know');
   neg(player.items.every((t) => t.representations.every((r) => r.agreementId === undefined && r.firstActAt === undefined)), 'N3 …and not the agent\'s own agreement reference');
   const eng = (await j('GET', '/org/transactions', undefined, maria.token)).body;
   ok(eng.items.length >= 1 && eng.signatory === true && eng.items.every((t) => t.viewerPartyRole === 'engaging_entity'), 'P1 the engaging club sees the transactions it is a party to, and its own side');
   const rel = (await j('GET', '/org/transactions', undefined, devA.token)).body;
-  ok(rel.items.some((t) => t.viewerPartyRole === 'releasing_entity'), 'Q1 the releasing club sees its own, as the releasing side — a separate party role, not a copy of the engaging one (§45)');
+  ok(rel.items.some((t) => t.viewerPartyRole === 'releasing_entity'), 'Q1 the releasing club sees its own, as the releasing side — a separate party role, not a copy of the engaging one');
   const foreign = (await j('GET', '/org/transactions', undefined, outsider.token)).body;
-  ok(foreign.items.length === 0, 'S1 a club that is party to nothing sees an empty list, not a filtered one (§78)');
+  ok(foreign.items.length === 0, 'S1 a club that is party to nothing sees an empty list, not a filtered one');
   const relDetail = rel.items.find((t) => t.id === TX1);
   if (relDetail) neg(relDetail.compliance.policyVersions === undefined && relDetail.compliance.outcome !== undefined, 'Q2 a club sees the compliance OUTCOME and its reason codes, never the policy versions the agent is bound by (privacy matrix row 14)');
   else ok(true, 'Q2 (the releasing club\'s transaction was re-parented earlier in this run)');
@@ -713,7 +696,7 @@ section('R/S/T/U/V — concealment, safeguarding, unsupported jurisdictions and 
   for (const g of guesses) neg(expect(collect(`S8-${g}`, await j('GET', `/org/agent/transactions/${g}`, undefined, ANA.token)), 404, 'TRANSACTION_NOT_FOUND'), `S8 "${g}" is not a transaction`);
   const a = collect('S9a', await j('GET', `/org/agent/transactions/${TX2}`, undefined, ZOE.token));
   const b = collect('S9b', await j('GET', '/org/agent/transactions/atx-nonexistent', undefined, ZOE.token));
-  neg(JSON.stringify(a.body) === JSON.stringify(b.body), 'S9 a foreign transaction and a non-existent one answer with byte-identical bodies (§78)');
+  neg(JSON.stringify(a.body) === JSON.stringify(b.body), 'S9 a foreign transaction and a non-existent one answer with byte-identical bodies');
   // Safeguarding: Theo blocks the agency, then a transaction naming him is
   // indistinguishable from one that never existed.
   const txTheo = await j('POST', '/org/agent/transactions', { type: 'employment_contract', jurisdictions: ['ENG'], parties: [{ partyRole: 'individual', subjectKind: 'player', subjectId: 'pl-martin' }, { partyRole: 'engaging_entity', subjectKind: 'club', subjectId: 'org-eastport' }] }, ANA.token);
@@ -724,21 +707,21 @@ section('R/S/T/U/V — concealment, safeguarding, unsupported jurisdictions and 
   const blockedRead = await j('GET', `/org/agent/transactions/${TX_THEO}`, undefined, ANA.token);
   ok(blockedRead.status === 200 && blockedRead.body.transaction.parties.find((p) => p.subjectKind === 'player').name === null, 'T3 the agency keeps its own record of what happened and loses the person from it: the party row reads with no name');
   const blockedWrite = collect('T3b', await j('POST', `/org/agent/transactions/${TX_THEO}/documents`, { documentType: 'mandate', visibility: 'AGENT_PRIVATE', label: 'x' }, ANA.token));
-  neg(expect(blockedWrite, 422, 'TRANSACTION_PARTY_UNAVAILABLE') && !/block/i.test(JSON.stringify(blockedWrite.body)), 'T4 nothing can be written to it — and the refusal never says "blocked", so it is identical for removed, invisible, blocked and minor (#27, §61)');
+  neg(expect(blockedWrite, 422, 'TRANSACTION_PARTY_UNAVAILABLE') && !/block/i.test(JSON.stringify(blockedWrite.body)), 'T4 nothing can be written to it — and the refusal never says "blocked", so it is identical for removed, invisible, blocked and minor (#27)');
   const blockedActive = collect('T4b', await j('POST', `/org/agent/transactions/${TX_THEO}/status`, { to: 'CANCELLED', reasonCode: 'other' }, ANA.token));
   neg(expect(blockedActive, 422, 'TRANSACTION_PARTY_UNAVAILABLE'), 'T4b nor can its status be moved — a compliance CLEAR would not have overridden this');
   neg(expect(collect('T5', await j('POST', '/org/agent/transactions', { type: 'employment_contract', jurisdictions: ['ENG'], parties: [{ partyRole: 'individual', subjectKind: 'player', subjectId: 'pl-martin' }] }, ANA.token)), 404, 'TRANSACTION_PARTY_NOT_FOUND'), 'T5 and a NEW transaction naming him is the uniform 404, because there the caller is probing');
   const archived = await j('POST', `/org/agent/transactions/${TX_THEO}/status`, { to: 'CANCELLED', reasonCode: 'other', expectedRev: blockedRead.body.transaction.rev }, ANA.token);
   neg(archived.status === 422 && archived.body.error === 'TRANSACTION_PARTY_UNAVAILABLE', 'T6 the one thing a safeguarding stop must still allow is shelving the record; progressing it is refused either way');
-  neg(expect(collect('U1', await j('POST', '/org/agent/transactions', { type: 'transfer', jurisdictions: ['FRA'], parties: [] }, ANA.token)), 422, 'JURISDICTION_UNSUPPORTED'), 'U1 an unsupported jurisdiction is refused at creation, not silently allowed (§58, #24)');
-  neg(expect(collect('V1', await j('POST', '/org/agent/transactions', { type: 'employment_contract', jurisdictions: ['ENG'], parties: [{ partyRole: 'individual', subjectKind: 'player', subjectId: 'pl-guni' }] }, ANA.token)), 404, 'TRANSACTION_PARTY_NOT_FOUND'), 'V1 a minor cannot be a party: no minor pathway is production-enabled and the refusal is not an age oracle (§59, #23)');
+  neg(expect(collect('U1', await j('POST', '/org/agent/transactions', { type: 'transfer', jurisdictions: ['FRA'], parties: [] }, ANA.token)), 422, 'JURISDICTION_UNSUPPORTED'), 'U1 an unsupported jurisdiction is refused at creation, not silently allowed (#24)');
+  neg(expect(collect('V1', await j('POST', '/org/agent/transactions', { type: 'employment_contract', jurisdictions: ['ENG'], parties: [{ partyRole: 'individual', subjectKind: 'player', subjectId: 'pl-guni' }] }, ANA.token)), 404, 'TRANSACTION_PARTY_NOT_FOUND'), 'V1 a minor cannot be a party: no minor pathway is production-enabled and the refusal is not an age oracle (#23)');
   const minorList = await j('GET', '/player/transactions', undefined, (await playerLogin('pl-guni')).token);
   neg(minorList.body.minor === true && minorList.body.items.length === 0 && /not available for under-18/.test(minorList.body.note), 'V2 a guardian-managed account is told plainly that the workspace is not available to it');
-  ok(ROOM_ROLES.includes('party_guardian') && DOCUMENT_TYPES.includes('guardian_evidence'), 'V3 the guardian architecture is preserved — a distinct room role and a distinct document type — with no live surface (§60)');
+  ok(ROOM_ROLES.includes('party_guardian') && DOCUMENT_TYPES.includes('guardian_evidence'), 'V3 the guardian architecture is preserved — a distinct room role and a distinct document type — with no live surface');
 }
 
 // ============================================================ R — private data boundaries
-section('R/§46/§47/§48 — the three private worlds the workspace must not open');
+section('R — the three private worlds the workspace must not open');
 {
   const bodies = [
     (await j('GET', `/org/agent/transactions/${TX2}`, undefined, ANA.token)).body,
@@ -748,11 +731,11 @@ section('R/§46/§47/§48 — the three private worlds the workspace must not op
     (await j('GET', `/ts/transactions/${TX2}`, undefined, PRIYA.token)).body,
   ];
   const all = JSON.stringify(bodies);
-  neg(!/assessmentId|roomComment|recruitmentCase|decisionId|secondLook|nobodyMissed|trustScore/i.test(all), 'R1 no projection carries a club assessment, Room comment, recruitment case, P5 decision, Second Look or Nobody Missed reference (§46, §52)');
-  neg(!/boxSession|passportShare|medical|dateOfBirth|"dob"/i.test(all), 'R2 nor Box Cam, Passport, medical or a date of birth (§47)');
-  neg(!/feePercent|commission|"fee"/i.test(all), 'R3 and no fee term anywhere (§56, privacy matrix invariant 5)');
+  neg(!/assessmentId|roomComment|recruitmentCase|decisionId|secondLook|nobodyMissed|trustScore/i.test(all), 'R1 no projection carries a club assessment, Room comment, recruitment case, P5 decision, Second Look or Nobody Missed reference');
+  neg(!/boxSession|passportShare|medical|dateOfBirth|"dob"/i.test(all), 'R2 nor Box Cam, Passport, medical or a date of birth');
+  neg(!/feePercent|commission|"fee"/i.test(all), 'R3 and no fee term anywhere (privacy matrix invariant 5)');
   const clubBody = JSON.stringify(bodies[2]);
-  neg(!/Dan Mensah|Zoe Hart|pl-okafor|pl-carvalho/.test(clubBody), 'R4 the club learns nothing of the agency\'s other agents or other clients (§48)');
+  neg(!/Dan Mensah|Zoe Hart|pl-okafor|pl-carvalho/.test(clubBody), 'R4 the club learns nothing of the agency\'s other agents or other clients');
   const playerBody = JSON.stringify(bodies[3]);
   const leak5 = playerBody.match(/Maria Keane|budget|wage ceiling/);
   neg(leak5 === null, `R5 the player learns no club user's name and no club-internal note${leak5 ? ` — leaked "${leak5[0]}" in …${playerBody.slice(Math.max(0, leak5.index - 90), leak5.index + 40)}…` : ''}`);
@@ -760,7 +743,7 @@ section('R/§46/§47/§48 — the three private worlds the workspace must not op
 }
 
 // ============================================================ W/Y — rev and concurrency
-section('W/Y/§68/§70 — one authoritative result');
+section('W/Y — one authoritative result');
 {
   const t = (await j('GET', `/org/agent/transactions/${TX2}`, undefined, ANA.token)).body.transaction;
   neg(expect(collect('W1', await j('POST', `/org/agent/transactions/${TX2}/notes`, { text: 'stale write', visibility: 'AGENT_PRIVATE', expectedRev: 1 }, ANA.token)), 409, 'TRANSACTION_VERSION_CONFLICT'), 'W1 a stale expectedRev is refused');
@@ -771,18 +754,18 @@ section('W/Y/§68/§70 — one authoritative result');
   const wins = [c1, c2].filter((r) => r.status === 200); const loses = [c1, c2].filter((r) => r.status === 409);
   neg(wins.length === 1 && loses.length === 1 && ['TRANSACTION_VERSION_CONFLICT', 'TRANSACTION_TRANSITION_NOT_ALLOWED'].includes(loses[0].body.error), 'Y1 two status transitions at once: exactly one wins, the other gets 409 — no double final state (#18)');
   const final = (await j('GET', `/org/agent/transactions/${TX1}`, undefined, ANA.token)).body.transaction;
-  ok(final.status === 'CANCELLED' && final.cancelReasonCode === 'duplicate' && final.parties.length === 4 && final.history === undefined, 'D24 the cancellation preserves every party row and its history (§20)');
+  ok(final.status === 'CANCELLED' && final.cancelReasonCode === 'duplicate' && final.parties.length === 4 && final.history === undefined, 'D24 the cancellation preserves every party row and its history');
   neg(expect(collect('D25', await j('POST', `/org/agent/transactions/${TX1}/notes`, { text: 'after the end', visibility: 'AGENT_PRIVATE' }, ANA.token)), 409, 'TRANSACTION_NOT_LIVE'), 'D25 nothing can be written to a cancelled transaction; its record stays');
   const tlAfter = (await j('GET', `/org/agent/transactions/${TX1}/timeline`, undefined, ANA.token)).body.items;
   ok(tlAfter.some((e) => e.action === 'transaction_cancelled') && tlAfter.length >= 6, 'D26 and its timeline is intact, ending with the cancellation');
   const arch = await j('POST', `/org/agent/transactions/${TX1}/status`, { to: 'ARCHIVED' }, ANA.token);
-  ok(arch.status === 200 && arch.body.transaction.status === 'ARCHIVED', 'D27 a terminal transaction can be archived — retention, not deletion (§22)');
+  ok(arch.status === 200 && arch.body.transaction.status === 'ARCHIVED', 'D27 a terminal transaction can be archived — retention, not deletion');
   neg(expect(collect('D28', await j('POST', `/org/agent/transactions/${TX1}/notes`, { text: 'x', visibility: 'AGENT_PRIVATE' }, ANA.token)), 409, 'TRANSACTION_ARCHIVED') && expect(collect('D28b', await j('POST', `/org/agent/transactions/${TX1}/status`, { to: 'ACTIVE' }, ANA.token)), 409, 'TRANSACTION_ARCHIVED'), 'D28 an archived transaction is read-only for everyone, including its owner (#30)');
   ok((await j('GET', `/org/agent/transactions/${TX1}`, undefined, ANA.token)).status === 200, 'D29 …and still readable, which is what archive means');
 }
 
 // ============================================================ AC/AD — events and notifications
-section('AC/AD/§73/§74 — events and notifications say little and reveal nothing');
+section('AC/AD — events and notifications say little and reveal nothing');
 {
   const an = (await j('GET', '/org/notifications', undefined, ANA.token)).body;
   ok(an.some((n) => n.type === 'agent_transaction' || n.type === 'agent_transaction_compliance'), 'AD4 the agent was told about workspace activity');
@@ -795,7 +778,7 @@ section('AC/AD/§73/§74 — events and notifications say little and reveal noth
 }
 
 // ============================================================ AE — EN/FR parity
-section('AE/§83 — EN/FR parity for every new production string');
+section('AE — EN/FR parity for every new production string');
 {
   const i18n = readFileSync(path.join(ROOT, 'scoutbox-agent', 'src', 'i18n.ts'), 'utf8');
   // The catalogue is `const en = {` … `const fr: typeof en = {`, and every key is
@@ -813,7 +796,7 @@ section('AE/§83 — EN/FR parity for every new production string');
   ok(txKeys.length >= 30, `AE2 ${txKeys.length} transaction strings exist in English`);
   neg(txKeys.length > 0 && txKeys.every((k) => frKeys.has(k)), 'AE3 no transaction string is English-only');
   // Every status, party role, compliance state, consent state, visibility class
-  // and error the server can hand the client has a word in BOTH languages (§83).
+  // and error the server can hand the client has a word in BOTH languages.
   const bothHave = (k) => enKeys.has(k) && frKeys.has(k);
   neg(TRANSACTION_STATUSES.every((st) => bothHave(`txStatus.${st}`)), 'AE4 every one of the ten statuses has an EN and a FR word — no raw enum reaches a screen');
   neg(DOCUMENT_VISIBILITY.every((v) => bothHave(`visibility.${v}`)), 'AE5 every document visibility class has an EN and a FR word');
@@ -832,19 +815,19 @@ section('AE/§83 — EN/FR parity for every new production string');
 section('AF/AG/AH — the state and mobile contracts the browser journeys rely on');
 {
   const t = (await j('GET', `/org/agent/transactions/${TX2}`, undefined, ANA.token)).body.transaction;
-  neg(typeof t.status === 'string' && (t.compliance.pendingReason !== null || t.compliance.clear || t.compliance.blocked), 'AF1 every compliance state reaches the client as a WORD, so no surface has to rely on colour alone (§84)');
+  neg(typeof t.status === 'string' && (t.compliance.pendingReason !== null || t.compliance.clear || t.compliance.blocked), 'AF1 every compliance state reaches the client as a WORD, so no surface has to rely on colour alone');
   ok(Array.isArray(t.viewerRoles) && Array.isArray(t.allowedTransitions), 'AF2 the projection tells the client which actions exist, so a disabled control is never a guess');
   ok(existsSync(path.join(ROOT, 'e2e', 'm23AgentTransactionLive.test.mjs')), 'AH1 a real browser journey exists for the transaction workspace');
   ok(existsSync(path.join(ROOT, 'scoutbox-agent', 'src', 'transactions.tsx')), 'AG1 the agent app has a transactions screen, exercised at 1440/1280/390/360 by the live suite');
 }
 
 // ============================================================ AI — corruption / legacy
-section('AI/§92 — a corrupt row is contained and named by its effect, never repaired');
+section('AI — a corrupt row is contained and named by its effect, never repaired');
 {
   const before = (await j('GET', '/org/agent/transactions', undefined, ANA.token)).body.items.length;
   ok(before >= 2, `AI1 ${before} transactions are readable before the corruption fixture`);
   await stop(server);
-  // S11c: a status the machine does not know is not a row the typed table can hold — the repository refuses it, naming
+  // A status the machine does not know is not a row the typed table can hold — the repository refuses it, naming
   // it, and writes nothing. A typed row can still carry no compliance snapshot at all; that one is planted and judged on read.
   const party = { id: 'txp-ai1', partyRole: 'individual', subjectKind: 'player', subjectId: 'pl-adeyemi', addedAt: T0, addedBy: { kind: 'org', userId: ANA_ID, name: 'Ana Costa' }, removed: false, removedAt: null, confirmedAt: T0, confirmedBy: { kind: 'player', userId: 'pl-adeyemi', name: 'Kola Adeyemi' }, subjectRemovedAt: null };
   const row = (over) => ({
@@ -868,23 +851,23 @@ section('AI/§92 — a corrupt row is contained and named by its effect, never r
 }
 
 // ============================================================ Z — persistence across a restart
-section('Z/§91 — the bytes survive a restart');
+section('Z — the bytes survive a restart');
 {
   const t2 = (await j('GET', `/org/agent/transactions/${TX2}`, undefined, ANA.token)).body.transaction;
   ok(t2.status === 'ON_HOLD' && t2.notes.length >= 2 && t2.documents.length >= 2, 'Z1 after the restart the transaction still holds its status, its notes and its documents');
   ok(t2.parties.every((p) => p.confirmedAt) && t2.representations.length === 2 && t2.rev >= 2, 'Z2 the party confirmations, the representation bindings and the rev survived');
   const tl = (await j('GET', `/org/agent/transactions/${TX2}/timeline`, undefined, ANA.token)).body.items;
   ok(tl.length >= 8, `Z3 the timeline survived (${tl.length} entries)`);
-  ok((await j('POST', '/org/agent/transactions', { type: 'employment_contract', jurisdictions: ['ENG'], parties: [{ partyRole: 'individual', subjectKind: 'player', subjectId: 'pl-adeyemi' }, { partyRole: 'engaging_entity', subjectKind: 'club', subjectId: 'org-eastport' }], clientKey: 'tx-2' }, ANA.token)).body.idempotent === true, 'Z4 an idempotency key recorded before the restart still replays (§91)');
+  ok((await j('POST', '/org/agent/transactions', { type: 'employment_contract', jurisdictions: ['ENG'], parties: [{ partyRole: 'individual', subjectKind: 'player', subjectId: 'pl-adeyemi' }, { partyRole: 'engaging_entity', subjectKind: 'club', subjectId: 'org-eastport' }], clientKey: 'tx-2' }, ANA.token)).body.idempotent === true, 'Z4 an idempotency key recorded before the restart still replays');
   const consents = (await j('GET', `/org/agent/transactions/${TX2}`, undefined, ANA.token)).body.transaction.consents;
   ok(consents.some((k) => k.status === 'revoked'), 'Z5 the consent ledger — including the revocation — survived, and the transaction reads it rather than copying it');
   const metrics = await j('GET', '/ts/transactions/metrics', undefined, PRIYA.token);
-  ok(metrics.status === 200 && typeof metrics.body.byStatus.ON_HOLD === 'number' && metrics.body.holdReasons.awaiting_party_decision >= 1 && /No agent, club or player is ranked/.test(metrics.body.note), '§76 process analytics only: counts, durations and reason codes, and it says so');
-  neg(!JSON.stringify(metrics.body).match(/Ana|Kola|pl-|org-/), '§76b …and no agent, player or organisation is named in them');
+  ok(metrics.status === 200 && typeof metrics.body.byStatus.ON_HOLD === 'number' && metrics.body.holdReasons.awaiting_party_decision >= 1 && /No agent, club or player is ranked/.test(metrics.body.note), 'process analytics only: counts, durations and reason codes, and it says so');
+  neg(!JSON.stringify(metrics.body).match(/Ana|Kola|pl-|org-/), '…and no agent, player or organisation is named in them');
 }
 
 // ============================================================ AB — tombstones
-section('AB/§71 — an account removal keeps the shape and loses the person');
+section('AB — an account removal keeps the shape and loses the person');
 {
   const before = (await j('GET', '/org/agent/transactions', undefined, ANA.token)).body.items.find((t) => t.id === TX2);
   ok(before.parties.some((p) => p.name === 'Kola Adeyemi'), 'AB1 the individual is named while the account exists');
@@ -901,8 +884,8 @@ section('AB/§71 — an account removal keeps the shape and loses the person');
   neg(!docs.some((d) => d.ownerKind === 'player'), 'AB8 the removed person\'s own documents are gone from the workspace');
 }
 
-// ============================================================ S11c — the lists that grow page by cursor
-section('S11c — the agent\'s, the club\'s and Trust & Safety\'s lists page newest first by cursor; junk is a 400');
+// ============================================================ PG — the lists that grow page by cursor
+section('PG — the agent\'s, the club\'s and Trust & Safety\'s lists page newest first by cursor; junk is a 400');
 {
   const all = (await j('GET', '/org/agent/transactions', undefined, ANA.token)).body;
   ok(all.items.length >= 2 && all.nextCursor === null && all.counts.live === all.items.filter((t) => LIVE_STATUSES.includes(t.status)).length, `PG1 the first page holds every one of ${all.items.length} transactions, and the counts cover them all`);
@@ -933,7 +916,7 @@ section('Z — every refusal in this run: a code, and no private field');
   neg(!/agreementId":"rep|feePercent|commission/.test(blob), 'Z11 and no agreement reference or fee term');
   const codes = new Set(ERROR_BODIES.map((e) => e.body?.error).filter(Boolean));
   // Codes from the canonical platform (session, platform separation) and from
-  // the P5.6B/P5.6C domains are contracts of their own; this suite asserts that
+  // the agent core and compliance domains are contracts of their own; this suite asserts that
   // nothing OUTSIDE a declared contract reaches a caller.
   const CANONICAL = ['ORG_AUTH_REQUIRED', 'PLAYER_AUTH_REQUIRED', 'AUTH_REQUIRED', 'ORG_NOT_FOUND', 'USER_NOT_FOUND', 'GRASSROOTS_PLATFORM_ONLY', 'PLATFORM_MISMATCH', 'ORG_NOT_VERIFIED', 'ALREADY_ROOT_ADMIN', 'NOT_FOUND', 'BLOCK_EXISTS'];
   const unmapped = [...codes].filter((c) => !Object.hasOwn(M26_ERROR_HTTP, c) && !CANONICAL.includes(c) && !/^(AGENT_|REPRESENTATION_|CONSENT_|REVIEWER_|COMPLIANCE_|CONTEXT_|JURISDICTION_|REGULATORY_|POLICY_|PARTY_|SIGNATORY_|REVIEW_)/.test(c));

@@ -1,12 +1,7 @@
-// S9b — assessment templates, assessments, video segments and playlists as typed tables with explicit writes
-// (repositories/scoutingAssessments.mjs, migration 0020). What this suite proves: the migration creates the ten typed
-// tables with the four v1 templates and nothing else; the typers keep the routes' literals and refuse junk with the
-// record and field named (never the content); create/update write rows at once and return fresh, deep-frozen records
-// whose attributes snapshot is the template version's; the guards hold (unknown field, identity change, duplicate id,
-// nested update, a segment of another club or player, a template version out of turn); the queries match the rows; the
-// account-deletion redaction drops only the name; a rolled-back unit leaves nothing; there is no db.* view; and a
-// fixture written through the repository is typed, refuses missing references (nothing written) and reads back what it
-// wrote. Temporary databases only; nothing touches DATA_DIR. Run with: npm test
+// Assessment templates, assessments, video segments and playlists (repositories/scoutingAssessments.mjs, migration
+// 0020): the tables with the four v1 templates, the typers' refusals (naming the field, never the content), typed
+// writes and their guards, the queries, the account-deletion redaction (only the name goes), units of work and
+// fixtures. Temporary databases only; nothing touches DATA_DIR. Run with: npm test
 
 import assert from 'node:assert/strict';
 import fs from 'node:fs';

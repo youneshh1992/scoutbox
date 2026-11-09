@@ -1,9 +1,7 @@
 /**
  * Assessment templates (attributes), assessments (ratings, cited evidence, history), video segments (labels) and
- * playlists (segments) get their own typed tables (S9b). REGISTERED in DATA_MIGRATIONS. `up()` is the DDL plus the
- * catalogue: the four v1 position templates, which every database has from its first boot (they used to be pushed
- * into memory when the scouting module registered). Everything else is written through the repository
- * (repositories/scoutingAssessments.mjs).
+ * playlists (segments) (repositories/scoutingAssessments.mjs). Also inserts the catalogue: the four v1 position
+ * templates, which every database has from its first boot.
  */
 import { migrationApplied } from '../database.mjs';
 import { SCOUTING_EVIDENCE_MIGRATION } from '../scoutingEvidence.mjs';

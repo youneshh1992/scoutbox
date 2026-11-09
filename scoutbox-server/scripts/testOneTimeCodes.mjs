@@ -1,4 +1,4 @@
-// S6a — one-time codes (repositories/oneTimeCodes.mjs, migration 0008): the
+// One-time codes (repositories/oneTimeCodes.mjs, migration 0008): the
 // fixture's refusals (the entry typing the repository exports); the repository (hashing, expiry,
 // attempts, reissue, sweep, hash-free views); the two consumption operations
 // inside units of work under injected failures and real COMMIT faults, read
@@ -177,8 +177,8 @@ test('pairing as one unit of work: a failure after the consumption and a failure
   L.close(); rm(dir);
 });
 
-// ============================================================= review of b2a237e: the repository joins the store's unit of work
-/** Durable state read through an independent connection: the code rows and the unrelated organisation row. (Rewritten in S14a: this read a blob and the save revision.) */
+// ============================================================= the repository joins the store's unit of work
+/** Durable state read through an independent connection: the code rows and the unrelated organisation row. */
 const durable = (dir) => ({ codes: rowsOf(dir, 'pairing_codes').map((r) => r.code_hash), challenges: rowsOf(dir, 'email_challenges').map((r) => [r.org_id, r.attempts]), suspended: suspendedOf(dir) });
 /** Run `work` in a unit of work, beside an unrelated organisation edit, whose caller swallows the repository error; returns what the caller caught and what the unit threw. */
 const swallowing = (L, work) => {
@@ -243,8 +243,7 @@ test('e-mail side, a multi-statement operation that already wrote: the tenth wro
 test('the boundary itself: joined successes commit with the unit (issue, consume and an unrelated edit, one transaction); an uncaught failure rolls back as before; expected negative results stay return values and never poison a unit; a validation failure is part of the operation (caught inside a unit, it still poisons the unit); a raw SQLite transaction a tool opened is honoured without a nested BEGIN and is not mistaken for a unit (its ROLLBACK undoes the operation); a malformed participant API is refused at construction', () => {
   const dir = tempDir('otc-joined-edge'); s5File(dir);
   const L = live(dir);
-  // Joined successes. (Rewritten in S14a: the unrelated edit was a blob and the save revision was counted; now it
-  // is an organisation row and the BEGINs are counted.)
+  // Joined successes: the unrelated edit is an organisation row, and the BEGINs are counted.
   const exec = L.store.sqlite.exec.bind(L.store.sqlite);
   let begins = 0;
   L.store.sqlite.exec = (sql) => { if (/^BEGIN/.test(sql)) begins += 1; return exec(sql); };
@@ -316,7 +315,7 @@ test('player deletion revokes the pairing code inside the deletion unit: a failu
   const del = (fault) => L.store.unitOfWork(() => {
     L.layer.sessions.revokeFor('player', 'pl-child1');
     L.codes.revokePairingCodesFor('pl-child1');
-    L.layer.players.erase('pl-child1'); // S14h: the account deletion (the row stays as the retained record)
+    L.layer.players.erase('pl-child1'); // the account deletion (the row stays as the retained record)
     if (fault) L.store.failCommitOfOpenTransaction();
   });
   assert.throws(() => del(true), /FOREIGN KEY constraint failed/);
@@ -353,7 +352,7 @@ test('boot: a stale code array handed in with the seed is never imported — the
   assert.deepEqual(L.codes.counts(), { emailChallenges: 0, pairingCodes: 2 });
   L.close();
   const store = openStore(dir);
-  // (S14a: server mode has nothing to load; the stale array is handed in as part of the seed, which an initialised file ignores.)
+  // The stale array is handed in as part of the seed, which an initialised file ignores.
   const seed = { pairingCodes: [{ code: 'STALE2', playerId: 'pl-adult', expiresAt: NOW + 99 * MIN }] };
   const warnings = [];
   const layer = attachDataLayer({ seed, store, nextId, sessionTtlMs: TTL, now: () => NOW + 2 * MIN, warn: (m) => warnings.push(m) });
@@ -383,7 +382,7 @@ test('collisions: two organisations may hold the same e-mail code by chance (eac
   s.close(); rm(dir);
 });
 
-// ============================================================= review of e020aba
+// ============================================================= exhausted rows, attempt limits and the mailer's outbox
 test('runtime: an exhausted row that somehow exists (planted directly) is never redeemed — check answers none, consumption returns nothing and deletes nothing, a wrong code counts nothing, it is not outstanding, and the sweep removes it; at nine attempts the tenth wrong code cancels a valid challenge', () => {
   const dir = tempDir('otc-f2-rt'); s5File(dir);
   const s = openRaw(dir);
@@ -405,10 +404,10 @@ test('runtime: an exhausted row that somehow exists (planted directly) is never 
   s2.close(); rm(dir);
 });
 
-await testAsync('review of e020aba, finding 1 — the mailer withholds the secrets it is given from the outbox record it keeps (the record is saved and backed up): on the dev transport the full text is kept in this process\'s memory only, for the admin outbox view; on the live transport the provider receives the full text and nothing keeps it; a mail without secrets is recorded unchanged', async () => {
+await testAsync('the mailer withholds the secrets it is given from the outbox record it keeps (the record is saved and backed up): on the dev transport the full text is kept in this process\'s memory only, for the admin outbox view; on the live transport the provider receives the full text and nothing keeps it; a mail without secrets is recorded unchanged', async () => {
   const savedKey = process.env.SENDGRID_API_KEY; delete process.env.SENDGRID_API_KEY;
   let n = 0; const nextIdLocal = (p) => `${p}-${++n}`;
-  // A recording stand-in for the outbox repository (S14d: the mailer writes through it, never an array).
+  // A recording stand-in for the outbox repository (the mailer writes through it).
   const outboxStub = () => { const rows = []; return { rows, append: (r) => { rows.push({ ...r }); return r; }, markDelivered: (id, ok) => { rows.find((r) => r.id === id).delivered = ok; } }; };
   const db = outboxStub();
   const dev = createMailer(nextIdLocal, { outbox: db });
@@ -419,7 +418,7 @@ await testAsync('review of e020aba, finding 1 — the mailer withholds the secre
   const plain = await dev.send({ to: 'b@eastport.test', subject: 'Hello', text: 'An unrelated mail.' });
   assert.equal(plain.text, 'An unrelated mail.'); assert.equal(dev.devDeliveredText(plain.id), null, 'nothing is withheld, nothing held');
   assert.equal(JSON.stringify(db.rows).includes('QX7K2M'), false, 'the stored outbox records hold no secret');
-  // S14d (review): a subject or text longer than the outbox keeps (a name the routes do not bound) is shortened in the
+  // A subject or text longer than the outbox keeps (a name the routes do not bound) is shortened in the
   // stored record, never refused — the mail is still recorded and sent.
   const long = await dev.send({ to: 'd@eastport.test', subject: `Reference request for ${'N'.repeat(400)}`, text: 'T'.repeat(12_000) });
   assert.deepEqual([long.subject.length, long.text.length], [300, 10_000]); assert.equal(db.rows.at(-1).id, long.id, 'recorded');

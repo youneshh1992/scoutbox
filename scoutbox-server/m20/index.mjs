@@ -1,8 +1,8 @@
 /**
- * M20 — Recruitment Analytics: registration and routes.
+ * Recruitment analytics: registration and routes.
  *
- * Three rules govern everything here, in priority order. They are M18.2's
- * audit-log rules, deliberately reused rather than reinvented, because this is
+ * Three rules govern everything here, in priority order. They are the audit
+ * log's rules, deliberately reused rather than reinvented, because this is
  * the same kind of surface: an administrative projection over records other
  * modules own.
  *
@@ -17,9 +17,9 @@
  *   3. **Bounded and stable.** Drill-down is cursor-paged, at most 50 rows,
  *      in an order that does not change between two reads of the same data.
  *
- * M20 writes nothing. There is no analytics store, no materialised rollup and
+ * Analytics writes nothing. There is no analytics store, no materialised rollup and
  * no cache: every figure is projected from the Rooms, decisions, briefs,
- * reviews, watchlists and trials that M12–M19 already own. A number here can
+ * reviews, watchlists and trials that other modules already own. A number here can
  * therefore never disagree with the record it came from, because it IS the
  * record, read differently.
  */
@@ -41,7 +41,6 @@ const PAGE_DEFAULT = 25;
 
 export function registerAnalytics(ctx) {
   const { recruitmentReads, scoutingReads, orgRouter, requireLead, findPlayer, orgCanSee } = ctx;
-  // The reporting context reads the recruitment records and (S9b) the club's assessments through SQL.
   const reportingReads = { ...recruitmentReads, ...scoutingReads, discovery: ctx.discoveryReads };
   if (typeof recruitmentReads?.contacts?.forOrg !== 'function' || typeof recruitmentReads?.offers?.forOrg !== 'function' || typeof recruitmentReads?.signings?.forOrg !== 'function' || typeof recruitmentReads?.signingPackages?.forOrg !== 'function') throw new TypeError('registerAnalytics needs recruitmentReads (contacts, offers, signings, signingPackages) from the data layer');
 
@@ -181,7 +180,7 @@ export function registerAnalytics(ctx) {
     const parsed = readQuery(req.query ?? {});
     if (parsed.error) return res.status(parsed.status).json(parsed);
 
-    // Fault injection is the M18.2 mechanism, and it exists so the
+    // Fault injection is the audit log's mechanism, and it exists so the
     // partial-failure path is exercised by a test rather than asserted in
     // prose. It is unavailable in production, by name.
     const fault = devFaults && req.query?.simulateFailure ? String(req.query.simulateFailure) : null;

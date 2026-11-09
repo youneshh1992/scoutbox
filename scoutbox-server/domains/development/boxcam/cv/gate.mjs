@@ -1,4 +1,4 @@
-// M22 — the production enablement gate (§129, §130, §63).
+// The production enablement gate.
 //
 // This module answers exactly one question, for one protocol at a time:
 //
@@ -7,10 +7,10 @@
 //
 // It is a separate file from the provider on purpose. The provider's job is
 // to observe; the gate's job is to refuse to let observation become a claim
-// until the evidence for that claim exists. Merging them is how a milestone
+// until the evidence for that claim exists. Merging them is how a product
 // ends up shipping a badge it cannot justify.
 //
-// §130 is the rule that shapes everything here: the gate must read MEASURED
+// The rule that shapes everything here: the gate must read MEASURED
 // evaluation output. It may not contain `passed = true`.
 
 import fs from 'node:fs';
@@ -23,19 +23,19 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const EVAL_PATH = path.join(HERE, 'evaluation.json');
 
 /**
- * The acceptance criteria (§63), fixed BEFORE the evaluation was run and
+ * The acceptance criteria, fixed BEFORE the evaluation was run and
  * deliberately not softened after seeing it.
  *
- * Note the last one. It is the criterion that actually decides this
- * milestone, and it is not a number.
+ * Note the last one. It is the criterion that actually decides production
+ * enablement, and it is not a number.
  */
 export const ACCEPTANCE_CRITERIA = Object.freeze({
-  maxFalseVerifications: 0,          // §61: any is a P0.
+  maxFalseVerifications: 0,          // any is a P0.
   maxNondeterministic: 0,            // the same fixture must answer the same way.
   maxMeanAbsCountError: 1.0,         // on fixtures that should be accepted.
   maxAbsCountError: 2,               // no single fixture may be wilder than this.
   minCorrectVerdictRate: 1.0,        // every fixture must land on its declared truth.
-  // §63 again, and the honest one: a counting claim about real football
+  // The honest one: a counting claim about real football
   // requires evidence from real football. Synthetic geometry can prove the
   // engine is deterministic and that it refuses what it promises to refuse.
   // It cannot show that a touch in a living room is a touch to this engine.
@@ -87,7 +87,7 @@ export function evaluateGate(report) {
   }
   // NOTE: the real-world validation criterion is deliberately NOT checked
   // here. A synthetic evaluation artefact must never be able to assert its
-  // own real-world validity — that is exactly the bypass §38 exists to
+  // own real-world validity — that is exactly the bypass this separation exists to
   // prevent. It is checked in `protocolProductionEnabled()` against the
   // server-side versioned record in validation.mjs, which no evaluation
   // run, client or request can write.
@@ -95,7 +95,7 @@ export function evaluateGate(report) {
 }
 
 /**
- * §129 — may this protocol be production-verified here?
+ * May this protocol be production-verified here?
  *
  * Conjunctive by construction. Every clause must hold, and each one that
  * does not is named, so a "no" is always explicable.
@@ -131,7 +131,7 @@ export function protocolProductionEnabled(protocolId, {
   const evalRes = evaluateGate(evaluation);
   if (!evalRes.open) reasons.push(...evalRes.failures);
 
-  // §38/§39 — THE HARD BLOCKER, applied last and independently.
+  // THE HARD BLOCKER, applied last and independently.
   //
   // Everything above can be perfect: provider healthy, every capability
   // present, every synthetic fixture passing, zero false verifications. None
@@ -140,7 +140,7 @@ export function protocolProductionEnabled(protocolId, {
   //
   // The record is read from server-side release configuration. It cannot be
   // set by a client, a request body, a provider payload, or an environment
-  // variable alone (§40, §41).
+  // variable alone.
   const rw = realWorldValidationPass(protocolId, {
     engineVersion: CV_ENGINE_VERSION,
     policyVersion: BOX_CAM_CV_POLICY_VERSION,
@@ -160,7 +160,7 @@ export function protocolProductionEnabled(protocolId, {
   };
 }
 
-/** A whole-matrix view for `/capabilities` and the documentation (§49, §68). */
+/** A whole-matrix view for `/capabilities` and the documentation. */
 export function productionMatrix(opts = {}) {
   const out = {};
   for (const id of Object.keys(CANDIDATE_PROTOCOLS)) {

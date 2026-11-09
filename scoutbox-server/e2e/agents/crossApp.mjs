@@ -1,4 +1,4 @@
-// M23 P5.6E acceptance suite — ScoutBox Agent cross-app integration.
+// Agent cross-app integration battery.
 //
 // The governing principle this suite enforces: cross-app integration must never
 // turn legacy representation data, a stale Agent session, same-agency
@@ -11,21 +11,8 @@
 // crosses a boundary between two systems that were built separately, and asks
 // whether the seam between them leaks.
 //
-// Groups (mandate §95), pure first, then a real server:
-//   A representation seam audit · B canonical representation authority ·
-//   C legacy cannot grant authority · D Player Agent projection · E Club Agent
-//   projection · F Agent Client projection · G Opportunity share · H Contact
-//   routing · I Contact reauthorization · J Inbox isolation · K Trial Agent
-//   visibility · L Trial private assessment boundary · M Box Cam boundary ·
-//   N Recruitment Room boundary · O P5 Decision boundary · P explicit
-//   transaction handoff · Q duplicate handoff · R transaction compliance
-//   recheck · S same-agency privacy · T representation expiry · U termination ·
-//   V dispute · W licence expiry · X Agent leaves Agency · Y blocks · Z minors ·
-//   AA unsupported jurisdiction · AB tenant isolation · AC direct deep links ·
-//   AD rev · AE idempotency · AF concurrency · AG events · AH notifications ·
-//   AI audit · AJ EN/FR · AK accessibility · AL 390/360 · AM demo ·
-//   AN tombstones · AO legacy/corruption
-//   — and the thirty-seven adversarial cases (§96), numbered #1–#37.
+// Pure groups first, then a real server; the adversarial cases are numbered
+// #1–#37 in their check labels.
 //
 // No assertion is `status !== 200`. Every refusal names its status and its code.
 
@@ -91,7 +78,7 @@ const agreement = (over = {}) => ({
   status: 'active', confirmedAt: T0 - 10 * DAY, endAt: T0 + 300 * DAY, scope: ['employment'], ...over,
 });
 
-section('pure A/§4 — the seam: one basis, and it is the canonical predicate');
+section('pure A — the seam: one basis, and it is the canonical predicate');
 {
   ok(SURFACE_NAMES.length === 10, 'A-p1 ten declared integration surfaces — every question another app can ask has a name');
   ok(SURFACE_NAMES.every((s) => typeof SURFACES[s].regulated === 'boolean' && (SURFACES[s].scopes === null || Array.isArray(SURFACES[s].scopes))), 'A-p2 each declares whether it is a regulated action and which scopes it needs');
@@ -100,16 +87,16 @@ section('pure A/§4 — the seam: one basis, and it is the canonical predicate')
   ok(RULE_ORDER.indexOf('ADULT') < RULE_ORDER.indexOf('BLOCK') && RULE_ORDER.indexOf('MINOR_PATHWAY') < RULE_ORDER.indexOf('BLOCK'), 'A-p5 and age is applied before both');
   ok(DENY_CODES.length === 12 && new Set(DENY_CODES).size === 12, 'A-p6 twelve distinct deny codes, one meaning each');
   neg(!DENY_CODES.some((c) => /minor|age|dob|birth/i.test(c) && c !== 'MINOR_PATHWAY_DISABLED'), 'A-p7 no deny code is an age oracle beyond the one named pathway');
-  ok(Object.keys(POLICY_ACTION_FOR_SURFACE).every((s) => POLICY_ACTIONS.includes(POLICY_ACTION_FOR_SURFACE[s])), 'A-p8 every regulated surface maps to a real P5.6C policy action, not a name of its own');
+  ok(Object.keys(POLICY_ACTION_FOR_SURFACE).every((s) => POLICY_ACTIONS.includes(POLICY_ACTION_FOR_SURFACE[s])), 'A-p8 every regulated surface maps to a real policy action, not a name of its own');
   ok(SURFACE_NAMES.filter(surfaceIsRegulated).every((s) => Object.hasOwn(POLICY_ACTION_FOR_SURFACE, s)), 'A-p9 and every regulated surface HAS a mapping — a regulated surface with nothing to ask would be unenforceable');
   neg(!SURFACE_NAMES.some((s) => /offer|fee|commission|negotiat|sign/i.test(s)), 'A-p10 no surface names an offer, a fee, a negotiation or a signing');
 }
 
-section('pure B/§5 — canonical authority: the basis is agreementGrantsAccess and nothing else');
+section('pure B — canonical authority: the basis is agreementGrantsAccess and nothing else');
 {
   const good = agreement();
   ok(agentClientBasis({ agreements: [good], agentUserId: 'usr-ana', clientId: 'pl-kola', now: T0 }).ok === true, 'B-p1 an active, client-confirmed, unexpired agreement naming this agent IS a basis');
-  ok(agentClientBasis({ agreements: [good], agentUserId: 'usr-ana', clientId: 'pl-kola', now: T0 }).agentUserId === 'usr-ana', 'B-p2 and the basis NAMES the individual — a routing snapshot that has to re-derive it records nobody (E-4)');
+  ok(agentClientBasis({ agreements: [good], agentUserId: 'usr-ana', clientId: 'pl-kola', now: T0 }).agentUserId === 'usr-ana', 'B-p2 and the basis NAMES the individual — a routing snapshot that has to re-derive it records nobody');
   neg(agentClientBasis({ agreements: [agreement({ confirmedAt: null, status: 'proposed' })], agentUserId: 'usr-ana', clientId: 'pl-kola', now: T0 }).ok === false, 'B-p3 a proposal is not a basis: nothing is active until the client confirms it');
   neg(agentClientBasis({ agreements: [agreement({ status: 'disputed', disputedAt: T0 })], agentUserId: 'usr-ana', clientId: 'pl-kola', now: T0 }).ok === false, 'B-p4 a dispute is not a basis (#13)');
   neg(agentClientBasis({ agreements: [agreement({ endAt: T0 - DAY })], agentUserId: 'usr-ana', clientId: 'pl-kola', now: T0 }).ok === false, 'B-p5 an active agreement past its end is not a basis — expiry is derived, never waited for (#13, T)');
@@ -120,9 +107,9 @@ section('pure B/§5 — canonical authority: the basis is agreementGrantsAccess 
   neg(agentClientBasis({ agreements: [], agentUserId: 'usr-ana', clientId: 'pl-kola', now: T0 }).status === null, 'B-p10 and "none at all" is a different answer from "not active" — a third party gets neither');
 }
 
-section('pure C/§6 — a legacy M13 F10 row can never grant authority');
+section('pure C — a legacy row can never grant authority');
 {
-  // The 2305 mirror writes a row with agentUserId: null. It is history.
+  // A legacy agency-level row has agentUserId: null. It is history.
   const mirror = agreement({ agentUserId: null, legacy: { fromRepresentationId: 'rep-legacy-1' } });
   neg(agreementGrantsAccess(mirror, null, T0) === false, 'C-p1 a legacy mirror does not grant access even to a caller with no id (#1)');
   neg(agreementGrantsAccess(mirror, 'usr-ana', T0) === false, 'C-p2 nor to a real agent (#1)');
@@ -131,7 +118,7 @@ section('pure C/§6 — a legacy M13 F10 row can never grant authority');
   ok(effectiveAgreementStatus(mirror, T0) === 'active', 'C-p5 the mirrored row may still READ as active — it is history, and the predicate is what withholds authority, not a rewrite of the record');
 }
 
-section('pure §47 — every surface fails closed, rule by rule');
+section('pure — every surface fails closed, rule by rule');
 {
   const full = { basis: basis(), subjectPresent: true, isAdult: true, minorPathwayOpen: false, blocked: false, disclosure: true, shared: true, licenceCurrent: true, complianceClear: true };
   for (const s of SURFACE_NAMES) ok(agentSurfaceDecision({ surface: s, ...full }).allowed === true, `S-p1 ${s} allows when every fact is satisfied`);
@@ -159,10 +146,10 @@ section('pure §47 — every surface fails closed, rule by rule');
   ok(DENY_CODES.includes(agentSurfaceDecision({ surface: 'nope' }).code), 'S-p20 every deny code the decision can produce is in the declared list');
 }
 
-section('pure §21/§22 — contact routing adds the agent BESIDE the player, never instead');
+section('pure — contact routing adds the agent BESIDE the player, never instead');
 {
   ok(CONTACT_MODES.join() === 'player_only,both' && CONTACT_ROUTING_MODES.join() === 'player_only,both', 'H-p1 two modes, and the Contact domain and the integration layer agree on them');
-  neg(!CONTACT_MODES.includes('agent_only') && !CONTACT_ROUTING_MODES.includes('agent_only'), 'H-p2 there is NO mode that reaches an agent instead of the player: a message with no player Inbox row could not honestly be "delivered", and making it honest would need a second Inbox, which §20 forbids');
+  neg(!CONTACT_MODES.includes('agent_only') && !CONTACT_ROUTING_MODES.includes('agent_only'), 'H-p2 there is NO mode that reaches an agent instead of the player: a message with no player Inbox row could not honestly be "delivered", and making it honest would need a second Inbox, which is forbidden');
   const player = { type: 'player', playerId: 'pl-kola', guardianId: null, minor: false };
   const guardian = { type: 'guardian', playerId: 'pl-guni', guardianId: 'gd-amara', minor: true };
   const allow = { allowed: true, basis: basis() };
@@ -173,17 +160,17 @@ section('pure §21/§22 — contact routing adds the agent BESIDE the player, ne
   ok(refused.mode === 'player_only' && refused.targets.length === 1 && refused.agentRefusal === 'DISCLOSURE_WITHHELD', 'H-p5 asking for the agent and being refused falls back to the player and NAMES the rule — the player is always a valid route, so the contact does not fail');
   const minor = contactRouting({ recipient: guardian, agentDecision: allow, requestedMode: 'both' });
   ok(minor.mode === 'player_only' && minor.targets[0] === guardian && minor.agent === null && minor.agentRefusal === 'MINOR_PATHWAY_DISABLED', 'H-p6 a minor\'s route stays the guardian\'s and no agent is substituted for a guardian (Z)');
-  neg(contactRouting({ recipient: player, agentDecision: { allowed: true, basis: basis({ agentUserId: null }) }, requestedMode: 'both' }).agent === null, 'H-p7 a basis that names no individual routes no agent: a snapshot claiming an agent with no agent in it is worse than no snapshot (E-4)');
+  neg(contactRouting({ recipient: player, agentDecision: { allowed: true, basis: basis({ agentUserId: null }) }, requestedMode: 'both' }).agent === null, 'H-p7 a basis that names no individual routes no agent: a snapshot claiming an agent with no agent in it is worse than no snapshot');
   neg(contactRouting({ recipient: null, agentDecision: allow, requestedMode: 'both' }).ok === false, 'H-p8 no recipient at all is a refusal, not a route to the agent alone');
   ok(contactRouting({ recipient: player, agentDecision: allow, requestedMode: 'agent_only' }).mode === 'player_only', 'H-p9 an unknown mode is read as the safest one rather than honoured');
   const snap = contactTargetSnapshot(both, T0);
   ok(snap.at === T0 && snap.mode === 'both' && snap.player === true && snap.agent?.agentUserId === 'usr-ana', 'H-p10 the snapshot records WHO was validly routed, as roles and ids');
   ok(contactTargetSnapshot(minor, T0).guardian === true && contactTargetSnapshot(minor, T0).agent === null, 'H-p11 a guardian route is recorded as a guardian route');
-  ok(/does not rewrite it/i.test(snap.honest), 'H-p12 and it says in words that a later change does not rewrite it (§22)');
+  ok(/does not rewrite it/i.test(snap.honest), 'H-p12 and it says in words that a later change does not rewrite it');
   ok(contactTargetSnapshot({ ok: false }, T0) === null, 'H-p13 a failed routing produces no snapshot');
 }
 
-section('pure §14/§63 — the Club-facing agent presence is the PLAYER\'s disclosure, not the agent\'s wish');
+section('pure — the Club-facing agent presence is the PLAYER\'s disclosure, not the agent\'s wish');
 {
   ok(clubAgentPresence({ decision: { allowed: false, code: 'DISCLOSURE_WITHHELD' } }) === null, 'E-p1 a refused decision projects NOTHING — absent, not an empty badge');
   const p = clubAgentPresence({
@@ -191,23 +178,23 @@ section('pure §14/§63 — the Club-facing agent presence is the PLAYER\'s disc
     facets: { fifa_licence: 'VERIFIED', national_registration: { ENG: 'VERIFIED' } },
   });
   ok(p.represented === true && p.agent.displayName === 'Ana Costa' && p.agency.name === 'North Star', 'E-p2 an allowed decision names the agent and the agency');
-  ok(p.verification.fifaLicence === 'VERIFIED' && p.verification.nationalRegistration === 'unknown', 'E-p3 facet by facet, and a facet ScoutBox has not checked reads "unknown" rather than being omitted (§65/§66)');
+  ok(p.verification.fifaLicence === 'VERIFIED' && p.verification.nationalRegistration === 'unknown', 'E-p3 facet by facet, and a facet ScoutBox has not checked reads "unknown" rather than being omitted');
   neg(!/fee|commission|salary|term/i.test(JSON.stringify({ ...p, honest: '' })), 'E-p4 no agreement term, no commission and no fee has a field to arrive in');
   ok(/not a licence register|does not speak for any governing body/i.test(p.honest), 'E-p5 and it says plainly that ScoutBox is not a licence register');
   ok(Object.keys(p).length === 6, 'E-p6 the projection is exactly six fields — deliberately thin');
 }
 
-section('pure §34/§37 — the handoff preconditions, and the duplicate rule');
+section('pure — the handoff preconditions, and the duplicate rule');
 {
   ok(HANDOFF_STATUSES.join() === 'invited,accepted,withdrawn,expired', 'P-p1 four handoff states');
-  neg(!HANDOFF_STATUSES.some((s) => /offer|sign/i.test(s)), 'P-p2 none of them names an offer or a signing (§35)');
+  neg(!HANDOFF_STATUSES.some((s) => /offer|sign/i.test(s)), 'P-p2 none of them names an offer or a signing');
   ok(HANDOFF_BLOCKERS.length === 9 && new Set(HANDOFF_BLOCKERS).size === 9, 'P-p3 nine distinct blockers');
   const facts = { canWrite: true, hasFinalProgressDecision: true, caseStatus: 'offer_consideration', subjectPresent: true, isAdult: true, minorPathwayOpen: false, blocked: false, existingHandoffStatus: null, liveTransactionId: null, complianceEvaluable: true };
   ok(handoffBlockers(facts).length === 0, 'P-p4 every precondition met → no blockers');
   neg(handoffBlockers({ ...facts, hasFinalProgressDecision: false })[0] === 'HANDOFF_NOT_PERMITTED' === false, 'P-p5 a missing decision is reported as HANDOFF_DECISION_REQUIRED, not as a permission problem');
   ok(handoffBlockers({ ...facts, hasFinalProgressDecision: false }).includes('HANDOFF_DECISION_REQUIRED'), 'P-p5b (the code it actually reports)');
   neg(handoffBlockers({ ...facts, canWrite: false })[0] === 'HANDOFF_NOT_PERMITTED', 'P-p6 permission is reported first, so a viewer is told it is not theirs to do rather than handed a checklist');
-  neg(handoffBlockers({ ...facts, caseStatus: 'watching' }).includes('HANDOFF_CASE_STATE'), 'P-p7 a case at watching cannot hand off (§35)');
+  neg(handoffBlockers({ ...facts, caseStatus: 'watching' }).includes('HANDOFF_CASE_STATE'), 'P-p7 a case at watching cannot hand off');
   neg(handoffBlockers({ ...facts, isAdult: false }).includes('HANDOFF_MINOR_PATHWAY_DISABLED'), 'P-p8 nor a minor (Z)');
   neg(handoffBlockers({ ...facts, blocked: true }).includes('HANDOFF_BLOCKED'), 'P-p9 nor through a block (Y)');
   neg(handoffBlockers({ ...facts, existingHandoffStatus: 'invited' }).includes('HANDOFF_EXISTS'), 'P-p10 nor twice (Q)');
@@ -216,7 +203,7 @@ section('pure §34/§37 — the handoff preconditions, and the duplicate rule');
   ok(handoffBlockers({ ...facts, existingHandoffStatus: 'withdrawn' }).length === 0, 'P-p13 a withdrawn invitation does not block a fresh one');
   ok(handoffBlockers({}).length >= 5, 'P-p14 called with nothing, it refuses on several counts — the defaults are all "no"');
   // "Do not expose internal rationale" is enforced by the signature.
-  neg(!/reason|note|evidence|rationale|outcome/i.test(handoffBlockers.toString().split('{')[0]), 'P-p15 the precondition function does not TAKE the decision\'s reasons, note, evidence or author, so no refusal can leak them (§34)');
+  neg(!/reason|note|evidence|rationale|outcome/i.test(handoffBlockers.toString().split('{')[0]), 'P-p15 the precondition function does not TAKE the decision\'s reasons, note, evidence or author, so no refusal can leak them');
   ok(effectiveHandoffStatus({ status: 'invited', invitedAt: T0 - HANDOFF_TTL_MS - 1 }, T0) === 'expired', 'P-p16 an invitation nobody took up reads as expired, derived from the clock');
   ok(effectiveHandoffStatus({ status: 'invited', invitedAt: T0 - DAY }, T0) === 'invited', 'P-p17 and a fresh one does not');
   ok(effectiveHandoffStatus({ status: 'bogus' }, T0) === null, 'P-p18 an unrecognised stored status is not a status');
@@ -230,7 +217,7 @@ section('pure §34/§37 — the handoff preconditions, and the duplicate rule');
   const list = [tx('atx-1', 'employment_contract', 'ACTIVE', parties('pl-kola', 'org-eastport', null))];
   const args = { clientId: 'pl-kola', type: 'employment_contract', engagingOrgId: 'org-eastport', releasingOrgId: null, terminalStatuses: TERMINAL_STATUSES, partiesOf: (t) => t.parties };
   ok(duplicateTransactionOf(list, args)?.id === 'atx-1', 'Q-p1 same individual, same type, same clubs, still live → a duplicate');
-  neg(duplicateTransactionOf(list, { ...args, type: 'loan' }) === null, 'Q-p2 a loan beside an employment contract is a legitimately separate transaction (§37 "do not over-block")');
+  neg(duplicateTransactionOf(list, { ...args, type: 'loan' }) === null, 'Q-p2 a loan beside an employment contract is a legitimately separate transaction ("do not over-block")');
   neg(duplicateTransactionOf(list, { ...args, engagingOrgId: 'org-harbour' }) === null, 'Q-p3 a different engaging club is a different transaction — two clubs competing is normal');
   neg(duplicateTransactionOf(list, { ...args, releasingOrgId: 'org-harbour' }) === null, 'Q-p4 and adding a releasing side makes it a different context');
   neg(duplicateTransactionOf(list, { ...args, clientId: 'pl-other' }) === null, 'Q-p5 and a different individual entirely');
@@ -238,7 +225,7 @@ section('pure §34/§37 — the handoff preconditions, and the duplicate rule');
   neg(duplicateTransactionOf([tx('atx-3', 'employment_contract', 'ACTIVE', [{ partyRole: 'individual', subjectId: 'pl-kola', removed: true }, { partyRole: 'engaging_entity', subjectId: 'org-eastport', removed: false }])], args) === null, 'Q-p7 a removed party does not make a context — a tombstone blocks nothing');
 }
 
-section('pure §21 — disclosure defaults to off, and only an explicit yes is a yes');
+section('pure — disclosure defaults to off, and only an explicit yes is a yes');
 {
   ok(DISCLOSURE_KEYS.length === 3 && DISCLOSURE_KEYS.join() === 'clubPresence,contactRouting,trialVisibility', 'D-p1 three separate disclosure choices');
   ok(Object.values(DISCLOSURE_DEFAULT).every((v) => v === false), 'D-p2 every one defaults to FALSE — confirming a relationship turns none of them on');
@@ -263,13 +250,12 @@ section('pure K/L/M — the trial projection is scheduling, and nothing adjacent
   neg(!SURFACE_NAMES.some((s) => /assessment|report|box_?cam|scorecard/i.test(s)), 'L-p2 there is NO surface for a trial assessment, a trial report or Box Cam footage — the boundary is that the question cannot be asked (#15, M)');
 }
 
-section('pure §102/§103 — no new store, and no migration');
+section('pure — no new store, and no migration');
 {
-  // Rewritten in S14a: these described the retired snapshot registry (schema 2308, the m280 step, required stores).
   ok(DATA_MIGRATIONS.length === SCHEMA_VERSION, 'AN-p1 the schema is 40, the latest table migration (0040_match_facts)');
-  neg(!DATA_MIGRATIONS.some((m) => /disclosure|handoff|share/i.test(m.id)), 'AN-p3 no P5.6E migration exists at all (no disclosure, handoff or share table of its own; 0034_integrations is the enterprise API)');
+  neg(!DATA_MIGRATIONS.some((m) => /disclosure|handoff|share/i.test(m.id)), 'AN-p3 no cross-app migration exists at all (no disclosure, handoff or share table of its own; 0034_integrations is the enterprise API)');
   const p56e = ['agentOpportunityShares', 'representationDisclosures', 'transactionHandoffs', 'agentContacts', 'agentTrials'];
-  neg(!p56e.some((s) => TABLE_BACKED.includes(s)), 'AN-p4 and none of the five stores P5.6E might have declared exists — the disclosure lives on the agreement, the share lives on the agreement, and the handoff lives on the case (§103)');
+  neg(!p56e.some((s) => TABLE_BACKED.includes(s)), 'AN-p4 and none of the five stores the cross-app lane might have declared exists — the disclosure lives on the agreement, the share lives on the agreement, and the handoff lives on the case');
   ok(MAX_OPPORTUNITY_SHARES === 200, 'AN-p5 the share list is capped, so an unbounded array cannot grow on a hot row');
 }
 
@@ -284,7 +270,7 @@ section('pure AG/AH — events and notifications: ids only, and the right catego
     ok(e.replayPolicy === 'never', `AG-p4 ${n} is never replayed — an integration event is a nudge, not a record`);
   }
   ok(EVENT_REGISTRY.contact_agent_routed.payload.join() === 'orgId,contactId,agentUserId', 'AG-p5 the routing event carries three ids and nothing else: not the club\'s name, not the subject, not a word of the message');
-  neg(!EVENT_REGISTRY.transaction_handoff_invited.payload.some((k) => /decision|outcome|reason/i.test(k)), 'AG-p6 the handoff event carries nothing of the club\'s internal decision (§32)');
+  neg(!EVENT_REGISTRY.transaction_handoff_invited.payload.some((k) => /decision|outcome|reason/i.test(k)), 'AG-p6 the handoff event carries nothing of the club\'s internal decision');
   const notifs = ['representation_disclosure', 'representation_contact', 'representation_opportunity', 'representation_transaction'];
   for (const t of notifs) ok(typeof TYPE_CATEGORY[t] === 'string' && Object.hasOwn(CATEGORIES, TYPE_CATEGORY[t]), `AH-p1 ${t} maps to a real notification category`);
   ok(TYPE_CATEGORY.representation_transaction === 'transaction_updates' && CATEGORIES.transaction_updates.mandatory !== true, 'AH-p2 workspace traffic is the non-mandatory transaction category — a club inviting a workspace is operational, not a safety matter');
@@ -305,14 +291,14 @@ section('pure AO — the error tables have no default, so a new code cannot inhe
   const badSnap = contactIntegrity({ id: 'rct-y', status: 'draft', channel: 'in_app', playerId: 'pl-kola', routingSnapshot: { at: T0, mode: 'both', agent: { agentUserId: 'usr-ana' } } });
   neg(badSnap.includes('routing_snapshot_unsent'), 'AO-p7 a routed agent on a contact that never left the building is a contradiction, and is named');
   const nullAgent = contactIntegrity({ id: 'rct-z', status: 'delivered', channel: 'in_app', playerId: 'pl-kola', recipient: { type: 'player' }, deliveredAt: T0, routingSnapshot: { at: T0, mode: 'both', agent: { agentUserId: null } } });
-  neg(nullAgent.includes('routing_snapshot_malformed'), 'AO-p8 and a snapshot claiming an agent who is nobody is malformed, not trusted (E-4)');
+  neg(nullAgent.includes('routing_snapshot_malformed'), 'AO-p8 and a snapshot claiming an agent who is nobody is malformed, not trusted');
   const view = contactView({ id: 'rct-1', status: 'draft', channel: 'in_app', contactMode: 'both', routingSnapshot: null, history: [] });
   ok(view.contactMode === 'both' && view.routedToAgent === false && view.routedAt === null, 'AO-p9 the club view shows what it asked for and what was actually routed');
   neg(!/agentUserId|usr-/.test(JSON.stringify(view)), 'AO-p10 and never the agent\'s id — the club has the presence projection for that, gated on the player\'s own choice');
   ok(contactMilestone({ id: 'rct-1', status: 'delivered', channel: 'in_app', routingSnapshot: { agent: { agentUserId: 'usr-ana' } } }).routedToAgent === true, 'AO-p11 the journey milestone carries the routing as a boolean — a state, never a name');
 }
 
-section('pure §15 — the club never reads agent data merely because the player exists');
+section('pure — the club never reads agent data merely because the player exists');
 {
   ok(can(['licensed_agent'], 'clients.opportunities.share') === true, 'G-p1 sharing an opportunity is the licensed individual\'s');
   neg(can(['agency_admin'], 'clients.opportunities.share') === false, 'G-p2 not an agency administrator\'s (#3)');
@@ -397,12 +383,12 @@ const setD = async (patch, rev = REV) => {
   return r;
 };
 
-section('D/§8–§11 — the Player\'s own Agent projection');
+section('D — the Player\'s own Agent projection');
 {
   const mine = await j('GET', '/player/agent/relationships', undefined, kola.token);
   const row = (mine.body.items ?? []).find((x) => x.id === REP);
   ok(mine.status === 200 && !!row, 'D1 the client reads their own relationship');
-  ok(row.disclosure && Object.values(row.disclosure).every((v) => v === false), 'D2 all three disclosure choices start OFF — confirming turned none of them on (§21)');
+  ok(row.disclosure && Object.values(row.disclosure).every((v) => v === false), 'D2 all three disclosure choices start OFF — confirming turned none of them on');
   neg(!/fee|commission|salary/i.test(JSON.stringify(row)), 'D3 the client\'s own view carries no fee and no commission');
   const minorView = await j('GET', '/player/agent/relationships', undefined, guni.token);
   ok(minorView.body.minor === true && minorView.body.items.length === 0, 'D4 a guardian-managed account is told plainly that representation is not available to it (Z)');
@@ -445,7 +431,7 @@ section('V — a dispute suspends access, and is not an expiry');
   } else ok(dc.status >= 400, `V1 (this client could not confirm: ${dc.body?.error}) — the dispute leg is covered by the pure half`);
 }
 
-section('G/§17–§19 — the opportunity share: the client\'s own board is the gate');
+section('G — the opportunity share: the client\'s own board is the gate');
 {
   const far = new Date(Date.now() + 60 * DAY).toISOString().slice(0, 10);
   const made = await j('POST', '/org/opportunities', { type: 'trial', title: 'First-team trial week', category: 'mens', deadline: far, eligibility: { minAge: 16, maxAge: 40, positionGroup: 'any' } }, maria.token);
@@ -453,7 +439,7 @@ section('G/§17–§19 — the opportunity share: the client\'s own board is the
   const board = await j('GET', `/org/agent/clients/${REP}/opportunities`, undefined, ana.token);
   const OPP = board.body?.items?.[0]?.id;
   ok(board.status === 200 && !!OPP, 'G2 the agent reads the client\'s own board, through the same eligibility and visibility rules the player sees');
-  neg(!/watchlist|ranking|caseId|assessment|fit/i.test(JSON.stringify(board.body)), 'G3 and nothing of the club\'s recruitment thinking rides along (§17, #20)');
+  neg(!/watchlist|ranking|caseId|assessment|fit/i.test(JSON.stringify(board.body)), 'G3 and nothing of the club\'s recruitment thinking rides along (#20)');
   neg(expect(collect('G4', await j('POST', `/org/agent/clients/${REP}/opportunities/opp-nope/share`, { clientKey: key() }, ana.token)), 404, 'OPPORTUNITY_NOT_AVAILABLE'), 'G4 an opportunity not on the client\'s board is a uniform 404 — not "closed", not "ineligible", so the route is no oracle over the board');
   // #3. An agency ADMINISTRATOR holds the agency's books, not an agent's mandate.
   // The role gate answers first and says only that the action is not in their role —
@@ -475,7 +461,7 @@ section('G/§17–§19 — the opportunity share: the client\'s own board is the
   ok(pv.status === 200 && pv.body.items.length === 1 && pv.body.items[0].sharedByName === 'Ana Agent', 'G7 the client sees it, named to the agent who shared it');
   const apps = await j('GET', '/player/applications', undefined, kola.token);
   const rows = Array.isArray(apps.body) ? apps.body : (apps.body?.items ?? []);
-  neg(!rows.some((a) => a.opportunityId === OPP), 'G8 and NO application exists: sharing is not applying, and there is no parameter on the share route that could have started one (§18)');
+  neg(!rows.some((a) => a.opportunityId === OPP), 'G8 and NO application exists: sharing is not applying, and there is no parameter on the share route that could have started one');
   const notes = await j('GET', '/player/notifications', undefined, kola.token);
   const nrows = Array.isArray(notes.body) ? notes.body : (notes.body?.items ?? []);
   ok(nrows.some((n) => n.type === 'representation_opportunity'), 'AH1 the client was notified through the canonical stream');
@@ -487,7 +473,7 @@ section('G/§17–§19 — the opportunity share: the client\'s own board is the
   globalThis.__OPP = OPP;
 }
 
-section('H/I/J/§20–§24 — contact routing, its reauthorization, and Inbox isolation');
+section('H/I/J — contact routing, its reauthorization, and Inbox isolation');
 {
   const kase = await j('POST', '/org/rooms', { playerId: 'pl-adeyemi', reason: 'P5.6E integration' }, maria.token);
   const RID = kase.body?.room?.roomId ?? kase.body?.existingRoomId;
@@ -498,7 +484,7 @@ section('H/I/J/§20–§24 — contact routing, its reauthorization, and Inbox i
   }
   const list0 = await j('GET', `/org/rooms/${RID}/contacts`, undefined, maria.token);
   ok(list0.body.routing.available === true && list0.body.routing.agentParty === false, 'H2 the preview says the player is reachable and the agent is not a party');
-  ok(list0.body.routing.agentRefusal === 'DISCLOSURE_WITHHELD', 'H3 and names the rule: the client has not agreed (§21)');
+  ok(list0.body.routing.agentRefusal === 'DISCLOSURE_WITHHELD', 'H3 and names the rule: the client has not agreed');
   neg(!list0.body.routing.modes.includes('agent_only'), 'H4 the published modes do not include one that replaces the player');
   neg(expect(collect('H5', await j('POST', `/org/rooms/${RID}/contacts`, { body: 'Hello', contactMode: 'agent_only' }, maria.token)), 400, 'CONTACT_MODE_INVALID'), 'H5 and asking for it is refused rather than quietly downgraded');
 
@@ -524,14 +510,14 @@ section('H/I/J/§20–§24 — contact routing, its reauthorization, and Inbox i
   const C2 = d2.body.contact.id;
   const s2 = await j('POST', `/org/rooms/${RID}/contacts/${C2}/send`, { expectedRev: d2.body.contact.rev }, maria.token);
   ok(s2.status === 200 && s2.body.routing.agentParty === true, 'H8 the agent IS a party this time');
-  ok(s2.body.contact.recipient.type === 'player' && s2.body.contact.routedToAgent === true, 'H9 and the PLAYER is still the recipient — beside, never instead (§21)');
+  ok(s2.body.contact.recipient.type === 'player' && s2.body.contact.routedToAgent === true, 'H9 and the PLAYER is still the recipient — beside, never instead');
   const agentSees = await j('GET', `/org/agent/clients/${REP}/contacts`, undefined, ana.token);
   ok(agentSees.status === 200 && agentSees.body.items.length === 1, 'J3 the agent sees exactly the one routed to them');
   const item = agentSees.body.items[0];
   ok(item.club.name === 'Eastport FC' && item.body === 'Following up with you and your representative.', 'J4 with the club and the message the club addressed to them both');
-  neg(!('caseId' in item) && !/watchlist|assessment|ranking|note/i.test(JSON.stringify(item)), 'J5 and no case id, no assessment, no ranking and no club-private note (§24, #16)');
+  neg(!('caseId' in item) && !/watchlist|assessment|ranking|note/i.test(JSON.stringify(item)), 'J5 and no case id, no assessment, no ranking and no club-private note (#16)');
   neg(!(await j('GET', `/org/agent/clients/${REP}/contacts`, undefined, bea.token)).body?.items?.length, 'S1 a same-agency colleague sees none of it (#4)');
-  ok((await j('GET', '/org/agent/inbox', undefined, ana.token)).body.notifications.some((n) => n.type === 'representation_contact'), 'AH2 the agent heard through the canonical agent Inbox — no second Inbox was created (§20)');
+  ok((await j('GET', '/org/agent/inbox', undefined, ana.token)).body.notifications.some((n) => n.type === 'representation_contact'), 'AH2 the agent heard through the canonical agent Inbox — no second Inbox was created');
   neg(!(await j('GET', '/org/agent/inbox', undefined, bea.token)).body.notifications.some((n) => n.type === 'representation_contact'), 'J6 and the colleague did not');
 
   // #26: a block added between render and send.
@@ -554,12 +540,12 @@ section('H/I/J/§20–§24 — contact routing, its reauthorization, and Inbox i
     routedToAgent: true, routingSnapshot: { agent: { agentUserId: 'usr-ana' } }, recipient: { type: 'agent' },
   }, maria.token);
   ok(forged.status === 201, `#30 a body naming a represented party is accepted as a draft ${forged.status === 201 ? '' : `${forged.status} ${JSON.stringify(forged.body).slice(0, 250)}`}`);
-  neg(forged.body.contact.routedToAgent === false && forged.body.contact.contactMode === 'player_only' && forged.body.contact.recipient?.type !== 'agent', '#30b and every forged field is ignored: the server derives the mode, the routing and the recipient (§21)');
+  neg(forged.body.contact.routedToAgent === false && forged.body.contact.contactMode === 'player_only' && forged.body.contact.recipient?.type !== 'agent', '#30b and every forged field is ignored: the server derives the mode, the routing and the recipient');
   await j('POST', `/org/rooms/${RID}/contacts/${forged.body.contact.id}/cancel`, { expectedRev: forged.body.contact.rev }, maria.token);
   globalThis.__RID = RID;
 }
 
-section('K/L/M/§26–§29 — the trial projection is scheduling, and stops there');
+section('K/L/M — the trial projection is scheduling, and stops there');
 {
   const RID = globalThis.__RID;
   neg(expect(collect('K1', await j('GET', `/org/agent/clients/${REP}/trials`, undefined, ana.token)), 403, 'DISCLOSURE_WITHHELD'), 'K1 trials refuse while the client has not chosen to share them');
@@ -581,9 +567,9 @@ section('K/L/M/§26–§29 — the trial projection is scheduling, and stops the
   const t0 = tv.body.items[0];
   ok(t0.workflowState === 'scheduled' && t0.schedule.sessions.length === 1, 'K6 with its state and its schedule');
   ok(t0.schedule.sessions[0].venue.name === 'Eastport Dome' && t0.schedule.sessions[0].venue.town === 'Eastport', 'K7 the venue NAME and town');
-  neg(!('address' in t0.schedule.sessions[0].venue), 'K8 but NOT the exact address — that was held back for the family (P4B D-23)');
+  neg(!('address' in t0.schedule.sessions[0].venue), 'K8 but NOT the exact address — that was held back for the family (D-23)');
   neg(!('instructions' in t0.schedule.sessions[0]), 'K9 and NOT the club\'s joining instructions');
-  neg(!('evidence' in t0.schedule.sessions[0]), 'M1 and NOT the evidence list — no Box Cam payload has a field to arrive in (§M)');
+  neg(!('evidence' in t0.schedule.sessions[0]), 'M1 and NOT the evidence list — no Box Cam payload has a field to arrive in');
   const swept = JSON.stringify({ ...tv.body, note: undefined, honest: undefined });
   neg(!/assessment|"report"|scorecard|boxCam|"address"|"instructions"/i.test(swept), 'L1 and a sweep of the whole payload finds no assessment, no report, no address and no instructions (#15)');
   ok(t0.reportObligation === 'outstanding' || t0.reportObligation === null, 'L2 whether a report is OWED is a state the agent may see; what it says is not');
@@ -591,7 +577,7 @@ section('K/L/M/§26–§29 — the trial projection is scheduling, and stops the
   neg(expect(collect('#15b', await j('GET', `/org/rooms/${RID}/trials/${t0.id}`, undefined, ana.token)), 404, null), '#15b and the club\'s own trial detail is not reachable with an agency session');
 }
 
-section('N/O/§46 — the club-private worlds an agent cannot reach at all');
+section('N/O — the club-private worlds an agent cannot reach at all');
 {
   const RID = globalThis.__RID;
   // Two honest classes. A club's OWN case, decision or contact thread is shut to an
@@ -618,7 +604,7 @@ section('N/O/§46 — the club-private worlds an agent cannot reach at all');
     neg(r.status === 404 || r.status === 403 || (r.status === 200 && !(r.body?.items ?? []).length),
       `${label}: an agency session is answered about itself, and its own list is empty (${r.status})`);
     neg(!new RegExp(`${RID}|pl-adeyemi|Kola|org-eastport`).test(body),
-      `${label} (scoping): and the answer names no case, no player and no club of Eastport's — the list is org-scoped at the source (§36)`);
+      `${label} (scoping): and the answer names no case, no player and no club of Eastport's — the list is org-scoped at the source`);
   }
   // "No such route" is proven with a CLUB token as well as an agency one. An
   // agency 404 could in principle be a scoping refusal that happens to look like
@@ -630,10 +616,10 @@ section('N/O/§46 — the club-private worlds an agent cannot reach at all');
   neg(expect(collect('#35b passport write (club)', await j('PATCH', '/org/players/pl-adeyemi/football-passport', { position: 'ST' }, maria.token)), 404, null), '#35b nor through the club lane — a Passport is the player\'s, and nothing in the org router writes one');
 }
 
-section('E/§14/§63 — the Club-facing presence badge is the player\'s own choice');
+section('E — the Club-facing presence badge is the player\'s own choice');
 {
   const before = await j('GET', '/org/players/pl-adeyemi', undefined, maria.token);
-  neg(!/Ana Agent|North Star/.test(JSON.stringify(before.body ?? {})), 'E1 with clubPresence off, the club\'s player view names no agent and no agency (§15)');
+  neg(!/Ana Agent|North Star/.test(JSON.stringify(before.body ?? {})), 'E1 with clubPresence off, the club\'s player view names no agent and no agency');
   ok((await setD({ clubPresence: true })).status === 200, 'E2 the client turns club presence on');
   const rel = (await j('GET', '/player/agent/relationships', undefined, kola.token)).body.items.find((x) => x.id === REP);
   ok(rel.disclosure.clubPresence === true && rel.disclosure.contactRouting === true && rel.disclosure.trialVisibility === true, 'E3 and all three are now on, each having been set by its own request');
@@ -641,13 +627,13 @@ section('E/§14/§63 — the Club-facing presence badge is the player\'s own cho
   await setD({ clubPresence: true });
 }
 
-section('P/Q/R/§32–§39 — the explicit handoff, its duplicate rule, and its compliance gate');
+section('P/Q/R — the explicit handoff, its duplicate rule, and its compliance gate');
 {
   const RID = globalThis.__RID;
   const ready0 = await j('GET', `/org/rooms/${RID}/transaction-handoff`, undefined, maria.token);
   ok(ready0.status === 200 && ready0.body.available === false, 'P1 the handoff is not available yet');
-  ok(ready0.body.blockers.includes('HANDOFF_DECISION_REQUIRED'), 'P2 because no finalised decision to progress exists (§33)');
-  neg(expect(collect('#22', await j('POST', `/org/rooms/${RID}/transaction-handoff`, { clientKey: key() }, maria.token)), 422, 'HANDOFF_DECISION_REQUIRED'), '#22 and forcing the request gets the same answer the screen showed — visibility of a button is not authorization (§38)');
+  ok(ready0.body.blockers.includes('HANDOFF_DECISION_REQUIRED'), 'P2 because no finalised decision to progress exists');
+  neg(expect(collect('#22', await j('POST', `/org/rooms/${RID}/transaction-handoff`, { clientKey: key() }, maria.token)), 422, 'HANDOFF_DECISION_REQUIRED'), '#22 and forcing the request gets the same answer the screen showed — visibility of a button is not authorization');
   const viewerReady = await j('GET', `/org/rooms/${RID}/transaction-handoff`, undefined, tom.token);
   ok(viewerReady.status === 200 && viewerReady.body.blockers.length === 1 && viewerReady.body.blockers[0] === 'HANDOFF_NOT_PERMITTED', 'P3 a scout is told it is not theirs to do, and gets no checklist of what a lead could do');
   neg(expect(collect('P4', await j('POST', `/org/rooms/${RID}/transaction-handoff`, { clientKey: key() }, tom.token)), 403, 'HANDOFF_NOT_PERMITTED'), 'P4 and cannot do it');
@@ -679,25 +665,25 @@ section('P/Q/R/§32–§39 — the explicit handoff, its duplicate rule, and its
     const draftOnly = await j('GET', `/org/rooms/${RID}/transaction-handoff`, undefined, maria.token);
     neg(draftOnly.body.blockers.includes('HANDOFF_DECISION_REQUIRED'), '#22b a DRAFT decision is not a finalised one: the handoff is still refused');
     const fin = await j('POST', `/org/rooms/${RID}/decision/finalize`, { clientKey: key(), expectedRev: dr.body?.draft?.rev ?? 1 }, maria.token);
-    ok(fin.status === 201 && fin.body.lifecycle?.to === 'offer_consideration', `P6 and finalises it, which moves the case to offer_consideration (§35) ${fin.status === 201 ? '' : JSON.stringify(fin.body).slice(0, 200)}`);
+    ok(fin.status === 201 && fin.body.lifecycle?.to === 'offer_consideration', `P6 and finalises it, which moves the case to offer_consideration ${fin.status === 201 ? '' : JSON.stringify(fin.body).slice(0, 200)}`);
   }
   const txBefore = ((await j('GET', '/org/agent/transactions', undefined, ana.token)).body?.items ?? []).length;
   const ready1 = await j('GET', `/org/rooms/${RID}/transaction-handoff`, undefined, maria.token);
-  ok(ready1.body.available === true && ready1.body.handoff === null, 'P7 NOW the handoff is available — and none exists, because a decision creates nothing (§33)');
+  ok(ready1.body.available === true && ready1.body.handoff === null, 'P7 NOW the handoff is available — and none exists, because a decision creates nothing');
   ok(((await j('GET', '/org/agent/transactions', undefined, ana.token)).body?.items ?? []).length === txBefore, 'P8 and no transaction appeared from the decision alone (#23 precondition)');
   // The readiness view's own prose is the one place the words "offer" and "note"
   // legitimately appear — it exists to say that this is NOT an offer. Strip the
   // two explanatory fields and the vocabulary list, then sweep what is left.
   const { note: _rn, blockerVocabulary: _rbv, ...readySweep } = ready1.body ?? {};
   const swept = JSON.stringify(readySweep);
-  neg(!/rationale|"note"|assessment|"outcome"|reasonCode|"reason"|evidence/i.test(swept), 'O1 the readiness view carries none of the decision\'s rationale, note, outcome or evidence (§32/§34)');
+  neg(!/rationale|"note"|assessment|"outcome"|reasonCode|"reason"|evidence/i.test(swept), 'O1 the readiness view carries none of the decision\'s rationale, note, outcome or evidence');
 
   const KH = key();
   const inv1 = await j('POST', `/org/rooms/${RID}/transaction-handoff`, { clientKey: KH }, maria.token);
   ok(inv1.status === 201 && inv1.body.handoff.status === 'invited', '#23 the recruitment lead invites a workspace — allowed only once every other authorization passed');
   ok(inv1.body.handoff.representedAtInvitation === true, 'P9 it records THAT the client is represented');
   neg(!/Ana Agent|North Star/.test(JSON.stringify(inv1.body)), 'P10 but never WHO — that is the player\'s disclosure to make, not the handoff\'s to leak');
-  ok(/not an offer/i.test(inv1.body.handoff.honest), 'P11 and it says plainly that it is not an offer (§35)');
+  ok(/not an offer/i.test(inv1.body.handoff.honest), 'P11 and it says plainly that it is not an offer');
   ok((await j('POST', `/org/rooms/${RID}/transaction-handoff`, { clientKey: KH }, maria.token)).body?.idempotent === true, 'AE3 the same key replays');
   neg(expect(collect('#24', await j('POST', `/org/rooms/${RID}/transaction-handoff`, { clientKey: key() }, maria.token)), 409, 'HANDOFF_EXISTS'), '#24 a second club user inviting concurrently gets HANDOFF_EXISTS — one canonical invitation (Q, AF)');
 
@@ -707,13 +693,13 @@ section('P/Q/R/§32–§39 — the explicit handoff, its duplicate rule, and its
   neg(!(await j('GET', '/org/agent/handoffs', undefined, bea.token)).body.items.length, 'S2 a same-agency colleague sees no invitation of Ana\'s (#4)');
   neg(!(await j('GET', '/org/agent/handoffs', undefined, zoe.token)).body.items.length, 'AB3 and a foreign agency sees none at all');
 
-  // #25. P5.6D's frozen contract separates NAMING a party from REPRESENTING one, and
-  // it is the binding that carries authority. So an agent may open a draft naming an
-  // adult they do not represent — and that draft can go nowhere: the binding is
-  // refused, and without it nothing downstream is reachable. P5.6E does not loosen
-  // that, and it does not let representation be asserted by the request body either.
+  // #25. The frozen transaction contract separates NAMING a party from REPRESENTING
+  // one, and it is the binding that carries authority. So an agent may open a draft
+  // naming an adult they do not represent — and that draft can go nowhere: the
+  // binding is refused, and without it nothing downstream is reachable. Nor can
+  // representation be asserted by the request body.
   const stranger = await j('POST', '/org/agent/transactions', { type: 'employment_contract', jurisdictions: ['ENG'], clientKey: key(), parties: [{ partyRole: 'individual', subjectKind: 'player', subjectId: 'pl-svensson' }] }, ana.token);
-  ok(stranger.status === 201, '#25 naming a party is not claiming to represent them — P5.6D opens the draft (frozen contract)');
+  ok(stranger.status === 201, '#25 naming a party is not claiming to represent them — the draft opens (frozen contract)');
   const SX = stranger.body?.transaction?.id;
   neg(expect(collect('#25b', await j('POST', `/org/agent/transactions/${SX}/representations`, { partyRole: 'individual', agreementId: REP }, ana.token)), 403, 'REPRESENTATION_REQUIRED'), '#25b but the binding is refused — an agreement with ANOTHER client authorises nothing here');
   neg(expect(collect('#25c', await j('POST', `/org/agent/transactions/${SX}/status`, { to: 'PARTIES_CONFIRMED', clientKey: key() }, ana.token)), 422, 'TRANSACTION_PARTIES_NOT_CONFIRMED'), '#25c and the draft goes nowhere: the person named has to confirm for themselves, and naming them is not confirming them');
@@ -723,26 +709,26 @@ section('P/Q/R/§32–§39 — the explicit handoff, its duplicate rule, and its
     parties: [{ partyRole: 'individual', subjectKind: 'player', subjectId: 'pl-adeyemi' }, { partyRole: 'engaging_entity', subjectKind: 'club', subjectId: 'org-eastport' }],
   }, ana.token);
   ok(tx.status === 201, 'P13 the agent opens the workspace citing the case');
-  ok(tx.body.transaction.links.recruitmentCaseId === RID, 'P14 and the transaction REFERENCES the case (§36)');
+  ok(tx.body.transaction.links.recruitmentCaseId === RID, 'P14 and the transaction REFERENCES the case');
   const after = await j('GET', `/org/rooms/${RID}/transaction-handoff`, undefined, maria.token);
   ok(after.body.handoff.status === 'accepted' && after.body.handoff.transactionId === tx.body.transaction.id, 'P15 the club sees the invitation was taken up, without seeing inside the workspace');
   neg(expect(collect('P16', await j('POST', `/org/rooms/${RID}/transaction-handoff/withdraw`, {}, maria.token)), 409, 'HANDOFF_ALREADY_ACCEPTED'), 'P16 and cannot un-invite what has already been opened — withdrawing would not close it, and pretending otherwise would be a lie');
   neg(expect(collect('Q1', await j('POST', '/org/agent/transactions', { type: 'transfer', jurisdictions: ['ENG'], clientKey: key(), recruitmentCaseId: RID, parties: [{ partyRole: 'individual', subjectKind: 'player', subjectId: 'pl-adeyemi' }, { partyRole: 'engaging_entity', subjectKind: 'club', subjectId: 'org-eastport' }, { partyRole: 'releasing_entity', subjectKind: 'club', subjectId: 'org-harbour' }] }, ana.token)), 409, 'HANDOFF_NOT_OPEN'), 'Q1 one invitation opens one workspace, not a second');
-  neg(expect(collect('Q2', await j('POST', '/org/agent/transactions', { type: 'employment_contract', jurisdictions: ['ENG'], clientKey: key(), parties: [{ partyRole: 'individual', subjectKind: 'player', subjectId: 'pl-adeyemi' }, { partyRole: 'engaging_entity', subjectKind: 'club', subjectId: 'org-eastport' }] }, ana.token)), 409, 'TRANSACTION_DUPLICATE_CONTEXT'), 'Q2 and a second live transaction for the same individual, type and clubs is a named duplicate (§37)');
+  neg(expect(collect('Q2', await j('POST', '/org/agent/transactions', { type: 'employment_contract', jurisdictions: ['ENG'], clientKey: key(), parties: [{ partyRole: 'individual', subjectKind: 'player', subjectId: 'pl-adeyemi' }, { partyRole: 'engaging_entity', subjectKind: 'club', subjectId: 'org-eastport' }] }, ana.token)), 409, 'TRANSACTION_DUPLICATE_CONTEXT'), 'Q2 and a second live transaction for the same individual, type and clubs is a named duplicate');
   const loan = await j('POST', '/org/agent/transactions', { type: 'loan', jurisdictions: ['ENG'], clientKey: key(), parties: [{ partyRole: 'individual', subjectKind: 'player', subjectId: 'pl-adeyemi' }, { partyRole: 'engaging_entity', subjectKind: 'club', subjectId: 'org-harbour' }, { partyRole: 'releasing_entity', subjectKind: 'club', subjectId: 'org-eastport' }] }, ana.token);
-  ok(loan.status === 201, 'Q3 but a loan with different clubs is a legitimately separate transaction, not over-blocked (§37)');
+  ok(loan.status === 201, 'Q3 but a loan with different clubs is a legitimately separate transaction, not over-blocked');
   globalThis.__TX = tx.body.transaction.id;
 }
 
-section('§36/E-6 — the case reference reaches the two parties who own it, and nobody else');
+section('R — the case reference reaches the two parties who own it, and nobody else');
 {
   const TX = globalThis.__TX; const RID = globalThis.__RID;
   ok((await j('GET', `/org/agent/transactions/${TX}`, undefined, ana.token)).body.transaction.links.recruitmentCaseId === RID, 'R1 the representing agent sees the case reference');
   ok((await j('GET', `/org/transactions/${TX}`, undefined, maria.token)).body.transaction.links.recruitmentCaseId === RID, 'R2 and the club that OWNS that case sees it');
   const pl = await j('GET', `/player/transactions/${TX}`, undefined, kola.token);
-  neg(pl.status === 200 && !('recruitmentCaseId' in (pl.body.transaction.links ?? {})), 'R3 the individual does NOT — absent, not redacted, so its existence is not disclosed either (E-6)');
+  neg(pl.status === 200 && !('recruitmentCaseId' in (pl.body.transaction.links ?? {})), 'R3 the individual does NOT — absent, not redacted, so its existence is not disclosed either');
   const harbourTx = await j('GET', `/org/transactions/${TX}`, undefined, rita.token);
-  neg(harbourTx.status === 404 || !('recruitmentCaseId' in (harbourTx.body?.transaction?.links ?? {})), 'R4 and a club that is not a party to it learns nothing of the engaging club\'s internal case (E-6)');
+  neg(harbourTx.status === 404 || !('recruitmentCaseId' in (harbourTx.body?.transaction?.links ?? {})), 'R4 and a club that is not a party to it learns nothing of the engaging club\'s internal case');
 }
 
 section('body forgery — the server derives, the request never decides');
@@ -761,7 +747,7 @@ section('body forgery — the server derives, the request never decides');
   const before32 = (await j('GET', '/player/agent/relationships', undefined, kola.token)).body.items.find((r) => r.id === REP).disclosure;
   neg(expect(collect('#32b', await j('PATCH', `/player/agent/relationships/${REP}/sharing`, { disclosure: { clubPresence: 'yes', contactRouting: 1, trialVisibility: true }, expectedRev: REV }, kola.token)), 400, 'REPRESENTATION_INPUT_INVALID'), '#32b a disclosure sent as a truthy string is refused, not coerced');
   const after32 = (await j('GET', '/player/agent/relationships', undefined, kola.token)).body.items.find((r) => r.id === REP).disclosure;
-  neg(JSON.stringify(before32) === JSON.stringify(after32), '#32c and not one of the three choices moved — including the one field that WAS a valid boolean (§22)');
+  neg(JSON.stringify(before32) === JSON.stringify(after32), '#32c and not one of the three choices moved — including the one field that WAS a valid boolean');
 }
 
 section('AD/AF — rev and concurrency on the client\'s own choices');
@@ -825,8 +811,7 @@ section('AJ/AK/AL/AM — the client surfaces, checked as artefacts');
   ok(/data-testid="handoff-section"/.test(decision) && /handoff-blocker-\$\{b\}/.test(decision), 'AK5 the handoff section names every blocker as its own element, so a refusal is readable and testable');
   // The component's own body, not everything after it: the file goes on to render
   // the decision itself, where reason codes belong.
-  // (M24B placed `export function DecisionCard` right after it; the cut stops
-  // at the next top-level declaration whether or not it is exported.)
+  // The cut stops at the next top-level declaration whether or not it is exported.
   const handoffBody = (decision.split('function HandoffSection')[1] ?? '').split(/\n(?:export )?(?:function|const) /)[0];
   neg(!/\bd\.note|decision\.note|rationale|reasonCodes|assessmentSummary|evidenceRefs/.test(handoffBody), 'O3 and the handoff component never touches the decision\'s note, rationale, reason codes or evidence');
   const agentScreens = read('agentScreens');
@@ -867,8 +852,7 @@ section('#37 — a revoked relationship never contributes as an active Trust rel
   const t2 = await j('GET', '/player/trust-profile', undefined, mateus.token);
   ok(t2.status === 200, '#37b and so does the client whose relationship was terminated above');
   const src = readFileSync(path.join(HERE, '..', '..', 'domains', 'verification', 'trust', 'trust.mjs'), 'utf8');
-  // S11a: Trust reads the agreements through SQL and counts one only through agreementInForce, the access
-  // predicate's own rule (no stored-status copy of it any more).
+  // Trust counts an agreement only through agreementInForce, the access predicate's own rule.
   ok(/agentReads\.agreements\.forClient/.test(src) && /agreementInForce\(a, now\)/.test(src), '#37c the Trust relationship input reads the canonical lane through the one in-force rule');
   const live = { id: 'r', agentUserId: 'u', clientId: 'p', status: 'active', confirmedAt: T0 - DAY, startAt: T0 - DAY, endAt: T0 + 30 * DAY };
   ok(agreementInForce(live, T0) && !agreementInForce({ ...live, confirmedAt: null }, T0) && !agreementInForce({ ...live, status: 'disputed' }, T0) && !agreementInForce({ ...live, status: 'terminated_by_client' }, T0), '#37d and it requires confirmedAt AND an active status');
@@ -898,7 +882,7 @@ section('X/W/#11/#12/#29 — the licence and the affiliation are re-derived at m
   const list = await j('GET', `/org/rooms/${RID}/contacts`, undefined, maria.token);
   neg(list.body.routing.agentParty === false, '#11 and a club contact can no longer route to them — the licence is checked at the moment of the action, not when the relationship began');
   neg(['LICENCE_NOT_CURRENT', 'COMPLIANCE_NOT_CLEAR'].includes(list.body.routing.agentRefusal), `#11b with a named licence or compliance refusal (${list.body.routing.agentRefusal})`);
-  neg(expect(collect('#12', await j('POST', '/org/agent/transactions', { type: 'other_services', jurisdictions: ['ENG'], clientKey: key(), parties: [{ partyRole: 'individual', subjectKind: 'player', subjectId: 'pl-adeyemi' }] }, ana.token)), 403, 'AGENT_LICENCE_INACTIVE'), '#12 and a transaction action is refused too, by its name and not as a 500 — the P5.6D facet gate says which licence and what state');
+  neg(expect(collect('#12', await j('POST', '/org/agent/transactions', { type: 'other_services', jurisdictions: ['ENG'], clientKey: key(), parties: [{ partyRole: 'individual', subjectKind: 'player', subjectId: 'pl-adeyemi' }] }, ana.token)), 403, 'AGENT_LICENCE_INACTIVE'), '#12 and a transaction action is refused too, by its name and not as a 500 — the facet gate says which licence and what state');
   ok((await j('POST', '/org/agent/profile/facets/fifa_licence/submit', { reference: 'TEST-VERIFIED-ANA' }, ana.token)).status === 200, 'W2 re-verifying restores it');
   // #29: the affiliation ends while the session lives.
   const team = await j('GET', '/org/agent/agency/team', undefined, alex.token);
@@ -927,7 +911,7 @@ section('Z/#7/#8/#9 — a minor is not reachable through ANY integration seam');
   ok(minorShares.body.minor === true && minorShares.body.items.length === 0, '#7 and a minor\'s own shared-opportunities surface is structurally empty — there is no path by which an agent reaches them through an Opportunity');
 }
 
-section('AP — every route P5.6E added, swept by actor and by id');
+section('AP — every cross-app route, swept by actor and by id');
 {
   const RID = globalThis.__RID;
   const OPP = globalThis.__OPP;
@@ -990,13 +974,13 @@ section('AP — every route P5.6E added, swept by actor and by id');
   // The disclosure route: the client's own, and only theirs.
   for (const [who, token] of [['their agent', ana.token], ['the agency admin', alex.token], ['a club', maria.token]]) {
     const r = collect(`AP sharing/${who}`, await j('PATCH', `/player/agent/relationships/${REP}/sharing`, { disclosure: { clubPresence: false }, expectedRev: REV }, token));
-    neg(r.status >= 400, `AP12 ${who} cannot change the client's disclosure — it is the client's choice and nobody else's (§13)`);
+    neg(r.status >= 400, `AP12 ${who} cannot change the client's disclosure — it is the client's choice and nobody else's`);
   }
   const foreignRel = collect('AP sharing/other player', await j('PATCH', `/player/agent/relationships/${REP}/sharing`, { disclosure: { clubPresence: true }, expectedRev: REV }, (await playerLogin('pl-carvalho')).token));
   neg(expect(foreignRel, 404, 'REPRESENTATION_NOT_FOUND'), 'AP13 and another player reaching this relationship is told it does not exist, not that it is not theirs');
   const minorSharing = collect('AP sharing/minor', await j('PATCH', '/player/agent/relationships/rep-anything/sharing', { disclosure: { clubPresence: true } }, guni.token));
   neg(expect(minorSharing, 403, 'AGENT_ACTION_NOT_PERMITTED'), 'AP14 a guardian-managed account has no disclosure to make, because it has no relationship to disclose (Z)');
-  // expectedRev is optional platform-wide (M18.1): omitting it is last-write-wins,
+  // expectedRev is optional platform-wide: omitting it is last-write-wins,
   // and that is the convention every route follows. What must never pass is a rev
   // that is not a number — that is a malformed request, not a missing one.
   const badRev = collect('AP sharing/bad rev', await j('PATCH', `/player/agent/relationships/${REP}/sharing`, { disclosure: { clubPresence: true }, expectedRev: 'latest' }, kola.token));
@@ -1013,7 +997,7 @@ section('AP — every route P5.6E added, swept by actor and by id');
   neg(collect('AP withdraw/ghost', await j('POST', `/org/agent/clients/${REP}/opportunities/shares/sh-not-a-share/withdraw`, {}, ana.token)).status === 404, 'AP18 and withdrawing a share that was never made is a 404, not a silent success');
 }
 
-section('AQ — the five events P5.6E emits, checked against the registry');
+section('AQ — the five cross-app events, checked against the registry');
 {
   const registry = readFileSync(path.join(ROOT, 'scoutbox-server', 'domains', 'platform', 'eventRegistry.mjs'), 'utf8');
   const serverSrc = readFileSync(path.join(ROOT, 'scoutbox-server', 'server.mjs'), 'utf8');
@@ -1025,7 +1009,7 @@ section('AQ — the five events P5.6E emits, checked against the registry');
   // The payload allowlists: ids and org ids, never a person, a date of birth, a
   // note or a body of text. Read from the declaration itself.
   const decl = registry.match(/\['(representation_disclosure_changed|contact_agent_routed|agent_opportunity_shared)',\s*\[([^\]]*)\]\]/g) ?? [];
-  neg(decl.length === 3 && decl.every((d) => !/name|dob|birth|email|phone|note|body|text|message|outcome|reason/i.test(d)), 'AQ3 and not one of the three agent-lane payloads has a field for a name, a date, a note or an outcome (§M18.2)');
+  neg(decl.length === 3 && decl.every((d) => !/name|dob|birth|email|phone|note|body|text|message|outcome|reason/i.test(d)), 'AQ3 and not one of the three agent-lane payloads has a field for a name, a date, a note or an outcome');
   for (const name of ['transaction_handoff_invited', 'transaction_handoff_withdrawn']) {
     const block = registry.split(`${name}: {`)[1]?.split('},')[0] ?? '';
     neg(!/playerName|clientName|'note'|outcome|reasonCodes/.test(block), `AQ4 ${name} carries no name, note, outcome or reason code either`);
@@ -1052,12 +1036,12 @@ section('AR — authority is re-derived at READ time, not cached at grant time')
       ok(term.status === 200, 'AR4 the client ends the mandate');
       for (const [label, url] of [['trials', `/org/agent/clients/${rid}/trials`], ['contacts', `/org/agent/clients/${rid}/contacts`], ['shares', `/org/agent/clients/${rid}/opportunities/shares`]]) {
         const r = collect(`AR ${label}/terminated`, await j('GET', url, undefined, ana.token));
-        neg(r.status >= 400, `AR5 ${label}: the very next read is refused — the ending is not a job that runs later (§7, T)`);
+        neg(r.status >= 400, `AR5 ${label}: the very next read is refused — the ending is not a job that runs later (T)`);
       }
       const shareAfter = collect('AR share/terminated', await j('POST', `/org/agent/clients/${rid}/opportunities/${globalThis.__OPP}/share`, { clientKey: key() }, ana.token));
       neg(shareAfter.status >= 400, 'AR6 and no new share can be made for a client who is no longer one');
       // What was validly done stays done. Rewriting the record would be a lie about
-      // what happened, and §22 says so explicitly.
+      // what happened.
       const theoShared = await j('GET', '/player/agent/shared-opportunities', undefined, theo.token);
       ok(theoShared.status === 200, 'AR7 the former client can still read their own shared-opportunities surface — it is theirs, not their ex-agent\'s');
       // The disclosure route itself: a terminated relationship is still the client's
@@ -1068,7 +1052,7 @@ section('AR — authority is re-derived at READ time, not cached at grant time')
     } else ok(conf.status >= 400, `AR1 (this player could not confirm: ${conf.body?.error})`);
   } else ok(req.status >= 400, `AR1 (no relationship could be requested: ${req.body?.error})`);
 
-  // The five notification types P5.6E sends are each in a declared, MUTABLE
+  // The five cross-app notification types are each in a declared, MUTABLE
   // category. None of them is smuggled into `compliance`, which is mandatory and
   // cannot be turned off — a club's message and an agent's tip are not safety
   // notices, and dressing them as one would take a real choice away.
@@ -1086,16 +1070,16 @@ section('AR — authority is re-derived at READ time, not cached at grant time')
   ok(muted.status === 200 || muted.status === 404, `AR11 the client changes their own notification preferences through the canonical route (${muted.status})`);
 }
 
-section('AS — §22 history, the write contracts, and the verbs that do not exist');
+section('AS — history, the write contracts, and the verbs that do not exist');
 {
   const RID = globalThis.__RID;
   const OPP = globalThis.__OPP;
-  // §22. What was validly routed STAYS routed. Turning the disclosure off stops the
+  // What was validly routed STAYS routed. Turning the disclosure off stops the
   // next one; it does not rewrite the record of a message that really was delivered.
   const beforeOff = (await j('GET', `/org/agent/clients/${REP}/contacts`, undefined, ana.token)).body?.items ?? [];
   await setD({ contactRouting: false });
   const afterOff = collect('AS routed/after off', await j('GET', `/org/agent/clients/${REP}/contacts`, undefined, ana.token));
-  ok(afterOff.status === 200 && (afterOff.body.items ?? []).length === beforeOff.length, 'AS1 turning contact routing off does not delete the contacts that were already validly routed (§22)');
+  ok(afterOff.status === 200 && (afterOff.body.items ?? []).length === beforeOff.length, 'AS1 turning contact routing off does not delete the contacts that were already validly routed');
   const draftAfterOff = await j('POST', `/org/rooms/${RID}/contacts`, { body: 'And another.', contactMode: 'both' }, maria.token);
   if (draftAfterOff.status === 201) {
     neg(draftAfterOff.body.contact.routedToAgent === false, 'AS2 but the NEXT contact does not route to the agent — the choice takes effect at the next action, not retroactively');
@@ -1152,7 +1136,7 @@ section('AS — §22 history, the write contracts, and the verbs that do not exi
     ['sharing', 'PATCH', `/player/agent/relationships/${REP}/sharing`, { disclosure: { clubPresence: false } }],
   ]) {
     const r = collect(`AS admin/${label}`, await j(method, url, body, undefined, ADMIN));
-    neg(r.status === 401 || r.status === 403 || r.status === 404, `AS11 ${label}: the admin key is not a session on it (${r.status}) — T&S looks, it does not act for a person (§38)`);
+    neg(r.status === 401 || r.status === 403 || r.status === 404, `AS11 ${label}: the admin key is not a session on it (${r.status}) — T&S looks, it does not act for a person`);
   }
 }
 
@@ -1165,7 +1149,7 @@ section('AT — the audit trail: the club\'s own history, and nobody else\'s');
   ok(entries.length >= 1, `AT1 the club's own case history records that a transaction workspace was invited (${entries.length})`);
   ok(entries.every((e) => typeof e.handoffId === 'string' && typeof e.at === 'number'), 'AT1b with the invitation\'s id and the time it happened, so the record is checkable');
   const entryStr = JSON.stringify(entries);
-  neg(!/Ana Agent|North Star|fee|commission|offer/i.test(entryStr), 'AT2 and the entry names no agent, no agency, no fee and no offer — it records that a thing happened, as ids and a flag (§34)');
+  neg(!/Ana Agent|North Star|fee|commission|offer/i.test(entryStr), 'AT2 and the entry names no agent, no agency, no fee and no offer — it records that a thing happened, as ids and a flag');
   neg(!/"note"|rationale|reasonCodes/i.test(entryStr), 'AT3 nor any of the decision\'s own reasoning, which sits elsewhere and stays there');
   neg(collect('AT agency/journey', await j('GET', `/org/rooms/${RID}/journey`, undefined, ana.token)).status === 404, 'AT4 an agency session does not reach the case journey at all — the audit trail is not a side door into the Room (#16)');
   neg(collect('AT foreign/journey', await j('GET', `/org/rooms/${RID}/journey`, undefined, rita.token)).status === 404, 'AT5 and a foreign club gets the same 404, so the two are indistinguishable (AC)');
@@ -1175,24 +1159,20 @@ section('AT — the audit trail: the club\'s own history, and nobody else\'s');
   neg(!/history|"note"|rationale|assessment/i.test(JSON.stringify(hofs.body?.items ?? [])), 'AT6 the agent\'s own view of the invitation carries no history, no note and no assessment either');
 }
 
-section('AU/repair §4 — an agency on the shared /org router: generic infrastructure, proven');
+section('AU — an agency on the shared /org router: generic infrastructure, proven');
 {
   const RID = globalThis.__RID;
   // WHY THIS GROUP EXISTS.
   //
   // `/org` is one router serving both club and agency organisations, so an agency
-  // session reaches club recruitment surfaces and is answered about ITSELF. The
-  // repair pass considered gating those surfaces by org kind and REJECTED that
-  // fix: `m23TrialE2E` W3 asserts "an agency may invite an adult (the wall is
-  // about minors)" and `m19E2E` keeps watchlists on an agency org — a deny-by-
-  // default gate broke both, so it would have redesigned frozen P4B/M19 product
-  // shape rather than repaired a defect.
+  // session reaches club recruitment surfaces and is answered about ITSELF.
+  // Gating those surfaces by org kind was rejected: an agency may invite an adult
+  // to a trial (the wall is about minors) and may keep watchlists, so a deny-by-
+  // default gate would redesign product shape rather than repair a defect.
   //
-  // The mandate's alternative applies: if the route is intentionally generic
-  // infrastructure, prove that with architecture and tests. This group is that
-  // proof. It asserts tenant isolation directly, on the surfaces an agency can
-  // reach, rather than trusting that 357 route implementations each filter
-  // correctly forever.
+  // So the generic routes are proved instead: this group asserts tenant isolation
+  // directly, on the surfaces an agency can reach, rather than trusting that every
+  // route implementation filters correctly forever.
   const FOREIGN = ['case-', 'pl-adeyemi', 'Kola', 'org-eastport', 'Eastport', 'Maria Keane'];
   const surfaces = [
     ['AU rooms', '/org/rooms'],
@@ -1242,20 +1222,19 @@ section('AU/repair §4 — an agency on the shared /org router: generic infrastr
   neg((wl.body?.total ?? 0) === (wl.body?.items ?? []).length, 'AU-count a list total counts exactly the rows the caller was given, so a count cannot report what a projection withheld');
 }
 
-// ================================== AV — repair §25: the two new writes are quotas
+// ================================== AV — the two cross-app writes are quotas
 //
 // WHY THIS GROUP EXISTS, AND WHY IT IS LAST.
 //
-// Both writes P5.6E adds end in a notification to a PERSON, and both can be
+// Both writes (share, handoff) end in a notification to a PERSON, and both can be
 // repeated after being taken back: a share can be withdrawn and another made, and
 // only 'invited' and 'accepted' block a new handoff, so a withdrawn invitation may
-// deliberately be re-issued. The §25 review found neither carried a quota while
-// every comparable write in the codebase does, which left invite → withdraw →
-// invite as an unbounded way to make a player's and an agent's notifications ring.
+// deliberately be re-issued. Without a quota, invite → withdraw → invite would be
+// an unbounded way to make a player's and an agent's notifications ring.
 //
 // It runs last because proving a quota means spending it: every other assertion in
 // this suite has already had its budget.
-section('AV/repair §25 — the two new writes draw on the platform\'s own quotas');
+section('AV — the two new writes draw on the platform\'s own quotas');
 {
   const RID = globalThis.__RID;
   ok(typeof RATE_LIMIT_POLICY.opportunity_share?.max === 'number' && typeof RATE_LIMIT_POLICY.transaction_handoff?.max === 'number',
@@ -1343,7 +1322,7 @@ section('refusal hygiene — every refusal this suite provoked, swept at once');
   const named = domainRefusals.filter(({ body }) => typeof body?.error !== 'string' || !/^[A-Z][A-Z0-9_]+$/.test(body.error));
   neg(named.length === 0, `HY3 every one names itself with a code (${named.map((l) => `${l.label}:${l.status}`).join(', ')})`);
   neg(ERROR_BODIES.every((e) => e.status < 500), `HY4 and not one is a 5xx (${ERROR_BODIES.filter((e) => e.status >= 500).map((l) => `${l.label}:${l.body?.error}`).join(', ')})`);
-  // M18.2's shared conflict contract deliberately names WHO last changed a record,
+  // The shared conflict contract deliberately names WHO last changed a record,
   // so the person reloading knows whose edit they are about to overwrite — and it
   // is only ever sent to someone who can already see that person. That one declared
   // field is dropped before the sweep; nothing else is.

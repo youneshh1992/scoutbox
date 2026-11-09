@@ -1,35 +1,13 @@
-// Demo-host lifecycle for the E2E battery (§74–§76).
+// Demo-host lifecycle for the E2E battery.
 //
-// THE DEFECT THIS FIXES
+// A test that needs the demo host starts one if none is running and stops the
+// one it started, so no test depends on state another left behind.
 //
-// `crosstab` and `demoOffline` both assumed something was already listening on
-// :8099. For a long time something always was — a demo host left running from
-// an earlier session — so both tests passed. They were passing against
-// WHATEVER that process happened to be serving, which was a bundle built at
-// some earlier, unknown point. The tests looked green and were not testing the
-// current build.
-//
-// That is worse than a failing test, because a failing test gets fixed. This
-// one reported success about code it had never loaded, and it only surfaced
-// when the battery was run in an order where nothing had started the host
-// first, at which point two tests that had "always passed" failed.
-//
-// THE FIX HAS TWO HALVES, AND BOTH ARE NECESSARY
-//
-//   1. Ownership. A test that needs the demo host starts one if none is
-//      running, and stops the one it started. No test depends on ambient
-//      state left behind by another.
-//
-//   2. Identity. Starting one is not enough, because a stale host is still
-//      listening and still answers. So the host publishes a BUILD MARKER
-//      derived from the bytes of the bundles it will serve, and a caller that
-//      finds an existing host compares that marker against the bundles on
-//      disk. A mismatch is a hard failure with an explicit message — never a
-//      silent "well, something answered".
-//
-// The second half is the one that matters. Without it, "make the test start
-// the server" quietly becomes "make the test start the server unless one is
-// already there", which is the original bug with extra steps.
+// Starting one is not enough: a stale host still answers. So the host publishes
+// a BUILD MARKER derived from the bytes of the bundles it serves, and a caller
+// that finds an existing host compares it with the bundles on disk. A mismatch
+// is a hard failure, never a silent "something answered". Without that check,
+// tests pass against whatever bundle an earlier session left running.
 
 import http from 'node:http';
 import fs from 'node:fs';

@@ -1,6 +1,6 @@
 import { RecordIdentity } from './RecordDetails';
 import { GuidanceNote } from './InformationRows';
-// M23 P5.6B — "My Agent": the player's side of agent representation.
+// "My Agent": the player's side of agent representation.
 //
 // The client's confirmation is the root of every relationship. This card
 // shows what an agent asked for and what the agent's licence state IS in
@@ -18,7 +18,7 @@ import { pt } from '../i18n';
 import { uiLocale } from '../time';
 
 /**
- * M23 P5.6E — the three disclosure choices, in the order a player meets them.
+ * The three disclosure choices, in the order a player meets them.
  * Each is a SEPARATE question with its own words, because they are separate
  * questions: one asks whether clubs may see who represents you, one whether a
  * club's message also reaches your agent, one whether your agent is given your
@@ -99,7 +99,7 @@ export function MyAgentSection({ playerId, isMinor }: { playerId: string; isMino
             {r.termMonths ? <DetailFact label={pt('m24term')} value={`${r.termMonths} ${pt('m24months')}`} icon="calendar-days" /> : null}
             {r.endAt ? <DetailFact label={pt('m24ends')} value={fmt(r.endAt)} icon="clock" /> : null}
           </View>
-          {/* M24F.2 — the licence is one fact; only an UNVERIFIED licence earns its warning sentence. */}
+          {/* The licence is one fact; only an UNVERIFIED licence earns its warning sentence. */}
           <GuidanceNote icon="shield" title="Licence status">
             {pt('m24licence')}: {(r.agent.verification?.fifaLicence ?? 'UNVERIFIED').replace(/_/g, ' ').toLowerCase()}{r.agent.verification?.fifaLicence === 'VERIFIED' ? '' : ` — ${pt('m24honestUnverified')}`}
           </GuidanceNote>
@@ -166,7 +166,7 @@ export function MyAgentSection({ playerId, isMinor }: { playerId: string; isMino
         </View>
       ))}
       {items.length === 0 && !err && <GuidanceNote icon="info" size={12}>{pt('m24none')}</GuidanceNote>}
-      {/* M24F.2 — one section-level line, not one per relationship. */}
+      {/* One section-level line, not one per relationship. */}
       {items.length > 0 && <GuidanceNote icon="info" size={11}>{pt('m24whatIs')}</GuidanceNote>}
       {msg && <View accessibilityLiveRegion="polite"><Muted size={12}>{msg}</Muted></View>}
     </Card>
@@ -174,7 +174,7 @@ export function MyAgentSection({ playerId, isMinor }: { playerId: string; isMino
 }
 
 /**
- * M23 P5.6E §19 — opportunities an agent put in front of this player.
+ * Opportunities an agent put in front of this player.
  *
  * A separate card, because it is a separate thing: these are chances to look at,
  * not relationship admin. Every row says in words that applying is the player's

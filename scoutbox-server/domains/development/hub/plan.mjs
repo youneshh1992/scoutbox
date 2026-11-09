@@ -1,5 +1,5 @@
 /**
- * M21 — the one Development Plan projection (§101).
+ * The one Development Plan projection.
  *
  * `buildDevelopmentPlan()` is the only function that turns stored development
  * records into something a person reads. Every route returns its output, and
@@ -34,8 +34,8 @@ export const PLAN_LIMITATION =
   'A Development Plan records what was agreed, what was done and what evidence was cited. It is a record of work, not a measurement of the player.';
 
 /**
- * Timeline vocabulary (§41), and the allowlist that keeps it out of activity
- * spam (§42). An action not in this table never reaches a timeline, so a save
+ * Timeline vocabulary, and the allowlist that keeps it out of activity
+ * spam. An action not in this table never reaches a timeline, so a save
  * that changed nothing, a read, and a draft edit are absent by construction
  * rather than by a filter somebody has to remember to apply.
  *
@@ -69,8 +69,8 @@ export const TIMELINE_ACTIONS = Object.freeze({
 export const TIMELINE_ACTION_NAMES = Object.freeze(Object.keys(TIMELINE_ACTIONS));
 
 /**
- * Every record belonging to one plan: `{ plan, goals, actions, links, reviews }`, or null. Since S12a one indexed
- * query per table (`reads.plans.collect`, the development repository's `developmentReads`).
+ * Every record belonging to one plan: `{ plan, goals, actions, links, reviews }`, or null. One indexed query per
+ * table (`reads.plans.collect`, the development repository's `developmentReads`).
  */
 export function collectPlan(reads, planId) {
   return reads.plans.collect(planId);
@@ -91,7 +91,6 @@ export function buildDevelopmentPlan({
   const { plan, goals, actions, links, reviews } = bundle;
   if (!access?.read) return null;
 
-  // S12b: the player's attempts and sessions, read through SQL.
   const attempts = reads.boxCam?.attempts.forPlayer(plan.playerId) ?? [];
   const sessions = new Map((reads.boxCam?.sessions.forPlayer(plan.playerId) ?? []).map((s) => [s.id, s]));
 
@@ -126,7 +125,7 @@ export function buildDevelopmentPlan({
           id: a.id, goalId: a.goalId, type: a.type, title: a.title,
           status: a.status, dueAt: a.dueAt ?? null,
           // Overdue is a fact about a date. It is never attributed to a person,
-          // and no copy in this milestone turns it into one (§47).
+          // and no copy turns it into one.
           due: ['done', 'cancelled'].includes(a.status) ? { state: 'not_applicable', days: null } : due,
           assignee: a.assignee ? { kind: a.assignee.kind, name: a.assignee.name } : null,
           completedAt: a.completedAt ?? null,
@@ -140,7 +139,7 @@ export function buildDevelopmentPlan({
         id: g.id, planId: g.planId, title: g.title, description: g.description ?? null,
         category: g.category, categoryLabel: GOAL_CATEGORY_LABELS[g.category] ?? g.category,
         status: g.status,
-        // The sentence travels with the word, every time it appears (§16).
+        // The sentence travels with the word, every time it appears.
         statusMeaning: g.status === 'achieved' ? ACHIEVED_MEANING : null,
         blockReason: g.status === 'blocked' ? (g.blockReason ?? null) : null,
         blockNote: g.status === 'blocked' ? (g.blockNote ?? null) : null,
@@ -154,7 +153,7 @@ export function buildDevelopmentPlan({
         rev: g.rev ?? 1, revAt: g.revAt ?? null, revBy: g.revBy?.name ?? null,
         actions: actionViews,
         // Counts, and a sentence made of counts. No ratio field exists for a
-        // client to render as a percentage of a player (§46).
+        // client to render as a percentage of a player.
         actionCounts: counts,
         completion: completionPhrase(counts),
         evidence,
@@ -227,7 +226,7 @@ function planView(plan, { player, access, now }) {
 }
 
 /**
- * The deterministic summary (§45). Every field is a count or a date, and the
+ * The deterministic summary. Every field is a count or a date, and the
  * whole object is reproducible from the records — read it twice on unchanged
  * data and it is byte-identical.
  */
@@ -262,11 +261,11 @@ export function planSummary({ plan, goals, reviews, now }) {
 }
 
 /**
- * The development timeline (§41/§42).
+ * The development timeline.
  *
  * Built by projecting the append-only `history` that `audit()` already writes
- * on every record — the same one clock M12 onwards uses. M21 stores no separate
- * event log, so the timeline cannot disagree with the record it describes.
+ * on every record. There is no separate event log, so the timeline cannot
+ * disagree with the record it describes.
  */
 export function buildTimeline({ plan, goals, actions, reviews, access }) {
   const out = [];
