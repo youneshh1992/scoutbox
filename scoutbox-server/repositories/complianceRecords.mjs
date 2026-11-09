@@ -20,10 +20,13 @@
  * History. Ordered rows; a detail is typed columns, or worked out from the record it belongs to (a review's request,
  * resolution and cancellation; a consent's answers; an evaluation entry names its evaluation row).
  *
- * WRITES are explicit: `create(record)` and `update(id, (draft) => …)` type the whole record and write it at once,
- * joined into the open unit of work, the caller's open transaction, or a transaction of their own; an unknown field and
- * an update from inside its own update are refused. History only grows. An evaluation is recorded with
- * `contexts.recordEvaluation`; a revocation with `consents.revoke`; an account deletion with `forgetPlayer`.
+ * Writes (repositories/writes.mjs). A record is created whole and must read back as written, then changes only through
+ * named acts (`addParty`, `declareRepresentation`, `close`, `start`, `resolve`, `grant`, `revoke`, …), each an UPDATE of
+ * named columns or an INSERT of new rows, joined into the open unit of work, the caller's open transaction, or a
+ * transaction of their own. History is only inserted, and an entry whose detail is worked out on read must read back as
+ * the writer gave it. A closed context does not reopen, a review is decided once and superseded once, and a consent is
+ * answered once and revoked once, each guarded in SQL. An evaluation is recorded with `contexts.recordEvaluation`; an
+ * account deletion with `forgetPlayer`. A review's `supersededBy` is the review naming it, worked out on read.
  *
  * Records are deep-frozen. A context carries its latest evaluation and the count.
  *
@@ -35,6 +38,7 @@
  */
 import { isPlainObject, describe } from './recruitment.mjs';
 import { transaction, migrationApplied } from './database.mjs';
+import { writeKit } from './writes.mjs';
 import { deepFreeze } from './scoutingEvidence.mjs';
 import { quote } from './fieldSpecs.mjs';
 import { REVIEWER_ROLES } from './compliancePolicies.mjs';
@@ -199,6 +203,7 @@ export const COMPLIANCE_RECORDS_DDL = [
   proposed_party_role  TEXT CHECK (proposed_party_role IS NULL OR ${inList('proposed_party_role', PARTY_ROLES)}),
   proposed_agent_user_id  TEXT REFERENCES org_users(id) ON DELETE RESTRICT,
   UNIQUE (context_id, position),
+  UNIQUE (id, context_id),
   CHECK (id = context_id || '#' || position),
   CHECK ((proposed_party_role IS NULL) = (proposed_agent_user_id IS NULL))
 ) STRICT;`,
@@ -250,7 +255,7 @@ export const COMPLIANCE_RECORDS_DDL = [
   ${txt('subject_player_id', L.id)},
   ${MA('subject_jurisdiction')},
   snapshot_outcome  TEXT CHECK (snapshot_outcome IS NULL OR ${inList('snapshot_outcome', CONFLICT_OUTCOMES)}),
-  snapshot_evaluation_id  TEXT REFERENCES compliance_evaluations(id) ON DELETE RESTRICT,
+  snapshot_evaluation_id  TEXT,
   snapshot_evaluated_at  INTEGER,
   requested_at  INTEGER NOT NULL,
   ${BY_COLS('requested_by', { orgId: false }).join(',\n  ')},
@@ -277,13 +282,19 @@ export const COMPLIANCE_RECORDS_DDL = [
   result_representation_status  TEXT CHECK (result_representation_status IS NULL OR ${inList('result_representation_status', REPRESENTATION_STATUSES)}),
   result_note  TEXT CHECK (result_note IS NULL OR ${inList('result_note', RESULT_NOTES)}),
   supersedes_id  TEXT REFERENCES regulatory_reviews(id) ON DELETE RESTRICT,
-  superseded_by_id  TEXT REFERENCES regulatory_reviews(id) ON DELETE RESTRICT,
   ${KEY_COLS('resolve').join(',\n  ')},
   ${REV_COLS.join(',\n  ')},
   CHECK ((decision_outcome IS NULL) = (decision_reviewer_id IS NULL)),
-  CHECK (snapshot_evaluation_id IS NULL OR snapshot_outcome IS NOT NULL)
+  CHECK (snapshot_evaluation_id IS NULL OR snapshot_outcome IS NOT NULL),
+  CHECK (snapshot_evaluation_id IS NULL OR subject_context_id IS NOT NULL),
+  CHECK ((started_at IS NULL) = (started_by_id IS NULL)),
+  CHECK ((decided_at IS NOT NULL) = (decision_outcome IS NOT NULL OR status = 'CANCELLED')),
+  CHECK (decision_outcome IS NOT NULL OR status IN ('PENDING','IN_REVIEW','CANCELLED')),
+  CHECK (decision_outcome IS NULL OR decision_outcome = status OR (status = 'SUPERSEDED' AND decision_outcome <> 'CANCELLED')),
+  FOREIGN KEY (snapshot_evaluation_id, subject_context_id) REFERENCES compliance_evaluations(id, context_id) ON DELETE RESTRICT
 ) STRICT;`,
   'CREATE INDEX regulatory_reviews_queue ON regulatory_reviews(status, requested_at);',
+  'CREATE UNIQUE INDEX regulatory_reviews_superseded_once ON regulatory_reviews(supersedes_id) WHERE supersedes_id IS NOT NULL;',
   'CREATE INDEX regulatory_reviews_agency ON regulatory_reviews(agency_org_id, agent_user_id);',
   'CREATE INDEX regulatory_reviews_subject_facet ON regulatory_reviews(subject_profile_id, subject_facet, subject_member_association) WHERE subject_profile_id IS NOT NULL;',
   'CREATE INDEX regulatory_reviews_subject_agreement ON regulatory_reviews(subject_agreement_id) WHERE subject_agreement_id IS NOT NULL;',
@@ -383,377 +394,32 @@ export const COMPLIANCE_RECORDS_TABLES = Object.freeze([
   'regulatory_consent_rule_ids', 'regulatory_consent_revocations', 'regulatory_consent_history',
 ]);
 
-// ------------------------------------------------------------------ typing (the one place a value is judged)
-export const refusal = (code, message, extra = {}) => Object.assign(new Error(`${code}: ${message}`), { code, ...extra });
-const FAIL = (reason) => { throw refusal('COMPLIANCE_RECORDS_INPUT_INVALID', reason); };
-const isId = (v, max = L.id) => typeof v === 'string' && v.length > 0 && v.length <= max;
-const isText = (v, max = L.text) => typeof v === 'string' && v.length > 0 && v.length <= max;
-const isInt = (v) => Number.isSafeInteger(v);
-const optInt = (v) => v === null || v === undefined || Number.isSafeInteger(v);
-const isMa = (v) => typeof v === 'string' && /^[A-Z]{3}$/.test(v);
-const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
-/** Refuse unless `ok`, naming the record and the field (never the value). */
-const need = (ok, at, field, what) => { if (!ok) FAIL(`${at}.${field} ${what}`); };
-const keysOnly = (raw, allowed, at) => {
-  need(isPlainObject(raw), at, 'record', `must be an object (got ${describe(raw)})`);
-  const extra = Object.keys(raw).filter((k) => !allowed.includes(k));
-  if (extra.length) FAIL(`${at} carries field(s) this build does not store: ${extra.join(', ')}`);
-};
-const inV = (v, vocab, at, field, { nullable = false } = {}) => need((nullable && (v === null || v === undefined)) || vocab.includes(v), at, field, `must be one of ${vocab.join('|')}${nullable ? ' or null' : ''} (got ${describe(v)})`);
-const distinctList = (v, ok, at, field, { max = L.list } = {}) => {
-  need(Array.isArray(v) && v.length <= max && v.every(ok) && new Set(v).size === v.length, at, field, `must be a list of at most ${max} distinct entries`);
-  return [...v];
-};
-
-/** An actor `{ kind, userId, name, role?, orgId? }` (a reviewer carries their role, a club user their club). */
-function typeBy(by, at, { kinds = ACTOR_KINDS, signatory = false } = {}) {
-  keysOnly(by, ['kind', 'userId', 'name', 'role', 'orgId', ...(signatory ? ['signatory'] : [])], `${at}`);
-  inV(by.kind, kinds, at, 'kind');
-  need(by.userId === null || by.userId === undefined || isId(by.userId), at, 'userId', 'must be an id or null');
-  need(by.name === null || by.name === undefined || (typeof by.name === 'string' && by.name.length <= L.name), at, 'name', `must be text of at most ${L.name} characters`);
-  if (by.kind === 'ts_reviewer') inV(by.role, REVIEWER_ROLES, at, 'role'); else need(by.role === undefined, at, 'role', 'is a reviewer\'s only');
-  if (by.kind === 'club_user') need(isId(by.orgId), at, 'orgId', 'names the club'); else need(by.orgId === undefined, at, 'orgId', 'is a club user\'s only');
-  if (signatory) need(by.signatory === undefined || (by.signatory === true && by.kind === 'club_user'), at, 'signatory', 'is true for a club signatory, or absent');
-  return { kind: by.kind, userId: by.userId ?? null, name: by.name ?? null, ...(by.kind === 'ts_reviewer' ? { role: by.role } : {}), ...(by.kind === 'club_user' ? { orgId: by.orgId } : {}), ...(by.signatory ? { signatory: true } : {}) };
-}
-const byCols = (by, p = 'by') => ({ [`${p}_kind`]: by.kind, [`${p}_id`]: by.userId, [`${p}_name`]: by.name, [`${p}_role`]: by.role ?? null, ...(p === 'by' ? { by_org_id: by.orgId ?? null } : {}) });
-const byOfRow = (r, p = 'by') => ({ kind: r[`${p}_kind`], userId: r[`${p}_id`], name: r[`${p}_name`], ...(r[`${p}_kind`] === 'ts_reviewer' ? { role: r[`${p}_role`] } : {}), ...(r[`${p}_kind`] === 'club_user' && r[`${p}_org_id`] !== undefined ? { orgId: r[`${p}_org_id`] } : {}) });
-const typeKeys = (raw, slots, at) => {
-  const keys = raw ?? {};
-  keysOnly(keys, slots, `${at}.keys`);
-  const out = {};
-  for (const [s, v] of Object.entries(keys)) {
-    keysOnly(v, ['key', 'fp'], `${at}.keys.${s}`);
-    need(isText(v.key, L.key) && typeof v.fp === 'string' && v.fp.length <= L.fp, `${at}.keys`, s, 'must be { key, fp }');
-    out[s] = { key: v.key, fp: v.fp };
-  }
-  return out;
-};
-const revOf = (r, at) => {
-  need(isInt(r.rev) && r.rev >= 1, at, 'rev', 'starts at 1');
-  need(optInt(r.revAt), at, 'revAt', 'must be an instant or null');
-  if (r.revBy !== null && r.revBy !== undefined) { keysOnly(r.revBy, ['userId', 'name'], `${at}.revBy`); need((r.revBy.userId === null || isId(r.revBy.userId)) && (r.revBy.name === null || typeof r.revBy.name === 'string'), at, 'revBy', 'is { userId, name }'); }
-  return { rev: r.rev, revAt: r.revAt ?? null, revBy: r.revBy ? { userId: r.revBy.userId ?? null, name: r.revBy.name ?? null } : null };
-};
-const revCols = (r) => ({ rev: r.rev, rev_at: r.revAt, rev_by_id: r.revBy?.userId ?? null, rev_by_name: r.revBy?.name ?? null });
-const revOfRow = (row) => ({ rev: row.rev, revAt: row.rev_at, revBy: row.rev_by_id === null && row.rev_by_name === null ? null : { userId: row.rev_by_id, name: row.rev_by_name } });
-
-/** A reason `{ code, ruleId, ruleStatus, regulator?, jurisdiction?, policyVersion, ...extras }`. */
-function typeReason(raw, at) {
-  keysOnly(raw, ['code', 'ruleId', 'ruleStatus', 'regulator', 'jurisdiction', 'policyVersion', ...REASON_SCALARS.map(([k]) => k), ...REASON_LISTS, 'viaConnectedAgent'], at);
-  need(isText(raw.code, L.code), at, 'code', 'names a reason code');
-  need(raw.ruleId === null || raw.ruleId === undefined || isId(raw.ruleId, L.ruleId), at, 'ruleId', 'must be a rule id or null');
-  inV(raw.ruleStatus, RULE_STATUSES, at, 'ruleStatus', { nullable: true });
-  need(raw.regulator === null || raw.regulator === undefined || isText(raw.regulator, 20), at, 'regulator', 'must be text or null');
-  need(raw.jurisdiction === null || raw.jurisdiction === undefined || isMa(raw.jurisdiction), at, 'jurisdiction', 'must be a three-letter code or null');
-  need(raw.policyVersion === null || raw.policyVersion === undefined || isId(raw.policyVersion), at, 'policyVersion', 'must be a policy version id or null');
-  const out = { code: raw.code, ruleId: raw.ruleId ?? null, ruleStatus: raw.ruleStatus ?? null, regulator: raw.regulator ?? null, jurisdiction: raw.jurisdiction ?? null, policyVersion: raw.policyVersion ?? null };
-  for (const [k] of REASON_SCALARS) {
-    if (raw[k] === null || raw[k] === undefined) continue;
-    need(isText(raw[k], k === 'detail' ? L.text : L.id), at, k, 'must be text');
-    if (k === 'partyRole') inV(raw[k], PARTY_ROLES, at, k);
-    if (k === 'consentKind') inV(raw[k], CONSENT_KINDS, at, k);
-    if (k === 'facet') inV(raw[k], FACETS, at, k);
-    out[k] = raw[k];
-  }
-  if (raw.partyRoles !== undefined) out.partyRoles = distinctList(raw.partyRoles, (x) => PARTY_ROLES.includes(x), at, 'partyRoles');
-  if (raw.viaConnectedAgent !== undefined) { need(raw.viaConnectedAgent === true, at, 'viaConnectedAgent', 'is true or absent'); out.viaConnectedAgent = true; }
-  if (raw.jurisdictions !== undefined) out.jurisdictions = distinctList(raw.jurisdictions, isMa, at, 'jurisdictions');
-  return out;
-}
-const typeReasons = (list, at) => { need(Array.isArray(list) && list.length <= 200, at, 'reasons', 'must be a list'); return list.map((r, i) => typeReason(r, `${at}.reasons[${i}]`)); };
-const policyList = (v, at, field = 'policyVersions') => distinctList(v ?? [], (x) => isId(x), at, field);
-
-// ---- contexts
-function typeParty(raw, at) {
-  keysOnly(raw, ['id', 'partyRole', 'subjectKind', 'subjectId', 'addedAt', 'removed', 'removedAt'], at);
-  need(isId(raw.id), at, 'id', 'must be an id'); inV(raw.partyRole, PARTY_ROLES, at, 'partyRole'); inV(raw.subjectKind, SUBJECT_KINDS, at, 'subjectKind');
-  need(isId(raw.subjectId), at, 'subjectId', 'must be an id'); need(optInt(raw.addedAt), at, 'addedAt', 'must be an instant');
-  need(typeof raw.removed === 'boolean', at, 'removed', 'must be true or false'); need(optInt(raw.removedAt) && (raw.removed || raw.removedAt == null), at, 'removedAt', 'is set only on a removed party');
-  return { id: raw.id, partyRole: raw.partyRole, subjectKind: raw.subjectKind, subjectId: raw.subjectId, addedAt: raw.addedAt ?? null, removed: raw.removed, removedAt: raw.removedAt ?? null };
-}
-function typeRepresentation(raw, at) {
-  keysOnly(raw, ['id', 'agentUserId', 'partyRole', 'agreementId', 'status', 'declaredOnly', 'reviewId', 'declaredAt', 'firstActAt', 'withdrawnAt', 'verifiedByReviewId', 'verifiedAt', 'keys'], at);
-  need(isId(raw.id), at, 'id', 'must be an id'); need(isId(raw.agentUserId), at, 'agentUserId', 'must be an id'); inV(raw.partyRole, PARTY_ROLES, at, 'partyRole');
-  need(raw.agreementId === null || raw.agreementId === undefined || isId(raw.agreementId), at, 'agreementId', 'must be an id or null');
-  inV(raw.status, REPRESENTATION_STATUSES, at, 'status'); need(typeof raw.declaredOnly === 'boolean', at, 'declaredOnly', 'must be true or false');
-  for (const k of ['reviewId', 'verifiedByReviewId']) need(raw[k] === null || raw[k] === undefined || isId(raw[k]), at, k, 'must be an id or null');
-  for (const k of ['declaredAt', 'firstActAt', 'withdrawnAt', 'verifiedAt']) need(optInt(raw[k]), at, k, 'must be an instant or null');
-  const keys = typeKeys(raw.keys, ['declare'], at);
-  return { id: raw.id, agentUserId: raw.agentUserId, partyRole: raw.partyRole, agreementId: raw.agreementId ?? null, status: raw.status, declaredOnly: raw.declaredOnly, reviewId: raw.reviewId ?? null, declaredAt: raw.declaredAt ?? null, firstActAt: raw.firstActAt ?? null, withdrawnAt: raw.withdrawnAt ?? null, verifiedByReviewId: raw.verifiedByReviewId ?? null, verifiedAt: raw.verifiedAt ?? null, keys };
-}
-/** A context history detail, by action; `evaluated` and a verified declaration repeat an evaluation (checked by the writer). */
-function typeContextDetail(action, d, at) {
-  const ex = (req, opt = []) => { keysOnly(d, [...req, ...opt], `${at}.detail`); for (const k of req) need(Object.hasOwn(d, k), `${at}.detail`, k, 'is required'); };
-  switch (action) {
-    case 'compliance_context_opened': ex(['type', 'policyVersions']); inV(d.type, CONTEXT_TYPES, at, 'detail.type'); return { type: d.type, policyVersions: policyList(d.policyVersions, at, 'detail.policyVersions') };
-    case 'compliance_context_party_added': ex(['partyRole', 'kind']); inV(d.partyRole, PARTY_ROLES, at, 'detail.partyRole'); inV(d.kind, SUBJECT_KINDS, at, 'detail.kind'); return { partyRole: d.partyRole, kind: d.kind };
-    case 'compliance_context_party_removed': ex(['partyRole']); inV(d.partyRole, PARTY_ROLES, at, 'detail.partyRole'); return { partyRole: d.partyRole };
-    case 'compliance_representation_declared':
-      if (d?.status === 'pending_review') { ex(['partyRole', 'status']); inV(d.partyRole, PARTY_ROLES, at, 'detail.partyRole'); return { partyRole: d.partyRole, status: 'pending_review' }; }
-      ex(['partyRole', 'status', 'outcome', 'policyVersions']); inV(d.partyRole, PARTY_ROLES, at, 'detail.partyRole'); need(d.status === 'verified', at, 'detail.status', 'is verified or pending_review'); inV(d.outcome, CONFLICT_OUTCOMES, at, 'detail.outcome');
-      return { partyRole: d.partyRole, status: 'verified', outcome: d.outcome, policyVersions: policyList(d.policyVersions, at, 'detail.policyVersions') };
-    case 'compliance_representation_verified': ex(['partyRole', 'reviewId']); inV(d.partyRole, PARTY_ROLES, at, 'detail.partyRole'); need(isId(d.reviewId), at, 'detail.reviewId', 'must be an id'); return { partyRole: d.partyRole, reviewId: d.reviewId };
-    case 'compliance_representation_withdrawn': ex(['partyRole'], ['reviewId']); inV(d.partyRole, PARTY_ROLES, at, 'detail.partyRole'); need(d.reviewId === undefined || isId(d.reviewId), at, 'detail.reviewId', 'must be an id'); return { partyRole: d.partyRole, ...(d.reviewId ? { reviewId: d.reviewId } : {}) };
-    case 'compliance_context_evaluated':
-      if (d && Object.hasOwn(d, 'reviewId')) { ex(['reviewId', 'outcome']); need(isId(d.reviewId), at, 'detail.reviewId', 'must be an id'); inV(d.outcome, ['review_approved', 'review_rejected'], at, 'detail.outcome'); return { reviewId: d.reviewId, outcome: d.outcome }; }
-      ex(['outcome', 'reasonCodes', 'policyVersions']); inV(d.outcome, CONFLICT_OUTCOMES, at, 'detail.outcome');
-      return { outcome: d.outcome, reasonCodes: distinctList(d.reasonCodes, (x) => isText(x, L.code), at, 'detail.reasonCodes'), policyVersions: policyList(d.policyVersions, at, 'detail.policyVersions') };
-    case 'compliance_context_policy_changed': { ex(['policyVersions']); const l = policyList(d.policyVersions, at, 'detail.policyVersions'); need(l.length === 1, at, 'detail.policyVersions', 'names the one version published'); return { policyVersions: l }; }
-    default: need(d === null, at, 'detail', 'is null'); return null;
-  }
-}
-function typeHistory(list, at, actions, typeDetail, byOpts) {
-  need(Array.isArray(list), at, 'history', 'must be a list');
-  const out = list.map((h, i) => {
-    const a = `${at}.history[${i}]`;
-    keysOnly(h, ['id', 'at', 'action', 'by', 'detail'], a);
-    need(isId(h.id), a, 'id', 'must be an id'); need(isInt(h.at), a, 'at', 'must be an instant'); inV(h.action, actions, a, 'action');
-    return { id: h.id, at: h.at, action: h.action, by: typeBy(h.by, `${a}.by`, byOpts), detail: typeDetail(h.action, h.detail ?? null, a) };
-  });
-  need(new Set(out.map((h) => h.id)).size === out.length, at, 'history', 'names an id twice');
-  return out;
-}
-const CONTEXT_FIELDS = ['id', 'agencyOrgId', 'agentUserId', 'type', 'jurisdictions', 'parties', 'representations', 'resolvedFacts', 'reEvaluationPending', 'reviewRejectedAt', 'status', 'origin', 'transactionId', 'openedAt', 'closedAt', 'keys', 'rev', 'revAt', 'revBy', 'history'];
-/** A context: flat columns, jurisdictions, parties, representations, resolved facts, keys and history (its evaluations are their own rows). */
-export function typeContext(raw, at = 'complianceContexts') {
-  const label = `${at} ${isPlainObject(raw) && typeof raw.id === 'string' ? raw.id : ''}`.trim();
-  try {
-    const { lastEvaluation: _l, evaluationCount: _n, ...rest } = isPlainObject(raw) ? raw : {};
-    keysOnly(raw, [...CONTEXT_FIELDS, 'lastEvaluation', 'evaluationCount'], label);
-    const r = rest;
-    need(isId(r.id), label, 'id', 'must be an id'); need(isId(r.agencyOrgId), label, 'agencyOrgId', 'must be an id'); need(isId(r.agentUserId), label, 'agentUserId', 'must be an id');
-    inV(r.type, CONTEXT_TYPES, label, 'type'); inV(r.status, CONTEXT_STATUSES, label, 'status');
-    const jurisdictions = distinctList(r.jurisdictions, isMa, label, 'jurisdictions', { max: L.jurisdictions });
-    need(jurisdictions.length > 0, label, 'jurisdictions', 'must not be empty');
-    need(Array.isArray(r.parties), label, 'parties', 'must be a list');
-    const parties = r.parties.map((p, i) => typeParty(p, `${label}.parties[${i}]`));
-    need(new Set(parties.map((p) => p.id)).size === parties.length, label, 'parties', 'names an id twice');
-    const live = parties.filter((p) => !p.removed).map((p) => p.partyRole);
-    need(new Set(live).size === live.length, label, 'parties', 'names a party role twice');
-    need(Array.isArray(r.representations), label, 'representations', 'must be a list');
-    const representations = r.representations.map((x, i) => typeRepresentation(x, `${label}.representations[${i}]`));
-    need(new Set(representations.map((x) => x.id)).size === representations.length, label, 'representations', 'names an id twice');
-    const resolvedFacts = distinctList(r.resolvedFacts ?? [], (x) => RESOLVED_FACTS.includes(x), label, 'resolvedFacts');
-    need(typeof r.reEvaluationPending === 'boolean', label, 'reEvaluationPending', 'must be true or false');
-    for (const k of ['reviewRejectedAt', 'closedAt']) need(optInt(r[k]), label, k, 'must be an instant or null');
-    need(isInt(r.openedAt), label, 'openedAt', 'must be an instant');
-    need((r.status === 'closed') === (r.closedAt != null), label, 'closedAt', 'is set exactly when the context is closed');
-    need((r.origin === undefined || r.origin === null) ? (r.transactionId === undefined || r.transactionId === null) : (r.origin === 'transaction' && isId(r.transactionId)), label, 'origin', 'is transaction, with its transactionId, or absent');
-    const keys = typeKeys(r.keys, ['create'], label);
-    const history = typeHistory(r.history ?? [], label, CONTEXT_ACTIONS, typeContextDetail);
-    return {
-      id: r.id, agencyOrgId: r.agencyOrgId, agentUserId: r.agentUserId, type: r.type, jurisdictions, parties, representations, resolvedFacts,
-      reEvaluationPending: r.reEvaluationPending, reviewRejectedAt: r.reviewRejectedAt ?? null, status: r.status,
-      ...(r.origin ? { origin: 'transaction', transactionId: r.transactionId } : {}), openedAt: r.openedAt, closedAt: r.closedAt ?? null,
-      keys, ...revOf(r, label), history,
-    };
-  } catch (e) { if (e.code === 'COMPLIANCE_RECORDS_INPUT_INVALID') return { ok: false, reason: e.message.replace(/^[A-Z_]+: /, '') }; throw e; }
-}
-/** The result an evaluation records, with the identity of its inputs. */
-function typeEvaluation(result, snapshotOf, at) {
-  need(isPlainObject(result), at, 'evaluation', 'must be an engine result');
-  inV(result.outcome, CONFLICT_OUTCOMES, at, 'outcome'); need(isInt(result.evaluatedAt), at, 'evaluatedAt', 'must be an instant');
-  need(typeof result.inputHash === 'string' && /^[0-9a-f]{64}$/.test(result.inputHash), at, 'inputHash', 'must be a sha256 hex digest');
-  const reasons = typeReasons(result.reasons, at);
-  need(Array.isArray(result.consentsOutstanding), at, 'consentsOutstanding', 'must be a list');
-  const consentsOutstanding = result.consentsOutstanding.map((c, i) => {
-    const a = `${at}.consentsOutstanding[${i}]`; keysOnly(c, ['partyRole', 'agentUserId', 'consentKind', 'reasonCode'], a);
-    inV(c.partyRole, PARTY_ROLES, a, 'partyRole'); inV(c.consentKind, CONSENT_KINDS, a, 'consentKind'); need(isText(c.reasonCode, L.code), a, 'reasonCode', 'names a reason');
-    need(c.agentUserId === null || c.agentUserId === undefined || isId(c.agentUserId), a, 'agentUserId', 'must be an id');
-    return { partyRole: c.partyRole, agentUserId: c.agentUserId ?? null, consentKind: c.consentKind, reasonCode: c.reasonCode };
-  });
-  keysOnly(snapshotOf, ['parties', 'representations', 'proposed'], `${at}.snapshotOf`);
-  const parties = snapshotOf.parties.map((p, i) => { const a = `${at}.snapshotOf.parties[${i}]`; keysOnly(p, ['partyRole', 'subjectKind', 'subjectId'], a); inV(p.partyRole, PARTY_ROLES, a, 'partyRole'); inV(p.subjectKind, SUBJECT_KINDS, a, 'subjectKind'); need(isId(p.subjectId), a, 'subjectId', 'must be an id'); return { partyRole: p.partyRole, subjectKind: p.subjectKind, subjectId: p.subjectId }; });
-  const representations = snapshotOf.representations.map((x, i) => { const a = `${at}.snapshotOf.representations[${i}]`; keysOnly(x, ['agentUserId', 'partyRole', 'status'], a); need(isId(x.agentUserId), a, 'agentUserId', 'must be an id'); inV(x.partyRole, PARTY_ROLES, a, 'partyRole'); inV(x.status, REPRESENTATION_STATUSES, a, 'status'); return { agentUserId: x.agentUserId, partyRole: x.partyRole, status: x.status }; });
-  let proposed = null;
-  if (snapshotOf.proposed) { keysOnly(snapshotOf.proposed, ['partyRole', 'agentUserId'], `${at}.snapshotOf.proposed`); inV(snapshotOf.proposed.partyRole, PARTY_ROLES, at, 'proposed.partyRole'); need(isId(snapshotOf.proposed.agentUserId), at, 'proposed.agentUserId', 'must be an id'); proposed = { partyRole: snapshotOf.proposed.partyRole, agentUserId: snapshotOf.proposed.agentUserId }; }
-  return { outcome: result.outcome, reasons, consentsOutstanding, policyVersions: policyList(result.policyVersions, at), evaluatedAt: result.evaluatedAt, inputHash: result.inputHash, snapshotOf: { parties, representations, proposed } };
-}
-
-// ---- reviews
-const PRIOR_KEYS = { verification_facet: ['facetState'], representation_dispute: ['agreementStatus'], representation_declared: ['contextOutcome', 'representationStatus'], conflict_evaluation: ['contextOutcome', 'representationStatus'] };
-const STATE_VOCAB = { facetState: VERIFICATION_STATES, agreementStatus: AGREEMENT_STATUSES, contextOutcome: CONFLICT_OUTCOMES, representationStatus: REPRESENTATION_STATUSES };
-const NOTE_OF = { verification_facet: 'profile gone', representation_dispute: 'not disputed any more', representation_declared: 'context gone', conflict_evaluation: 'context gone' };
-function typeState(v, kind, at, { prior }) {
-  if (v === null) return null;
-  const keys = PRIOR_KEYS[kind];
-  const note = NOTE_OF[kind];
-  const gone = !prior && v.note !== undefined;
-  const want = prior ? ['status', ...keys] : gone ? (kind === 'representation_dispute' ? ['agreementStatus', 'note'] : [keys[0], 'note']) : keys;
-  keysOnly(v, want, at); for (const k of want) need(Object.hasOwn(v, k), at, k, 'is required');
-  if (prior) inV(v.status, REVIEW_STATUSES, at, 'status');
-  if (gone) need(v.note === note, at, 'note', `is "${note}" for a ${kind} review`);
-  for (const k of keys) if (Object.hasOwn(v, k)) inV(v[k], STATE_VOCAB[k], at, k, { nullable: true });
-  return Object.fromEntries(want.map((k) => [k, v[k] ?? null]));
-}
-function typeSubject(kind, s, at) {
-  if (kind === 'verification_facet') {
-    keysOnly(s, ['profileId', 'userId', 'facet', 'memberAssociation'], at);
-    need(isId(s.profileId), at, 'profileId', 'must be an id'); need(isId(s.userId), at, 'userId', 'must be an id'); inV(s.facet, FACETS, at, 'facet');
-    need(s.memberAssociation === null || s.memberAssociation === undefined || isMa(s.memberAssociation), at, 'memberAssociation', 'must be a code or null');
-    return { profileId: s.profileId, userId: s.userId, facet: s.facet, memberAssociation: s.memberAssociation ?? null };
-  }
-  if (kind === 'representation_dispute') { keysOnly(s, ['agreementId'], at); need(isId(s.agreementId), at, 'agreementId', 'must be an id'); return { agreementId: s.agreementId }; }
-  if (kind === 'conflict_evaluation' && s?.approach === true) {
-    keysOnly(s, ['approach', 'playerId', 'jurisdiction'], at); need(isId(s.playerId), at, 'playerId', 'must be an id'); need(isMa(s.jurisdiction), at, 'jurisdiction', 'must be a code');
-    return { approach: true, playerId: s.playerId, jurisdiction: s.jurisdiction };
-  }
-  keysOnly(s, ['contextId', 'transactionId', 'representationId', 'partyRole'], at);
-  need(isId(s.contextId), at, 'contextId', 'must be an id'); inV(s.partyRole, PARTY_ROLES, at, 'partyRole');
-  for (const k of ['transactionId', 'representationId']) need(s[k] === null || s[k] === undefined || isId(s[k]), at, k, 'must be an id or null');
-  if (kind === 'representation_declared') need(isId(s.representationId), at, 'representationId', 'names the declared representation');
-  return { contextId: s.contextId, ...(s.transactionId ? { transactionId: s.transactionId } : {}), representationId: s.representationId ?? null, partyRole: s.partyRole };
-}
-const REVIEW_FIELDS = ['id', 'kind', 'status', 'agencyOrgId', 'agentUserId', 'subject', 'reasons', 'policyVersions', 'snapshot', 'requestedAt', 'requestedBy', 'startedAt', 'startedBy', 'decidedAt', 'decision', 'supersedes', 'supersededBy', 'keys', 'rev', 'revAt', 'revBy', 'history'];
-const uniqueCodes = (reasons) => [...new Set(reasons.map((x) => x.code))];
-/** A review: subject by kind, reasons, versions, snapshot (outcome + evaluation row), decision and history. */
-export function typeReview(raw, at = 'regulatoryReviews') {
-  const label = `${at} ${isPlainObject(raw) && typeof raw.id === 'string' ? raw.id : ''}`.trim();
-  try {
-    keysOnly(raw, REVIEW_FIELDS, label);
-    const r = raw;
-    need(isId(r.id), label, 'id', 'must be an id'); inV(r.kind, REVIEW_KINDS, label, 'kind'); inV(r.status, REVIEW_STATUSES, label, 'status');
-    need(isId(r.agencyOrgId), label, 'agencyOrgId', 'must be an id'); need(r.agentUserId === null || r.agentUserId === undefined || isId(r.agentUserId), label, 'agentUserId', 'must be an id or null');
-    const subject = typeSubject(r.kind, r.subject, `${label}.subject`);
-    const reasons = typeReasons(r.reasons ?? [], label);
-    const policyVersions = policyList(r.policyVersions, label);
-    let snapshot = null;
-    if (r.snapshot !== null && r.snapshot !== undefined) {
-      need(isPlainObject(r.snapshot), label, 'snapshot', 'must be an object or null');
-      inV(r.snapshot.outcome, CONFLICT_OUTCOMES, label, 'snapshot.outcome');
-      const evaluationId = r.snapshot.evaluationId ?? null;
-      need(evaluationId === null || isId(evaluationId, 100), label, 'snapshot.evaluationId', 'must be an evaluation id or null');
-      need(optInt(r.snapshot.evaluatedAt), label, 'snapshot.evaluatedAt', 'must be an instant or null');
-      snapshot = { outcome: r.snapshot.outcome, evaluationId, evaluatedAt: r.snapshot.evaluatedAt ?? null };
-    }
-    need(isInt(r.requestedAt), label, 'requestedAt', 'must be an instant');
-    const requestedBy = typeBy(r.requestedBy, `${label}.requestedBy`, { kinds: ['org', 'player', 'ts_reviewer', 'system'] });
-    let startedBy = null;
-    if (r.startedBy) { keysOnly(r.startedBy, ['id', 'name', 'role'], `${label}.startedBy`); need(isId(r.startedBy.id), label, 'startedBy.id', 'names the reviewer'); inV(r.startedBy.role, REVIEWER_ROLES, label, 'startedBy.role'); startedBy = { id: r.startedBy.id, name: r.startedBy.name ?? null, role: r.startedBy.role }; }
-    need((r.startedAt != null) === (startedBy !== null), label, 'startedAt', 'is set, with startedBy, exactly when a reviewer started it');
-    for (const k of ['startedAt', 'decidedAt']) need(optInt(r[k]), label, k, 'must be an instant or null');
-    let decision = null;
-    if (r.decision) {
-      const d = r.decision; const a = `${label}.decision`;
-      keysOnly(d, ['reviewerId', 'reviewerName', 'reviewerRole', 'outcome', 'reasonCode', 'reason', 'evidenceRefs', 'policyVersions', 'at', 'priorState', 'resultingState'], a);
-      need(isId(d.reviewerId), a, 'reviewerId', 'names the reviewer'); inV(d.reviewerRole, REVIEWER_ROLES, a, 'reviewerRole'); inV(d.outcome, DECISION_OUTCOMES, a, 'outcome');
-      need(isText(d.reasonCode, L.reasonCode), a, 'reasonCode', `must be text of 1 to ${L.reasonCode} characters`); need(isText(d.reason, L.reason), a, 'reason', `must be text of 1 to ${L.reason} characters`);
-      const evidenceRefs = distinctList(d.evidenceRefs ?? [], (x) => isText(x, L.evidenceRef), a, 'evidenceRefs', { max: L.evidenceRefs });
-      if (d.policyVersions !== undefined) need(same(d.policyVersions, policyVersions), a, 'policyVersions', 'repeats the review\'s own versions');
-      need(isInt(d.at), a, 'at', 'must be an instant');
-      const cancel = d.outcome === 'CANCELLED';
-      const priorState = cancel ? (need(d.priorState === null, a, 'priorState', 'is null on a cancellation'), null) : typeState(d.priorState, r.kind, `${a}.priorState`, { prior: true });
-      const resultingState = cancel ? (need(d.resultingState === null, a, 'resultingState', 'is null on a cancellation'), null) : typeState(d.resultingState, r.kind, `${a}.resultingState`, { prior: false });
-      need(cancel || (priorState && resultingState), a, 'priorState', 'and resultingState are recorded with a decision');
-      decision = { reviewerId: d.reviewerId, reviewerName: d.reviewerName ?? null, reviewerRole: d.reviewerRole, outcome: d.outcome, reasonCode: d.reasonCode, reason: d.reason, evidenceRefs, policyVersions, at: d.at, priorState, resultingState };
-    }
-    if (decision) need(decision.outcome === r.status || (r.status === 'SUPERSEDED' && decision.outcome !== 'CANCELLED'), label, 'status', 'follows the decision');
-    need(decision !== null || !['APPROVED', 'REJECTED', 'SUPERSEDED'].includes(r.status), label, 'decision', 'is recorded with an APPROVED, REJECTED or SUPERSEDED status');
-    need((r.decidedAt != null) === (decision !== null || r.status === 'CANCELLED'), label, 'decidedAt', 'is set exactly when the review is decided or cancelled');
-    for (const k of ['supersedes', 'supersededBy']) need(r[k] === null || r[k] === undefined || isId(r[k]), label, k, 'must be a review id or null');
-    need((r.status === 'SUPERSEDED') === (r.supersededBy != null), label, 'supersededBy', 'is set exactly when the review is superseded');
-    const keys = typeKeys(r.keys, ['resolve'], label);
-    const history = typeHistory(r.history ?? [], label, REVIEW_ACTIONS, (action, d, a) => typeReviewDetail(action, d, a, { kind: r.kind, reasons, policyVersions, decision }), { kinds: ['org', 'player', 'ts_reviewer', 'system'] });
-    return {
-      id: r.id, kind: r.kind, status: r.status, agencyOrgId: r.agencyOrgId, agentUserId: r.agentUserId ?? null, subject, reasons, policyVersions, snapshot,
-      requestedAt: r.requestedAt, requestedBy, startedAt: r.startedAt ?? null, startedBy, decidedAt: r.decidedAt ?? null, decision,
-      supersedes: r.supersedes ?? null, supersededBy: r.supersededBy ?? null, keys, ...revOf(r, label), history,
-    };
-  } catch (e) { if (e.code === 'COMPLIANCE_RECORDS_INPUT_INVALID') return { ok: false, reason: e.message.replace(/^[A-Z_]+: /, '') }; throw e; }
-}
-/** A review history detail; the request, resolution and cancellation repeat the review's own fields (worked out on read). */
-function typeReviewDetail(action, d, at, own) {
-  const ex = (req) => { keysOnly(d, req, `${at}.detail`); for (const k of req) need(Object.hasOwn(d, k), `${at}.detail`, k, 'is required'); };
-  const rev = () => (need(isInt(d.rev) && d.rev >= 1, at, 'detail.rev', 'must be a revision'), d.rev);
-  switch (action) {
-    case 'regulatory_review_requested':
-      if (d && Object.hasOwn(d, 'reviewId')) { ex(['reasonCode', 'reviewId']); need(d.reasonCode === 'supersedes' && isId(d.reviewId), at, 'detail', 'is { reasonCode: supersedes, reviewId }'); return { reasonCode: 'supersedes', reviewId: d.reviewId }; }
-      ex(['kind', 'reasonCodes', 'policyVersions']);
-      need(d.kind === own.kind && same(d.reasonCodes, uniqueCodes(own.reasons)) && same(d.policyVersions, own.policyVersions), at, 'detail', 'repeats the review\'s kind, reason codes and versions');
-      return { kind: own.kind, reasonCodes: uniqueCodes(own.reasons), policyVersions: own.policyVersions };
-    case 'regulatory_review_started': ex(['rev']); return { rev: rev() };
-    case 'regulatory_review_resolved': {
-      ex(['outcome', 'reasonCode', 'evidenceRefs', 'evidenceCount', 'policyVersions', 'priorState', 'resultingState', 'rev']);
-      const dec = own.decision;
-      need(dec && dec.outcome !== 'CANCELLED' && same([d.outcome, d.reasonCode, d.evidenceRefs, d.evidenceCount, d.policyVersions, d.priorState, d.resultingState], [dec.outcome, dec.reasonCode, dec.evidenceRefs, dec.evidenceRefs.length, dec.policyVersions, dec.priorState, dec.resultingState]), at, 'detail', 'repeats the decision');
-      return { outcome: dec.outcome, reasonCode: dec.reasonCode, evidenceRefs: dec.evidenceRefs, evidenceCount: dec.evidenceRefs.length, policyVersions: dec.policyVersions, priorState: dec.priorState, resultingState: dec.resultingState, rev: rev() };
-    }
-    case 'regulatory_review_cancelled':
-      if (d && Object.hasOwn(d, 'rev')) { ex(['outcome', 'reasonCode', 'rev']); need(d.outcome === 'CANCELLED' && d.reasonCode === 'cancelled', at, 'detail', 'is a reviewer\'s cancellation'); return { outcome: 'CANCELLED', reasonCode: 'cancelled', rev: rev() }; }
-      ex(['reasonCode']); need(d.reasonCode === 'context_closed', at, 'detail.reasonCode', 'is context_closed'); return { reasonCode: 'context_closed' };
-    default: {
-      ex(['reasonCode', 'reviewId', 'priorState', 'rev']); need(d.reasonCode === 'superseded' && isId(d.reviewId), at, 'detail', 'names the superseding review');
-      keysOnly(d.priorState, ['status'], `${at}.detail.priorState`); inV(d.priorState.status, REVIEW_STATUSES, at, 'detail.priorState.status');
-      return { reasonCode: 'superseded', reviewId: d.reviewId, priorState: { status: d.priorState.status }, rev: rev() };
-    }
-  }
-}
-
-// ---- consents
-const CONSENT_FIELDS = ['id', 'kind', 'contextId', 'agentUserId', 'agencyOrgId', 'partyRole', 'subject', 'regarding', 'status', 'requestedAt', 'requestedBy', 'grantedAt', 'grantedBy', 'declinedAt', 'declinedBy', 'particulars', 'policyVersions', 'ruleIds', 'keys', 'rev', 'revAt', 'revBy', 'history'];
-/** A consent: the ledger row (status requested | granted | declined; a revocation is its own row). */
-export function typeConsent(raw, at = 'regulatoryConsents') {
-  const label = `${at} ${isPlainObject(raw) && typeof raw.id === 'string' ? raw.id : ''}`.trim();
-  try {
-    const { revokedAt: _r, ...k } = isPlainObject(raw) ? raw : {};
-    keysOnly(raw, [...CONSENT_FIELDS, 'revokedAt'], label);
-    need(isId(k.id), label, 'id', 'must be an id'); inV(k.kind, CONSENT_KINDS, label, 'kind');
-    for (const f of ['contextId', 'agentUserId', 'agencyOrgId']) need(isId(k[f]), label, f, 'must be an id');
-    inV(k.partyRole, PARTY_ROLES, label, 'partyRole');
-    keysOnly(k.subject, ['kind', 'id'], `${label}.subject`); inV(k.subject.kind, SUBJECT_KINDS, label, 'subject.kind'); need(isId(k.subject.id), label, 'subject.id', 'must be an id');
-    const regarding = distinctList(k.regarding ?? [], (x) => PARTY_ROLES.includes(x), label, 'regarding');
-    inV(k.status, STORED_CONSENT_STATUSES, label, 'status');
-    need(isInt(k.requestedAt), label, 'requestedAt', 'must be an instant');
-    const requestedBy = typeBy(k.requestedBy, `${label}.requestedBy`, { kinds: ['org'] });
-    for (const f of ['grantedAt', 'declinedAt']) need(optInt(k[f]), label, f, 'must be an instant or null');
-    const grantedBy = k.grantedBy ? typeBy(k.grantedBy, `${label}.grantedBy`, { kinds: ['player', 'club_user'], signatory: true }) : null;
-    const declinedBy = k.declinedBy ? typeBy(k.declinedBy, `${label}.declinedBy`, { kinds: ['player', 'club_user'] }) : null;
-    need((k.status === 'granted') === (k.grantedAt != null && grantedBy !== null), label, 'grantedAt', 'is set, with grantedBy, exactly when granted');
-    need((k.status === 'declined') === (k.declinedAt != null && declinedBy !== null), label, 'declinedAt', 'is set, with declinedBy, exactly when declined');
-    const p = k.particulars;
-    keysOnly(p, ['fullParticularsProvided', 'legalAdviceOffered', 'proposedFeeDisclosed', 'acknowledged'], `${label}.particulars`);
-    for (const f of ['fullParticularsProvided', 'legalAdviceOffered', 'proposedFeeDisclosed']) need(typeof p[f] === 'boolean', label, `particulars.${f}`, 'must be true or false');
-    let acknowledged = null;
-    if (p.acknowledged !== null && p.acknowledged !== undefined) {
-      keysOnly(p.acknowledged, ['particulars', 'legalAdvice', 'at'], `${label}.particulars.acknowledged`);
-      need(p.acknowledged.particulars === true && p.acknowledged.legalAdvice === true && isInt(p.acknowledged.at), label, 'particulars.acknowledged', 'is { particulars: true, legalAdvice: true, at }');
-      acknowledged = { particulars: true, legalAdvice: true, at: p.acknowledged.at };
-    }
-    need((k.status === 'granted') === (acknowledged !== null), label, 'particulars.acknowledged', 'is recorded exactly when granted');
-    const policyVersions = policyList(k.policyVersions, label);
-    const ruleIds = distinctList(k.ruleIds ?? [], (x) => isId(x, L.ruleId), label, 'ruleIds');
-    const keys = typeKeys(k.keys, CONSENT_KEY_SLOTS, label);
-    const history = typeHistory(k.history ?? [], label, CONSENT_ACTIONS, (action, d, a) => {
-      const want = action === 'regulatory_consent_requested' ? { partyRole: k.partyRole, kind: k.kind, policyVersions } : action === 'regulatory_consent_granted' ? { partyRole: k.partyRole, policyVersions } : action === 'regulatory_consent_declined' ? { partyRole: k.partyRole } : { consentId: k.id, partyRole: k.partyRole };
-      need(same(d, want), a, 'detail', 'repeats the consent\'s own fields');
-      return want;
-    });
-    return {
-      id: k.id, kind: k.kind, contextId: k.contextId, agentUserId: k.agentUserId, agencyOrgId: k.agencyOrgId, partyRole: k.partyRole, subject: { kind: k.subject.kind, id: k.subject.id }, regarding,
-      status: k.status, requestedAt: k.requestedAt, requestedBy, grantedAt: k.grantedAt ?? null, grantedBy, declinedAt: k.declinedAt ?? null, declinedBy,
-      particulars: { fullParticularsProvided: p.fullParticularsProvided, legalAdviceOffered: p.legalAdviceOffered, proposedFeeDisclosed: p.proposedFeeDisclosed, acknowledged },
-      policyVersions, ruleIds, keys, ...revOf(k, label), history,
-    };
-  } catch (e) { if (e.code === 'COMPLIANCE_RECORDS_INPUT_INVALID') return { ok: false, reason: e.message.replace(/^[A-Z_]+: /, '') }; throw e; }
-}
-
 // ------------------------------------------------------------------ rows
+const refusal = (code, message, extra = {}) => Object.assign(new Error(`${code}: ${message}`), { code, ...extra });
+const FAIL = (reason) => { throw refusal('COMPLIANCE_RECORDS_INPUT_INVALID', reason); };
+const listOf = (v, what) => (Array.isArray(v) ? v : v === undefined || v === null ? [] : FAIL(`${what}: must be a list (got ${describe(v)})`));
+const bool = (v) => (v === true ? 1 : v === false ? 0 : v);
+const byCols = (by, p = 'by') => ({ [`${p}_kind`]: by?.kind, [`${p}_id`]: by?.userId ?? null, [`${p}_name`]: by?.name ?? null, [`${p}_role`]: by?.role ?? null, ...(p === 'by' ? { by_org_id: by?.orgId ?? null } : {}) });
+const byOfRow = (r, p = 'by') => ({ kind: r[`${p}_kind`], userId: r[`${p}_id`], name: r[`${p}_name`], ...(r[`${p}_kind`] === 'ts_reviewer' ? { role: r[`${p}_role`] } : {}), ...(r[`${p}_kind`] === 'club_user' && r[`${p}_org_id`] !== undefined ? { orgId: r[`${p}_org_id`] } : {}) });
+const revCols = (r) => ({ rev: r.rev, rev_at: r.revAt ?? null, rev_by_id: r.revBy?.userId ?? null, rev_by_name: r.revBy?.name ?? null });
+const revOfRow = (row) => ({ rev: row.rev, revAt: row.rev_at, revBy: row.rev_by_id === null && row.rev_by_name === null ? null : { userId: row.rev_by_id, name: row.rev_by_name } });
+/** The decision states a review records, by kind. */
+const PRIOR_KEYS = { verification_facet: ['facetState'], representation_dispute: ['agreementStatus'], representation_declared: ['contextOutcome', 'representationStatus'], conflict_evaluation: ['contextOutcome', 'representationStatus'] };
+const uniqueCodes = (reasons) => [...new Set(reasons.map((x) => x.code))];
+
 const st = new WeakMap();
+/** An absent value is bound as NULL (a NOT NULL column then refuses it), positional or named. */
+const bindable = (v) => (v === undefined ? null : v !== null && typeof v === 'object' && !Array.isArray(v) ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, x === undefined ? null : x])) : v);
 function statements(sqlite) {
   let s = st.get(sqlite); if (s && s.prepare === sqlite.prepare) return s.list;
-  const p = (sql) => sqlite.prepare(sql);
+  const p = (sql) => { const stmt = sqlite.prepare(sql); return { run: (...args) => stmt.run(...args.map(bindable)) }; };
   const reasonIns = (prefix, owner) => p(`INSERT INTO ${prefix}_reasons (${owner}, ord, code, rule_id, rule_status, regulator, jurisdiction, policy_version_id, ${REASON_SCALARS.map(([, c]) => c).join(', ')}, via_connected_agent, has_party_roles, has_jurisdictions) VALUES (${Array(9 + REASON_SCALARS.length + 2).fill('?').join(', ')})`);
   const list = {
     context: p(`INSERT INTO compliance_contexts (id, agency_org_id, agent_user_id, type, status, re_evaluation_pending, review_rejected_at, origin, transaction_id, opened_at, closed_at, create_key, create_fp, rev, rev_at, rev_by_id, rev_by_name)
-      VALUES (@id, @agency_org_id, @agent_user_id, @type, @status, @re_evaluation_pending, @review_rejected_at, @origin, @transaction_id, @opened_at, @closed_at, @create_key, @create_fp, @rev, @rev_at, @rev_by_id, @rev_by_name)
-      ON CONFLICT(id) DO UPDATE SET status = excluded.status, re_evaluation_pending = excluded.re_evaluation_pending, review_rejected_at = excluded.review_rejected_at, closed_at = excluded.closed_at, rev = excluded.rev, rev_at = excluded.rev_at, rev_by_id = excluded.rev_by_id, rev_by_name = excluded.rev_by_name`),
+      VALUES (@id, @agency_org_id, @agent_user_id, @type, @status, @re_evaluation_pending, @review_rejected_at, @origin, @transaction_id, @opened_at, @closed_at, @create_key, @create_fp, @rev, @rev_at, @rev_by_id, @rev_by_name)`),
     jurIns: p('INSERT INTO compliance_context_jurisdictions (context_id, ord, member_association) VALUES (?, ?, ?)'),
-    partyDel: p('DELETE FROM compliance_context_parties WHERE context_id = ?'),
     partyIns: p('INSERT INTO compliance_context_parties (context_id, ord, id, party_role, subject_kind, subject_id, added_at, removed, removed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'),
-    repDel: p('DELETE FROM compliance_context_representations WHERE context_id = ?'),
     repIns: p('INSERT INTO compliance_context_representations (context_id, ord, id, agent_user_id, party_role, agreement_id, status, declared_only, review_id, declared_at, first_act_at, withdrawn_at, verified_by_review_id, verified_at, declare_key, declare_fp) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'),
-    factDel: p('DELETE FROM compliance_context_resolved_facts WHERE context_id = ?'),
     factIns: p('INSERT INTO compliance_context_resolved_facts (context_id, ord, code) VALUES (?, ?, ?)'),
     ctxHist: p(`INSERT INTO compliance_context_history (id, context_id, ord, at, by_kind, by_id, by_name, by_role, by_org_id, action, detail_party_role, detail_subject_kind, detail_status, detail_review_outcome, detail_evaluation_id, detail_review_id, detail_policy_version_id)
       VALUES (@id, @owner, @ord, @at, @by_kind, @by_id, @by_name, @by_role, @by_org_id, @action, @detail_party_role, @detail_subject_kind, @detail_status, @detail_review_outcome, @detail_evaluation_id, @detail_review_id, @detail_policy_version_id)`),
@@ -765,14 +431,13 @@ function statements(sqlite) {
     evPv: p('INSERT INTO compliance_evaluation_policy_versions (evaluation_id, ord, policy_version_id) VALUES (?, ?, ?)'),
     evParty: p('INSERT INTO compliance_evaluation_snapshot_parties (evaluation_id, ord, party_role, subject_kind, subject_id) VALUES (?, ?, ?, ?, ?)'),
     evRep: p('INSERT INTO compliance_evaluation_snapshot_representations (evaluation_id, ord, agent_user_id, party_role, status) VALUES (?, ?, ?, ?, ?)'),
-    review: p(`INSERT INTO regulatory_reviews (${REVIEW_COLS.join(', ')}) VALUES (${REVIEW_COLS.map((c) => `@${c}`).join(', ')}) ON CONFLICT(id) DO UPDATE SET ${REVIEW_COLS.filter((c) => c !== 'id').map((c) => `${c} = excluded.${c}`).join(', ')}`),
+    review: p(`INSERT INTO regulatory_reviews (${REVIEW_COLS.join(', ')}) VALUES (${REVIEW_COLS.map((c) => `@${c}`).join(', ')})`),
     rvReason: reasonIns('regulatory_review', 'review_id'),
     rvReasonItem: p('INSERT INTO regulatory_review_reason_items (review_id, reason_ord, list, ord, value) VALUES (?, ?, ?, ?, ?)'),
     rvPv: p('INSERT INTO regulatory_review_policy_versions (review_id, ord, policy_version_id) VALUES (?, ?, ?)'),
-    rvRefDel: p('DELETE FROM regulatory_review_evidence_refs WHERE review_id = ?'),
     rvRef: p('INSERT INTO regulatory_review_evidence_refs (review_id, ord, ref) VALUES (?, ?, ?)'),
     rvHist: p('INSERT INTO regulatory_review_history (id, review_id, ord, at, by_kind, by_id, by_name, by_role, by_org_id, action, detail_rev, detail_review_id, detail_prior_status) VALUES (@id, @owner, @ord, @at, @by_kind, @by_id, @by_name, @by_role, @by_org_id, @action, @detail_rev, @detail_review_id, @detail_prior_status)'),
-    consent: p(`INSERT INTO regulatory_consents (${CONSENT_COLS.join(', ')}) VALUES (${CONSENT_COLS.map((c) => `@${c}`).join(', ')}) ON CONFLICT(id) DO UPDATE SET ${CONSENT_COLS.filter((c) => c !== 'id').map((c) => `${c} = excluded.${c}`).join(', ')}`),
+    consent: p(`INSERT INTO regulatory_consents (${CONSENT_COLS.join(', ')}) VALUES (${CONSENT_COLS.map((c) => `@${c}`).join(', ')})`),
     csRegarding: p('INSERT INTO regulatory_consent_regarding (consent_id, ord, party_role) VALUES (?, ?, ?)'),
     csPv: p('INSERT INTO regulatory_consent_policy_versions (consent_id, ord, policy_version_id) VALUES (?, ?, ?)'),
     csRule: p('INSERT INTO regulatory_consent_rule_ids (consent_id, ord, rule_id) VALUES (?, ?, ?)'),
@@ -782,13 +447,13 @@ function statements(sqlite) {
   st.set(sqlite, { prepare: sqlite.prepare, list });
   return list;
 }
-const REVIEW_COLS = ['id', 'kind', 'status', 'agency_org_id', 'agent_user_id', 'subject_profile_id', 'subject_user_id', 'subject_facet', 'subject_member_association', 'subject_agreement_id', 'subject_context_id', 'subject_transaction_id', 'subject_representation_id', 'subject_party_role', 'subject_is_approach', 'subject_player_id', 'subject_jurisdiction', 'snapshot_outcome', 'snapshot_evaluation_id', 'snapshot_evaluated_at', 'requested_at', 'requested_by_kind', 'requested_by_id', 'requested_by_name', 'requested_by_role', 'started_at', 'started_by_id', 'started_by_name', 'started_by_role', 'decided_at', 'decision_reviewer_id', 'decision_reviewer_name', 'decision_reviewer_role', 'decision_outcome', 'decision_reason_code', 'decision_reason', 'decision_at', 'prior_status', 'prior_facet_state', 'prior_agreement_status', 'prior_context_outcome', 'prior_representation_status', 'result_facet_state', 'result_agreement_status', 'result_context_outcome', 'result_representation_status', 'result_note', 'supersedes_id', 'superseded_by_id', 'resolve_key', 'resolve_fp', 'rev', 'rev_at', 'rev_by_id', 'rev_by_name'];
+const REVIEW_COLS = ['id', 'kind', 'status', 'agency_org_id', 'agent_user_id', 'subject_profile_id', 'subject_user_id', 'subject_facet', 'subject_member_association', 'subject_agreement_id', 'subject_context_id', 'subject_transaction_id', 'subject_representation_id', 'subject_party_role', 'subject_is_approach', 'subject_player_id', 'subject_jurisdiction', 'snapshot_outcome', 'snapshot_evaluation_id', 'snapshot_evaluated_at', 'requested_at', 'requested_by_kind', 'requested_by_id', 'requested_by_name', 'requested_by_role', 'started_at', 'started_by_id', 'started_by_name', 'started_by_role', 'decided_at', 'decision_reviewer_id', 'decision_reviewer_name', 'decision_reviewer_role', 'decision_outcome', 'decision_reason_code', 'decision_reason', 'decision_at', 'prior_status', 'prior_facet_state', 'prior_agreement_status', 'prior_context_outcome', 'prior_representation_status', 'result_facet_state', 'result_agreement_status', 'result_context_outcome', 'result_representation_status', 'result_note', 'supersedes_id', 'resolve_key', 'resolve_fp', 'rev', 'rev_at', 'rev_by_id', 'rev_by_name'];
 const CONSENT_COLS = ['id', 'kind', 'context_id', 'agent_user_id', 'agency_org_id', 'party_role', 'subject_kind', 'subject_id', 'status', 'requested_at', 'requested_by_kind', 'requested_by_id', 'requested_by_name', 'requested_by_role', 'granted_at', 'granted_by_kind', 'granted_by_id', 'granted_by_name', 'granted_by_org_id', 'granted_by_signatory', 'declined_at', 'declined_by_kind', 'declined_by_id', 'declined_by_name', 'declined_by_org_id', 'full_particulars_provided', 'legal_advice_offered', 'proposed_fee_disclosed', 'acknowledged_at', ...CONSENT_KEY_SLOTS.flatMap((s) => [`${s}_key`, `${s}_fp`]), 'rev', 'rev_at', 'rev_by_id', 'rev_by_name'];
 
 function writeReasons(ins, itemIns, owner, reasons) {
-  reasons.forEach((r, i) => {
-    ins.run(owner, i, r.code, r.ruleId, r.ruleStatus, r.regulator, r.jurisdiction, r.policyVersion, ...REASON_SCALARS.map(([k]) => r[k] ?? null), r.viaConnectedAgent ? 1 : null, r.partyRoles ? 1 : 0, r.jurisdictions ? 1 : 0);
-    for (const list of REASON_LISTS) (r[list] ?? []).forEach((v, j) => itemIns.run(owner, i, list, j, v));
+  listOf(reasons, `${owner} reasons`).forEach((r, i) => {
+    ins.run(owner, i, r?.code, r?.ruleId, r?.ruleStatus, r?.regulator, r?.jurisdiction, r?.policyVersion, ...REASON_SCALARS.map(([k]) => r?.[k] ?? null), r?.viaConnectedAgent ? 1 : null, r?.partyRoles ? 1 : 0, r?.jurisdictions ? 1 : 0);
+    for (const list of REASON_LISTS) listOf(r?.[list], `${owner} reasons[${i}].${list}`).forEach((v, j) => itemIns.run(owner, i, list, j, v));
   });
 }
 function readReason(row, items) {
@@ -802,90 +467,101 @@ function readReason(row, items) {
   return out;
 }
 
-function writeContext(s, c, { isNew, knownHistory = 0, latestEvaluationId = null }) {
+const contextPartyRow = (id, ord, p) => [id, ord, p?.id, p?.partyRole, p?.subjectKind, p?.subjectId, p?.addedAt ?? null, bool(p?.removed), p?.removedAt ?? null];
+const contextRepRow = (id, ord, r) => [id, ord, r?.id, r?.agentUserId, r?.partyRole, r?.agreementId ?? null, r?.status, bool(r?.declaredOnly), r?.reviewId ?? null, r?.declaredAt ?? null, r?.firstActAt ?? null, r?.withdrawnAt ?? null, r?.verifiedByReviewId ?? null, r?.verifiedAt ?? null, r?.keys?.declare?.key ?? null, r?.keys?.declare?.fp ?? null];
+/** A new context's rows (its evaluations are recorded with recordEvaluation). */
+function writeContext(s, c) {
   s.context.run({
-    id: c.id, agency_org_id: c.agencyOrgId, agent_user_id: c.agentUserId, type: c.type, status: c.status, re_evaluation_pending: c.reEvaluationPending ? 1 : 0,
-    review_rejected_at: c.reviewRejectedAt, origin: c.origin ?? null, transaction_id: c.transactionId ?? null, opened_at: c.openedAt, closed_at: c.closedAt,
-    create_key: c.keys.create?.key ?? null, create_fp: c.keys.create?.fp ?? null, ...revCols(c),
+    id: c.id, agency_org_id: c.agencyOrgId, agent_user_id: c.agentUserId, type: c.type, status: c.status, re_evaluation_pending: bool(c.reEvaluationPending),
+    review_rejected_at: c.reviewRejectedAt ?? null, origin: c.origin ?? null, transaction_id: c.transactionId ?? null, opened_at: c.openedAt, closed_at: c.closedAt ?? null,
+    create_key: c.keys?.create?.key ?? null, create_fp: c.keys?.create?.fp ?? null, ...revCols(c),
   });
-  if (isNew) c.jurisdictions.forEach((j, i) => s.jurIns.run(c.id, i, j));
-  s.partyDel.run(c.id);
-  c.parties.forEach((p, i) => s.partyIns.run(c.id, i, p.id, p.partyRole, p.subjectKind, p.subjectId, p.addedAt, p.removed ? 1 : 0, p.removedAt));
-  s.repDel.run(c.id);
-  c.representations.forEach((r, i) => s.repIns.run(c.id, i, r.id, r.agentUserId, r.partyRole, r.agreementId, r.status, r.declaredOnly ? 1 : 0, r.reviewId, r.declaredAt, r.firstActAt, r.withdrawnAt, r.verifiedByReviewId, r.verifiedAt, r.keys.declare?.key ?? null, r.keys.declare?.fp ?? null));
-  s.factDel.run(c.id);
-  c.resolvedFacts.forEach((f, i) => s.factIns.run(c.id, i, f));
-  c.history.slice(knownHistory).forEach((h, i) => writeContextEntry(s, c.id, knownHistory + i, h, latestEvaluationId));
+  listOf(c.jurisdictions, `compliance_contexts ${c.id} jurisdictions`).forEach((j, i) => s.jurIns.run(c.id, i, j));
+  listOf(c.parties, `compliance_contexts ${c.id} parties`).forEach((p, i) => s.partyIns.run(...contextPartyRow(c.id, i, p)));
+  listOf(c.representations, `compliance_contexts ${c.id} representations`).forEach((r, i) => s.repIns.run(...contextRepRow(c.id, i, r)));
+  listOf(c.resolvedFacts, `compliance_contexts ${c.id} resolvedFacts`).forEach((f, i) => s.factIns.run(c.id, i, f));
 }
+/** A context history entry; an evaluation entry, and a verified declaration, name the evaluation they repeat. */
 function writeContextEntry(s, owner, ord, h, evaluationId) {
-  const d = h.detail ?? {};
-  const linksEvaluation = (h.action === 'compliance_context_evaluated' && !d.reviewId) || (h.action === 'compliance_representation_declared' && d.status === 'verified');
+  const d = h?.detail ?? {};
+  const linksEvaluation = (h?.action === 'compliance_context_evaluated' && !d.reviewId) || (h?.action === 'compliance_representation_declared' && d.status === 'verified');
   if (linksEvaluation && !evaluationId) FAIL(`compliance_context_history ${h.id}: an evaluation entry needs the evaluation it repeats`);
   s.ctxHist.run({
-    id: h.id, owner, ord, at: h.at, ...byCols(h.by), action: h.action,
-    detail_party_role: d.partyRole ?? null, detail_subject_kind: h.action === 'compliance_context_party_added' ? d.kind : null,
-    detail_status: h.action === 'compliance_representation_declared' ? d.status : null,
-    detail_review_outcome: h.action === 'compliance_context_evaluated' && d.reviewId ? d.outcome : null,
+    id: h?.id, owner, ord, at: h?.at, ...byCols(h?.by), action: h?.action,
+    detail_party_role: d.partyRole ?? null, detail_subject_kind: h?.action === 'compliance_context_party_added' ? d.kind : null,
+    detail_status: h?.action === 'compliance_representation_declared' ? d.status : null,
+    detail_review_outcome: h?.action === 'compliance_context_evaluated' && d.reviewId ? d.outcome : null,
     detail_evaluation_id: linksEvaluation ? evaluationId : null, detail_review_id: d.reviewId ?? null,
-    detail_policy_version_id: h.action === 'compliance_context_policy_changed' ? d.policyVersions[0] : null,
+    detail_policy_version_id: h?.action === 'compliance_context_policy_changed' ? listOf(d.policyVersions, `history ${h.id} policyVersions`)[0] : null,
   });
-  if (h.action === 'compliance_context_opened') d.policyVersions.forEach((pv, i) => s.ctxHistPv.run(h.id, i, pv));
+  if (h?.action === 'compliance_context_opened') listOf(d.policyVersions, `history ${h.id} policyVersions`).forEach((pv, i) => s.ctxHistPv.run(h.id, i, pv));
 }
-function writeEvaluation(s, contextId, position, e) {
+function writeEvaluation(s, contextId, position, e, snapshotOf) {
   const id = `${contextId}#${position}`;
-  s.evaluation.run(id, contextId, position, e.outcome, e.evaluatedAt, e.inputHash, e.snapshotOf.proposed?.partyRole ?? null, e.snapshotOf.proposed?.agentUserId ?? null);
-  writeReasons(s.evReason, s.evReasonItem, id, e.reasons);
-  e.consentsOutstanding.forEach((c, i) => s.evConsent.run(id, i, c.partyRole, c.agentUserId, c.consentKind, c.reasonCode));
-  e.policyVersions.forEach((pv, i) => s.evPv.run(id, i, pv));
-  e.snapshotOf.parties.forEach((p, i) => s.evParty.run(id, i, p.partyRole, p.subjectKind, p.subjectId));
-  e.snapshotOf.representations.forEach((r, i) => s.evRep.run(id, i, r.agentUserId, r.partyRole, r.status));
+  s.evaluation.run(id, contextId, position, e?.outcome, e?.evaluatedAt, e?.inputHash, snapshotOf?.proposed?.partyRole ?? null, snapshotOf?.proposed?.agentUserId ?? null);
+  writeReasons(s.evReason, s.evReasonItem, id, e?.reasons);
+  listOf(e?.consentsOutstanding, `${id} consentsOutstanding`).forEach((c, i) => s.evConsent.run(id, i, c?.partyRole, c?.agentUserId ?? null, c?.consentKind, c?.reasonCode));
+  listOf(e?.policyVersions, `${id} policyVersions`).forEach((pv, i) => s.evPv.run(id, i, pv));
+  listOf(snapshotOf?.parties, `${id} snapshotOf.parties`).forEach((p, i) => s.evParty.run(id, i, p?.partyRole, p?.subjectKind, p?.subjectId));
+  listOf(snapshotOf?.representations, `${id} snapshotOf.representations`).forEach((r, i) => s.evRep.run(id, i, r?.agentUserId, r?.partyRole, r?.status));
   return id;
 }
-function reviewRow(r) {
-  const sub = r.subject; const d = r.decision; const ps = d?.priorState ?? {}; const rs = d?.resultingState ?? {};
+/** A review decision's columns (prior and resulting states by kind, or none for a cancellation). */
+const decisionCols = (d) => {
+  const ps = d?.priorState ?? {}; const rs = d?.resultingState ?? {};
   return {
-    id: r.id, kind: r.kind, status: r.status, agency_org_id: r.agencyOrgId, agent_user_id: r.agentUserId,
+    decision_reviewer_id: d?.reviewerId ?? null, decision_reviewer_name: d?.reviewerName ?? null, decision_reviewer_role: d?.reviewerRole ?? null,
+    decision_outcome: d?.outcome ?? null, decision_reason_code: d?.reasonCode ?? null, decision_reason: d?.reason ?? null, decision_at: d?.at ?? null,
+    prior_status: d?.priorState ? ps.status : null, prior_facet_state: ps.facetState ?? null, prior_agreement_status: ps.agreementStatus ?? null,
+    prior_context_outcome: ps.contextOutcome ?? null, prior_representation_status: ps.representationStatus ?? null,
+    result_facet_state: rs.facetState ?? null, result_agreement_status: rs.agreementStatus ?? null, result_context_outcome: rs.contextOutcome ?? null,
+    result_representation_status: rs.representationStatus ?? null, result_note: rs.note ?? null,
+  };
+};
+function reviewRow(r) {
+  const sub = r.subject ?? {};
+  return {
+    id: r.id, kind: r.kind, status: r.status, agency_org_id: r.agencyOrgId, agent_user_id: r.agentUserId ?? null,
     subject_profile_id: sub.profileId ?? null, subject_user_id: sub.userId ?? null, subject_facet: sub.facet ?? null, subject_member_association: sub.memberAssociation ?? null,
     subject_agreement_id: sub.agreementId ?? null, subject_context_id: sub.contextId ?? null, subject_transaction_id: sub.transactionId ?? null,
     subject_representation_id: sub.representationId ?? null, subject_party_role: sub.partyRole ?? null, subject_is_approach: sub.approach ? 1 : 0,
     subject_player_id: sub.playerId ?? null, subject_jurisdiction: sub.jurisdiction ?? null,
     snapshot_outcome: r.snapshot?.outcome ?? null, snapshot_evaluation_id: r.snapshot?.evaluationId ?? null, snapshot_evaluated_at: r.snapshot?.evaluatedAt ?? null,
     requested_at: r.requestedAt, ...byCols(r.requestedBy, 'requested_by'),
-    started_at: r.startedAt, started_by_id: r.startedBy?.id ?? null, started_by_name: r.startedBy?.name ?? null, started_by_role: r.startedBy?.role ?? null,
-    decided_at: r.decidedAt, decision_reviewer_id: d?.reviewerId ?? null, decision_reviewer_name: d?.reviewerName ?? null, decision_reviewer_role: d?.reviewerRole ?? null,
-    decision_outcome: d?.outcome ?? null, decision_reason_code: d?.reasonCode ?? null, decision_reason: d?.reason ?? null, decision_at: d?.at ?? null,
-    prior_status: d?.priorState ? ps.status : null, prior_facet_state: ps.facetState ?? null, prior_agreement_status: ps.agreementStatus ?? null,
-    prior_context_outcome: ps.contextOutcome ?? null, prior_representation_status: ps.representationStatus ?? null,
-    result_facet_state: rs.facetState ?? null, result_agreement_status: rs.agreementStatus ?? null, result_context_outcome: rs.contextOutcome ?? null,
-    result_representation_status: rs.representationStatus ?? null, result_note: rs.note ?? null,
-    supersedes_id: r.supersedes, superseded_by_id: r.supersededBy, resolve_key: r.keys.resolve?.key ?? null, resolve_fp: r.keys.resolve?.fp ?? null, ...revCols(r),
+    started_at: r.startedAt ?? null, started_by_id: r.startedBy?.id ?? null, started_by_name: r.startedBy?.name ?? null, started_by_role: r.startedBy?.role ?? null,
+    decided_at: r.decidedAt ?? null, ...decisionCols(r.decision),
+    supersedes_id: r.supersedes ?? null, resolve_key: r.keys?.resolve?.key ?? null, resolve_fp: r.keys?.resolve?.fp ?? null, ...revCols(r),
   };
 }
-function writeReview(s, r, { isNew, knownHistory = 0 }) {
+/** A new review's rows; its history entries follow, in order. */
+function writeReview(s, r) {
   s.review.run(reviewRow(r));
-  if (isNew) { writeReasons(s.rvReason, s.rvReasonItem, r.id, r.reasons); r.policyVersions.forEach((pv, i) => s.rvPv.run(r.id, i, pv)); }
-  s.rvRefDel.run(r.id);
-  (r.decision?.evidenceRefs ?? []).forEach((ref, i) => s.rvRef.run(r.id, i, ref));
-  writeReviewHistory(s, r, knownHistory);
+  writeReasons(s.rvReason, s.rvReasonItem, r.id, r.reasons);
+  listOf(r.policyVersions, `regulatory_reviews ${r.id} policyVersions`).forEach((pv, i) => s.rvPv.run(r.id, i, pv));
+  listOf(r.decision?.evidenceRefs, `regulatory_reviews ${r.id} evidenceRefs`).forEach((ref, i) => s.rvRef.run(r.id, i, ref));
 }
-function writeReviewHistory(s, r, knownHistory = 0) {
-  r.history.slice(knownHistory).forEach((h, i) => {
-    const d = h.detail ?? {};
-    s.rvHist.run({ id: h.id, owner: r.id, ord: knownHistory + i, at: h.at, ...byCols(h.by), action: h.action, detail_rev: d.rev ?? null, detail_review_id: d.reviewId ?? null, detail_prior_status: d.priorState && h.action === 'regulatory_review_superseded' ? d.priorState.status : null });
-  });
-}
-function writeConsent(s, k, { isNew, knownHistory = 0 }) {
+const reviewEntry = (owner, ord, h) => {
+  const d = h?.detail ?? {};
+  return { id: h?.id, owner, ord, at: h?.at, ...byCols(h?.by), action: h?.action, detail_rev: d.rev ?? null, detail_review_id: d.reviewId ?? null, detail_prior_status: d.priorState && h?.action === 'regulatory_review_superseded' ? d.priorState.status : null };
+};
+const answerCols = (slot, at, by, { signatory = false } = {}) => ({
+  [`${slot}_at`]: at ?? null, [`${slot}_by_kind`]: by?.kind ?? null, [`${slot}_by_id`]: by?.userId ?? null, [`${slot}_by_name`]: by?.name ?? null, [`${slot}_by_org_id`]: by?.orgId ?? null,
+  ...(signatory ? { granted_by_signatory: by?.signatory ? 1 : null } : {}),
+});
+const consentKeyCols = (keys) => Object.fromEntries(CONSENT_KEY_SLOTS.flatMap((sl) => [[`${sl}_key`, keys?.[sl]?.key ?? null], [`${sl}_fp`, keys?.[sl]?.fp ?? null]]));
+/** A new consent's rows; its history entries follow, in order. */
+function writeConsent(s, k) {
+  const p = k.particulars ?? {};
   s.consent.run({
-    id: k.id, kind: k.kind, context_id: k.contextId, agent_user_id: k.agentUserId, agency_org_id: k.agencyOrgId, party_role: k.partyRole, subject_kind: k.subject.kind, subject_id: k.subject.id,
+    id: k.id, kind: k.kind, context_id: k.contextId, agent_user_id: k.agentUserId, agency_org_id: k.agencyOrgId, party_role: k.partyRole, subject_kind: k.subject?.kind, subject_id: k.subject?.id,
     status: k.status, requested_at: k.requestedAt, ...byCols(k.requestedBy, 'requested_by'),
-    granted_at: k.grantedAt, granted_by_kind: k.grantedBy?.kind ?? null, granted_by_id: k.grantedBy?.userId ?? null, granted_by_name: k.grantedBy?.name ?? null, granted_by_org_id: k.grantedBy?.orgId ?? null, granted_by_signatory: k.grantedBy?.signatory ? 1 : null,
-    declined_at: k.declinedAt, declined_by_kind: k.declinedBy?.kind ?? null, declined_by_id: k.declinedBy?.userId ?? null, declined_by_name: k.declinedBy?.name ?? null, declined_by_org_id: k.declinedBy?.orgId ?? null,
-    full_particulars_provided: k.particulars.fullParticularsProvided ? 1 : 0, legal_advice_offered: k.particulars.legalAdviceOffered ? 1 : 0, proposed_fee_disclosed: k.particulars.proposedFeeDisclosed ? 1 : 0,
-    acknowledged_at: k.particulars.acknowledged?.at ?? null,
-    ...Object.fromEntries(CONSENT_KEY_SLOTS.flatMap((sl) => [[`${sl}_key`, k.keys[sl]?.key ?? null], [`${sl}_fp`, k.keys[sl]?.fp ?? null]])), ...revCols(k),
+    ...answerCols('granted', k.grantedAt, k.grantedBy, { signatory: true }), ...answerCols('declined', k.declinedAt, k.declinedBy),
+    full_particulars_provided: bool(p.fullParticularsProvided), legal_advice_offered: bool(p.legalAdviceOffered), proposed_fee_disclosed: bool(p.proposedFeeDisclosed),
+    acknowledged_at: p.acknowledged?.at ?? null, ...consentKeyCols(k.keys), ...revCols(k),
   });
-  if (isNew) { k.regarding.forEach((x, i) => s.csRegarding.run(k.id, i, x)); k.policyVersions.forEach((x, i) => s.csPv.run(k.id, i, x)); k.ruleIds.forEach((x, i) => s.csRule.run(k.id, i, x)); }
-  k.history.slice(knownHistory).forEach((h, i) => s.csHist.run({ id: h.id, owner: k.id, ord: knownHistory + i, at: h.at, ...byCols(h.by), action: h.action }));
+  listOf(k.regarding, `regulatory_consents ${k.id} regarding`).forEach((x, i) => s.csRegarding.run(k.id, i, x));
+  listOf(k.policyVersions, `regulatory_consents ${k.id} policyVersions`).forEach((x, i) => s.csPv.run(k.id, i, x));
+  listOf(k.ruleIds, `regulatory_consents ${k.id} ruleIds`).forEach((x, i) => s.csRule.run(k.id, i, x));
 }
 
 // ---- decoding
@@ -971,6 +647,8 @@ function decodeReviews(sqlite, rows) {
   const refs = groupBy(inIds(sqlite, `SELECT * FROM regulatory_review_evidence_refs WHERE ${IN('review_id')} ORDER BY review_id, ord`, rids), (r) => r.review_id);
   const hist = groupBy(inIds(sqlite, `SELECT * FROM regulatory_review_history WHERE ${IN('review_id')} ORDER BY review_id, ord`, rids), (r) => r.review_id);
   const evs = new Map(decodeEvaluations(sqlite, inIds(sqlite, `SELECT * FROM compliance_evaluations WHERE ${IN('id')}`, rows.map((r) => r.snapshot_evaluation_id).filter(Boolean))).map((e) => [e.evaluationId, e]));
+  // A review's `supersededBy` is the review naming it (`supersedes_id`): one fact, stored once.
+  const nextOf = new Map(inIds(sqlite, `SELECT id, supersedes_id FROM regulatory_reviews WHERE ${IN('supersedes_id')}`, rids).map((r) => [r.supersedes_id, r.id]));
   return rows.map((row) => {
     const kind = row.kind;
     const rs = reasons(row.id); const policyVersions = pvs(row.id).map((p) => p.policy_version_id);
@@ -1008,7 +686,7 @@ function decodeReviews(sqlite, rows) {
       id: row.id, kind, status: row.status, agencyOrgId: row.agency_org_id, agentUserId: row.agent_user_id, subject, reasons: rs, policyVersions, snapshot,
       requestedAt: row.requested_at, requestedBy: byOfRow(row, 'requested_by'), startedAt: row.started_at,
       startedBy: row.started_by_id === null ? null : { id: row.started_by_id, name: row.started_by_name, role: row.started_by_role },
-      decidedAt: row.decided_at, decision, supersedes: row.supersedes_id, supersededBy: row.superseded_by_id,
+      decidedAt: row.decided_at, decision, supersedes: row.supersedes_id, supersededBy: nextOf.get(row.id) ?? null,
       keys: row.resolve_key === null ? {} : { resolve: { key: row.resolve_key, fp: row.resolve_fp } }, ...revOfRow(row), history,
     };
   });
@@ -1064,95 +742,127 @@ const playerRefCount = (sqlite, sql) => sqlite.prepare(sql).get().n;
 export const unresolvedPlayerReferences = (sqlite) => (complianceRecordsLive(sqlite) ? { complianceRecords: playerRefCount(sqlite, "SELECT count(*) AS n FROM compliance_context_parties x WHERE subject_kind = 'player' AND NOT EXISTS (SELECT 1 FROM players p WHERE p.id = x.subject_id)") } : null);
 
 // ------------------------------------------------------------------ the repository
-const WRITES = new Set(['create', 'update', 'recordEvaluation', 'revoke', 'forgetPlayer', 'flagPolicyChange']);
-const clone = (v) => JSON.parse(JSON.stringify(v));
+const WRITES = new Set([
+  'create', 'recordEvaluation', 'forgetPlayer', 'flagPolicyChange', 'recordAct', 'addParty', 'declareRepresentation', 'withdrawRepresentation',
+  'decideRepresentation', 'resolveFacts', 'rejectByReview', 'project', 'close', 'clearReEvaluation', 'start', 'resolve', 'cancel', 'markSuperseded',
+  'grant', 'decline', 'revoke',
+]);
 const OPEN = "status IN ('PENDING','IN_REVIEW')";
+const SQLITE_CONSTRAINT = 19;
 /**
  * `createComplianceRecordsRepository({ sqlite, unit, now, log })`: `contexts`, `reviews` and `consents`, each with its
- * writes and queries, plus `reads` (the queries alone) and `forgetPlayer` (an account deletion).
+ * whole-record `create`, its named acts and its queries, plus `reads` (the queries alone) and `forgetPlayer` (an
+ * account deletion).
+ *
+ * An act is `act(id, input, bookkeeping)`: its own writes, then the bookkeeping — the history entries (only ever
+ * inserted, each reading back as written) and the rev bump (`bump: { at, by: { id | userId, name } }`) — in one
+ * operation, returning the stored record. `recordAct(id, bookkeeping)` is the bookkeeping alone.
  */
 export function createComplianceRecordsRepository({ sqlite, unit = null, now = Date.now, log = () => {} } = {}) {
   if (!sqlite) throw new TypeError('the compliance records repository needs a SQLite connection (node:sqlite)');
   const operation = (fn) => (unit?.active?.() ? unit.join(fn) : sqlite.isTransaction ? fn() : transaction(sqlite, fn));
-  const cache = new Map();
-  const q = (sql) => { let s = cache.get(sql); if (!s) cache.set(sql, (s = sqlite.prepare(sql))); return s; };
+  const { q, assign, guarded, refusal: refuse, invalid, rowStep, readsBackAsWritten, newRecord } = writeKit(sqlite, 'COMPLIANCE_RECORDS');
   const s = () => statements(sqlite);
-  const updating = new Set();
-  const guard = (key, fn) => {
-    if (updating.has(key)) throw refusal('COMPLIANCE_RECORDS_NESTED_UPDATE', `${key} is already being updated; make the second change after the first returns`);
-    updating.add(key);
-    try { return fn(); } finally { updating.delete(key); }
+  /** One write of a record's rows: a missing referenced row and a taken key are named as such, any other constraint failure as junk. */
+  const step = (table, id, part, fn) => {
+    try { return fn(); } catch (e) {
+      if (e?.code !== 'ERR_SQLITE_ERROR' || (e.errcode & 0xff) !== SQLITE_CONSTRAINT) throw e;
+      if (/FOREIGN KEY/.test(String(e.message))) throw refuse('REFERENCE_MISSING', `${table} ${id} names a row that is not there (${part}: ${e.message})`);
+      if (/UNIQUE|PRIMARY KEY/.test(String(e.message))) throw refuse('DUPLICATE', `${table} ${id} ${part}: ${e.message}`);
+      return rowStep(table, id, part, () => { throw e; });
+    }
   };
-  const typedOr = (type, raw, name) => { const t = type(raw, name); if (t && t.ok === false) throw refusal('COMPLIANCE_RECORDS_INPUT_INVALID', t.reason); return t; };
-  const historyTaken = (h) => q('SELECT 1 FROM compliance_context_history WHERE id = ? UNION ALL SELECT 1 FROM regulatory_review_history WHERE id = ? UNION ALL SELECT 1 FROM regulatory_consent_history WHERE id = ?').get(h.id, h.id, h.id);
-  const checkHistory = (table, id, stored, next) => {
-    if (next.history.length < stored.history.length || stored.history.some((h, i) => !same(h, next.history[i]))) throw refusal('COMPLIANCE_RECORDS_INPUT_INVALID', `${table} ${id}: the history only grows (a stored entry cannot change or go)`);
-    const taken = next.history.slice(stored.history.length).find(historyTaken);
-    if (taken) throw refusal('COMPLIANCE_RECORDS_DUPLICATE', `history entry ${taken.id} already exists`);
-  };
-  const checkFixed = (table, id, stored, next, fields) => { for (const k of fields) if (!same(next[k], stored[k])) throw refusal('COMPLIANCE_RECORDS_INPUT_INVALID', `${table} ${id}: ${k} cannot change`); };
+  const setRow = (table, keys, cols) => q(`UPDATE ${table} SET ${assign(cols)} WHERE ${Object.keys(keys).map((c) => `${c} = @key_${c}`).join(' AND ')}`)
+    .run({ ...Object.fromEntries(Object.entries(cols).map(([c, v]) => [c, v === undefined ? null : v])), ...Object.fromEntries(Object.entries(keys).map(([c, v]) => [`key_${c}`, v])) });
+  const nextOrd = (table, owner, id) => q(`SELECT COALESCE(MAX(ord) + 1, 0) AS n FROM ${table} WHERE ${owner} = ?`).get(id).n;
   const one = (decoder, sql) => (...args) => { const row = q(sql).get(...args); return row ? deepFreeze(decoder(sqlite, [row])[0]) : null; };
   const many = (decoder, sql) => (...args) => decoder(sqlite, q(sql).all(...args)).map(deepFreeze);
   const latestEvaluationId = (ctxId) => q('SELECT id FROM compliance_evaluations WHERE context_id = ? ORDER BY position DESC LIMIT 1').get(ctxId)?.id ?? null;
   const evaluationOf = (id) => { const row = q('SELECT * FROM compliance_evaluations WHERE id = ?').get(id); return row ? decodeEvaluations(sqlite, [row])[0] : null; };
-  /** An entry that repeats an evaluation must repeat the latest one exactly. */
-  const checkEvaluationEntries = (ctxId, entries) => {
-    const evId = latestEvaluationId(ctxId); const ev = evId ? evaluationOf(evId) : null;
-    for (const h of entries) {
-      const d = h.detail ?? {};
-      if (h.action === 'compliance_context_evaluated' && !d.reviewId) { if (!ev || !same(d, { outcome: ev.outcome, reasonCodes: [...new Set(ev.reasons.map((x) => x.code))], policyVersions: ev.policyVersions })) throw refusal('COMPLIANCE_RECORDS_INPUT_INVALID', `compliance_context_history ${h.id}: an evaluation entry repeats the latest evaluation`); }
-      if (h.action === 'compliance_representation_declared' && d.status === 'verified') { if (!ev || ev.outcome !== d.outcome || !same(ev.policyVersions, d.policyVersions)) throw refusal('COMPLIANCE_RECORDS_INPUT_INVALID', `compliance_context_history ${h.id}: a verified declaration repeats the latest evaluation`); }
-    }
-    return evId;
+  /** A whole record handed to `create` must read back as it was written. */
+  const created = (table, byId, written) => { const stored = byId(written.id); readsBackAsWritten(table, written.id, written, stored); return stored; };
+  /** Insert a history entry and read it back: a detail worked out on read must repeat what the writer said. */
+  const historyWith = (table, ownerCol, byId, insert) => (id, h) => {
+    if (!isPlainObject(h)) FAIL(`${table} ${id}: a history entry must be an object (got ${describe(h)})`);
+    step(table, id, `history ${h.id}`, () => insert(id, nextOrd(table, ownerCol, id), h));
+    readsBackAsWritten(table, h.id, h, byId(id).history.find((x) => x.id === h.id));
+  };
+  const bumpOf = (table) => (id, { at, by = null }) => q(`UPDATE ${table} SET rev = rev + 1, rev_at = @at, rev_by_id = @uid, rev_by_name = @name WHERE id = @id`).run({ id, at, uid: by?.id ?? by?.userId ?? null, name: by?.name ?? null });
+  /** Named acts on one table, each `act(id, input, bookkeeping)`, and `recordAct(id, bookkeeping)`. */
+  const actsOn = ({ table, byId, history }, defs) => {
+    const bump = bumpOf(table);
+    const run = (name, id, fn, { bump: b = null, history: entries = [] } = {}) => operation(() => {
+      if (!q(`SELECT 1 FROM ${table} WHERE id = ?`).get(id)) throw refuse('NOT_FOUND', `${table} ${id} is not a record of the repository`);
+      step(table, id, name, fn);
+      if (b) bump(id, b);
+      for (const h of listOf(entries, `${table} ${id} history`)) history(id, h);
+      return byId(id);
+    });
+    return {
+      ...Object.fromEntries(Object.entries(defs).map(([name, fn]) => [name, (id, input = {}, bookkeeping = {}) => run(name, id, () => fn(id, input), bookkeeping)])),
+      recordAct: (id, bookkeeping = {}) => run('recordAct', id, () => {}, bookkeeping),
+    };
   };
 
   // ---- contexts
   const contextById = one(decodeContexts, 'SELECT * FROM compliance_contexts WHERE id = ?');
+  const CTX = 'compliance_contexts';
+  const contextHistory = historyWith('compliance_context_history', 'context_id', contextById, (id, ord, h) => writeContextEntry(s(), id, ord, h, latestEvaluationId(id)));
+  const repMove = (id, repId, where, cols, what) => guarded('compliance_context_representations', { context_id: id, id: repId }, where, cols, `compliance_context_representations ${repId} of ${CTX} ${id} ${what}`);
+  const replaceProjection = (id, parties, representations) => {
+    q('DELETE FROM compliance_context_parties WHERE context_id = ?').run(id);
+    listOf(parties, `${CTX} ${id} parties`).forEach((p, i) => s().partyIns.run(...contextPartyRow(id, i, p)));
+    q('DELETE FROM compliance_context_representations WHERE context_id = ?').run(id);
+    listOf(representations, `${CTX} ${id} representations`).forEach((r, i) => s().repIns.run(...contextRepRow(id, i, r)));
+  };
   const contexts = {
-    create: (raw) => operation(() => {
-      const c = typedOr(typeContext, raw, 'complianceContexts');
-      if (q('SELECT 1 FROM compliance_contexts WHERE id = ?').get(c.id)) throw refusal('COMPLIANCE_RECORDS_DUPLICATE', `compliance_contexts ${c.id} already exists`);
-      const taken = c.history.find(historyTaken); if (taken) throw refusal('COMPLIANCE_RECORDS_DUPLICATE', `history entry ${taken.id} already exists`);
-      if (c.history.some((h) => h.action === 'compliance_context_evaluated' || h.detail?.status === 'verified')) throw refusal('COMPLIANCE_RECORDS_INPUT_INVALID', `compliance_contexts ${c.id}: an evaluation is recorded with recordEvaluation`);
-      writeContext(s(), c, { isNew: true });
-      return contextById(c.id);
+    /** A new context, whole, with its opening history (an evaluation is recorded with recordEvaluation). An existing id is refused. */
+    create: (c) => operation(() => {
+      newRecord(CTX, (id) => !!q('SELECT 1 FROM compliance_contexts WHERE id = ?').get(id), c);
+      const entries = listOf(c.history, `${CTX} ${c.id} history`);
+      if (entries.some((h) => h?.action === 'compliance_context_evaluated' || h?.detail?.status === 'verified')) FAIL(`${CTX} ${c.id}: an evaluation is recorded with recordEvaluation`);
+      step(CTX, c.id, 'rows', () => writeContext(s(), c));
+      for (const h of entries) step(CTX, c.id, `history ${h?.id}`, () => writeContextEntry(s(), c.id, nextOrd('compliance_context_history', 'context_id', c.id), h, null));
+      const { lastEvaluation: _l, evaluationCount: _n, ...written } = c;
+      return created(CTX, contextById, written);
     }),
-    /**
-     * `update(id, change)`: the agency, agent, type, jurisdictions, origin, opening and create key never change; a closed
-     * context does not reopen; the history only grows; an evaluation entry repeats the latest evaluation.
-     */
-    update: (id, change) => guard(`compliance_contexts ${id}`, () => operation(() => {
-      if (typeof change !== 'function') throw new TypeError('compliance_contexts: update(id, change) needs a function that edits the copy it is given');
-      const stored = contextById(id);
-      if (!stored) throw refusal('COMPLIANCE_RECORDS_NOT_FOUND', `compliance_contexts ${id} is not a record of the repository`);
-      const draft = clone(stored);
-      const returned = change(draft);
-      const next = typedOr(typeContext, returned === undefined ? draft : returned, 'complianceContexts');
-      const { lastEvaluation: _l, evaluationCount: _n, ...storedFlat } = stored;
-      checkFixed('compliance_contexts', id, storedFlat, next, ['id', 'agencyOrgId', 'agentUserId', 'type', 'jurisdictions', 'origin', 'transactionId', 'openedAt', 'keys']);
-      if (stored.status === 'closed' && next.status !== 'closed') throw refusal('COMPLIANCE_RECORDS_INPUT_INVALID', `compliance_contexts ${id}: a closed context does not reopen`);
-      checkHistory('compliance_contexts', id, storedFlat, next);
-      const evId = checkEvaluationEntries(id, next.history.slice(stored.history.length));
-      writeContext(s(), next, { isNew: false, knownHistory: stored.history.length, latestEvaluationId: evId });
-      return contextById(id);
-    })),
+    ...actsOn({ table: CTX, byId: contextById, history: contextHistory }, {
+      addParty: (id, { party }) => s().partyIns.run(...contextPartyRow(id, nextOrd('compliance_context_parties', 'context_id', id), party)),
+      /** The agent's declaration (verified, or pending its review). */
+      declareRepresentation: (id, { representation }) => s().repIns.run(...contextRepRow(id, nextOrd('compliance_context_representations', 'context_id', id), representation)),
+      /** A withdrawal is final. */
+      withdrawRepresentation: (id, { representationId, at }) => repMove(id, representationId, "status <> 'withdrawn'", { status: 'withdrawn', withdrawn_at: at }, 'is already withdrawn'),
+      /** An attributed reviewer decided a declaration awaiting review: verified by that review (no act by the agent), or withdrawn. */
+      decideRepresentation: (id, { representationId, approved, reviewId, at }) => repMove(id, representationId, "status = 'pending_review'",
+        approved ? { status: 'verified', declared_only: 0, verified_by_review_id: reviewId, verified_at: at } : { status: 'withdrawn', withdrawn_at: at }, 'is not awaiting review'),
+      /** Facts an approved review settled (each once). */
+      resolveFacts: (id, { codes }) => {
+        for (const code of listOf(codes, `${CTX} ${id} codes`)) {
+          if (!q('SELECT 1 FROM compliance_context_resolved_facts WHERE context_id = ? AND code = ?').get(id, code)) s().factIns.run(id, nextOrd('compliance_context_resolved_facts', 'context_id', id), code);
+        }
+      },
+      rejectByReview: (id, { at }) => setRow(CTX, { id }, { review_rejected_at: at }),
+      /** The evaluation input, rebuilt from a transaction's own rows (the transaction is the truth; this is its projection). */
+      project: (id, { parties, representations }) => replaceProjection(id, parties, representations),
+      /** A closed context does not reopen. */
+      close: (id, { at }) => guarded(CTX, { id }, "status = 'open'", { status: 'closed', closed_at: at }, `${CTX} ${id} is already closed`),
+      clearReEvaluation: (id) => setRow(CTX, { id }, { re_evaluation_pending: 0 }),
+    }),
     /**
      * Record an evaluation of the context (append-only): the result, the identity of its inputs and the history entry that
      * says so, at once; the re-evaluation flag clears. Returns the stored evaluation (decoded, with its id).
      */
     recordEvaluation: (id, result, snapshotOf, entry) => operation(() => {
-      const ctx = q('SELECT id FROM compliance_contexts WHERE id = ?').get(id);
-      if (!ctx) throw refusal('COMPLIANCE_RECORDS_NOT_FOUND', `compliance_contexts ${id} is not a record of the repository`);
-      const e = typeEvaluation(result, snapshotOf, `compliance_evaluations ${id}`);
+      if (!q('SELECT 1 FROM compliance_contexts WHERE id = ?').get(id)) throw refuse('NOT_FOUND', `${CTX} ${id} is not a record of the repository`);
+      if (!isPlainObject(result) || !isPlainObject(snapshotOf)) FAIL(`compliance_evaluations ${id}: an evaluation is an engine result and the identity of its inputs`);
       const position = (q('SELECT MAX(position) AS p FROM compliance_evaluations WHERE context_id = ?').get(id).p ?? 0) + 1;
-      const evId = writeEvaluation(s(), id, position, e);
-      const h = typeHistory([entry], `compliance_contexts ${id}`, CONTEXT_ACTIONS, typeContextDetail)[0];
-      if (historyTaken(h)) throw refusal('COMPLIANCE_RECORDS_DUPLICATE', `history entry ${h.id} already exists`);
-      checkEvaluationEntries(id, [h]);
-      const ord = q('SELECT COUNT(*) AS n FROM compliance_context_history WHERE context_id = ?').get(id).n;
-      writeContextEntry(s(), id, ord, h, evId);
-      q('UPDATE compliance_contexts SET re_evaluation_pending = 0 WHERE id = ?').run(id);
-      return deepFreeze(evaluationOf(evId));
+      const evId = step('compliance_evaluations', `${id}#${position}`, 'rows', () => writeEvaluation(s(), id, position, result, snapshotOf));
+      const stored = evaluationOf(evId);
+      const { outcome, reasons, consentsOutstanding, policyVersions, evaluatedAt, inputHash } = result;
+      readsBackAsWritten('compliance_evaluations', evId, { outcome, reasons, consentsOutstanding, policyVersions, evaluatedAt, inputHash, snapshotOf }, stored);
+      contextHistory(id, entry);
+      setRow(CTX, { id }, { re_evaluation_pending: 0 });
+      return deepFreeze(stored);
     }),
     byId: contextById,
     /** One evaluation row, decoded (a transaction's snapshot names one), or null. */
@@ -1175,7 +885,7 @@ export function createComplianceRecordsRepository({ sqlite, unit = null, now = D
         JOIN compliance_evaluations e ON e.context_id = c.id AND e.position = (SELECT MAX(position) FROM compliance_evaluations WHERE context_id = c.id)
         WHERE c.status = 'open' AND NOT EXISTS (SELECT 1 FROM compliance_evaluation_policy_versions v WHERE v.evaluation_id = e.id AND v.policy_version_id = ?)
         ORDER BY c.rowid`).all(jurisdiction, policyVersionId).map((r) => r.id);
-      for (const id of ids) contexts.update(id, (d) => { d.reEvaluationPending = true; d.history.push(entryOf()); });
+      for (const id of ids) { setRow(CTX, { id }, { re_evaluation_pending: 1 }); contextHistory(id, entryOf()); }
       return ids;
     }),
     /** Every evaluation's outcome, counted (the T&S metrics). */
@@ -1184,38 +894,32 @@ export function createComplianceRecordsRepository({ sqlite, unit = null, now = D
 
   // ---- reviews
   const reviewById = one(decodeReviews, 'SELECT * FROM regulatory_reviews WHERE id = ?');
-  const checkSnapshot = (r) => {
-    if (!r.snapshot?.evaluationId) return;
-    const ev = q('SELECT outcome, context_id FROM compliance_evaluations WHERE id = ?').get(r.snapshot.evaluationId);
-    if (!ev || ev.outcome !== r.snapshot.outcome || (r.subject.contextId && ev.context_id !== r.subject.contextId)) throw refusal('COMPLIANCE_RECORDS_INPUT_INVALID', `regulatory_reviews ${r.id}: the snapshot names an evaluation of its context with the same outcome`);
-  };
+  const RV = 'regulatory_reviews';
+  const reviewHistory = historyWith('regulatory_review_history', 'review_id', reviewById, (id, ord, h) => s().rvHist.run(reviewEntry(id, ord, h)));
+  const reviewMove = (id, where, cols, what) => guarded(RV, { id }, where, cols, `${RV} ${id} ${what}`);
   const reviews = {
-    create: (raw) => operation(() => {
-      const r = typedOr(typeReview, raw, 'regulatoryReviews');
-      if (q('SELECT 1 FROM regulatory_reviews WHERE id = ?').get(r.id)) throw refusal('COMPLIANCE_RECORDS_DUPLICATE', `regulatory_reviews ${r.id} already exists`);
-      checkSnapshot(r);
-      const taken = r.history.find(historyTaken); if (taken) throw refusal('COMPLIANCE_RECORDS_DUPLICATE', `history entry ${taken.id} already exists`);
-      writeReview(s(), r, { isNew: true });
-      return reviewById(r.id);
+    /**
+     * A new review, whole, with its history; a reconsideration names the decided review it `supersedes` (once). The
+     * snapshot names an evaluation of the review's own context. An existing id is refused.
+     */
+    create: (r) => operation(() => {
+      newRecord(RV, (id) => !!q('SELECT 1 FROM regulatory_reviews WHERE id = ?').get(id), r);
+      step(RV, r.id, 'rows', () => writeReview(s(), r));
+      for (const h of listOf(r.history, `${RV} ${r.id} history`)) step(RV, r.id, `history ${h?.id}`, () => s().rvHist.run(reviewEntry(r.id, nextOrd('regulatory_review_history', 'review_id', r.id), h)));
+      return created(RV, reviewById, r);
     }),
-    /** `update(id, change)`: kind, agency, agent, subject, reasons, versions, snapshot and request never change; a decision is final; the history only grows. */
-    update: (id, change) => guard(`regulatory_reviews ${id}`, () => operation(() => {
-      if (typeof change !== 'function') throw new TypeError('regulatory_reviews: update(id, change) needs a function that edits the copy it is given');
-      const stored = reviewById(id);
-      if (!stored) throw refusal('COMPLIANCE_RECORDS_NOT_FOUND', `regulatory_reviews ${id} is not a record of the repository`);
-      const draft = clone(stored);
-      const returned = change(draft);
-      const next = typedOr(typeReview, returned === undefined ? draft : returned, 'regulatoryReviews');
-      const flat = (r) => ({ ...r, snapshot: r.snapshot && { outcome: r.snapshot.outcome, evaluationId: r.snapshot.evaluationId ?? null, evaluatedAt: r.snapshot.evaluatedAt ?? null } });
-      checkFixed('regulatory_reviews', id, flat(stored), next, ['id', 'kind', 'agencyOrgId', 'agentUserId', 'subject', 'reasons', 'policyVersions', 'snapshot', 'requestedAt', 'requestedBy']);
-      for (const k of ['supersedes', 'supersededBy']) if (stored[k] !== null && next[k] !== stored[k]) throw refusal('COMPLIANCE_RECORDS_INPUT_INVALID', `regulatory_reviews ${id}: ${k} is written once`);
-      if (stored.decision && !same(stored.decision, next.decision)) throw refusal('COMPLIANCE_RECORDS_INPUT_INVALID', `regulatory_reviews ${id}: a decision is final`);
-      if (!OPEN_REVIEW_STATUSES.includes(stored.status) && stored.status !== next.status && !(next.status === 'SUPERSEDED' && ['APPROVED', 'REJECTED'].includes(stored.status))) throw refusal('COMPLIANCE_RECORDS_INPUT_INVALID', `regulatory_reviews ${id}: a ${stored.status} review only becomes SUPERSEDED`);
-      for (const k of ['resolve']) if (stored.keys[k] && !same(stored.keys[k], next.keys[k])) throw refusal('COMPLIANCE_RECORDS_INPUT_INVALID', `regulatory_reviews ${id}: the ${k} key is written once`);
-      checkHistory('regulatory_reviews', id, stored, next);
-      writeReview(s(), next, { isNew: false, knownHistory: stored.history.length });
-      return reviewById(id);
-    })),
+    ...actsOn({ table: RV, byId: reviewById, history: reviewHistory }, {
+      start: (id, { at, by }) => reviewMove(id, "status = 'PENDING'", { status: 'IN_REVIEW', started_at: at, started_by_id: by?.id, started_by_name: by?.name ?? null, started_by_role: by?.role }, 'is not pending'),
+      /** A decision is final: the review takes its outcome, with the prior and resulting states and the evidence cited. */
+      resolve: (id, { decision, key = null }) => {
+        reviewMove(id, OPEN, { status: decision?.outcome, decided_at: decision?.at, ...decisionCols(decision), resolve_key: key?.key ?? null, resolve_fp: key?.fp ?? null }, 'is not open');
+        listOf(decision?.evidenceRefs, `${RV} ${id} evidenceRefs`).forEach((ref, i) => s().rvRef.run(id, i, ref));
+      },
+      /** An open review is cancelled: by its context closing (no decision), or by a reviewer (a CANCELLED decision). */
+      cancel: (id, { at, decision = null }) => reviewMove(id, OPEN, { status: 'CANCELLED', decided_at: at, ...decisionCols(decision) }, 'is not open'),
+      /** A decided review is superseded by the review naming it (created first); its decision is retained. */
+      markSuperseded: (id) => reviewMove(id, "status IN ('APPROVED','REJECTED') AND EXISTS (SELECT 1 FROM regulatory_reviews n WHERE n.supersedes_id = regulatory_reviews.id)", { status: 'SUPERSEDED' }, 'is not a decided review a newer one supersedes'),
+    }),
     byId: reviewById,
     /** The open item for this facet of this profile, or null (one open item per subject). */
     openForFacet: one(decodeReviews, `SELECT * FROM regulatory_reviews WHERE kind = 'verification_facet' AND ${OPEN} AND subject_profile_id = ? AND subject_facet = ? AND subject_member_association IS ? LIMIT 1`),
@@ -1256,43 +960,31 @@ export function createComplianceRecordsRepository({ sqlite, unit = null, now = D
 
   // ---- consents
   const consentById = one(decodeConsents, 'SELECT * FROM regulatory_consents WHERE id = ?');
+  const CS = 'regulatory_consents';
+  const consentHistory = historyWith('regulatory_consent_history', 'consent_id', consentById, (id, ord, h) => s().csHist.run({ id: h.id, owner: id, ord, at: h.at, ...byCols(h.by), action: h.action }));
+  const idTaken = (id) => !!q('SELECT 1 FROM regulatory_consents WHERE id = ? UNION ALL SELECT 1 FROM regulatory_consent_revocations WHERE id = ?').get(id, id);
+  /** The stored status changes once (requested → granted | declined), with the answer's key. */
+  const answer = (id, cols, slot, key) => guarded(CS, { id }, "status = 'requested'", { ...cols, [`${slot}_key`]: key?.key ?? null, [`${slot}_fp`]: key?.fp ?? null }, `${CS} ${id} is not awaiting an answer`);
   const consents = {
-    create: (raw) => operation(() => {
-      const k = typedOr(typeConsent, raw, 'regulatoryConsents');
-      if (q('SELECT 1 FROM regulatory_consents WHERE id = ? UNION ALL SELECT 1 FROM regulatory_consent_revocations WHERE id = ?').get(k.id, k.id)) throw refusal('COMPLIANCE_RECORDS_DUPLICATE', `regulatory_consents ${k.id} already exists`);
-      if (k.status !== 'requested') throw refusal('COMPLIANCE_RECORDS_INPUT_INVALID', `regulatory_consents ${k.id}: a consent is requested first`);
-      const taken = k.history.find(historyTaken); if (taken) throw refusal('COMPLIANCE_RECORDS_DUPLICATE', `history entry ${taken.id} already exists`);
-      writeConsent(s(), k, { isNew: true });
-      return consentById(k.id);
+    /** A new consent, whole and requested, with its history. An existing id is refused. */
+    create: (k) => operation(() => {
+      newRecord(CS, idTaken, k);
+      if (k.status !== 'requested') FAIL(`${CS} ${k.id}: a consent is requested first`);
+      step(CS, k.id, 'rows', () => writeConsent(s(), k));
+      for (const h of listOf(k.history, `${CS} ${k.id} history`)) step(CS, k.id, `history ${h?.id}`, () => s().csHist.run({ id: h?.id, owner: k.id, ord: nextOrd('regulatory_consent_history', 'consent_id', k.id), at: h?.at, ...byCols(h?.by), action: h?.action }));
+      return created(CS, consentById, k);
     }),
-    /** `update(id, change)`: the parties, context, versions and particulars offered never change; the stored status changes once (requested → granted | declined); a key is written once; the history only grows. */
-    update: (id, change) => guard(`regulatory_consents ${id}`, () => operation(() => {
-      if (typeof change !== 'function') throw new TypeError('regulatory_consents: update(id, change) needs a function that edits the copy it is given');
-      const stored = consentById(id);
-      if (!stored) throw refusal('COMPLIANCE_RECORDS_NOT_FOUND', `regulatory_consents ${id} is not a record of the repository`);
-      const { revocation: _rv, ...storedFlat } = stored;
-      const draft = clone(storedFlat);
-      const returned = change(draft);
-      const next = typedOr(typeConsent, returned === undefined ? draft : returned, 'regulatoryConsents');
-      checkFixed('regulatory_consents', id, storedFlat, next, ['id', 'kind', 'contextId', 'agentUserId', 'agencyOrgId', 'partyRole', 'subject', 'regarding', 'requestedAt', 'requestedBy', 'policyVersions', 'ruleIds']);
-      const fixedParticulars = (p) => ({ ...p, acknowledged: null });
-      if (!same(fixedParticulars(next.particulars), fixedParticulars(storedFlat.particulars))) throw refusal('COMPLIANCE_RECORDS_INPUT_INVALID', `regulatory_consents ${id}: the particulars offered cannot change`);
-      if (storedFlat.status !== 'requested' && !same([next.status, next.grantedAt, next.grantedBy, next.declinedAt, next.declinedBy, next.particulars], [storedFlat.status, storedFlat.grantedAt, storedFlat.grantedBy, storedFlat.declinedAt, storedFlat.declinedBy, storedFlat.particulars])) throw refusal('COMPLIANCE_RECORDS_INPUT_INVALID', `regulatory_consents ${id}: an answered consent is never edited (a revocation is its own row)`);
-      for (const k of CONSENT_KEY_SLOTS) if (storedFlat.keys[k] && !same(storedFlat.keys[k], next.keys[k])) throw refusal('COMPLIANCE_RECORDS_INPUT_INVALID', `regulatory_consents ${id}: the ${k} key is written once`);
-      checkHistory('regulatory_consents', id, storedFlat, next);
-      writeConsent(s(), next, { isNew: false, knownHistory: storedFlat.history.length });
-      return consentById(id);
-    })),
-    /** Record the revocation of a granted consent, once: its own row (`{ id, at, by }`). */
-    revoke: (consentId, { id, at, by }) => operation(() => {
-      const k = consentById(consentId);
-      if (!k || k.status !== 'granted') throw refusal('COMPLIANCE_RECORDS_INPUT_INVALID', `regulatory_consents ${consentId}: only a granted consent can be revoked`);
-      if (k.revocation) throw refusal('COMPLIANCE_RECORDS_DUPLICATE', `regulatory_consents ${consentId} was already revoked`);
-      if (!isId(id) || !isInt(at)) throw refusal('COMPLIANCE_RECORDS_INPUT_INVALID', 'a revocation needs an id and an instant');
-      if (q('SELECT 1 FROM regulatory_consents WHERE id = ? UNION ALL SELECT 1 FROM regulatory_consent_revocations WHERE id = ?').get(id, id)) throw refusal('COMPLIANCE_RECORDS_DUPLICATE', `${id} already exists`);
-      const b = typeBy(by, `regulatory_consent_revocations ${id}.by`, { kinds: ['player', 'club_user'] });
-      s().revocation.run(id, consentId, at, b.kind, b.userId, b.name, b.orgId ?? null);
-      return consentById(consentId);
+    ...actsOn({ table: CS, byId: consentById, history: consentHistory }, {
+      /** The party grants, acknowledging the particulars and the offer of legal advice (`by.signatory` for a club's signatory). */
+      grant: (id, { at, by, key = null }) => answer(id, { status: 'granted', ...answerCols('granted', at, by, { signatory: true }), acknowledged_at: at }, 'grant', key),
+      decline: (id, { at, by, key = null }) => answer(id, { status: 'declined', ...answerCols('declined', at, by) }, 'decline', key),
+      /** A granted consent is revoked once: the revocation is its own row; the granted row is never edited (only its key). */
+      revoke: (id, { revocation: rv, key = null }) => {
+        guarded(CS, { id }, "status = 'granted'", { revoke_key: key?.key ?? null, revoke_fp: key?.fp ?? null }, `${CS} ${id}: only a granted consent can be revoked`);
+        if (idTaken(rv?.id)) throw refuse('DUPLICATE', `${rv.id} already exists`);
+        if (rv?.by?.kind !== 'player' && rv?.by?.kind !== 'club_user') FAIL(`regulatory_consent_revocations ${rv?.id}: revoked by the party (a player or a club user)`);
+        s().revocation.run(rv.id, id, rv.at, rv.by.kind, rv.by.userId ?? null, rv.by.name ?? null, rv.by.orgId ?? null);
+      },
     }),
     byId: consentById,
     /** The context's consents, oldest first (the engine's input, the transaction's projection). */
@@ -1324,7 +1016,8 @@ export function createComplianceRecordsRepository({ sqlite, unit = null, now = D
   const forgetPlayer = (playerId, at, entryOf) => operation(() => {
     const touched = q("SELECT DISTINCT context_id FROM compliance_context_parties WHERE subject_kind = 'player' AND subject_id = ? AND removed = 0 ORDER BY context_id").all(playerId).map((r) => r.context_id);
     for (const id of touched) {
-      contexts.update(id, (d) => { for (const p of d.parties) if (p.subjectKind === 'player' && p.subjectId === playerId && !p.removed) { p.removed = true; p.removedAt = at; } d.history.push(entryOf()); });
+      q("UPDATE compliance_context_parties SET removed = 1, removed_at = ? WHERE context_id = ? AND subject_kind = 'player' AND subject_id = ? AND removed = 0").run(at, id, playerId);
+      contexts.recordAct(id, { history: [entryOf()] });
       q("UPDATE compliance_context_history SET by_id = NULL, by_name = NULL WHERE context_id = ? AND by_kind = 'player'").run(id);
     }
     const SUB = "SELECT id FROM regulatory_consents WHERE subject_kind = 'player' AND subject_id = ?";

@@ -38,7 +38,7 @@
  *                                   no rule, no policy and no consent row.
  */
 
-import { guardRev, bumpRev, revMeta } from '../../platform/concurrency.mjs';
+import { guardRev, revMeta } from '../../platform/concurrency.mjs';
 import { rateLimitedBody } from '../../platform/rateLimit.mjs';
 import { readPage, pageOf, sendPageError } from '../../platform/paging.mjs';
 import { normaliseClientKey, payloadFingerprint } from '../../recruitment/lifecycle/contact.mjs';
@@ -80,14 +80,12 @@ export function registerTransactions(rawCtx) {
     agentTransactions, unit,
     channels, // a linked thread's own authorisation is read from the message threads
   } = rawCtx;
-  if (typeof agentTransactions?.transactions?.update !== 'function' || typeof unit !== 'function') throw new TypeError('registerTransactions needs the agent transactions repository and unit from the data layer');
+  if (typeof agentTransactions?.transactions?.recordAct !== 'function' || typeof unit !== 'function') throw new TypeError('registerTransactions needs the agent transactions repository and unit from the data layer');
   const { transactions: txs, representations: repsRepo, documents: docsRepo } = agentTransactions;
 
   const now = () => Date.now();
-  const hist = (record, action, by, detail = null) => {
-    record.history ??= [];
-    record.history.push({ id: nextId('aud'), at: now(), action, by, detail });
-  };
+  /** A history entry, for an act's bookkeeping or a whole record's history. */
+  const entry = (action, by, detail = null) => ({ id: nextId('aud'), at: now(), action, by, detail });
   const byAgent = (req) => ({ kind: 'org', userId: req.orgUser.id, name: req.orgUser.name });
   const byClubUser = (req) => ({ kind: 'club_user', userId: req.orgUser.id, name: req.orgUser.name, orgId: req.org.id });
   const byPlayer = (req) => ({ kind: 'player', userId: req.player.id, name: req.player.name });
@@ -128,7 +126,13 @@ export function registerTransactions(rawCtx) {
    * `history[].by`; the shared token carries the role, and the 409 conflict body
    * then says "Club signatory changed this" rather than naming someone.
    */
-  const bumpTxRev = (record, by) => bumpRev(record, { by: { id: null, name: actorLabel(by)?.label ?? null }, at: now() });
+  const roleRev = (by) => ({ at: now(), label: actorLabel(by)?.label ?? null });
+  /** An act's bookkeeping on the transaction: its entries, and with `touch` the change instant. */
+  const txBook = (by, history = [], { touch = false } = {}) => ({ at: now(), touch, history });
+  /** The route's one rev bump, labelled with the role, after its acts. */
+  const bumpTx = (txId, by) => txs.recordAct(txId, { bump: roleRev(by) });
+  /** On a binding or a document: its entries and a rev bump labelled with the role (or with `revBy`, a person). */
+  const rowBook = (by, history = [], revBy = null) => ({ history, bump: { at: now(), by: revBy ?? { userId: null, name: roleRev(by).label } } });
 
   const txById = (id) => (typeof id === 'string' ? txs.byId(id) : null);
   const repsOf = (txId) => repsRepo.forTransaction(txId);
@@ -190,72 +194,71 @@ export function registerTransactions(rawCtx) {
   }
 
   /**
-   * Re-evaluate compliance NOW and record the snapshot on the transaction draft
-   * `d` (inside the route's unit). Called on every material mutation and never
-   * trusted from a previous request: this is what makes "an old evaluation
-   * authorises a new mutation" impossible rather than guarded against.
+   * Re-evaluate compliance NOW over the transaction's stored rows and record the snapshot (inside the route's unit).
+   * Called on every material mutation, after the mutation's own act, and never trusted from a previous request: this is
+   * what makes "an old evaluation authorises a new mutation" impossible rather than guarded against. Returns the verdict
+   * and the stored transaction.
    */
-  function recheckCompliance(d, by) {
-    const ctx = compliance.contextById(d.contextId);
-    const reps = liveRepsOf(d.id);
-    const confirmed = partiesConfirmed(d);
-    const guard = safeguardingProblem(d);
+  function recheckCompliance(txId, by) {
+    const tx = txById(txId);
+    const ctx = compliance.contextById(tx.contextId);
+    const reps = liveRepsOf(tx.id);
+    const confirmed = partiesConfirmed(tx);
+    const guard = safeguardingProblem(tx);
     if (guard) {
       // Safeguarding is not a compliance verdict and must not be reported as
       // one: the transaction stops, the snapshot is not refreshed, and the
       // caller's refusal is the uniform 404.
-      return { safeguarding: guard, state: null, result: null };
+      return { safeguarding: guard, state: null, result: null, tx };
     }
-    const gate = compliance.facetGateProblem(d.agentUserId, d.jurisdictions);
+    const gate = compliance.facetGateProblem(tx.agentUserId, tx.jurisdictions);
     if (gate) {
       const state = complianceStateFrom({ gate: gate.gate ?? 'FACET_NOT_VERIFIED', reasons: gate.reasons ?? [], partiesConfirmed: confirmed, representationCount: reps.length });
-      applyComplianceSnapshot(d, { state, result: null, ctx, by });
-      return { safeguarding: null, state, result: null, gateProblem: gate };
+      return { safeguarding: null, state, result: null, gateProblem: gate, tx: applyComplianceSnapshot(tx, { state, result: null, ctx, by }) };
     }
-    if (!ctx) return { safeguarding: null, state: complianceStateFrom({ gate: 'REPRESENTATION_MISSING', partiesConfirmed: confirmed }), result: null };
-    compliance.project(ctx, { parties: partiesOf(d), representations: reps });
+    if (!ctx) return { safeguarding: null, state: complianceStateFrom({ gate: 'REPRESENTATION_MISSING', partiesConfirmed: confirmed }), result: null, tx };
+    compliance.project(ctx, { parties: partiesOf(tx), representations: reps });
     const result = compliance.evaluate(ctx, by);
     const state = complianceStateFrom({
       outcome: result.outcome, reasons: result.reasons, consentsOutstanding: result.consentsOutstanding,
       representationCount: reps.length, partiesConfirmed: confirmed,
     });
-    applyComplianceSnapshot(d, { state, result, ctx, by });
-    return { safeguarding: null, state, result };
+    return { safeguarding: null, state, result, tx: applyComplianceSnapshot(tx, { state, result, ctx, by }) };
   }
 
   /**
-   * Attach the snapshot to the draft and let it move the status through
-   * the COMPLIANCE transition map only. An actor can never reach READY,
+   * Record the snapshot and let it move the status through the COMPLIANCE
+   * transition map only. An actor can never reach READY,
    * COMPLIANCE_PENDING or COMPLIANCE_BLOCKED by asking. The snapshot names the
    * evaluation it was taken from (or the gate that refused before the engine
    * ran); its outcome, reasons and versions are that evaluation's own.
    */
-  function applyComplianceSnapshot(d, { state, result, ctx, by }) {
-    const prev = complianceOf(d)?.state ?? null;
-    d.compliance = {
+  function applyComplianceSnapshot(tx, { state, result, ctx, by }) {
+    const prev = complianceOf(tx)?.state ?? null;
+    const actor = by ?? bySystem('compliance re-evaluation');
+    const snapshot = {
       evaluationId: result ? result.evaluationId : null, gate: result ? null : state.pendingReason,
       evaluatedAt: now(), pendingReason: state.pendingReason ?? null,
-      verificationFreshness: compliance.facetStatesFor(d.agentUserId)?.fifa_licence ?? null,
-      partyRevision: currentPartyRevision(d),
+      verificationFreshness: compliance.facetStatesFor(tx.agentUserId)?.fifa_licence ?? null,
+      partyRevision: currentPartyRevision(tx),
     };
-    d.reEvaluationPending = false;
     if (ctx) compliance.clearReEvaluation(ctx);
     const want = statusForComplianceState(state);
-    if (want && want !== d.status && complianceTransitionAllowed(d.status, want)) {
-      const from = d.status;
-      d.status = want;
-      hist(d, 'transaction_status_changed', by ?? bySystem('compliance re-evaluation'), { from, to: want, pendingReason: state.pendingReason ?? null, outcome: state.outcome ?? null });
-      broadcast('agent_transaction_status_changed', { orgId: d.agencyOrgId, txId: d.id, status: d.status });
-    }
-    hist(d, 'transaction_compliance_evaluated', by ?? bySystem('compliance re-evaluation'), { outcome: state.outcome ?? null, pendingReason: state.pendingReason ?? null, reasonCodes: state.reasonCodes, policyVersions: result?.policyVersions ?? [] });
+    const to = want && want !== tx.status && complianceTransitionAllowed(tx.status, want) ? want : null;
+    const history = [
+      ...(to ? [entry('transaction_status_changed', actor, { from: tx.status, to, pendingReason: state.pendingReason ?? null, outcome: state.outcome ?? null })] : []),
+      entry('transaction_compliance_evaluated', actor, { outcome: state.outcome ?? null, pendingReason: state.pendingReason ?? null, reasonCodes: state.reasonCodes, policyVersions: result?.policyVersions ?? [] }),
+    ];
+    const stored = txs.recordCompliance(tx.id, { snapshot, to }, { at: now(), touch: true, history });
+    if (to) broadcast('agent_transaction_status_changed', { orgId: tx.agencyOrgId, txId: tx.id, status: to });
     if (JSON.stringify(prev) !== JSON.stringify(state)) {
-      broadcast('agent_transaction_compliance_updated', { orgId: d.agencyOrgId, txId: d.id, outcome: state.outcome ?? 'NONE' });
-      notify({ kind: 'org_user', id: d.agentUserId }, 'agent_transaction_compliance', state.blocked
+      broadcast('agent_transaction_compliance_updated', { orgId: tx.agencyOrgId, txId: tx.id, outcome: state.outcome ?? 'NONE' });
+      notify({ kind: 'org_user', id: tx.agentUserId }, 'agent_transaction_compliance', state.blocked
         ? 'A transaction is blocked by an encoded ACTIVE rule. It cannot progress; only changed facts or a new policy version produce a different answer.'
         : state.clear ? 'A transaction is compliance-clear under the currently encoded rules. Nothing has been approved, agreed or signed.'
-          : `A transaction cannot currently progress: ${String(state.pendingReason ?? 'compliance pending').replace(/_/g, ' ').toLowerCase()}.`, d.id);
+          : `A transaction cannot currently progress: ${String(state.pendingReason ?? 'compliance pending').replace(/_/g, ' ').toLowerCase()}.`, tx.id);
     }
-    d.updatedAt = now();
+    return stored;
   }
 
   /**
@@ -676,11 +679,10 @@ export function registerTransactions(rawCtx) {
         notes: [], linkedThreads: [], links: { trialId: null, opportunityId: null, recruitmentCaseId: caseRef }, terms: { versions: [] },
         holdReasonCode: null, holdReason: null, heldAt: null, cancelReasonCode: null, cancelledAt: null, closeReasonCode: null, closedAt: null, archivedAt: null,
         initiatedBy: byAgent(req), createdAt: at, updatedAt: at,
-        keys: key ? { create: { key, fp } } : {}, rev: 1, revAt: at, revBy: null, history: [],
+        keys: key ? { create: { key, fp } } : {}, rev: 1, revAt: at, revBy: null, history: [entry('transaction_created', byAgent(req), { count: parties.length })],
       };
-      hist(tx, 'transaction_created', byAgent(req), { count: parties.length });
       txs.create(tx);
-      txs.update(id, (d) => { recheckCompliance(d, byAgent(req)); });
+      recheckCompliance(id, byAgent(req));
       broadcast('agent_transaction_created', { orgId: req.org.id, txId: id });
       for (const p of parties) notifyParty(tx, p, 'agent_transaction_action', `A transaction workspace has been opened naming you as the ${p.partyRole.replace(/_/g, ' ')}. Confirm your participation to let it proceed. Confirming does not agree to any terms.`);
       const stored = txById(id);
@@ -705,15 +707,11 @@ export function registerTransactions(rawCtx) {
     if (partiesOf(tx).length >= TRANSACTION_LIMITS.parties * 3) return sendTransactionError(res, { error: 'TRANSACTION_INPUT_INVALID', field: 'parties', message: 'This transaction already holds the maximum number of party records.' }, 'parties');
     if (!guardRev(req, res, tx, TX_CONFLICT(tx))) return;
     inUnit(() => {
-      txs.update(tx.id, (d) => {
-        d.parties.push(party);
-        if (key) d.keys[`party:${key}`] = { key, fp };
-        hist(d, 'transaction_party_added', byAgent(req), { partyRole: party.partyRole, subjectKind: party.subjectKind });
-        // A party change invalidates every prior clearance: the compliance
-        // snapshot is recomputed here and now, not carried over.
-        partyChanged(d, byAgent(req));
-        bumpTxRev(d, byAgent(req));
-      });
+      txs.addParty(tx.id, { party, key: key ? { key, fp } : null }, txBook(byAgent(req), [entry('transaction_party_added', byAgent(req), { partyRole: party.partyRole, subjectKind: party.subjectKind })]));
+      // A party change invalidates every prior clearance: the compliance
+      // snapshot is recomputed here and now, not carried over.
+      partyChanged(tx.id, byAgent(req));
+      bumpTx(tx.id, byAgent(req));
       broadcast('agent_transaction_party_changed', { orgId: tx.agencyOrgId, txId: tx.id, partyRole: party.partyRole });
       notifyParty(tx, party, 'agent_transaction_action', `A transaction workspace now names you as the ${party.partyRole.replace(/_/g, ' ')}. Confirm your participation to let it proceed. Confirming does not agree to any terms.`);
       const stored = txById(tx.id);
@@ -736,19 +734,11 @@ export function registerTransactions(rawCtx) {
     inUnit(() => {
       for (const r of repsOf(tx.id)) {
         if (r.partyRole !== party.partyRole || r.status === 'withdrawn') continue;
-        repsRepo.update(r.id, (x) => {
-          x.status = 'withdrawn'; x.withdrawnAt = now(); x.withdrawnReason = 'party_removed';
-          hist(x, 'transaction_representation_withdrawn', byAgent(req), { partyRole: x.partyRole, status: 'withdrawn' });
-          bumpRev(x, { by: req.orgUser, at: now() });
-        });
+        repsRepo.withdraw(r.id, { at: now(), reason: 'party_removed' }, rowBook(byAgent(req), [entry('transaction_representation_withdrawn', byAgent(req), { partyRole: r.partyRole, status: 'withdrawn' })], { userId: req.orgUser.id, name: req.orgUser.name }));
       }
-      txs.update(tx.id, (d) => {
-        const p = d.parties.find((x) => x.id === party.id);
-        p.removed = true; p.removedAt = now();
-        hist(d, 'transaction_party_removed', byAgent(req), { partyRole: party.partyRole, subjectKind: party.subjectKind });
-        partyChanged(d, byAgent(req));
-        bumpTxRev(d, byAgent(req));
-      });
+      txs.removeParty(tx.id, { partyId: party.id, at: now() }, txBook(byAgent(req), [entry('transaction_party_removed', byAgent(req), { partyRole: party.partyRole, subjectKind: party.subjectKind })]));
+      partyChanged(tx.id, byAgent(req));
+      bumpTx(tx.id, byAgent(req));
       broadcast('agent_transaction_party_changed', { orgId: tx.agencyOrgId, txId: tx.id, partyRole: party.partyRole });
       const stored = txById(tx.id);
       return () => res.json({ transaction: projectTransaction(stored, agentViewer(req)) });
@@ -760,19 +750,18 @@ export function registerTransactions(rawCtx) {
    * two routes: a confirmed transaction that loses its confirmation set falls
    * back out of READY/ACTIVE, and compliance is re-evaluated immediately.
    */
-  function partyChanged(d, by) {
-    if (!partiesConfirmed(d) && ['READY', 'ACTIVE', 'COMPLIANCE_PENDING', 'COMPLIANCE_BLOCKED'].includes(d.status)) {
-      const from = d.status;
-      d.status = 'PARTIES_CONFIRMED';
-      hist(d, 'transaction_status_changed', by, { from, to: d.status, pendingReason: 'PARTIES_NOT_CONFIRMED' });
-      broadcast('agent_transaction_status_changed', { orgId: d.agencyOrgId, txId: d.id, status: d.status });
+  function partyChanged(txId, by) {
+    let tx = txById(txId);
+    if (!partiesConfirmed(tx) && ['READY', 'ACTIVE', 'COMPLIANCE_PENDING', 'COMPLIANCE_BLOCKED'].includes(tx.status)) {
+      const from = tx.status;
+      tx = txs.moveOnPartyChange(tx.id, { to: 'PARTIES_CONFIRMED' }, { history: [entry('transaction_status_changed', by, { from, to: 'PARTIES_CONFIRMED', pendingReason: 'PARTIES_NOT_CONFIRMED' })] });
+      broadcast('agent_transaction_status_changed', { orgId: tx.agencyOrgId, txId: tx.id, status: tx.status });
     }
-    if (d.status === 'DRAFT' && partiesConfirmed(d)) {
-      hist(d, 'transaction_status_changed', by, { from: 'DRAFT', to: 'PARTIES_CONFIRMED' });
-      d.status = 'PARTIES_CONFIRMED';
-      broadcast('agent_transaction_status_changed', { orgId: d.agencyOrgId, txId: d.id, status: d.status });
+    if (tx.status === 'DRAFT' && partiesConfirmed(tx)) {
+      tx = txs.moveOnPartyChange(tx.id, { to: 'PARTIES_CONFIRMED' }, { history: [entry('transaction_status_changed', by, { from: 'DRAFT', to: 'PARTIES_CONFIRMED' })] });
+      broadcast('agent_transaction_status_changed', { orgId: tx.agencyOrgId, txId: tx.id, status: tx.status });
     }
-    recheckCompliance(d, by);
+    return recheckCompliance(tx.id, by);
   }
 
   /**
@@ -838,7 +827,8 @@ export function registerTransactions(rawCtx) {
       const proposed = { agentUserId: req.orgUser.id, partyRole, agreementId: agreement?.id ?? null, declaredOnly, status: declaredOnly ? 'declared' : 'verified', firstActAt: now() };
       const result = compliance.evaluate(ctx, byAgent(req), { proposed });
       const snapshotAndRefuse = (state, out) => {
-        txs.update(tx.id, (d) => { applyComplianceSnapshot(d, { state, result, ctx, by: byAgent(req) }); bumpTxRev(d, byAgent(req)); });
+        applyComplianceSnapshot(txById(tx.id), { state, result, ctx, by: byAgent(req) });
+        bumpTx(tx.id, byAgent(req));
         return () => sendTransactionError(res, out, 'representations');
       };
       if (result.outcome === 'PROHIBITED_CONFLICT') {
@@ -866,19 +856,18 @@ export function registerTransactions(rawCtx) {
       if (declaredOnly) {
         reviewId = compliance.createReview({ kind: 'representation_declared', agencyOrgId: tx.agencyOrgId, agentUserId: req.orgUser.id, subject: { contextId: ctx.id, transactionId: tx.id, representationId: repId, partyRole }, reasons: reviewReasons, policyVersions: result.policyVersions, snapshot, requestedBy: byAgent(req) }).id;
       }
+      const status = declaredOnly ? 'pending_review' : 'verified';
       const rep = {
         id: repId, transactionId: tx.id, agencyOrgId: tx.agencyOrgId, agentUserId: req.orgUser.id, partyRole,
-        agreementId: agreement?.id ?? null, declaredOnly, scope, jurisdictions, status: declaredOnly ? 'pending_review' : 'verified',
+        agreementId: agreement?.id ?? null, declaredOnly, scope, jurisdictions, status,
         reviewId, createdAt: now(), verifiedAt: declaredOnly ? null : now(), verifiedByReviewId: null, firstActAt: declaredOnly ? null : now(), withdrawnAt: null, withdrawnReason: null,
-        keys: key ? { attach: { key, fp } } : {}, rev: 1, revAt: now(), revBy: null, history: [],
+        keys: key ? { attach: { key, fp } } : {}, rev: 1, revAt: now(), revBy: null,
+        history: [entry('transaction_representation_attached', byAgent(req), { partyRole, status, policyVersions: result.policyVersions })],
       };
-      hist(rep, 'transaction_representation_attached', byAgent(req), { partyRole, status: rep.status, policyVersions: result.policyVersions });
       repsRepo.create(rep);
-      txs.update(tx.id, (d) => {
-        hist(d, 'transaction_representation_attached', byAgent(req), { partyRole, status: rep.status });
-        recheckCompliance(d, byAgent(req));
-        bumpTxRev(d, byAgent(req));
-      });
+      txs.recordAct(tx.id, txBook(byAgent(req), [entry('transaction_representation_attached', byAgent(req), { partyRole, status })]));
+      recheckCompliance(tx.id, byAgent(req));
+      bumpTx(tx.id, byAgent(req));
       // A declared-only binding is RECORDED and NOT EFFECTIVE. It answers 422 with
       // the review it created rather than 201, for the same reason compliance
       // does: a 201 reads as "this is now in force", and it is not — an
@@ -899,16 +888,10 @@ export function registerTransactions(rawCtx) {
     if (rep.status === 'withdrawn') return res.json({ transaction: projectTransaction(tx, agentViewer(req)), idempotent: true });
     if (!guardRev(req, res, tx, TX_CONFLICT(tx))) return;
     inUnit(() => {
-      repsRepo.update(rep.id, (x) => {
-        x.status = 'withdrawn'; x.withdrawnAt = now(); x.withdrawnReason = 'agent_withdrew';
-        hist(x, 'transaction_representation_withdrawn', byAgent(req), { partyRole: x.partyRole });
-        bumpTxRev(x, byAgent(req));
-      });
-      txs.update(tx.id, (d) => {
-        hist(d, 'transaction_representation_withdrawn', byAgent(req), { partyRole: rep.partyRole });
-        recheckCompliance(d, byAgent(req));
-        bumpTxRev(d, byAgent(req));
-      });
+      repsRepo.withdraw(rep.id, { at: now(), reason: 'agent_withdrew' }, rowBook(byAgent(req), [entry('transaction_representation_withdrawn', byAgent(req), { partyRole: rep.partyRole })]));
+      txs.recordAct(tx.id, txBook(byAgent(req), [entry('transaction_representation_withdrawn', byAgent(req), { partyRole: rep.partyRole })]));
+      recheckCompliance(tx.id, byAgent(req));
+      bumpTx(tx.id, byAgent(req));
       const stored = txById(tx.id);
       return () => res.json({ transaction: projectTransaction(stored, agentViewer(req)) });
     });
@@ -919,7 +902,8 @@ export function registerTransactions(rawCtx) {
     if (!writableOr(res, tx, 'evaluate')) return;
     if (limitedOr429(res, 'transaction_write', req.orgUser.id)) return;
     inUnit(() => {
-      txs.update(tx.id, (d) => { recheckCompliance(d, byAgent(req)); bumpTxRev(d, byAgent(req)); });
+      recheckCompliance(tx.id, byAgent(req));
+      bumpTx(tx.id, byAgent(req));
       const stored = txById(tx.id);
       return () => res.json({ transaction: projectTransaction(stored, agentViewer(req)) });
     });
@@ -971,18 +955,15 @@ export function registerTransactions(rawCtx) {
         // second guard, not the only one. The flag and the entry commit with the refusal.
         const stale0 = stalenessOf(tx);
         if (stale0) {
-          txs.update(tx.id, (d) => { d.reEvaluationPending = true; hist(d, 'transaction_compliance_stale', byAgent(req), { staleness: stale0 }); d.updatedAt = now(); bumpTxRev(d, byAgent(req)); });
+          txs.flagStale(tx.id, {}, txBook(byAgent(req), [entry('transaction_compliance_stale', byAgent(req), { staleness: stale0 })], { touch: true }));
+          bumpTx(tx.id, byAgent(req));
           return () => sendTransactionError(res, { error: 'TRANSACTION_COMPLIANCE_STALE', staleness: stale0, message: 'The recorded compliance evaluation no longer matches the current facts. Re-evaluate and read the new answer before progressing.' }, 'status');
         }
         // Leaving a hold never resumes on trust: compliance is re-checked
         // here, in this request, and the answer decides (and is recorded either way).
-        let checked = null;
-        const after = txs.update(tx.id, (d) => {
-          checked = recheckCompliance(d, byAgent(req));
-          if (checked.safeguarding) return;
-          if (checked.state?.blocked || !checked.state?.clear || !actorTransitionAllowed(d.status, to)) { bumpTxRev(d, byAgent(req)); return; }
-        });
-        const { safeguarding, state } = checked;
+        const { safeguarding, state, tx: after } = recheckCompliance(tx.id, byAgent(req));
+        // A refusal below commits the re-evaluation and the rev it moved.
+        if (!safeguarding && (state?.blocked || !state?.clear || !actorTransitionAllowed(after.status, to))) bumpTx(tx.id, byAgent(req));
         if (safeguarding) return () => notFound(res, 'status');
         if (state?.blocked) return () => sendTransactionError(res, { error: 'TRANSACTION_COMPLIANCE_BLOCKED', outcome: state.outcome, reasons: state.reasonCodes.map((code) => ({ code })), message: 'An encoded ACTIVE rule prohibits this combination. A reviewer cannot approve past it; only changed facts or a new policy version can.' }, 'status');
         if (!state?.clear) return () => sendTransactionError(res, { error: 'TRANSACTION_COMPLIANCE_PENDING', pendingReason: state?.pendingReason ?? null, outcome: state?.outcome ?? null, reasons: (state?.reasonCodes ?? []).map((code) => ({ code })), message: 'This transaction cannot progress while compliance is outstanding.' }, 'status');
@@ -993,20 +974,11 @@ export function registerTransactions(rawCtx) {
       }
       // A stale rev rolls back the re-evaluation above with the rest.
       guardRevOrRollback(req, res, tx, TX_CONFLICT(tx));
-      let from = null;
-      txs.update(tx.id, (d) => {
-        from = d.status;
-        d.status = to;
-        if (key) d.keys[`status:${key}`] = { key, fp };
-        if (to === 'ON_HOLD') { d.holdReasonCode = reasonCode; d.holdReason = reason || null; d.heldAt = now(); }
-        if (to === 'ACTIVE') { d.holdReasonCode = null; d.holdReason = null; d.heldAt = null; }
-        if (to === 'CANCELLED') { d.cancelReasonCode = reasonCode; d.cancelledAt = now(); }
-        if (to === 'CLOSED') { d.closeReasonCode = reasonCode; d.closedAt = now(); }
-        if (to === 'ARCHIVED') d.archivedAt = now();
-        const action = to === 'ON_HOLD' ? 'transaction_held' : to === 'CANCELLED' ? 'transaction_cancelled' : to === 'CLOSED' ? 'transaction_closed' : to === 'ARCHIVED' ? 'transaction_archived' : 'transaction_status_changed';
-        hist(d, action, byAgent(req), { from, to, ...(reasonCode ? { holdReasonCode: reasonCode } : {}) });
-        d.updatedAt = now(); bumpTxRev(d, byAgent(req));
-      });
+      const from = txById(tx.id).status;
+      const action = to === 'ON_HOLD' ? 'transaction_held' : to === 'CANCELLED' ? 'transaction_cancelled' : to === 'CLOSED' ? 'transaction_closed' : to === 'ARCHIVED' ? 'transaction_archived' : 'transaction_status_changed';
+      txs.moveByActor(tx.id, { to, at: now(), key: key ? { key, fp } : null, reasonCode: reasonCode || null, reason: reason || null },
+        txBook(byAgent(req), [entry(action, byAgent(req), { from, to, ...(reasonCode ? { holdReasonCode: reasonCode } : {}) })], { touch: true }));
+      bumpTx(tx.id, byAgent(req));
       if (['CANCELLED', 'CLOSED'].includes(to)) {
         const ctx = compliance.contextById(tx.contextId);
         if (ctx) compliance.closeContext(ctx, byAgent(req));
@@ -1063,12 +1035,10 @@ export function registerTransactions(rawCtx) {
     if (tx.terms.versions.length >= TRANSACTION_LIMITS.termsVersions) return sendTransactionError(res, { error: 'TERMS_INPUT_INVALID', field: 'summary', message: 'This transaction already holds the maximum number of recorded terms versions.' }, 'terms');
     if (!guardRev(req, res, tx, TX_CONFLICT(tx))) return;
     inUnit(() => {
-      txs.update(tx.id, (d) => {
-        const v = { id: nextId('txt'), at: now(), by: byAgent(req), recordedFor: b.recordedFor, visibility, summary, version: d.terms.versions.length + 1 };
-        d.terms.versions.push(v);
-        hist(d, 'transaction_terms_recorded', byAgent(req), { partyRole: b.recordedFor, visibility, version: v.version });
-        d.updatedAt = now(); bumpTxRev(d, byAgent(req));
-      });
+      const version = txById(tx.id).terms.versions.length + 1;
+      const terms = { id: nextId('txt'), at: now(), by: byAgent(req), recordedFor: b.recordedFor, visibility, summary, version };
+      txs.recordTerms(tx.id, { terms }, txBook(byAgent(req), [entry('transaction_terms_recorded', byAgent(req), { partyRole: b.recordedFor, visibility, version })], { touch: true }));
+      bumpTx(tx.id, byAgent(req));
       const stored = txById(tx.id);
       return () => res.status(201).json({ transaction: projectTransaction(stored, agentViewer(req)) });
     });
@@ -1087,11 +1057,8 @@ export function registerTransactions(rawCtx) {
     if (!opp || !engaging || opp.orgId !== engaging.subjectId) return sendTransactionError(res, { error: 'TRANSACTION_INPUT_INVALID', field: 'opportunityId', message: 'No opportunity of the engaging club matches that reference.' }, 'links');
     if (!guardRev(req, res, tx, TX_CONFLICT(tx))) return;
     inUnit(() => {
-      txs.update(tx.id, (d) => {
-        d.links.opportunityId = opp.id;
-        hist(d, 'transaction_status_changed', byAgent(req), { from: d.status, to: d.status });
-        d.updatedAt = now(); bumpTxRev(d, byAgent(req));
-      });
+      txs.linkOpportunity(tx.id, { opportunityId: opp.id }, txBook(byAgent(req), [entry('transaction_status_changed', byAgent(req), { from: tx.status, to: tx.status })], { touch: true }));
+      bumpTx(tx.id, byAgent(req));
       const stored = txById(tx.id);
       return () => res.json({ transaction: projectTransaction(stored, agentViewer(req)) });
     });
@@ -1147,11 +1114,10 @@ export function registerTransactions(rawCtx) {
         id: nextId('txd'), transactionId: tx.id, documentType, visibility, label, version: 1,
         owner, ownerPartyRole: partyRole, uploadedBy: by, createdAt: now(),
         expiresAt, evidenceRef, supersedes: null, supersededBy: null, removedAt: null,
-        keys: key ? { add: { key, fp } } : {}, rev: 1, revAt: now(), revBy: null, history: [],
+        keys: key ? { add: { key, fp } } : {}, rev: 1, revAt: now(), revBy: null, history: [entry('transaction_document_added', by, { documentType, visibility, version: 1 })],
       };
-      hist(d, 'transaction_document_added', by, { documentType, visibility, version: 1 });
       const stored = docsRepo.create(d);
-      txs.update(tx.id, (x) => { hist(x, 'transaction_document_added', by, { documentType, visibility }); x.updatedAt = now(); });
+      txs.recordAct(tx.id, txBook(by, [entry('transaction_document_added', by, { documentType, visibility })], { touch: true }));
       broadcast('agent_transaction_document_added', { orgId: tx.agencyOrgId, txId: tx.id, docId: d.id });
       // Only the parties the CLASS admits hear about it: a notification is a
       // disclosure, and an AGENT_PRIVATE document discloses nothing to anyone.
@@ -1211,16 +1177,12 @@ export function registerTransactions(rawCtx) {
       const d = {
         id: nextId('txd'), transactionId: tx.id, documentType: old.documentType, visibility: old.visibility, label, version: old.version + 1,
         owner: old.owner, ownerPartyRole: old.ownerPartyRole, uploadedBy: byAgent(req), createdAt: now(), expiresAt: old.expiresAt,
-        evidenceRef: old.evidenceRef, supersedes: old.id, supersededBy: null, removedAt: null, keys: {}, rev: 1, revAt: now(), revBy: null, history: [],
+        evidenceRef: old.evidenceRef, supersedes: old.id, supersededBy: null, removedAt: null, keys: {}, rev: 1, revAt: now(), revBy: null,
+        history: [entry('transaction_document_added', byAgent(req), { documentType: old.documentType, visibility: old.visibility, version: old.version + 1 })],
       };
-      hist(d, 'transaction_document_added', byAgent(req), { documentType: d.documentType, visibility: d.visibility, version: d.version });
-      const stored = docsRepo.create(d);
-      docsRepo.update(old.id, (x) => {
-        x.supersededBy = d.id;
-        hist(x, 'transaction_document_superseded', byAgent(req), { version: x.version });
-        bumpTxRev(x, byAgent(req));
-      });
-      txs.update(tx.id, (x) => { hist(x, 'transaction_document_superseded', byAgent(req), { documentType: d.documentType, version: d.version }); x.updatedAt = now(); });
+      docsRepo.supersede(old.id, { document: d }, rowBook(byAgent(req), [entry('transaction_document_superseded', byAgent(req), { version: old.version })]));
+      const stored = docsRepo.byId(d.id);
+      txs.recordAct(tx.id, txBook(byAgent(req), [entry('transaction_document_superseded', byAgent(req), { documentType: d.documentType, version: d.version })], { touch: true }));
       return () => res.status(201).json({ document: documentView(stored, roles) });
     });
   });
@@ -1245,11 +1207,8 @@ export function registerTransactions(rawCtx) {
     if (!guardRev(req, res, tx, TX_CONFLICT(tx))) return;
     inUnit(() => {
       const n = { id: nextId('txn'), visibility, text: noteText, by, at: now() };
-      txs.update(tx.id, (d) => {
-        d.notes.push(n);
-        hist(d, 'transaction_note_added', by, { visibility });
-        d.updatedAt = now(); bumpTxRev(d, by);
-      });
+      txs.addNote(tx.id, { note: n }, txBook(by, [entry('transaction_note_added', by, { visibility })], { touch: true }));
+      bumpTx(tx.id, by);
       return () => res.status(201).json({ note: { id: n.id, visibility: n.visibility, text: n.text, at: n.at, actor: actorLabel(n.by) } });
     });
   }
@@ -1307,13 +1266,9 @@ export function registerTransactions(rawCtx) {
     if (party.confirmedAt) return res.json({ transaction: projectTransaction(tx, clubViewer(req)), idempotent: true });
     if (!guardRev(req, res, tx, TX_CONFLICT(tx))) return;
     inUnit(() => {
-      txs.update(tx.id, (d) => {
-        const p = d.parties.find((x) => x.id === party.id);
-        p.confirmedAt = now(); p.confirmedBy = byClubUser(req);
-        hist(d, 'transaction_party_confirmed', byClubUser(req), { partyRole: party.partyRole, subjectKind: 'club' });
-        partyChanged(d, byClubUser(req));
-        bumpTxRev(d, byClubUser(req));
-      });
+      txs.confirmParty(tx.id, { partyId: party.id, at: now(), by: byClubUser(req) }, txBook(byClubUser(req), [entry('transaction_party_confirmed', byClubUser(req), { partyRole: party.partyRole, subjectKind: 'club' })]));
+      partyChanged(tx.id, byClubUser(req));
+      bumpTx(tx.id, byClubUser(req));
       broadcast('agent_transaction_party_changed', { orgId: tx.agencyOrgId, txId: tx.id, partyRole: party.partyRole });
       notify({ kind: 'org_user', id: tx.agentUserId }, 'agent_transaction', `A club confirmed its participation as the ${party.partyRole.replace(/_/g, ' ')} in a transaction.`, tx.id);
       const stored = txById(tx.id);
@@ -1359,11 +1314,9 @@ export function registerTransactions(rawCtx) {
     if (tx.linkedThreads.length >= TRANSACTION_LIMITS.linkedThreads) return sendTransactionError(res, { error: 'TRANSACTION_INPUT_INVALID', field: 'channelId', message: 'This transaction already links the maximum number of conversations.' }, 'messages');
     if (!guardRev(req, res, tx, TX_CONFLICT(tx))) return;
     inUnit(() => {
-      txs.update(tx.id, (d) => {
-        d.linkedThreads.push({ id: nextId('txm'), channelId: ch.id, linkedBy: byClubUser(req), linkedAt: now() });
-        hist(d, 'transaction_message_linked', byClubUser(req), { count: d.linkedThreads.length });
-        d.updatedAt = now(); bumpTxRev(d, byClubUser(req));
-      });
+      const thread = { id: nextId('txm'), channelId: ch.id, linkedBy: byClubUser(req), linkedAt: now() };
+      txs.linkThread(tx.id, { thread }, txBook(byClubUser(req), [entry('transaction_message_linked', byClubUser(req), { count: tx.linkedThreads.length + 1 })], { touch: true }));
+      bumpTx(tx.id, byClubUser(req));
       broadcast('agent_transaction_message_linked', { orgId: tx.agencyOrgId, txId: tx.id });
       const stored = txById(tx.id);
       return () => res.status(201).json({ transaction: projectTransaction(stored, clubViewer(req)) });
@@ -1381,11 +1334,8 @@ export function registerTransactions(rawCtx) {
     if (!trial) return sendTransactionError(res, { error: 'TRANSACTION_INPUT_INVALID', field: 'trialId', message: 'No trial of yours with this transaction\'s individual matches that reference.' }, 'links');
     if (!guardRev(req, res, tx, TX_CONFLICT(tx))) return;
     inUnit(() => {
-      txs.update(tx.id, (d) => {
-        d.links.trialId = trial.id;
-        hist(d, 'transaction_status_changed', byClubUser(req), { from: d.status, to: d.status });
-        d.updatedAt = now(); bumpTxRev(d, byClubUser(req));
-      });
+      txs.linkTrial(tx.id, { trialId: trial.id }, txBook(byClubUser(req), [entry('transaction_status_changed', byClubUser(req), { from: tx.status, to: tx.status })], { touch: true }));
+      bumpTx(tx.id, byClubUser(req));
       const stored = txById(tx.id);
       return () => res.json({ transaction: projectTransaction(stored, clubViewer(req)) });
     });
@@ -1415,13 +1365,9 @@ export function registerTransactions(rawCtx) {
     if (party.confirmedAt) return res.json({ transaction: projectTransaction(tx, playerViewer(req)), idempotent: true });
     if (!guardRev(req, res, tx, TX_CONFLICT(tx))) return;
     inUnit(() => {
-      txs.update(tx.id, (d) => {
-        const p = d.parties.find((x) => x.id === party.id);
-        p.confirmedAt = now(); p.confirmedBy = byPlayer(req);
-        hist(d, 'transaction_party_confirmed', byPlayer(req), { partyRole: party.partyRole, subjectKind: 'player' });
-        partyChanged(d, byPlayer(req));
-        bumpTxRev(d, byPlayer(req));
-      });
+      txs.confirmParty(tx.id, { partyId: party.id, at: now(), by: byPlayer(req) }, txBook(byPlayer(req), [entry('transaction_party_confirmed', byPlayer(req), { partyRole: party.partyRole, subjectKind: 'player' })]));
+      partyChanged(tx.id, byPlayer(req));
+      bumpTx(tx.id, byPlayer(req));
       broadcast('agent_transaction_party_changed', { orgId: tx.agencyOrgId, txId: tx.id, partyRole: party.partyRole });
       notify({ kind: 'org_user', id: tx.agentUserId }, 'agent_transaction', 'Your client confirmed their participation in a transaction.', tx.id);
       const stored = txById(tx.id);
@@ -1531,17 +1477,12 @@ export function registerTransactions(rawCtx) {
     const rep = tx ? repsRepo.byId(representationId) : null;
     if (!tx || !rep || rep.transactionId !== transactionId || rep.status !== 'pending_review') return;
     const action = outcome === 'APPROVED' ? 'transaction_representation_attached' : 'transaction_representation_withdrawn';
-    const next = repsRepo.update(rep.id, (x) => {
-      if (outcome === 'APPROVED') { x.status = 'verified'; x.declaredOnly = false; x.verifiedAt = now(); x.verifiedByReviewId = reviewId; }
-      else { x.status = 'withdrawn'; x.withdrawnAt = now(); x.withdrawnReason = 'review_rejected'; }
-      hist(x, action, by, { partyRole: x.partyRole, status: x.status });
-      bumpTxRev(x, by);
-    });
-    txs.update(tx.id, (d) => {
-      hist(d, action, by, { partyRole: next.partyRole, status: next.status });
-      if (LIVE_STATUSES.includes(d.status)) recheckCompliance(d, by);
-      d.updatedAt = now();
-    });
+    const book = rowBook(by, [entry(action, by, { partyRole: rep.partyRole, status: outcome === 'APPROVED' ? 'verified' : 'withdrawn' })]);
+    const next = outcome === 'APPROVED'
+      ? repsRepo.verifyByReview(rep.id, { at: now(), reviewId }, book)
+      : repsRepo.withdraw(rep.id, { at: now(), reason: 'review_rejected' }, book);
+    txs.recordAct(tx.id, txBook(by, [entry(action, by, { partyRole: next.partyRole, status: next.status })], { touch: true }));
+    if (LIVE_STATUSES.includes(tx.status)) recheckCompliance(tx.id, by);
   }
 
   /**

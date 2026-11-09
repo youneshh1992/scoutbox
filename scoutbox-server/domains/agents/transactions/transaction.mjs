@@ -140,6 +140,18 @@ export const COMPLIANCE_TRANSITIONS = nullProto({
   ARCHIVED: [],
 });
 
+/**
+ * Transitions a PARTY CHANGE makes: a draft whose required parties have all confirmed is PARTIES_CONFIRMED, and a
+ * transaction that loses a confirmed party falls back to it out of any compliance claim.
+ */
+export const PARTY_CHANGE_TRANSITIONS = nullProto({
+  DRAFT: ['PARTIES_CONFIRMED'],
+  READY: ['PARTIES_CONFIRMED'],
+  ACTIVE: ['PARTIES_CONFIRMED'],
+  COMPLIANCE_PENDING: ['PARTIES_CONFIRMED'],
+  COMPLIANCE_BLOCKED: ['PARTIES_CONFIRMED'],
+});
+
 export const actorTransitionAllowed = (from, to) =>
   typeof from === 'string' && Object.hasOwn(ACTOR_TRANSITIONS, from) && ACTOR_TRANSITIONS[from].includes(to);
 export const complianceTransitionAllowed = (from, to) =>

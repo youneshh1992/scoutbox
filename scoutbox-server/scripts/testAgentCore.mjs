@@ -1,6 +1,6 @@
 // The agent core (profiles, agency affiliations, representation agreements, agency settings;
 // repositories/agentCore.mjs, migration 0026): the STRICT tables, the typers' refusals (a minor included), records read
-// back whole, updates that keep what never changes and never reopen an ended membership, the routes' queries, a
+// back whole, named acts that move a status only along its table and never reopen an ended membership, the routes' queries, a
 // client's removal leaving id-only tombstones, units of work and fixtures. Temporary databases only; nothing touches
 // DATA_DIR. Run with: npm test
 
@@ -120,28 +120,27 @@ test('[profiles] a profile is created whole with every facet and read back; the 
     assert.equal(P.forUser(UID).id, 'agp-1');
     refused(() => P.create(profile()), /already exists/, 'duplicate id');
     refused(() => P.create(profile({ id: 'agp-2', history: [] })), /already has a profile/, 'a second profile for one staff member');
-    const v = P.update('agp-1', (d) => {
-      d.facets.fifa_licence = verified({ recheckAt: NOW + DAY });
-      d.facets.national_registration.ENG = { ...verified({ reference: 'FA-1', recheckAt: NOW + DAY }), memberAssociation: 'ENG' };
-      d.history.push(entry('aud-p2', 'agent_verification_state_changed', { facet: 'fifa_licence', memberAssociation: null, from: 'UNVERIFIED', to: 'VERIFIED', state: 'VERIFIED' }));
-    });
+    P.setFacet('agp-1', { facet: 'fifa_licence', record: verified({ recheckAt: NOW + DAY }) }, { history: [entry('aud-p2', 'agent_verification_state_changed', { facet: 'fifa_licence', memberAssociation: null, from: 'UNVERIFIED', to: 'VERIFIED', state: 'VERIFIED' })] });
+    const v = P.setFacet('agp-1', { facet: 'national_registration', memberAssociation: 'ENG', record: { ...verified({ reference: 'FA-1', recheckAt: NOW + DAY }), memberAssociation: 'ENG' } }, { at: NOW + 1, touch: true, bump: { at: NOW + 1, by: { id: UID, name: SCOUT.name } } });
     assert.equal(v.facets.fifa_licence.state, 'VERIFIED'); assert.equal(v.facets.national_registration.ENG.reference, 'FA-1');
-    assert.deepEqual(v.history.map((h) => h.id), ['aud-p1', 'aud-p2']);
-    refused(() => P.update('agp-1', (d) => { d.userId = 'usr-2'; }), /userId cannot change/, 'user change');
-    refused(() => P.update('agp-1', (d) => { d.agencyOrgId = 'org-other'; }), /agencyOrgId cannot change/, 'agency change');
-    refused(() => P.update('agp-1', (d) => { d.history.pop(); }), /only grows/, 'history dropped');
-    refused(() => P.update('agp-1', (d) => { d.history.push(entry('aud-p1', 'agent_profile_updated', { fields: ['displayName'] })); }), /names an id twice|already exists/, 'a reused entry id');
-    refused(() => P.update('agp-1', () => { P.update('agp-1', () => {}); }), /already being updated/, 'nested update');
+    assert.deepEqual([v.history.map((h) => h.id), v.rev, v.updatedAt], [['aud-p1', 'aud-p2'], 2, NOW + 1]);
+    refused(() => P.setFacet('agp-1', { facet: 'national_registration', memberAssociation: 'ENG', record: { ...verified(), memberAssociation: 'USA' } }), /memberAssociation must be ENG/, 'a facet names its own member association');
+    refused(() => P.recordAct('agp-1', { history: [entry('aud-p1', 'agent_profile_updated', { fields: ['displayName'] })] }), /already exists/, 'a reused entry id');
+    refused(() => P.recordAct('agp-1', { history: [entry('aud-p3', 'agent_profile_updated', { fields: ['mood'] })] }), /AGENT_CORE_INPUT_INVALID/, 'an entry is typed');
+    const d = P.updateDeclared('agp-1', { displayName: 'Ana C.', jurisdictions: ['ENG'] }, { history: [entry('aud-p4', 'agent_profile_updated', { fields: ['displayName', 'jurisdictions'] })] });
+    assert.deepEqual([d.displayName, d.declared.jurisdictions, d.userId, d.history.at(-1).detail], ['Ana C.', ['ENG'], UID, { fields: ['displayName', 'jurisdictions'] }], 'the declared details change; the user never does');
+    assert.equal(typeof P.update, 'undefined', 'there is no whole-record update');
     assert.deepEqual(P.staleUnnotified(NOW + 2 * DAY).map((x) => x.id), ['agp-1'], 'a VERIFIED facet past its recheck date');
-    P.update('agp-1', (d) => { d.facets.fifa_licence.staleNotifiedAt = NOW + 2 * DAY; });
+    P.markStaleNotified('agp-1', { facets: [['fifa_licence', null]], at: NOW + 2 * DAY });
     assert.deepEqual(P.staleUnnotified(NOW + 2 * DAY).map((x) => x.id), ['agp-1'], 'still listed: the FA registration is stale too');
-    P.update('agp-1', (d) => { d.facets.national_registration.ENG.staleNotifiedAt = NOW + 2 * DAY; });
+    P.markStaleNotified('agp-1', { facets: [['national_registration', 'ENG']], at: NOW + 2 * DAY });
     assert.deepEqual(P.staleUnnotified(NOW + 40 * DAY), [], 'each stale facet is told once');
-    assert.equal(typeof s.repo.reads.profiles.update, 'undefined', 'the reads carry no writes');
+    refused(() => P.markStaleNotified('agp-1', { facets: [['fifa_licence', null]], at: NOW + 3 * DAY }), /STATE_CONFLICT.*already marked stale/);
+    assert.equal(typeof s.repo.reads.profiles.setFacet, 'undefined', 'the reads carry no writes');
   } finally { s.close(); rm(dir); }
 });
 
-test('[affiliations] a membership is active in its window; roles change through an update; an ended membership does not reopen; the create key is written once', () => {
+test('[affiliations] a membership is active in its window; roles change through an act; an ended membership does not reopen; the create key is written once', () => {
   const dir = tempDir('s11a-affiliations'); saveFixture(dir);
   const s = serverOpen(dir);
   const A = s.repo.affiliations;
@@ -151,19 +150,19 @@ test('[affiliations] a membership is active in its window; roles change through 
     assert.equal(A.activeFor(UID, ORG.id, NOW).id, 'aff-1');
     assert.equal(A.activeFor(UID, ORG.id, NOW - 1), null, 'not before it started');
     assert.equal(A.byCreateKey(ORG.id, 'k-team').id, 'aff-1');
-    const u = A.update('aff-1', (d) => { d.tiers = ['agency_admin', 'licensed_agent']; d.rev += 1; d.history.push(entry('aud-a2', 'agency_affiliation_updated', { from: ['agency_admin'], to: ['agency_admin', 'licensed_agent'], tiers: ['agency_admin', 'licensed_agent'] })); });
-    assert.deepEqual(u.tiers, ['agency_admin', 'licensed_agent']);
+    const u = A.setTiers('aff-1', { tiers: ['agency_admin', 'licensed_agent'] }, { bump: { at: NOW, by: { id: UID, name: SCOUT.name } }, history: [entry('aud-a2', 'agency_affiliation_updated', { from: ['agency_admin'], to: ['agency_admin', 'licensed_agent'], tiers: ['agency_admin', 'licensed_agent'] })] });
+    assert.deepEqual([u.tiers, u.rev, u.keys.create.key, u.startedAt], [['agency_admin', 'licensed_agent'], 2, 'k-team', NOW], 'the roles change; the create key and the start do not');
     assert.deepEqual(u.history[1].detail, { from: ['agency_admin'], to: ['agency_admin', 'licensed_agent'], tiers: ['agency_admin', 'licensed_agent'] }, 'the role change reads back from its rows');
-    refused(() => A.update('aff-1', (d) => { d.keys = {}; }), /keys cannot change/, 'the create key');
-    refused(() => A.update('aff-1', (d) => { d.startedAt -= DAY; }), /startedAt cannot change/, 'backdated');
-    A.update('aff-1', (d) => { d.endedAt = NOW + DAY; d.endedReason = 'left'; d.history.push(entry('aud-a3', 'agency_affiliation_ended', { reasonCode: 'left' })); });
+    refused(() => A.setTiers('aff-1', { tiers: ['owner'] }), /AGENT_CORE_INPUT_INVALID/, 'a role the vocabulary does not know');
+    A.end('aff-1', { at: NOW + DAY, reason: 'left' }, { history: [entry('aud-a3', 'agency_affiliation_ended', { reasonCode: 'left' })] });
     assert.equal(A.activeFor(UID, ORG.id, NOW + 2 * DAY), null, 'ended');
-    refused(() => A.update('aff-1', (d) => { d.endedAt = null; d.endedReason = null; }), /an ended membership does not reopen/, 'reopened');
+    refused(() => A.end('aff-1', { at: NOW + 2 * DAY, reason: 'left' }), /STATE_CONFLICT.*already ended/, 'an ended membership does not end again');
+    refused(() => A.setTiers('aff-1', { tiers: ['licensed_agent'] }), /STATE_CONFLICT.*has ended/, 'or change');
     refused(() => A.create(affiliation({ id: 'aff-2', userId: 'usr-none', history: [] })), /FOREIGN KEY/, 'a member who is not staff');
   } finally { s.close(); rm(dir); }
 });
 
-test('[agreements] an agreement is created whole; its parties, scope and term never change; a key is written once; shares only gain rows; a client\'s removal leaves tombstones', () => {
+test('[agreements] an agreement is created whole; it moves only along its transition tables; shares only gain rows and are withdrawn once; a client\'s removal leaves tombstones', () => {
   const dir = tempDir('s11a-agreements'); saveFixture(dir);
   const s = serverOpen(dir);
   const R = s.repo.agreements;
@@ -172,19 +171,17 @@ test('[agreements] an agreement is created whole; its parties, scope and term ne
     assert.deepEqual(a.history[0].detail, { scope: ['employment'], termMonths: 12, jurisdiction: 'ENG', policyVersions: [] }, 'the request entry is read from the agreement itself');
     assert.equal(R.byRequestKey(ORG.id, UID, 'k-req').id, 'rep-1');
     refused(() => R.create(agreement({ id: 'rep-p', policyVersions: ['jp-none-1'], history: undefined })), /policy version jp-none-1 is not a known policy/, 'an unknown policy version');
-    const c = R.update('rep-1', (d) => {
-      d.status = 'active'; d.confirmedAt = NOW + 1; d.confirmedBy = { kind: 'player', id: 'pl-1' }; d.startAt = NOW + 1; d.endAt = NOW + 365 * DAY; d.keys.confirm = { key: 'k-conf', fp: '{}' }; d.rev += 1;
-      d.history.push(entry('aud-r2', 'representation_confirmed', { from: 'proposed', to: 'active', by: 'client', hadReason: false }, { by: { kind: 'player', userId: 'pl-1', name: 'Kola' } }));
-    });
-    assert.equal(c.status, 'active'); assert.deepEqual(c.confirmedBy, { kind: 'player', id: 'pl-1' });
-    refused(() => R.update('rep-1', (d) => { d.scope = ['transfer']; }), /scope cannot change|repeats the agreement's own scope/, 'scope');
-    refused(() => R.update('rep-1', (d) => { d.clientId = 'pl-2'; d.confirmedBy = { kind: 'player', id: 'pl-2' }; }), /clientId cannot change/, 'client');
-    refused(() => R.update('rep-1', (d) => { d.keys.confirm = { key: 'k-other', fp: '{}' }; }), /the confirm key is written once/, 'a key rewritten');
-    R.update('rep-1', (d) => { d.opportunityShares = [share()]; d.history.push(entry('aud-r3', 'opportunity_shared', { shareId: 'shr-1', via: 'opportunity' })); });
-    refused(() => R.update('rep-1', (d) => { d.opportunityShares = []; }), /a share cannot be removed/, 'share removed');
-    refused(() => R.update('rep-1', (d) => { d.opportunityShares[0].note = 'Edited'; }), /share shr-1 keeps what was shared/, 'share edited');
-    R.update('rep-1', (d) => { d.opportunityShares[0].withdrawnAt = NOW + 2; d.history.push(entry('aud-r4', 'opportunity_share_withdrawn', { shareId: 'shr-1' })); });
-    refused(() => R.update('rep-1', (d) => { d.opportunityShares[0].withdrawnAt = NOW + 3; }), /already withdrawn/, 'withdrawn twice');
+    const c = R.answerByClient('rep-1', { to: 'active', at: NOW + 1, playerId: 'pl-1', key: { key: 'k-conf', fp: '{}' }, slot: 'confirm' },
+      { bump: { at: NOW + 1, by: { id: 'pl-1', name: 'Kola' } }, history: [entry('aud-r2', 'representation_confirmed', { from: 'proposed', to: 'active', by: 'client', hadReason: false }, { by: { kind: 'player', userId: 'pl-1', name: 'Kola' } })] });
+    assert.deepEqual([c.status, c.confirmedBy, c.startAt, c.endAt, c.keys.confirm.key, c.rev], ['active', { kind: 'player', id: 'pl-1' }, NOW + 1, NOW + 1 + 12 * 30 * DAY, 'k-conf', 2], 'confirmed: the term runs from the confirmation');
+    refused(() => R.answerByClient('rep-1', { to: 'active', at: NOW + 2, playerId: 'pl-1', slot: 'confirm' }), /STATE_CONFLICT.*cannot move to active/, 'confirmed once');
+    refused(() => R.answerByClient('rep-1', { to: 'declined', at: NOW + 2, playerId: 'pl-1', slot: 'decline' }), /STATE_CONFLICT/, 'an active relationship is not declined');
+    refused(() => R.resolveDispute('rep-1', { outcome: 'ended', reviewId: 'rrv-1', at: NOW + 2 }), /STATE_CONFLICT.*not disputed/);
+    R.addShare('rep-1', { share: share() }, { history: [entry('aud-r3', 'opportunity_shared', { shareId: 'shr-1', via: 'opportunity' })] });
+    refused(() => R.addShare('rep-1', { share: share({ id: 'shr-2' }) }), /AGENT_CORE_INPUT_INVALID/, 'one live share per opportunity');
+    R.withdrawShare('rep-1', { shareId: 'shr-1', at: NOW + 2 }, { history: [entry('aud-r4', 'opportunity_share_withdrawn', { shareId: 'shr-1' })] });
+    assert.deepEqual([R.byId('rep-1').opportunityShares[0].withdrawnAt, R.byId('rep-1').opportunityShares[0].rev], [NOW + 2, 2]);
+    refused(() => R.withdrawShare('rep-1', { shareId: 'shr-1', at: NOW + 3 }), /already withdrawn/, 'withdrawn twice');
     assert.deepEqual(R.forClient('pl-1').map((x) => x.id), ['rep-1']);
     assert.deepEqual(R.forAgentClient(UID, 'pl-1').map((x) => x.id), ['rep-1']);
     assert.deepEqual(R.expiringUnnotified(NOW + 360 * DAY, 30 * DAY).map((x) => x.id), ['rep-1'], 'ending within the window');

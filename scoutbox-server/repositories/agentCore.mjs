@@ -19,11 +19,13 @@
  * Idempotency keys are columns of their owner (`keys.<slot>` = `{ key, fp }`): an affiliation's create; an
  * agreement's request, confirm, decline, terminate (the client's), dispute and agentTerminate; a share's share.
  *
- * WRITES are explicit: `create(record)` and `update(id, (draft) => …)` type the whole record and write it at once,
- * joined into the open unit of work, the caller's open transaction, or a transaction of their own; an unknown field and
- * an update from inside its own update are refused. History only grows; a profile's user and agency, an affiliation's
- * agency, user and start, and an agreement's parties, scope, jurisdiction, exclusivity, term and policy versions never
- * change; shares only gain rows.
+ * Writes. `create(record)` types the whole record (from the field specs) and writes it at once; after that a record
+ * changes only through named acts (`updateDeclared`, `setFacet`, `setTiers`, `end`, `answerByClient`, `addShare`, …),
+ * each an UPDATE of named columns or an INSERT of new rows, joined into the open unit of work, the caller's open
+ * transaction, or a transaction of their own. History is only inserted; an agreement moves only along
+ * AGENT_TRANSITIONS and CLIENT_TRANSITIONS, an ended membership does not reopen, and a share is withdrawn once, each
+ * guarded in SQL. A profile's user and agency, an affiliation's agency, user and start, and an agreement's parties,
+ * scope, jurisdiction, exclusivity, term and policy versions have no act that changes them.
  *
  * Queries decode deep-frozen records in insertion (rowid) order unless they say otherwise. Modules receive them as
  * `agentReads`.
@@ -36,7 +38,7 @@ import { isPlainObject, describe, ids } from './recruitment.mjs';
 import { transaction, migrationApplied, childRowsOf } from './database.mjs';
 import { deepFreeze } from './scoutingEvidence.mjs';
 import { text, int, bool, oneOf, group, tableDdl, bad, typeSpec, encode, decode, upsertSql, quote } from './fieldSpecs.mjs';
-import { VERIFICATION_STATES, FACETS, JURISDICTIONS, TIERS, AGREEMENT_STATUSES, SCOPES, MAX_TERM_MONTHS, DISCLOSURE_KEYS, MAX_OPPORTUNITY_SHARES } from '../domains/agents/core/shared.mjs';
+import { VERIFICATION_STATES, FACETS, JURISDICTIONS, TIERS, AGREEMENT_STATUSES, SCOPES, MAX_TERM_MONTHS, DISCLOSURE_KEYS, MAX_OPPORTUNITY_SHARES, AGENT_TRANSITIONS, CLIENT_TRANSITIONS, termEndAt } from '../domains/agents/core/shared.mjs';
 
 export const AGENT_CORE_MIGRATION = '0026_agent_core';
 export const AGENT_CORE_COLLECTIONS = Object.freeze(['agentProfiles', 'agencyAffiliations', 'representationAgreements']);
@@ -627,15 +629,18 @@ function writeProfile(st, p, knownHistory = 0) {
   for (const f of MA_FACETS) for (const [ma, rec] of Object.entries(p.facets[f])) st.facetIns.run(encode(FACET_ROW_SPEC, facetRow(p.id, f, ma, rec)));
   p.history.slice(knownHistory).forEach((h, i) => st.profileHist.run(profileHistoryRow(h, p.id, knownHistory + i)));
 }
+function writeAffiliationEntry(st, owner, ord, h) {
+  st.affHist.run(affiliationHistoryRow(h, owner, ord));
+  if (h.action === 'agency_affiliation_updated') h.detail.from.forEach((t, j) => st.affHistTier.run(h.id, 'from', j, t));
+  if (h.action !== 'agency_affiliation_ended') h.detail.tiers.forEach((t, j) => st.affHistTier.run(h.id, 'to', j, t));
+}
+/** An agreement key slot's columns. */
+const keyCols = (slot, k) => ({ [`${SLOT_COLUMN[slot]}_key`]: k?.key ?? null, [`${SLOT_COLUMN[slot]}_fp`]: k?.fp ?? null });
 function writeAffiliation(st, a, knownHistory = 0) {
   st.affiliation.run(encode([...AFFILIATION_SPEC, KEY_GROUP('keys', 'create')], { ...a, keys: a.keys.create ?? null }));
   st.tierDel.run(a.id);
   a.tiers.forEach((t, i) => st.tierIns.run(a.id, i, t));
-  a.history.slice(knownHistory).forEach((h, i) => {
-    st.affHist.run(affiliationHistoryRow(h, a.id, knownHistory + i));
-    if (h.action === 'agency_affiliation_updated') h.detail.from.forEach((t, j) => st.affHistTier.run(h.id, 'from', j, t));
-    if (h.action !== 'agency_affiliation_ended') h.detail.tiers.forEach((t, j) => st.affHistTier.run(h.id, 'to', j, t));
-  });
+  a.history.slice(knownHistory).forEach((h, i) => writeAffiliationEntry(st, a.id, knownHistory + i, h));
 }
 function writeAgreement(st, a, { isNew, knownHistory = 0 }) {
   st.agreement.run(encode([...AGREEMENT_SPEC, idf('confirmedByPlayerId', 'confirmed_by_player_id'), ...AGREEMENT_KEYS_SPEC], {
@@ -720,9 +725,10 @@ export const unresolvedPlayerReferences = (sqlite) => (agentCoreLive(sqlite) ? {
 export const retainedPlayerReferences = (sqlite) => (agentCoreLive(sqlite) ? { agentCore: playerRefCount(sqlite, 'EXISTS (SELECT 1 FROM players p WHERE p.id = x.client_id AND p.deleted_at IS NOT NULL)') } : null);
 
 // ------------------------------------------------------------------ the repository
-const WRITES = new Set(['create', 'update', 'save', 'redactClient']);
-const clone = (v) => JSON.parse(JSON.stringify(v));
-const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+const WRITES = new Set([
+  'create', 'save', 'redactClient', 'recordAct', 'updateDeclared', 'setFacet', 'markStaleNotified', 'setTiers', 'end',
+  'terminateByAgent', 'answerByClient', 'setSharing', 'markExpiryNotified', 'resolveDispute', 'addShare', 'withdrawShare',
+]);
 const EMPTY_SETTINGS = Object.freeze({ jurisdictions: Object.freeze([]), description: '' });
 /**
  * `createAgentCoreRepository({ sqlite, unit, now, log, policyVersionKnown })`: `profiles`, `affiliations`, `agreements` and
@@ -734,33 +740,39 @@ export function createAgentCoreRepository({ sqlite, unit = null, now = Date.now,
   const cache = new Map();
   const q = (sql) => { let s = cache.get(sql); if (!s) cache.set(sql, (s = sqlite.prepare(sql))); return s; };
   const st = statements(sqlite);
-  const updating = new Set();
-  const guard = (key, fn) => {
-    if (updating.has(key)) throw refusal('AGENT_CORE_NESTED_UPDATE', `${key} is already being updated; make the second change after the first returns`);
-    updating.add(key);
-    try { return fn(); } finally { updating.delete(key); }
-  };
   const typedOr = (type, raw, name) => { const t = type(raw, name); if (!t.ok) throw refusal('AGENT_CORE_INPUT_INVALID', t.reason); return t.record; };
   const historyTaken = (h) => q('SELECT 1 FROM agent_profile_history WHERE id = ? UNION ALL SELECT 1 FROM agency_affiliation_history WHERE id = ? UNION ALL SELECT 1 FROM agreement_history WHERE id = ?').get(h.id, h.id, h.id);
-  /** The shared rules of every update: unchanged fields, history that only grows, new entry ids not taken. */
-  const checkUpdate = (table, id, stored, next, immutable) => {
-    for (const k of immutable) if (!same(next[k], stored[k])) throw refusal('AGENT_CORE_INPUT_INVALID', `${table} ${id}: ${k} cannot change`);
-    if (next.history.length < stored.history.length || stored.history.some((h, i) => !same(h, next.history[i]))) throw refusal('AGENT_CORE_INPUT_INVALID', `${table} ${id}: the history only grows (a stored entry cannot change or go)`);
-    const taken = next.history.slice(stored.history.length).find(historyTaken);
-    if (taken) throw refusal('AGENT_CORE_DUPLICATE', `history entry ${taken.id} already exists`);
+  const nextOrd = (table, owner, id) => q(`SELECT COALESCE(MAX(ord) + 1, 0) AS n FROM ${table} WHERE ${owner} = ?`).get(id).n;
+  const setRow = (table, keys, cols) => q(`UPDATE ${table} SET ${Object.keys(cols).map((c) => `${c} = @${c}`).join(', ')} WHERE ${Object.keys(keys).map((c) => `${c} = @key_${c}`).join(' AND ')}`)
+    .run({ ...Object.fromEntries(Object.entries(cols).map(([c, v]) => [c, v === undefined ? null : v])), ...Object.fromEntries(Object.entries(keys).map(([c, v]) => [`key_${c}`, v])) });
+  /** Update one row only while `where` holds; no row means a route's gate let through a change it should have refused. */
+  const guarded = (table, keys, where, cols, what) => {
+    const params = { ...Object.fromEntries(Object.entries(cols).map(([c, v]) => [c, v === undefined ? null : v])), ...Object.fromEntries(Object.entries(keys).map(([c, v]) => [`key_${c}`, v])) };
+    const sql = `UPDATE ${table} SET ${Object.keys(cols).map((c) => `${c} = @${c}`).join(', ')} WHERE ${Object.keys(keys).map((c) => `${c} = @key_${c}`).join(' AND ')}${where ? ` AND (${where})` : ''}`;
+    if (q(sql).run(params).changes !== 1) throw refusal('AGENT_CORE_STATE_CONFLICT', what);
   };
-  const updater = (table, byId, type, immutable, write, extra = () => {}) => (id, change) => guard(`${table} ${id}`, () => operation(() => {
-    if (typeof change !== 'function') throw new TypeError(`${table}: update(id, change) needs a function that edits the copy it is given`);
-    const stored = byId(id);
-    if (!stored) throw refusal('AGENT_CORE_NOT_FOUND', `${table} ${id} is not a record of the repository`);
-    const draft = clone(stored);
-    const returned = change(draft);
-    const next = typedOr(type, returned === undefined ? draft : returned, table);
-    checkUpdate(table, id, stored, next, immutable);
-    extra(stored, next);
-    write(next, stored);
-    return byId(id);
-  }));
+  const leadingTo = (transitions, to) => Object.keys(transitions).filter((x) => transitions[x].includes(to)).map(quote).join(', ') || "''";
+  /**
+   * Named acts on one table, each `act(id, input, bookkeeping)`: the act's own writes, then the bookkeeping — the history
+   * entries (typed, only inserted), the rev bump (`bump: { at, by: { id | userId, name } }`) and, with `touch`,
+   * `updatedAt = at` — in one operation, returning the stored record. `recordAct(id, bookkeeping)` is the bookkeeping alone.
+   */
+  const actsOn = ({ table, label, byId, actions, typeDetail, writeEntry }, defs) => {
+    const run = (name, id, fn, { at = null, touch = false, bump = null, history = [] } = {}) => operation(() => {
+      if (!q(`SELECT 1 FROM ${table} WHERE id = ?`).get(id)) throw refusal('AGENT_CORE_NOT_FOUND', `${table} ${id} is not a record of the repository`);
+      const h = typeHistory(history, `${label} ${id}`, actions, typeDetail); if (!h.ok) throw refusal('AGENT_CORE_INPUT_INVALID', h.reason);
+      const taken = h.list.find(historyTaken); if (taken) throw refusal('AGENT_CORE_DUPLICATE', `history entry ${taken.id} already exists`);
+      fn();
+      if (bump) q(`UPDATE ${table} SET rev = rev + 1, rev_at = @at, rev_by_id = @uid, rev_by_name = @name WHERE id = @id`).run({ id, at: bump.at, uid: bump.by?.id ?? bump.by?.userId ?? null, name: bump.by?.name ?? null });
+      if (touch) setRow(table, { id }, { updated_at: at });
+      for (const e of h.list) writeEntry(id, e);
+      return byId(id);
+    });
+    return {
+      ...Object.fromEntries(Object.entries(defs).map(([name, fn]) => [name, (id, input = {}, bookkeeping = {}) => run(name, id, () => fn(id, input), bookkeeping)])),
+      recordAct: (id, bookkeeping = {}) => run('recordAct', id, () => {}, bookkeeping),
+    };
+  };
   const one = (decoder, sql) => (...args) => { const row = q(sql).get(...args); return row ? deepFreeze(decoder(sqlite, [row])[0]) : null; };
   const many = (decoder, sql) => (...args) => decoder(sqlite, q(sql).all(...args)).map(deepFreeze);
   /** Newest first by cursor (`after` is the previous page's last `[rowid]`): `{ rows: [{ key, record }] }`, one row more than `limit` when there is a next page. */
@@ -780,8 +792,28 @@ export function createAgentCoreRepository({ sqlite, unit = null, now = Date.now,
       writeProfile(st, p);
       return profileById(p.id);
     }),
-    /** `update(id, change)`: the user, agency and creation never change; the history only grows. */
-    update: updater('agent_profiles', profileById, typeAgentProfile, ['id', 'userId', 'agencyOrgId', 'createdAt'], (next, stored) => writeProfile(st, next, stored.history.length)),
+    ...actsOn({ table: 'agent_profiles', label: 'agentProfiles', byId: profileById, actions: PROFILE_ACTIONS, typeDetail: typeProfileDetail, writeEntry: (id, h) => st.profileHist.run(profileHistoryRow(h, id, nextOrd('agent_profile_history', 'profile_id', id))) }, {
+      /** The declared details the agent changed: a display name, the jurisdictions (replaced, in order), the licence number. */
+      updateDeclared: (id, { displayName, jurisdictions, fifaLicenceNumber }) => {
+        const cols = { ...(displayName !== undefined ? { display_name: displayName } : {}), ...(fifaLicenceNumber !== undefined ? { declared_fifa_licence_number: fifaLicenceNumber } : {}) };
+        if (Object.keys(cols).length) setRow('agent_profiles', { id }, cols);
+        if (jurisdictions !== undefined) {
+          const l = typeList(jurisdictions, JURISDICTIONS, `agentProfiles ${id}`, 'declared.jurisdictions'); if (!l.ok) throw refusal('AGENT_CORE_INPUT_INVALID', l.reason);
+          st.profileJurDel.run(id);
+          l.list.forEach((j, i) => st.profileJurIns.run(id, i, j));
+        }
+      },
+      /** A facet's new state (the FIFA licence under `memberAssociation: null`); a stored facet keeps no stale marker from before. */
+      setFacet: (id, { facet, memberAssociation = null, record }) => {
+        const ma = facet === 'fifa_licence' ? FIFA_MA : memberAssociation;
+        const t = typeFacet({ staleNotifiedAt: null, ...record }, `agentProfiles ${id}.facets.${facet}${ma === FIFA_MA ? '' : `.${ma}`}`, facet, memberAssociation); if (!t.ok) throw refusal('AGENT_CORE_INPUT_INVALID', t.reason);
+        st.facetIns.run(encode(FACET_ROW_SPEC, facetRow(id, facet, ma, t.record)));
+      },
+      /** The sweep told the agent these VERIFIED facets went STALE (`[[facet, memberAssociation]]`), once each. */
+      markStaleNotified: (id, { facets, at }) => {
+        for (const [facet, ma] of facets) guarded('agent_profile_facets', { profile_id: id, facet, member_association: facet === 'fifa_licence' ? FIFA_MA : ma }, 'stale_notified_at IS NULL', { stale_notified_at: at }, `agent_profiles ${id}: ${facet} was already marked stale`);
+      },
+    }),
     byId: profileById,
     /** The staff member's profile, or null. */
     forUser: one(decodeProfiles, 'SELECT * FROM agent_profiles WHERE user_id = ?'),
@@ -807,9 +839,16 @@ export function createAgentCoreRepository({ sqlite, unit = null, now = Date.now,
       writeAffiliation(st, a);
       return affiliationById(a.id);
     }),
-    /** `update(id, change)`: the agency, member, start and create key never change; the history only grows. */
-    update: updater('agency_affiliations', affiliationById, typeAgencyAffiliation, ['id', 'agencyOrgId', 'userId', 'startedAt', 'createdAt', 'keys'], (next, stored) => writeAffiliation(st, next, stored.history.length), (stored, next) => {
-      if (stored.endedAt !== null && !same(next, { ...next, endedAt: stored.endedAt, endedReason: stored.endedReason })) throw refusal('AGENT_CORE_INPUT_INVALID', `agency_affiliations ${stored.id}: an ended membership does not reopen`);
+    ...actsOn({ table: 'agency_affiliations', label: 'agencyAffiliations', byId: affiliationById, actions: AFFILIATION_ACTIONS, typeDetail: typeAffiliationDetail, writeEntry: (id, h) => writeAffiliationEntry(st, id, nextOrd('agency_affiliation_history', 'affiliation_id', id), h) }, {
+      /** The member's roles, replaced; an ended membership does not change. */
+      setTiers: (id, { tiers }) => {
+        const l = typeList(tiers, TIERS, `agencyAffiliations ${id}`, 'tiers', { nonEmpty: true }); if (!l.ok) throw refusal('AGENT_CORE_INPUT_INVALID', l.reason);
+        if (!q('SELECT 1 FROM agency_affiliations WHERE id = ? AND ended_at IS NULL').get(id)) throw refusal('AGENT_CORE_STATE_CONFLICT', `agency_affiliations ${id} has ended`);
+        st.tierDel.run(id);
+        l.list.forEach((t, i) => st.tierIns.run(id, i, t));
+      },
+      /** An ended membership does not reopen. */
+      end: (id, { at, reason }) => guarded('agency_affiliations', { id }, 'ended_at IS NULL', { ended_at: at, ended_reason: reason }, `agency_affiliations ${id} has already ended`),
     }),
     byId: affiliationById,
     /** The member's membership of the agency that is active at `at`, or null (every agent request). */
@@ -834,23 +873,48 @@ export function createAgentCoreRepository({ sqlite, unit = null, now = Date.now,
       writeAgreement(st, a, { isNew: true });
       return agreementById(a.id);
     }),
-    /**
-     * `update(id, change)`: the parties, scope, jurisdiction, exclusivity, term and policy versions never change; a key
-     * slot is written once; shares only gain rows (a share's withdrawal, once, is its only change); the history only grows.
-     */
-    update: updater('representation_agreements', agreementById, typeRepresentationAgreement,
-      ['id', 'agentUserId', 'agencyOrgId', 'clientKind', 'clientId', 'jurisdiction', 'scope', 'exclusive', 'termMonths', 'policyVersions', 'proposedAt', 'createdAt'],
-      (next, stored) => writeAgreement(st, next, { isNew: false, knownHistory: stored.history.length }),
-      (stored, next) => {
-        for (const s of AGREEMENT_KEY_SLOTS) if (stored.keys[s] && !same(stored.keys[s], next.keys[s])) throw refusal('AGENT_CORE_INPUT_INVALID', `representation_agreements ${stored.id}: the ${s} key is written once`);
-        if (next.opportunityShares.length < stored.opportunityShares.length) throw refusal('AGENT_CORE_INPUT_INVALID', `representation_agreements ${stored.id}: a share cannot be removed`);
-        stored.opportunityShares.forEach((s, i) => {
-          const n = next.opportunityShares[i];
-          const { withdrawnAt: _w, rev: _r, revAt: _ra, ...fixed } = s; const { withdrawnAt: _nw, rev: _nr, revAt: _nra, ...nfixed } = n;
-          if (!same(fixed, nfixed)) throw refusal('AGENT_CORE_INPUT_INVALID', `representation_agreements ${stored.id}: share ${s.id} keeps what was shared`);
-          if (s.withdrawnAt !== null && n.withdrawnAt !== s.withdrawnAt) throw refusal('AGENT_CORE_INPUT_INVALID', `representation_agreements ${stored.id}: share ${s.id} was already withdrawn`);
-        });
-      }),
+    ...actsOn({ table: 'representation_agreements', label: 'representationAgreements', byId: agreementById, actions: AGREEMENT_ACTIONS, typeDetail: typeAgreementDetail, writeEntry: (id, h) => st.agrHist.run(agreementHistoryRow(h, id, nextOrd('agreement_history', 'agreement_id', id))) }, {
+      /** The agent withdraws a request or ends the relationship (AGENT_TRANSITIONS), with the request's key. */
+      terminateByAgent: (id, { at, reasonCode, key = null }) => guarded('representation_agreements', { id }, `status IN (${leadingTo(AGENT_TRANSITIONS, 'terminated_by_agent')})`,
+        { status: 'terminated_by_agent', terminated_at: at, terminated_by: 'agent', termination_reason_code: reasonCode, ...keyCols('agentTerminate', key) }, `representation_agreements ${id} cannot be ended by its agent from where it is`),
+      /** The client's answer (CLIENT_TRANSITIONS): confirm, decline, end or dispute, with the request's key in its own slot. */
+      answerByClient: (id, { to, at, playerId, reason = null, key = null, slot }) => {
+        const cols = to === 'active' ? { status: 'active', confirmed_at: at, confirmed_by_player_id: playerId, start_at: at, end_at: termEndAt(at, q('SELECT term_months FROM representation_agreements WHERE id = ?').get(id).term_months) }
+          : to === 'declined' ? { status: 'declined', declined_at: at }
+            : to === 'terminated_by_client' ? { status: 'terminated_by_client', terminated_at: at, terminated_by: 'client', termination_reason_code: 'client_ended' }
+              : to === 'disputed' ? { status: 'disputed', disputed_at: at, dispute_reason: reason } : null;
+        if (!cols) throw refusal('AGENT_CORE_INPUT_INVALID', `representation_agreements ${id}: a client cannot move a relationship to ${to}`);
+        guarded('representation_agreements', { id }, `status IN (${leadingTo(CLIENT_TRANSITIONS, to)})`, { ...cols, ...keyCols(slot, key) }, `representation_agreements ${id} cannot move to ${to} from where it is`);
+      },
+      /** The client's sharing and disclosure choices that changed. */
+      setSharing: (id, { shareWithAgencyStaff, disclosure = {} }) => {
+        const cols = { ...(shareWithAgencyStaff !== undefined ? { share_with_agency_staff: shareWithAgencyStaff ? 1 : 0 } : {}) };
+        for (const k of DISCLOSURE_KEYS) if (Object.hasOwn(disclosure, k)) cols[`disclosure_${k.replace(/[A-Z]/g, (m) => `_${m.toLowerCase()}`)}`] = disclosure[k] ? 1 : 0;
+        if (Object.keys(cols).length) setRow('representation_agreements', { id }, cols);
+      },
+      /** The sweep told the agent the relationship ends soon, once. */
+      markExpiryNotified: (id, { at }) => guarded('representation_agreements', { id }, 'expiry_notified_at IS NULL', { expiry_notified_at: at }, `representation_agreements ${id}: the expiry was already notified`),
+      /**
+       * An attributed review decided a dispute: reinstated (the client's confirmation is unchanged; an unset term end is
+       * worked out from the start) or ended by Trust & Safety.
+       */
+      resolveDispute: (id, { outcome, reviewId, at }) => {
+        const a = q('SELECT start_at, confirmed_at, end_at, term_months FROM representation_agreements WHERE id = ?').get(id);
+        const cols = outcome === 'reinstated'
+          ? { status: 'active', ...(a.end_at === null && a.confirmed_at !== null ? { end_at: termEndAt(a.start_at ?? a.confirmed_at, a.term_months) } : {}) }
+          : { status: 'terminated_by_client', terminated_at: at, terminated_by: 'trust_safety', termination_reason_code: 'dispute_upheld' };
+        guarded('representation_agreements', { id }, "status = 'disputed'", { ...cols, dispute_resolved_at: at, dispute_review_id: reviewId, dispute_outcome: outcome }, `representation_agreements ${id} is not disputed`);
+      },
+      /** An opportunity the agent shares with the client (a new row; no agreement rev: a share changes no term). */
+      addShare: (id, { share }) => {
+        const t = typeShare(share, `representationAgreements ${id}.opportunityShares`); if (!t.ok) throw refusal('AGENT_CORE_INPUT_INVALID', t.reason);
+        try {
+          st.share.run(encode([idf('agreementId', 'agreement_id', req), int('ord', 'ord', { req: true }), ...SHARE_SPEC, KEY_GROUP('keys', 'share')], { ...t.record, agreementId: id, ord: nextOrd('agreement_opportunity_shares', 'agreement_id', id), keys: t.record.keys.share ?? null }));
+        } catch (e) { if (/UNIQUE|CHECK/.test(String(e?.message))) throw refusal('AGENT_CORE_INPUT_INVALID', `representation_agreements ${id}: ${e.message}`); throw e; }
+      },
+      /** A share is withdrawn once; the record stays. */
+      withdrawShare: (id, { shareId, at }) => guarded('agreement_opportunity_shares', { agreement_id: id, id: shareId }, 'withdrawn_at IS NULL', { withdrawn_at: at, rev: q('SELECT rev FROM agreement_opportunity_shares WHERE id = ?').get(shareId)?.rev + 1, rev_at: at }, `agreement_opportunity_shares ${shareId} of representation_agreements ${id} was already withdrawn`),
+    }),
     byId: agreementById,
     /** The agency's agreements, oldest first (the agency figures, the client list before visibility). */
     forAgency: many(decodeAgreements, 'SELECT * FROM representation_agreements WHERE agency_org_id = ? ORDER BY rowid'),
@@ -872,13 +936,9 @@ export function createAgentCoreRepository({ sqlite, unit = null, now = Date.now,
      * history entries: the actor's id and name of the client's own entries.
      */
     redactClient: (clientId, at) => operation(() => {
-      for (const stored of agreements.forClient(clientId)) {
-        const next = clone(stored);
-        next.subjectRemovedAt = at;
-        next.disputeReason = null;
-        if (next.status === 'proposed') { next.status = 'declined'; next.declinedAt = at; }
-        writeAgreement(st, typedOr(typeRepresentationAgreement, next, 'representationAgreements'), { isNew: false, knownHistory: stored.history.length });
-      }
+      q(`UPDATE representation_agreements SET subject_removed_at = @at, dispute_reason = NULL,
+        declined_at = CASE WHEN status = 'proposed' THEN @at ELSE declined_at END, status = CASE WHEN status = 'proposed' THEN 'declined' ELSE status END
+        WHERE client_kind = 'player' AND client_id = @c`).run({ at, c: clientId });
       q("UPDATE agreement_history SET by_id = NULL, by_name = NULL WHERE by_kind = 'player' AND agreement_id IN (SELECT id FROM representation_agreements WHERE client_kind = 'player' AND client_id = ?)").run(clientId);
     }),
   };

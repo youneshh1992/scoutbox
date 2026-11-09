@@ -840,7 +840,7 @@ section('AI — a corrupt row is contained and named by its effect, never repair
   const context = { id: 'ctx-ai1', agencyOrgId: 'org-northstar', agentUserId: ANA_ID, type: 'transfer', jurisdictions: ['ENG'], parties: [], representations: [], resolvedFacts: [], reEvaluationPending: false, reviewRejectedAt: null, status: 'open', origin: 'transaction', transactionId: 'atx-corrupt', openedAt: T0, closedAt: null, keys: {}, rev: 1, revAt: T0, revBy: null, history: [] };
   let refusedStatus = null;
   try { writeFixture(DATA_DIR, { complianceContexts: [context], agentTransactions: [row({})] }); } catch (e) { refusedStatus = e; }
-  neg(refusedStatus?.code === 'AGENT_TRANSACTIONS_INPUT_INVALID' && /atx-corrupt\.status/.test(refusedStatus.message) && !readRecords(DATA_DIR).complianceContexts.some((c) => c.id === 'ctx-ai1'), `AI2 a row with a status nobody wrote is refused by the repository, naming it — nothing is repaired and nothing is written (${refusedStatus?.message})`);
+  neg(refusedStatus?.code === 'AGENT_TRANSACTIONS_INPUT_INVALID' && /atx-corrupt.*status/.test(refusedStatus.message) && !readRecords(DATA_DIR).complianceContexts.some((c) => c.id === 'ctx-ai1'), `AI2 a row with a status nobody wrote is refused by the repository, naming it — nothing is repaired and nothing is written (${refusedStatus?.message})`);
   neg(!actorTransitionAllowed('SOMETHING_NOBODY_WROTE', 'ACTIVE') && !ALL_TRANSITIONS.some((t) => t.from === 'SOMETHING_NOBODY_WROTE'), 'AI3 …and no transition exists from a status the machine does not know');
   writeFixture(DATA_DIR, { complianceContexts: [context], agentTransactions: [row({ status: 'READY' })] });
   server = await boot();

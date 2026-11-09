@@ -69,8 +69,8 @@ async function bootOn(dataDir, port) {
   };
 }
 const fixture = (dir, collections) => writeFixture(dir, collections, { idCounter: 500_000 });
-/** Plant a state between boots through the repositories, as a route writes it. */
-const plant = (dir, work) => { const L = openLayer(dir); try { return L.unit(() => work(L.layer)); } finally { L.close(); } };
+/** Plant a state between boots through the repositories, as a route writes it, or with SQL for a state no route writes. */
+const plant = (dir, work) => { const L = openLayer(dir); try { return L.unit(() => work(L.layer, L.sqlite)); } finally { L.close(); } };
 
 // ============================================================ 1
 section('1 — migration 0029: registered once; the three stores are tables, EMPTY on a clean database');
@@ -244,12 +244,15 @@ section('5 — corruption on disk is contained and named by its effect, never re
   const orphaned = refusedWrite({ transactionDocuments: [orphan] });
   neg(orphaned?.code === 'AGENT_TRANSACTIONS_REFERENCE_MISSING', `(b) a document whose transaction is gone is refused by the repository — a document belongs to a transaction (${orphaned?.code})`);
   const odd = refusedWrite({ agentTransactions: [copy({ id: 'atx-odd', status: 'HALF_WRITTEN' })] });
-  neg(odd?.code === 'AGENT_TRANSACTIONS_INPUT_INVALID' && /atx-odd\.status/.test(odd.message), `(c) a status nobody wrote is refused by the repository, naming the row (${odd?.message})`);
+  neg(odd?.code === 'AGENT_TRANSACTIONS_INPUT_INVALID' && /atx-odd.*status/.test(odd.message), `(c) a status nobody wrote is refused by the repository, naming the row (${odd?.message})`);
   neg(stableJson(readRecords(dir)) === stableJson(db), 'and nothing of the refused writes is on disk');
   // A policy version published for the jurisdiction flags the transaction's compliance context. The transaction
   // reads that flag — its snapshot is POLICY_CHANGED and authorises nothing until it is re-evaluated.
   const ctxId = db.agentTransactions[0].contextId;
-  plant(dir, (L) => L.complianceRecords.contexts.update(ctxId, (d) => { d.reEvaluationPending = true; d.history.push({ id: 'aud-plant-policy', at: Date.now(), action: 'compliance_context_policy_changed', by: { kind: 'system', userId: null, name: 'policy publication' }, detail: { policyVersions: ['jp-eng-2026-27-1'] } }); }));
+  plant(dir, (L, sqlite) => {
+    L.complianceRecords.contexts.recordAct(ctxId, { history: [{ id: 'aud-plant-policy', at: Date.now(), action: 'compliance_context_policy_changed', by: { kind: 'system', userId: null, name: 'policy publication' }, detail: { policyVersions: ['jp-eng-2026-27-1'] } }] });
+    sqlite.prepare('UPDATE compliance_contexts SET re_evaluation_pending = 1 WHERE id = ?').run(ctxId);
+  });
   const sp = await bootOn(dir, globalThis.LIVE_PORT + 3);
   ok(sp.up, 'the server boots over a context flagged by a policy publication');
   if (sp.up) {
@@ -260,10 +263,10 @@ section('5 — corruption on disk is contained and named by its effect, never re
     neg(progress.status === 422 && progress.body.error === 'TRANSACTION_COMPLIANCE_STALE' && progress.body.staleness === 'POLICY_CHANGED', `and it cannot enter the live workflow until re-evaluated (${progress.status} ${progress.body?.staleness})`);
     await sp.stop();
   }
-  plant(dir, (L) => L.complianceRecords.contexts.update(ctxId, (d) => { d.reEvaluationPending = false; }));
+  plant(dir, (L) => L.complianceRecords.contexts.clearReEvaluation(ctxId));
   // What a typed row CAN still carry is planted and judged on read: a snapshot taken under a party revision the current
   // facts no longer produce.
-  plant(dir, (L) => L.agentTransactions.transactions.update(TX, (d) => { d.compliance.partyRevision = 'f'.repeat(64); }));
+  plant(dir, (_L, sqlite) => sqlite.prepare('UPDATE agent_transactions SET compliance_party_revision = ? WHERE id = ?').run('f'.repeat(64), TX));
   const s = await bootOn(dir, globalThis.LIVE_PORT + 2);
   ok(s.up, 'the server boots over the planted row');
   if (s.up) {

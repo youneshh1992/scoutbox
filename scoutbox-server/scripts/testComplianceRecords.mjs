@@ -1,6 +1,6 @@
 // Compliance contexts and their evaluations, regulatory reviews and consents (repositories/complianceRecords.mjs,
-// migration 0028): the STRICT tables, the typers' refusals, evaluations appended and read back whole, a context that
-// never reopens, a final review decision, a consent answered and revoked once, the queue's order, account deletion
+// migration 0028): the STRICT tables, the refusals a create meets, evaluations appended and read back whole, named acts
+// with history only inserted, a context that never reopens, a final review decision, a consent answered and revoked once, the queue's order, account deletion
 // keeping ids only, units of work and fixtures. Temporary databases only; nothing touches DATA_DIR. Run with: npm test
 
 import assert from 'node:assert/strict';
@@ -11,7 +11,6 @@ import { NOW, TTL, tempDir } from './coreIdentityTestFixtures.mjs';
 import { saveFixture, fixtureDb, ORG, SCOUT } from './recruitmentTestFixtures.mjs';
 import {
   COMPLIANCE_RECORDS_MIGRATION as MIGRATION, COMPLIANCE_RECORDS_TABLES as TABLES, COMPLIANCE_RECORDS_COLLECTIONS as COLLECTIONS,
-  typeContext, typeReview, typeConsent,
 } from '../repositories/complianceRecords.mjs';
 import { PERMITTED_WITH_CONSENT } from '../domains/agents/compliance/conflict.mjs';
 
@@ -99,28 +98,31 @@ test('[schema] 0028 is registered after 0027 and creates the twenty-six STRICT t
   s.close(); rm(dir);
 });
 
-// ------------------------------------------------------------- typing
-test('[typing] the typers refuse junk with the record and field named', () => {
-  assert.equal(typeContext(context()).ok, undefined, 'a typed context is the record itself');
-  assert.match(typeContext(context({ otherServices: [] })).reason, /ctx-1 carries field\(s\) this build does not store: otherServices/, 'the dead Other Services list is gone');
-  assert.match(typeContext(context({ status: 'archived' })).reason, /ctx-1\.status must be one of open\|closed/);
-  assert.match(typeContext(context({ jurisdictions: ['eng'] })).reason, /jurisdictions/);
-  assert.match(typeContext(context({ parties: [...context().parties, { ...context().parties[0], id: 'cpt-3' }] })).reason, /names a party role twice/);
-  assert.match(typeContext(context({ representations: [{ id: 'crp-1', agentUserId: UID, partyRole: 'individual', agreementId: null, status: 'declared', declaredOnly: false, keys: {} }] })).reason, /status must be one of verified\|pending_review\|withdrawn/);
-  assert.match(typeContext(context({ history: [entry('aud-x', 'compliance_context_party_added', { partyRole: 'individual', kind: 'agent' })] })).reason, /detail\.kind/);
-  assert.equal(typeReview(review()).ok, undefined);
-  assert.match(typeReview(review({ kind: 'verification_facet', subject: { profileId: 'agp-1', userId: UID, facet: 'fifa_licence', memberAssociation: null, referenceHash: '9' } })).reason, /does not store: referenceHash/, 'the facet subject does not carry the reference length');
-  assert.match(typeReview(review({ status: 'APPROVED' })).reason, /history|decision|status/);
-  assert.match(typeReview(review({ history: [entry('aud-y', 'regulatory_review_requested', { kind: 'conflict_evaluation', reasonCodes: ['OTHER'], policyVersions: ['jp-fifa-2025-1'] })] })).reason, /repeats the review's kind, reason codes and versions/);
-  assert.match(typeReview(review({ reasons: [{ code: 'X', ruleId: null, ruleStatus: 'MAYBE', policyVersion: null }] })).reason, /ruleStatus must be one of/);
-  assert.equal(typeConsent(consent()).ok, undefined);
-  assert.match(typeConsent(consent({ kind: 'revocation' })).reason, /kind must be one of/, 'a revocation is not a consent row');
-  assert.match(typeConsent(consent({ status: 'revoked' })).reason, /status must be one of requested\|granted\|declined/, 'revoked is derived, never stored');
-  assert.match(typeConsent(consent({ status: 'granted', grantedAt: NOW, grantedBy: PLAYER })).reason, /acknowledged is recorded exactly when granted/);
+// ------------------------------------------------------------- creating
+test('[create] a whole record reads back as written; a field with no column and a value the columns refuse are refused, naming the record', () => {
+  const dir = tempDir('s11b2-create'); saveFixture(dir);
+  const s = serverOpen(dir);
+  const { contexts: C, reviews: R, consents: K } = s.repo;
+  try {
+    const ctx = (over) => context({ id: 'ctx-9', keys: {}, ...over });
+    refused(() => C.create(ctx({ otherServices: [{ id: 'x' }] })), /ctx-9 otherServices: is not stored as written/, 'the dead Other Services list');
+    refused(() => C.create(ctx({ status: 'archived' })), /INPUT_INVALID: compliance_contexts ctx-9 rows: .*status/);
+    refused(() => C.create(ctx({ jurisdictions: ['eng'] })), /member_association/);
+    refused(() => C.create(ctx({ representations: [{ id: 'crp-1', agentUserId: UID, partyRole: 'individual', agreementId: null, status: 'declared', declaredOnly: false, keys: {} }] })), /status IN/);
+    refused(() => C.create(ctx({ history: [entry('aud-x', 'compliance_context_party_added', { partyRole: 'individual', kind: 'agent' })] })), /detail_subject_kind/);
+    assert.equal(C.byId('ctx-9'), null, 'nothing of a refused create is stored');
+    C.create(context());
+    refused(() => R.create(review({ kind: 'verification_facet', subject: { profileId: null, userId: UID, facet: 'fifa_licence', memberAssociation: null, referenceHash: '9' } })), /subject\.referenceHash: is not stored as written/, 'the facet subject does not carry the reference length');
+    refused(() => R.create(review({ status: 'APPROVED' })), /INPUT_INVALID: regulatory_reviews rrv-1 rows/, 'an approval is recorded with its decision');
+    refused(() => R.create(review({ history: [entry('aud-y', 'regulatory_review_requested', { kind: 'conflict_evaluation', reasonCodes: ['OTHER'], policyVersions: ['jp-fifa-2025-1'] })] })), /history\[0\]\.detail\.reasonCodes\[0\]: is not stored as written/, 'the request entry repeats the review\'s own codes');
+    refused(() => R.create(review({ reasons: [{ code: 'X', ruleId: null, ruleStatus: 'MAYBE', policyVersion: null }] })), /rule_status/);
+    refused(() => K.create(consent({ kind: 'revocation' })), /INPUT_INVALID: regulatory_consents rcs-1 rows: .*kind/, 'a revocation is not a consent row');
+    refused(() => K.create(consent({ status: 'granted', grantedAt: NOW, grantedBy: PLAYER })), /is requested first/, 'a consent is answered by an act');
+  } finally { s.close(); rm(dir); }
 });
 
-// ------------------------------------------------------------- writes and reads
-test('[contexts] a context is created whole; an evaluation is appended with its entry and read back whole; what never changes does not; a closed context does not reopen', () => {
+// ------------------------------------------------------------- acts
+test('[contexts] a context is created whole; an evaluation is appended with its entry and read back whole; the context changes through named acts; a closed context does not reopen', () => {
   const dir = tempDir('s11b2-contexts'); saveFixture(dir);
   const s = serverOpen(dir);
   const C = s.repo.contexts;
@@ -131,9 +133,10 @@ test('[contexts] a context is created whole; an evaluation is appended with its 
     refused(() => C.create(context()), /already exists/, 'duplicate');
     refused(() => C.create(context({ id: 'ctx-2', keys: {}, history: [evaluated('aud-e0')] })), /recorded with recordEvaluation/, 'an evaluation entry on creation');
     const r = result();
-    refused(() => C.recordEvaluation('ctx-1', r, inputs, entry('aud-e1', 'compliance_context_evaluated', { outcome: 'CLEAR', reasonCodes: [], policyVersions: r.policyVersions })), /repeats the latest evaluation/, 'an entry that does not repeat its evaluation');
+    refused(() => C.recordEvaluation('ctx-1', r, inputs, entry('aud-e1', 'compliance_context_evaluated', { outcome: 'CLEAR', reasonCodes: [], policyVersions: r.policyVersions })), /aud-e1 detail\.outcome: is not stored as written/, 'an entry that does not repeat its evaluation');
+    refused(() => C.recordEvaluation('ctx-1', { ...r, reasons: [{ ...r.reasons[0], mood: 'calm' }] }, inputs, evaluated('aud-e1', r)), /reasons\[0\]\.mood: is not stored as written/, 'a reason field with no column');
     const ev = C.recordEvaluation('ctx-1', r, inputs, evaluated('aud-e1', r));
-    assert.equal(ev.evaluationId, 'ctx-1#1');
+    assert.equal(ev.evaluationId, 'ctx-1#1', 'a refused evaluation left nothing behind');
     assert.deepEqual(ev.reasons, r.reasons, 'reasons read back with their extras and lists');
     assert.deepEqual(ev.consentsOutstanding, r.consentsOutstanding);
     assert.deepEqual(ev.snapshotOf, inputs);
@@ -142,15 +145,18 @@ test('[contexts] a context is created whole; an evaluation is appended with its 
     const after = C.byId('ctx-1');
     assert.equal(after.evaluationCount, 1); assert.equal(after.lastEvaluation.evaluationId, 'ctx-1#1');
     assert.deepEqual(after.history.at(-1).detail, { outcome: r.outcome, reasonCodes: ['CONSENT_REQUIRED', 'NATIONAL_RULE_APPLIES'], policyVersions: r.policyVersions }, 'the entry is worked out from its evaluation');
-    const v = C.update('ctx-1', (d) => {
-      d.representations.push({ id: 'crp-1', agentUserId: UID, partyRole: 'individual', agreementId: null, status: 'verified', declaredOnly: false, reviewId: null, declaredAt: NOW, firstActAt: NOW, withdrawnAt: null, verifiedByReviewId: null, verifiedAt: null, keys: { declare: { key: 'k-d', fp: '{}' } } });
-      d.history.push(entry('aud-d1', 'compliance_representation_declared', { partyRole: 'individual', status: 'verified', outcome: r.outcome, policyVersions: r.policyVersions }));
-    });
-    assert.equal(v.representations[0].keys.declare.key, 'k-d');
-    refused(() => C.update('ctx-1', (d) => { d.jurisdictions = ['USA']; }), /jurisdictions cannot change/);
-    refused(() => C.update('ctx-1', (d) => { d.history.pop(); }), /history only grows/);
-    C.update('ctx-1', (d) => { d.status = 'closed'; d.closedAt = NOW; d.history.push(entry('aud-cl', 'compliance_context_closed')); });
-    refused(() => C.update('ctx-1', (d) => { d.status = 'open'; d.closedAt = null; }), /does not reopen/);
+    const representation = { id: 'crp-1', agentUserId: UID, partyRole: 'individual', agreementId: null, status: 'verified', declaredOnly: false, reviewId: null, declaredAt: NOW, firstActAt: NOW, withdrawnAt: null, verifiedByReviewId: null, verifiedAt: null, keys: { declare: { key: 'k-d', fp: '{}' } } };
+    refused(() => C.declareRepresentation('ctx-1', { representation }, { history: [entry('aud-d0', 'compliance_representation_declared', { partyRole: 'individual', status: 'verified', outcome: 'CLEAR', policyVersions: r.policyVersions })] }), /aud-d0 detail\.outcome: is not stored as written/, 'a verified declaration repeats the latest evaluation');
+    const v = C.declareRepresentation('ctx-1', { representation }, { bump: { at: NOW, by: { id: UID, name: SCOUT.name } }, history: [entry('aud-d1', 'compliance_representation_declared', { partyRole: 'individual', status: 'verified', outcome: r.outcome, policyVersions: r.policyVersions })] });
+    assert.deepEqual([v.representations[0].keys.declare.key, v.rev, v.revBy], ['k-d', 2, { userId: UID, name: SCOUT.name }]);
+    C.withdrawRepresentation('ctx-1', { representationId: 'crp-1', at: NOW });
+    refused(() => C.withdrawRepresentation('ctx-1', { representationId: 'crp-1', at: NOW }), /STATE_CONFLICT.*already withdrawn/, 'a withdrawal is final');
+    refused(() => C.decideRepresentation('ctx-1', { representationId: 'crp-1', approved: true, reviewId: 'rrv-x', at: NOW }), /STATE_CONFLICT.*not awaiting review/);
+    C.resolveFacts('ctx-1', { codes: ['INTEREST_DECLARED'] }); C.resolveFacts('ctx-1', { codes: ['INTEREST_DECLARED', 'OTHER_SERVICES_PRESUMPTION'] });
+    assert.deepEqual(C.byId('ctx-1').resolvedFacts, ['INTEREST_DECLARED', 'OTHER_SERVICES_PRESUMPTION'], 'each settled fact once');
+    C.close('ctx-1', { at: NOW }, { history: [entry('aud-cl', 'compliance_context_closed')] });
+    refused(() => C.close('ctx-1', { at: NOW }), /STATE_CONFLICT.*already closed/, 'a closed context does not reopen or close twice');
+    assert.equal(typeof C.update, 'undefined', 'there is no whole-record update');
     assert.deepEqual(C.forAgent(ORG.id, UID).map((x) => x.id), ['ctx-1']); assert.equal(C.byCreateKey(ORG.id, UID, 'k-ctx').id, 'ctx-1');
     assert.deepEqual(C.outcomeCounts(), { [PERMITTED_WITH_CONSENT]: 1 });
   } finally { s.close(); rm(dir); }
@@ -171,31 +177,34 @@ test('[policy publication] open contexts of the jurisdiction whose latest evalua
   } finally { s.close(); rm(dir); }
 });
 
-test('[reviews] a review is created and read back; its snapshot names an evaluation of its context; the decision is final; the supersession is written once; the queue pages open items first', () => {
+test('[reviews] a review is created and read back; its snapshot names an evaluation of its context; it is started, decided and superseded once each; the queue pages open items first', () => {
   const dir = tempDir('s11b2-reviews'); saveFixture(dir);
   const s = serverOpen(dir);
   const { contexts: C, reviews: R } = s.repo;
   try {
     C.create(context()); C.recordEvaluation('ctx-1', result(), inputs, evaluated('aud-e1'));
-    refused(() => R.create(review({ snapshot: { outcome: 'CLEAR', evaluationId: 'ctx-1#1' } })), /names an evaluation of its context with the same outcome/);
-    const r = R.create(review({ snapshot: { ...result(), evaluationId: 'ctx-1#1', proposed: inputs.proposed } }));
+    C.create(context({ id: 'ctx-2', keys: {}, history: [] })); C.recordEvaluation('ctx-2', result({ outcome: 'CLEAR' }), inputs, evaluated('aud-e2', result({ outcome: 'CLEAR' })));
+    refused(() => R.create(review({ snapshot: { outcome: 'CLEAR', evaluationId: 'ctx-1#1' } })), /snapshot\.outcome: is not stored as written/, 'the snapshot keeps its evaluation\'s outcome');
+    refused(() => R.create(review({ snapshot: { outcome: 'CLEAR', evaluationId: 'ctx-2#1' } })), /REFERENCE_MISSING/, 'the snapshot names an evaluation of the review\'s own context');
+    const r = R.create(review({ snapshot: { outcome: PERMITTED_WITH_CONSENT, evaluationId: 'ctx-1#1', evaluatedAt: NOW } }));
     assert.equal(r.snapshot.evaluationId, 'ctx-1#1'); assert.deepEqual(r.snapshot.proposed, inputs.proposed, 'the snapshot is read from the evaluation row');
     assert.deepEqual(r.subject, { contextId: 'ctx-1', representationId: null, partyRole: 'engaging_entity' });
-    const prior = { status: 'PENDING', contextOutcome: PERMITTED_WITH_CONSENT, representationStatus: null };
-    const decided = R.update('rrv-1', (d) => {
-      d.status = 'REJECTED'; d.decidedAt = NOW;
-      d.decision = { reviewerId: 'tsr-a', reviewerName: 'Priya', reviewerRole: 'trust_safety_admin', outcome: 'REJECTED', reasonCode: 'no', reason: 'Not settled.', evidenceRefs: [], policyVersions: d.policyVersions, at: NOW, priorState: prior, resultingState: { contextOutcome: PERMITTED_WITH_CONSENT, representationStatus: null } };
-      d.history.push(entry('aud-rs', 'regulatory_review_resolved', { outcome: 'REJECTED', reasonCode: 'no', evidenceRefs: [], evidenceCount: 0, policyVersions: d.policyVersions, priorState: prior, resultingState: { contextOutcome: PERMITTED_WITH_CONSENT, representationStatus: null }, rev: 1 }, REVIEWER));
-      d.rev = 2;
-    });
-    assert.equal(decided.decision.reviewerId, 'tsr-a'); assert.equal(decided.history.at(-1).detail.evidenceCount, 0);
-    refused(() => R.update('rrv-1', (d) => { d.decision.reason = 'rewritten'; }), /a decision is final/);
-    refused(() => R.update('rrv-1', (d) => { d.status = 'PENDING'; d.decision = null; d.decidedAt = null; }), /decision is final|only becomes SUPERSEDED|repeats the decision/);
-    R.create(review({ id: 'rrv-2', snapshot: null }));
-    R.update('rrv-2', (d) => { d.supersedes = 'rrv-1'; d.history.push(entry('aud-sp', 'regulatory_review_requested', { reasonCode: 'supersedes', reviewId: 'rrv-1' }, REVIEWER)); });
-    R.update('rrv-1', (d) => { d.status = 'SUPERSEDED'; d.supersededBy = 'rrv-2'; d.history.push(entry('aud-ss', 'regulatory_review_superseded', { reasonCode: 'superseded', reviewId: 'rrv-2', priorState: { status: 'REJECTED' }, rev: 2 }, REVIEWER)); });
-    refused(() => R.update('rrv-2', (d) => { d.supersedes = 'rrv-x'; }), /supersedes is written once/);
-    assert.equal(R.byId('rrv-1').decision.outcome, 'REJECTED', 'a superseded review keeps its decision');
+    const started = R.start('rrv-1', { at: NOW, by: { id: 'tsr-a', name: 'Priya', role: 'trust_safety_admin' } }, { bump: { at: NOW, by: { id: 'tsr-a', name: 'Priya' } }, history: [entry('aud-st', 'regulatory_review_started', { rev: 1 }, REVIEWER)] });
+    assert.deepEqual([started.status, started.startedBy.id, started.rev], ['IN_REVIEW', 'tsr-a', 2]);
+    refused(() => R.start('rrv-1', { at: NOW, by: { id: 'tsr-a', name: 'Priya', role: 'trust_safety_admin' } }), /STATE_CONFLICT.*not pending/);
+    const prior = { status: 'IN_REVIEW', contextOutcome: PERMITTED_WITH_CONSENT, representationStatus: null };
+    const resulting = { contextOutcome: PERMITTED_WITH_CONSENT, representationStatus: null };
+    const decision = { reviewerId: 'tsr-a', reviewerName: 'Priya', reviewerRole: 'trust_safety_admin', outcome: 'REJECTED', reasonCode: 'no', reason: 'Not settled.', evidenceRefs: ['ev-1'], policyVersions: ['jp-fifa-2025-1'], at: NOW, priorState: prior, resultingState: resulting };
+    refused(() => R.resolve('rrv-1', { decision }, { history: [entry('aud-rs0', 'regulatory_review_resolved', { outcome: 'APPROVED', reasonCode: 'no', evidenceRefs: ['ev-1'], evidenceCount: 1, policyVersions: ['jp-fifa-2025-1'], priorState: prior, resultingState: resulting, rev: 2 }, REVIEWER)] }), /detail\.outcome: is not stored as written/, 'the resolution entry repeats the decision');
+    const decided = R.resolve('rrv-1', { decision, key: { key: 'k-rs', fp: '{}' } }, { history: [entry('aud-rs', 'regulatory_review_resolved', { outcome: 'REJECTED', reasonCode: 'no', evidenceRefs: ['ev-1'], evidenceCount: 1, policyVersions: ['jp-fifa-2025-1'], priorState: prior, resultingState: resulting, rev: 2 }, REVIEWER)] });
+    assert.deepEqual([decided.status, decided.decision.reviewerId, decided.decision.evidenceRefs, decided.keys.resolve.key, decided.history.at(-1).detail.evidenceCount], ['REJECTED', 'tsr-a', ['ev-1'], 'k-rs', 1]);
+    refused(() => R.resolve('rrv-1', { decision: { ...decision, reason: 'rewritten' } }), /STATE_CONFLICT.*not open/, 'a decision is final');
+    refused(() => R.cancel('rrv-1', { at: NOW }), /STATE_CONFLICT.*not open/);
+    refused(() => R.markSuperseded('rrv-1'), /STATE_CONFLICT.*a newer one supersedes/, 'superseded only by a review naming it');
+    R.create(review({ id: 'rrv-2', snapshot: null, supersedes: 'rrv-1', history: [entry('aud-rq2', 'regulatory_review_requested', { kind: 'conflict_evaluation', reasonCodes: ['RULE_STATUS_UNCERTAIN'], policyVersions: ['jp-fifa-2025-1'] }, REVIEWER), entry('aud-sp', 'regulatory_review_requested', { reasonCode: 'supersedes', reviewId: 'rrv-1' }, REVIEWER)] }));
+    const old = R.markSuperseded('rrv-1', {}, { history: [entry('aud-ss', 'regulatory_review_superseded', { reasonCode: 'superseded', reviewId: 'rrv-2', priorState: { status: 'REJECTED' }, rev: 2 }, REVIEWER)] });
+    assert.deepEqual([old.status, old.supersededBy, old.decision.outcome], ['SUPERSEDED', 'rrv-2', 'REJECTED'], 'a superseded review keeps its decision and reads its successor from the row naming it');
+    refused(() => R.create(review({ id: 'rrv-4', supersedes: 'rrv-1', history: undefined })), /DUPLICATE/, 'a review is superseded once');
     R.create(review({ id: 'rrv-3', kind: 'conflict_evaluation', subject: { approach: true, playerId: 'pl-9', jurisdiction: 'ENG' }, snapshot: { outcome: 'MANUAL_REGULATORY_REVIEW_REQUIRED', evaluatedAt: NOW } }));
     assert.deepEqual(R.byId('rrv-3').snapshot, { outcome: 'MANUAL_REGULATORY_REVIEW_REQUIRED', reasons: R.byId('rrv-3').reasons, policyVersions: ['jp-fifa-2025-1'], evaluatedAt: NOW }, 'an Approach item keeps its outcome and instant');
     const p1 = R.queuePage({ limit: 1 });
@@ -204,7 +213,7 @@ test('[reviews] a review is created and read back; its snapshot names an evaluat
     assert.deepEqual(p2.rows.map((x) => x.record.id), ['rrv-3', 'rrv-1'], 'then the decided ones');
     assert.deepEqual(R.queuePage({ status: 'SUPERSEDED', limit: 5 }).rows.map((x) => x.record.id), ['rrv-1']);
     assert.deepEqual(R.metrics().byStatus.PENDING, 2);
-    assert.deepEqual(R.decisionEntries(10).map((x) => x.entry.id), ['aud-ss', 'aud-rs'].filter((id) => ['aud-ss', 'aud-rs'].includes(id)).sort((a, b) => (a < b ? 1 : -1)));
+    assert.deepEqual(R.decisionEntries(10).map((x) => x.entry.id).sort(), ['aud-rs', 'aud-ss', 'aud-st']);
   } finally { s.close(); rm(dir); }
 });
 
@@ -216,17 +225,14 @@ test('[consents] a consent is requested, answered once and revoked once on its o
     C.create(context());
     const k = K.create(consent());
     assert.equal(k.revocation, null); assert.equal(K.byRequestKey('ctx-1', UID, 'k-cs').id, 'rcs-1');
-    refused(() => K.revoke('rcs-1', { id: 'rcs-r', at: NOW, by: PLAYER }), /only a granted consent can be revoked/);
-    const g = K.update('rcs-1', (d) => {
-      d.status = 'granted'; d.grantedAt = NOW; d.grantedBy = PLAYER; d.particulars.acknowledged = { particulars: true, legalAdvice: true, at: NOW };
-      d.keys.grant = { key: 'k-g', fp: '{}' }; d.history.push(entry('aud-g', 'regulatory_consent_granted', { partyRole: 'individual', policyVersions: [PV] }, PLAYER));
-    });
-    assert.equal(g.status, 'granted');
-    refused(() => K.update('rcs-1', (d) => { d.particulars.proposedFeeDisclosed = true; }), /particulars offered cannot change/);
-    refused(() => K.update('rcs-1', (d) => { d.status = 'declined'; d.declinedAt = NOW; d.declinedBy = PLAYER; d.grantedAt = null; d.grantedBy = null; d.particulars.acknowledged = null; }), /never edited/);
-    const rv = K.revoke('rcs-1', { id: 'rcs-r', at: NOW + 1, by: PLAYER });
+    refused(() => K.revoke('rcs-1', { revocation: { id: 'rcs-r', at: NOW, by: PLAYER } }), /only a granted consent can be revoked/);
+    refused(() => K.grant('rcs-1', { at: NOW, by: PLAYER }, { history: [entry('aud-g0', 'regulatory_consent_granted', { partyRole: 'engaging_entity', policyVersions: [PV] }, PLAYER)] }), /detail\.partyRole: is not stored as written/, 'the answer entry repeats the consent\'s own fields');
+    const g = K.grant('rcs-1', { at: NOW, by: PLAYER, key: { key: 'k-g', fp: '{}' } }, { bump: { at: NOW, by: { id: 'pl-1', name: 'Kola' } }, history: [entry('aud-g', 'regulatory_consent_granted', { partyRole: 'individual', policyVersions: [PV] }, PLAYER)] });
+    assert.deepEqual([g.status, g.grantedBy, g.particulars.acknowledged, g.keys.grant.key, g.rev], ['granted', PLAYER, { particulars: true, legalAdvice: true, at: NOW }, 'k-g', 2]);
+    refused(() => K.decline('rcs-1', { at: NOW, by: PLAYER }), /STATE_CONFLICT.*not awaiting an answer/, 'an answered consent is never edited');
+    const rv = K.revoke('rcs-1', { revocation: { id: 'rcs-r', at: NOW + 1, by: PLAYER } });
     assert.equal(rv.status, 'granted', 'the stored status stays granted'); assert.equal(rv.revocation.at, NOW + 1, 'revoked is the revocation row');
-    refused(() => K.revoke('rcs-1', { id: 'rcs-r2', at: NOW, by: PLAYER }), /already revoked/);
+    refused(() => K.revoke('rcs-1', { revocation: { id: 'rcs-r2', at: NOW, by: PLAYER } }), /DUPLICATE/, 'revoked once');
     assert.deepEqual(K.metrics(), { requested: 1, granted: 0, declined: 0, revoked: 1 });
     s.repo.forgetPlayer('pl-1', NOW + 2, () => entry(nextId('aud'), 'compliance_context_party_removed', { partyRole: 'individual' }, { kind: 'system', userId: null, name: 'account deletion' }));
     const ctx = C.byId('ctx-1'); const after = K.byId('rcs-1');
@@ -247,7 +253,7 @@ test('[units] a rolled-back unit leaves nothing', () => {
 });
 
 // The fixture writes these the way the routes do: a context is opened and then evaluated (recordEvaluation); a consent is
-// requested, then answered (update), and a revocation is its own row (revoke).
+// requested, then granted (grant), and a revocation is its own row (revoke).
 const WRITERS = {
   complianceContexts: (L, records) => {
     for (const { evaluations = [], ...c } of records) {
@@ -258,15 +264,15 @@ const WRITERS = {
   },
   regulatoryConsents: (L, records) => {
     for (const k of records) {
-      if (k.kind === 'revocation') { L.complianceRecords.consents.revoke(k.of, { id: k.id, at: k.at, by: k.by }); continue; }
-      L.complianceRecords.consents.create({ ...k, status: 'requested', grantedAt: null, grantedBy: null, declinedAt: null, declinedBy: null, particulars: { ...k.particulars, acknowledged: null }, history: k.history.slice(0, 1) });
-      if (k.status !== 'requested') L.complianceRecords.consents.update(k.id, () => k);
+      if (k.kind === 'revocation') { L.complianceRecords.consents.revoke(k.of, { revocation: { id: k.id, at: k.at, by: k.by } }); continue; }
+      L.complianceRecords.consents.create({ ...k, status: 'requested', grantedAt: null, grantedBy: null, declinedAt: null, declinedBy: null, particulars: { ...k.particulars, acknowledged: null }, keys: { request: k.keys.request }, history: k.history.slice(0, 1) });
+      if (k.status === 'granted') L.complianceRecords.consents.grant(k.id, { at: k.grantedAt, by: k.grantedBy, key: k.keys.grant ?? null }, { history: k.history.slice(1) });
     }
   },
 };
 const fixture = (dir, collections) => writeFixture(dir, fixtureDb(collections), { now: NOW, writers: WRITERS });
 
-test('[fixtures] records written through the repository are typed, junk and a review naming a missing context are refused (nothing written), and they read back as written', () => {
+test('[fixtures] records written through the repository are stored as written, junk and a review naming a missing context are refused (nothing written), and they read back as written', () => {
   const dir = tempDir('s11b2-fix');
   const ctx = { ...context(), history: [...context().history, evaluated('aud-e1')], evaluations: [{ ...result(), snapshotOf: inputs }] };
   const granted = consent({ status: 'granted', grantedAt: NOW, grantedBy: PLAYER, particulars: { ...consent().particulars, acknowledged: { particulars: true, legalAdvice: true, at: NOW } } });
@@ -280,8 +286,8 @@ test('[fixtures] records written through the repository are typed, junk and a re
     assert.deepEqual(back.regulatoryConsents.map((k) => [k.id, k.kind]), [['rcs-1', 'dual_representation'], ['rcs-r', 'revocation']], 'the ledger reads back with its revocation row');
     const bad = [tempDir('s11b2-fix-ctx'), tempDir('s11b2-fix-rev'), tempDir('s11b2-fix-status')];
     refused(() => fixture(bad[0], { regulatoryReviews: [review({ id: 'rrv-9', subject: { contextId: 'ctx-gone', representationId: null, partyRole: 'individual' } })] }), /FOREIGN KEY constraint failed/, 'a review naming a missing context');
-    refused(() => fixture(bad[1], { complianceContexts: [ctx], regulatoryConsents: [granted, { id: 'rcs-r', kind: 'revocation', of: 'rcs-1', at: NOW, by: PLAYER }, { id: 'rcs-r2', kind: 'revocation', of: 'rcs-1', at: NOW, by: PLAYER }] }), /already revoked/, 'a second revocation');
-    refused(() => fixture(bad[2], { complianceContexts: [{ ...ctx, status: 'paused' }] }), /COMPLIANCE_RECORDS_INPUT_INVALID.*ctx-1\.status/, 'an unknown status');
+    refused(() => fixture(bad[1], { complianceContexts: [ctx], regulatoryConsents: [granted, { id: 'rcs-r', kind: 'revocation', of: 'rcs-1', at: NOW, by: PLAYER }, { id: 'rcs-r2', kind: 'revocation', of: 'rcs-1', at: NOW, by: PLAYER }] }), /DUPLICATE/, 'a second revocation');
+    refused(() => fixture(bad[2], { complianceContexts: [{ ...ctx, status: 'paused' }] }), /COMPLIANCE_RECORDS_INPUT_INVALID.*ctx-1.*status/, 'an unknown status');
     for (const d of bad) { const r = readRecords(d); assert.deepEqual([r.complianceContexts.length, r.regulatoryReviews.length, r.regulatoryConsents.length], [0, 0, 0], 'a refused fixture wrote nothing'); }
     rm(...bad);
   } finally { rm(dir); }

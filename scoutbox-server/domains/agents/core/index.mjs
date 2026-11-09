@@ -18,10 +18,10 @@
  */
 
 import { visibleToOrg } from '../../../domain.mjs';
-import { AGENT_CORE_LIMITS as LIM } from '../../../repositories/agentCore.mjs';
+import { AGENT_CORE_LIMITS as LIM, PROFILE_FIELDS } from '../../../repositories/agentCore.mjs';
 import { buildShared } from '../../../m12/shared.mjs';
 import { opportunityBoardFor } from '../../scouting/journeys.mjs';
-import { guardRev, bumpRev, revMeta } from '../../platform/concurrency.mjs';
+import { guardRev, revMeta } from '../../platform/concurrency.mjs';
 import { rateLimitedBody } from '../../platform/rateLimit.mjs';
 import { readPage, sendPageError, pageOf } from '../../platform/paging.mjs';
 import { normaliseClientKey, payloadFingerprint } from '../../recruitment/lifecycle/contact.mjs';
@@ -46,7 +46,7 @@ export function registerAgent(rawCtx) {
     orgCanSee, checkEligibility, distanceBand, moderateOrRefuse, verificationProvider, agentCore, unit, log = console,
   } = ctx;
   if (!notifications) throw new TypeError('registerAgent needs the notifications repository (ctx.notifications)');
-  if (typeof agentCore?.agreements?.update !== 'function' || typeof unit !== 'function') throw new TypeError('registerAgent needs the agent core repository and unit from the data layer');
+  if (typeof agentCore?.agreements?.recordAct !== 'function' || typeof unit !== 'function') throw new TypeError('registerAgent needs the agent core repository and unit from the data layer');
   const { profiles, affiliations, agreements, settings } = agentCore;
 
   const testProviderEnabled = process.env.AGENT_VERIFICATION_TEST_PROVIDER === '1';
@@ -55,10 +55,14 @@ export function registerAgent(rawCtx) {
   // an Approach. Absent (tests of the pure core), the core decides alone.
   const hooks = { facetNeedsReview: null, representationDisputed: null, authorizeApproach: null };
   const now = () => Date.now();
+  /** A history entry, for an act's bookkeeping or a whole record's history. */
+  const entry = (action, by, detail = null) => ({ id: nextId('aud'), at: now(), action, by, detail });
   const hist = (record, action, by, detail = null) => {
     record.history ??= [];
-    record.history.push({ id: nextId('aud'), at: now(), action, by, detail });
+    record.history.push(entry(action, by, detail));
   };
+  /** An act's rev bump, attributed to `by` (an org user or a player `{ id, name }`). */
+  const bumped = (by, at = now()) => ({ bump: { at, by } });
   const byOrg = (req) => ({ kind: 'org', userId: req.orgUser.id, name: req.orgUser.name });
   const byPlayer = (req) => ({ kind: 'player', userId: req.player.id, name: req.player.name });
 
@@ -266,24 +270,24 @@ export function registerAgent(rawCtx) {
       return res.status(201).json({ profile: profileView(created) });
     }
     if (!guardRev(req, res, p, { errorCode: 'REPRESENTATION_VERSION_CONFLICT', current: {} })) return;
-    const updated = unit(() => profiles.update(p.id, (d) => {
-      const changes = {};
-      if (displayName !== undefined && displayName !== d.displayName) { d.displayName = displayName; changes.displayName = true; }
-      if (jurisdictions !== undefined) { d.declared.jurisdictions = jurisdictions; changes.jurisdictions = true; }
-      if (licenceNumber !== undefined && licenceNumber !== d.declared.fifaLicenceNumber) {
-        d.declared.fifaLicenceNumber = licenceNumber;
+    const updated = unit(() => {
+      const declared = {};
+      const history = [];
+      if (displayName !== undefined && displayName !== p.displayName) declared.displayName = displayName;
+      if (jurisdictions !== undefined) declared.jurisdictions = jurisdictions;
+      if (licenceNumber !== undefined && licenceNumber !== p.declared.fifaLicenceNumber) {
+        declared.fifaLicenceNumber = licenceNumber;
         // A changed declaration invalidates the verified licence: the verified reference is no longer the declared one.
-        if (d.facets.fifa_licence.state === 'VERIFIED' && d.facets.fifa_licence.reference !== licenceNumber) {
-          d.facets.fifa_licence = { ...d.facets.fifa_licence, state: 'UNVERIFIED', note: 'The declared licence number changed; re-submit for verification.' };
-          hist(d, 'agent_verification_state_changed', byOrg(req), { facet: 'fifa_licence', memberAssociation: null, from: 'VERIFIED', to: 'UNVERIFIED', state: 'UNVERIFIED' });
-          broadcast('agent_verification_state_changed', { orgId: req.org.id, userId: d.userId, facet: 'fifa_licence', state: 'UNVERIFIED' });
+        const licence = p.facets.fifa_licence;
+        if (licence.state === 'VERIFIED' && licence.reference !== licenceNumber) {
+          profiles.setFacet(p.id, { facet: 'fifa_licence', record: { ...licence, state: 'UNVERIFIED', note: 'The declared licence number changed; re-submit for verification.' } });
+          history.push(entry('agent_verification_state_changed', byOrg(req), { facet: 'fifa_licence', memberAssociation: null, from: 'VERIFIED', to: 'UNVERIFIED', state: 'UNVERIFIED' }));
+          broadcast('agent_verification_state_changed', { orgId: req.org.id, userId: p.userId, facet: 'fifa_licence', state: 'UNVERIFIED' });
         }
-        changes.fifaLicenceNumber = true;
       }
-      d.updatedAt = now();
-      hist(d, 'agent_profile_updated', byOrg(req), { fields: Object.keys(changes) });
-      bumpRev(d, { by: req.orgUser, at: now() });
-    }));
+      history.push(entry('agent_profile_updated', byOrg(req), { fields: PROFILE_FIELDS.filter((f) => Object.hasOwn(declared, f)) }));
+      return profiles.updateDeclared(p.id, declared, { at: now(), touch: true, ...bumped(req.orgUser), history });
+    });
     res.status(200).json({ profile: profileView(updated) });
   });
 
@@ -322,12 +326,12 @@ export function registerAgent(rawCtx) {
     const prev = facet === 'fifa_licence' ? p.facets.fifa_licence : p.facets[facet]?.[ma];
     const changed = (prev?.state ?? 'UNVERIFIED') !== next.state;
     const updated = unit(() => {
-      const out = profiles.update(p.id, (d) => {
-        if (facet === 'fifa_licence') d.facets.fifa_licence = { ...next, staleNotifiedAt: null }; else d.facets[facet][ma] = { ...next, staleNotifiedAt: null };
-        hist(d, 'agent_verification_submitted', byOrg(req), { facet, memberAssociation: ma });
-        if (changed) hist(d, 'agent_verification_state_changed', byOrg(req), { facet, memberAssociation: ma, from: prev?.state ?? 'UNVERIFIED', to: next.state, state: next.state });
-        d.updatedAt = now();
-        bumpRev(d, { by: req.orgUser, at: now() });
+      const out = profiles.setFacet(p.id, { facet, memberAssociation: ma, record: next }, {
+        at: now(), touch: true, ...bumped(req.orgUser),
+        history: [
+          entry('agent_verification_submitted', byOrg(req), { facet, memberAssociation: ma }),
+          ...(changed ? [entry('agent_verification_state_changed', byOrg(req), { facet, memberAssociation: ma, from: prev?.state ?? 'UNVERIFIED', to: next.state, state: next.state })] : []),
+        ],
       });
       if (next.state === 'MANUAL_REVIEW_REQUIRED' && hooks.facetNeedsReview) hooks.facetNeedsReview(out, { facet, memberAssociation: ma, reference }, byOrg(req));
       if (changed) {
@@ -424,12 +428,7 @@ export function registerAgent(rawCtx) {
     const problem = affiliationChangeProblem({ affiliations: affiliations.forAgency(req.org.id), target: aff, actorUserId: req.orgUser.id, nextTiers: tiers, now: now() });
     if (problem) return sendAgentError(res, { error: problem, message: problem === 'LAST_ADMIN' ? 'An agency must keep at least one administrator.' : 'You cannot grant yourself the administrator role.' }, 'team');
     if (!guardRev(req, res, aff, { errorCode: 'AFFILIATION_VERSION_CONFLICT', current: { tiers: tiersOf(aff) } })) return;
-    unit(() => affiliations.update(aff.id, (d) => {
-      const from = tiersOf(d);
-      d.tiers = tiers;
-      hist(d, 'agency_affiliation_updated', byOrg(req), { from, to: tiers, tiers });
-      bumpRev(d, { by: req.orgUser, at: now() });
-    }));
+    unit(() => affiliations.setTiers(aff.id, { tiers }, { ...bumped(req.orgUser), history: [entry('agency_affiliation_updated', byOrg(req), { from: tiersOf(aff), to: tiers, tiers })] }));
     res.json({ member: memberRows(req.org).find((m) => m.affiliationId === aff.id) });
   });
 
@@ -444,12 +443,7 @@ export function registerAgent(rawCtx) {
     if (problem) return sendAgentError(res, { error: problem, message: 'An agency must keep at least one administrator.' }, 'team');
     if (!guardRev(req, res, aff, { errorCode: 'AFFILIATION_VERSION_CONFLICT', current: {} })) return;
     unit(() => {
-      affiliations.update(aff.id, (d) => {
-        d.endedAt = now();
-        d.endedReason = reason ?? 'left';
-        hist(d, 'agency_affiliation_ended', byOrg(req), { reasonCode: d.endedReason });
-        bumpRev(d, { by: req.orgUser, at: now() });
-      });
+      affiliations.end(aff.id, { at: now(), reason: reason ?? 'left' }, { ...bumped(req.orgUser), history: [entry('agency_affiliation_ended', byOrg(req), { reasonCode: reason ?? 'left' })] });
       broadcast('agency_affiliation_ended', { orgId: req.org.id, userId: aff.userId });
       // Current agency access ends now, in the same unit; the person's agent profile and every
       // historical attribution stay exactly as they are.
@@ -685,15 +679,8 @@ export function registerAgent(rawCtx) {
     if (!guardRev(req, res, a, { errorCode: 'REPRESENTATION_VERSION_CONFLICT', current: { status: effectiveAgreementStatus(a, now()) } })) return;
     const phase = effectiveAgreementStatus(a, now());
     const updated = unit(() => {
-      const out = agreements.update(a.id, (d) => {
-        d.status = 'terminated_by_agent';
-        d.terminatedAt = now();
-        d.terminatedBy = 'agent';
-        d.terminationReasonCode = reasonCode;
-        if (key) d.keys.agentTerminate = { key, fp };
-        hist(d, 'representation_terminated', byOrg(req), { by: 'agent', phase, reasonCode });
-        bumpRev(d, { by: req.orgUser, at: now() });
-      });
+      const out = agreements.terminateByAgent(a.id, { at: now(), reasonCode, key: key ? { key, fp } : null },
+        { ...bumped(req.orgUser), history: [entry('representation_terminated', byOrg(req), { by: 'agent', phase, reasonCode })] });
       broadcast('representation_terminated', { orgId: req.org.id, agreementId: out.id, agentUserId: out.agentUserId });
       notify({ kind: 'player', id: out.clientId }, 'representation_terminated', phase === 'proposed' ? 'An agent withdrew their representation request.' : 'Your agent ended the representation relationship. The record stays in your history.', out.id);
       return out;
@@ -789,15 +776,9 @@ export function registerAgent(rawCtx) {
     if (!guardRev(req, res, a, { errorCode: 'REPRESENTATION_VERSION_CONFLICT', current: { status: st } })) return;
     const t = now();
     const updated = unit(() => {
-      const out = agreements.update(a.id, (d) => {
-        if (to === 'active') { d.status = 'active'; d.confirmedAt = t; d.confirmedBy = { kind: 'player', id: req.player.id }; d.startAt = t; d.endAt = termEndAt(t, d.termMonths); }
-        else if (to === 'declined') { d.status = 'declined'; d.declinedAt = t; }
-        else if (to === 'terminated_by_client') { d.status = 'terminated_by_client'; d.terminatedAt = t; d.terminatedBy = 'client'; d.terminationReasonCode = 'client_ended'; }
-        else if (to === 'disputed') { d.status = 'disputed'; d.disputedAt = t; d.disputeReason = reason || null; }
-        if (key) d.keys[action] = { key, fp };
-        hist(d, event === 'representation_confirmed' ? 'representation_confirmed' : event === 'representation_rejected' ? 'representation_rejected' : event === 'representation_disputed' ? 'representation_disputed' : 'representation_terminated', byPlayer(req), { from: st, to, by: 'client', hadReason: !!reason });
-        bumpRev(d, { by: { id: req.player.id, name: req.player.name }, at: t });
-      });
+      const actionOf = event === 'representation_confirmed' ? 'representation_confirmed' : event === 'representation_rejected' ? 'representation_rejected' : event === 'representation_disputed' ? 'representation_disputed' : 'representation_terminated';
+      const out = agreements.answerByClient(a.id, { to, at: t, playerId: req.player.id, reason: reason || null, key: key ? { key, fp } : null, slot: action },
+        { ...bumped({ id: req.player.id, name: req.player.name }, t), history: [{ ...entry(actionOf, byPlayer(req), { from: st, to, by: 'client', hadReason: !!reason }), at: t }] });
       // Literal event names: the event registry audit reads call sites textually.
       const ev = { orgId: out.agencyOrgId, agreementId: out.id, agentUserId: out.agentUserId };
       if (event === 'representation_confirmed') broadcast('representation_confirmed', ev);
@@ -880,12 +861,9 @@ export function registerAgent(rawCtx) {
     let rel = a;
     if (Object.keys(changed).length) {
       rel = unit(() => {
-        const out = agreements.update(a.id, (d) => {
-          if (Object.hasOwn(changed, 'shareWithAgencyStaff')) d.shareWithAgencyStaff = changed.shareWithAgencyStaff;
-          for (const k of DISCLOSURE_KEYS) if (Object.hasOwn(changed, k)) d.disclosure[k] = changed[k];
-          hist(d, 'representation_sharing_changed', byPlayer(req), changed);
-          bumpRev(d, { by: { id: req.player.id, name: req.player.name }, at: now() });
-        });
+        const disclosure = Object.fromEntries(DISCLOSURE_KEYS.filter((k) => Object.hasOwn(changed, k)).map((k) => [k, changed[k]]));
+        const out = agreements.setSharing(a.id, { shareWithAgencyStaff: changed.shareWithAgencyStaff, disclosure },
+          { ...bumped({ id: req.player.id, name: req.player.name }), history: [entry('representation_sharing_changed', byPlayer(req), changed)] });
         broadcast('representation_disclosure_changed', { orgId: out.agencyOrgId, agreementId: out.id, agentUserId: out.agentUserId });
         notify({ kind: 'org_user', id: out.agentUserId }, 'representation_disclosure',
           'A client changed what they share with you. Open the relationship to see which parts of their record and process you can currently see.', out.id);
@@ -955,7 +933,7 @@ export function registerAgent(rawCtx) {
     for (const a of agreements.expiringUnnotified(t, EXPIRY_ALERT_MS)) {
       try {
         unit(() => {
-          agreements.update(a.id, (d) => { d.expiryNotifiedAt = t; });
+          agreements.markExpiryNotified(a.id, { at: t });
           // Only a current member is told; the marker is written either way.
           if (affiliations.activeFor(a.agentUserId, a.agencyOrgId, t)) notify({ kind: 'org_user', id: a.agentUserId }, 'representation_expiring', 'A client relationship ends within 30 days. A new relationship needs a new client confirmation.', a.id);
         });
@@ -965,11 +943,10 @@ export function registerAgent(rawCtx) {
       try {
         unit(() => {
           const told = [];
-          profiles.update(p.id, (d) => {
-            const mark = (facet, ma, rec) => { if (rec.state === 'VERIFIED' && rec.recheckAt !== null && rec.recheckAt <= t && rec.staleNotifiedAt === null) { rec.staleNotifiedAt = t; told.push([facet, ma]); } };
-            mark('fifa_licence', null, d.facets.fifa_licence);
-            for (const f of ['national_registration', 'domestic_authorisation', 'minors_authorisation']) for (const [ma, rec] of Object.entries(d.facets[f])) mark(f, ma, rec);
-          });
+          const mark = (facet, ma, rec) => { if (rec?.state === 'VERIFIED' && rec.recheckAt !== null && rec.recheckAt <= t && rec.staleNotifiedAt === null) told.push([facet, ma]); };
+          mark('fifa_licence', null, p.facets.fifa_licence);
+          for (const f of ['national_registration', 'domestic_authorisation', 'minors_authorisation']) for (const [ma, rec] of Object.entries(p.facets[f])) mark(f, ma, rec);
+          profiles.markStaleNotified(p.id, { facets: told, at: t });
           if (affiliations.activeFor(p.userId, p.agencyOrgId, t)) for (const [facet, ma] of told) notify({ kind: 'org_user', id: p.userId }, 'agent_verification_stale', `Verification of ${facet}${ma ? ` (${ma})` : ''} has gone STALE. Re-check it or request attributed review before any regulated action.`, p.id);
         });
       } catch (err) { log.error?.(`agent sweep: the stale notice for ${p.id} failed: ${err?.message ?? err}`); }

@@ -127,14 +127,23 @@ The rules are likely well under half of the production lines.
    became 24 named acts. A schedule proposal must be one past the current revision, nothing changes an ended trial,
    completion needs a scheduled trial and a report is filed once, all guarded in SQL; a report names its trial's player
    by a composite key. The erasure tombstone is now the repository's `redactPlayer` (SQL), as for cases.
+   **Agent transactions, compliance and core done too (9 Nov):** 57 draft edits in the three agent route modules
+   and `m27/` became named acts. `agentTransactions.mjs` (1,033 → 801 lines, 88k → 66k characters) and
+   `complianceRecords.mjs` (1,356 → 1,049 lines, 125k → 92k characters) have no JavaScript validator. A transaction's
+   status moves only along `ACTOR_`, `COMPLIANCE_` and the new `PARTY_CHANGE_TRANSITIONS`, nothing is added to an ended
+   one, and a route's rev bump is its own act after the re-evaluation. Composite keys replace four JavaScript checks: a
+   snapshot names an evaluation of its own context (transactions and reviews), a binding is in a transaction of its own
+   agency, a releasing party is only in a transfer or a loan. A document's and a review's `supersededBy` is now worked
+   out from the row naming it. Compliance history whose detail is derived must read back as written. The agent core's
+   acts guard `AGENT_TRANSITIONS` and `CLIENT_TRANSITIONS` in SQL; its `create` still types from the field specs, so it
+   grew (934 → 994 lines) and belongs with the "validators but no draft updates" pass. Left in these modules: the two
+   `compliancePolicies` edits (reviewer revocation, policy publication) and `users.update` on ending a membership.
    **Follow-up:** `offerIntegrity` (`offer.mjs`) still checks shapes the schema now rules out (unknown statuses, duplicate
    or missing revisions). Trim it once the batteries that test it on in-memory records have been looked at.
-   **Still to do (9 Nov):** about 223 draft edits remain in domain code, across ~25 repositories; ~30 repositories
+   **Still to do (9 Nov):** about 165 draft edits remain in domain code, across ~22 repositories; ~28 repositories
    still have JavaScript validators. In order:
    1. ~~**Trials and trial requests**~~ (done, above).
-   2. **Agent transactions, compliance and core** (`agentTransactions.mjs`, `complianceRecords.mjs`, `agentCore.mjs`,
-      ~40 edits). State machines with history, and the modules in the agent core ↔ compliance ↔ transactions cycle:
-      do them together with the wiring (step 3), so each module's dependencies change once.
+   2. ~~**Agent transactions, compliance and core**~~ (done, below; the wiring of their cycle is still step 3).
    3. **Verification** (claims, `transitionsVouches.mjs`, ~17 edits) and **Box Cam sessions** (`boxCam.mjs`, ~10).
    4. **Then decide whether to stop.** The identity long tail (`identity.mjs`, `users.mjs`, `orgs.mjs` and others,
       ~60 edits, mostly 1–7 single-field edits per repository) carries little state-machine risk: convert a repository

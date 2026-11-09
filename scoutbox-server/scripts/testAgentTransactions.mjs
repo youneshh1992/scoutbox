@@ -1,6 +1,6 @@
-// The Agent Transaction Workspace (repositories/agentTransactions.mjs, migration 0029): the STRICT tables, the typers'
-// refusals, a transaction created and read back whole, what never changes and what only grows, a snapshot naming an
-// evaluation of its own context, a withdrawn binding final and one live binding per (role, agent), document
+// The Agent Transaction Workspace (repositories/agentTransactions.mjs, migration 0029): the STRICT tables, the
+// refusals a create meets, a transaction changed only through named acts, a snapshot naming an evaluation of its own
+// context, a withdrawn binding final and one live binding per (role, agent), document
 // supersession, cursor paging and SQL counts, account deletion keeping ids only, units of work and fixtures.
 // Temporary databases only. Run with: npm test
 
@@ -12,7 +12,6 @@ import { NOW, TTL, tempDir } from './coreIdentityTestFixtures.mjs';
 import { saveFixture, fixtureDb, ORG, SCOUT } from './recruitmentTestFixtures.mjs';
 import {
   AGENT_TRANSACTIONS_MIGRATION as MIGRATION, AGENT_TRANSACTIONS_TABLES as TABLES, AGENT_TRANSACTIONS_COLLECTIONS as COLLECTIONS,
-  typeTransaction, typeRepresentation, typeDocument,
 } from '../repositories/agentTransactions.mjs';
 import { snapshotView } from '../domains/agents/transactions/transaction.mjs';
 
@@ -90,32 +89,42 @@ test('[schema] 0029 is registered after 0028 and creates the sixteen STRICT tabl
   s.close(); rm(dir);
 });
 
-// ------------------------------------------------------------- typing
-test('[typing] the typers refuse junk with the record and field named', () => {
-  assert.equal(typeTransaction(transaction()).ok, undefined, 'a typed transaction is the record itself');
-  assert.match(typeTransaction(transaction({ notes: [{ id: 'n', visibility: 'AGENT_PRIVATE', text: 'x', by: AGENT, at: NOW, removedAt: null }] })).reason, /notes\[0\] carries field\(s\) this build does not store: removedAt/, 'a note\'s never-written removal is gone');
-  assert.match(typeTransaction(transaction({ status: 'HALF_WRITTEN' })).reason, /atx-1\.status must be one of DRAFT/);
-  assert.match(typeTransaction(transaction({ parties: [party({ partyRole: 'engaging_entity' })] })).reason, /partyRole is individual exactly for a player/);
-  assert.match(typeTransaction(transaction({ parties: [party(), party({ id: 'txp-9' })] })).reason, /names a live party role twice/);
-  assert.match(typeTransaction(transaction({ type: 'employment_contract', parties: [party({ id: 'txp-3', partyRole: 'releasing_entity', subjectKind: 'club', subjectId: ORG.id })] })).reason, /releasing entity only in a transfer or a loan/);
-  assert.match(typeTransaction(transaction({ compliance: { evaluationId: 'ctx-1#1', gate: 'FACET_NOT_VERIFIED', evaluatedAt: NOW, pendingReason: 'FACET_NOT_VERIFIED', verificationFreshness: null, partyRevision: REV } })).reason, /exactly one/);
-  assert.match(typeTransaction(transaction({ compliance: { evaluationId: 'ctx-1#1', gate: null, evaluatedAt: NOW, pendingReason: null, verificationFreshness: null, partyRevision: 'not-a-digest' } })).reason, /partyRevision must be a sha256 hex digest/);
-  assert.match(typeTransaction(transaction({ compliance: { evaluationId: 'ctx-1#1', outcome: 'CLEAR', gate: null, evaluatedAt: NOW, pendingReason: null, verificationFreshness: null, partyRevision: REV } })).reason, /does not store: outcome/, 'the snapshot copies nothing its evaluation holds');
-  assert.match(typeTransaction(transaction({ holdReasonCode: 'awaiting_document' })).reason, /holdReasonCode is set, with heldAt/);
-  assert.match(typeTransaction(transaction({ keys: { 'party:k1': { key: 'k2', fp: '{}' } } })).reason, /repeats its own key/);
-  assert.match(typeTransaction(transaction({ history: [entry('aud-x', 'transaction_status_changed', { from: 'DRAFT', to: 'SIGNED' })] })).reason, /detail\.to must be one of/);
-  assert.equal(typeRepresentation(rep()).ok, undefined);
-  assert.match(typeRepresentation(rep({ declaredEvidenceId: null })).reason, /does not store: declaredEvidenceId/, 'the never-written declared evidence is gone');
-  assert.match(typeRepresentation(rep({ status: 'withdrawn' })).reason, /withdrawnAt is set exactly when the binding was withdrawn/);
-  assert.match(typeRepresentation(rep({ declaredOnly: false })).reason, /names the agreement of a binding that is not declared/);
-  assert.equal(typeDocument(doc()).ok, undefined);
-  assert.match(typeDocument(doc({ signedAt: null })).reason, /does not store: signedAt/, 'the never-written signature instant is gone');
-  assert.match(typeDocument(doc({ history: [entry('aud-d', 'transaction_document_added', { documentType: 'mandate', visibility: 'AGENT_PRIVATE', version: 1 })] })).reason, /repeats the document's own fields/);
-  assert.match(typeDocument(doc({ version: 2 })).reason, /supersedes names the version this one replaces/);
+// ------------------------------------------------------------- creating
+test('[create] a whole record reads back as written; a field with no column and a value the columns refuse are refused, naming the record', () => {
+  const dir = tempDir('s11c-create'); saveFixture(dir);
+  const s = serverOpen(dir);
+  const { transactions: T, representations: R, documents: D } = s.repo;
+  try {
+    s.withContext(); s.withContext('ctx-2', 'atx-2');
+    const tx = (over) => transaction({ id: 'atx-2', contextId: 'ctx-2', keys: {}, ...over });
+    refused(() => T.create(tx({ notes: [{ id: 'n', visibility: 'AGENT_PRIVATE', text: 'x', by: AGENT, at: NOW, removedAt: NOW }] })), /atx-2 notes\[0\]\.removedAt: is not stored as written/, 'a note\'s never-written removal');
+    refused(() => T.create(tx({ status: 'HALF_WRITTEN' })), /INPUT_INVALID: agent_transactions atx-2 row: .*status/);
+    refused(() => T.create(tx({ parties: [party({ partyRole: 'engaging_entity' })] })), /INPUT_INVALID: agent_transactions atx-2 party txp-1/, 'a player is the individual');
+    refused(() => T.create(tx({ parties: [party(), party({ id: 'txp-9' })] })), /DUPLICATE: agent_transactions atx-2 party txp-9/, 'a live party role twice');
+    refused(() => T.create(tx({ type: 'employment_contract', parties: [party({ id: 'txp-3', partyRole: 'releasing_entity', subjectKind: 'club', subjectId: ORG.id })] })), /INPUT_INVALID: .*releasing_entity/, 'a releasing entity only in a transfer or a loan');
+    refused(() => T.create(tx({ compliance: { evaluationId: 'ctx-2#1', gate: 'FACET_NOT_VERIFIED', evaluatedAt: NOW, pendingReason: 'FACET_NOT_VERIFIED', verificationFreshness: null, partyRevision: REV } })), /INPUT_INVALID: agent_transactions atx-2 row/, 'an evaluation or a gate, not both');
+    refused(() => T.create(tx({ compliance: { evaluationId: 'ctx-2#1', gate: null, evaluatedAt: NOW, pendingReason: null, verificationFreshness: null, partyRevision: 'not-a-digest' } })), /compliance_party_revision/);
+    refused(() => T.create(tx({ compliance: { evaluationId: 'ctx-1#1', gate: null, evaluatedAt: NOW, pendingReason: null, verificationFreshness: null, partyRevision: REV } })), /REFERENCE_MISSING: agent_transactions atx-2/, 'the snapshot names an evaluation of its own context');
+    refused(() => T.create(tx({ compliance: { evaluationId: 'ctx-2#1', outcome: 'CLEAR', gate: null, evaluatedAt: NOW, pendingReason: null, verificationFreshness: null, partyRevision: REV } })), /compliance\.outcome: is not stored as written/, 'the snapshot copies nothing its evaluation holds');
+    refused(() => T.create(tx({ holdReasonCode: 'awaiting_document' })), /hold_reason_code/);
+    refused(() => T.create(tx({ keys: { 'party:k1': { key: 'k2', fp: '{}' } } })), /repeats its own key/);
+    refused(() => T.create(tx({ history: [entry('aud-x', 'transaction_status_changed', { from: 'DRAFT', to: 'SIGNED' })] })), /history aud-x.*detail_to/);
+    refused(() => T.create(tx({ history: [entry('aud-y', 'transaction_status_changed', { from: 'DRAFT', mood: 'happy' })] })), /history aud-y detail carries field\(s\) this build does not store: mood/);
+    refused(() => T.create({ id: 'atx-partial' }), /INPUT_INVALID: agent_transactions atx-partial/, 'a partial record');
+    assert.equal(T.byId('atx-2'), null, 'nothing of a refused create is stored');
+    T.create(transaction());
+    refused(() => R.create(rep({ declaredEvidenceId: 'ev-1' })), /declaredEvidenceId: is not stored as written/, 'the never-written declared evidence');
+    refused(() => R.create(rep({ status: 'withdrawn' })), /withdrawn_at/);
+    refused(() => R.create(rep({ declaredOnly: false })), /verified_by_review_id/, 'a binding that is not declared names its agreement');
+    refused(() => R.create(rep({ agencyOrgId: 'org-other' })), /REFERENCE_MISSING: transaction_representations txr-1/, 'a binding is in a transaction of its own agency');
+    refused(() => D.create(doc({ signedAt: NOW })), /signedAt: is not stored as written/, 'the never-written signature instant');
+    refused(() => D.create(doc({ history: [entry('aud-d', 'transaction_document_added', { documentType: 'mandate', visibility: 'AGENT_PRIVATE', version: 1 })] })), /history\[0\]\.detail\.visibility: is not stored as written/, 'an entry repeats the document\'s own fields');
+    refused(() => D.create(doc({ version: 2 })), /supersedes_id/, 'a later version names the one it replaces');
+  } finally { s.close(); rm(dir); }
 });
 
-// ------------------------------------------------------------- writes and reads
-test('[transactions] a transaction is created whole and read back whole; what never changes does not; notes, terms, keys and history only grow; a removed party does not return', () => {
+// ------------------------------------------------------------- acts
+test('[transactions] a transaction changes only through named acts; history, notes, terms and keys are inserted; a status moves only along its table; nothing is added to an ended one', () => {
   const dir = tempDir('s11c-tx'); saveFixture(dir);
   const s = serverOpen(dir);
   const T = s.repo.transactions;
@@ -126,37 +135,41 @@ test('[transactions] a transaction is created whole and read back whole; what ne
     assert.ok(Object.isFrozen(t) && Object.isFrozen(t.parties[0].addedBy), 'deep-frozen');
     assert.equal(t.initiatedAt, NOW, 'the opening is the creation');
     refused(() => T.create(transaction()), /already exists/, 'duplicate');
-    const v = T.update('atx-1', (d) => {
-      d.parties[0].confirmedAt = NOW; d.parties[0].confirmedBy = PLAYER;
-      d.notes.push({ id: 'txn-1', visibility: 'AGENT_PRIVATE', text: 'Note', by: AGENT, at: NOW });
-      d.linkedThreads.push({ id: 'txm-1', channelId: 'ch-1', linkedBy: CLUB_USER, linkedAt: NOW });
-      d.terms.versions.push({ id: 'txt-1', at: NOW, by: AGENT, recordedFor: 'individual', visibility: 'PLAYER_AGENT_SHARED', summary: 'Two years.', version: 1 });
-      d.keys['status:k-s'] = { key: 'k-s', fp: '{"to":"ACTIVE"}' };
-      d.compliance = { evaluationId: ev.evaluationId, gate: null, evaluatedAt: NOW, pendingReason: null, verificationFreshness: 'VERIFIED', partyRevision: REV };
-      d.history.push(entry('aud-t2', 'transaction_compliance_evaluated', { outcome: 'CLEAR', pendingReason: null, reasonCodes: ['FACET_VERIFIED'], policyVersions: result.policyVersions }));
-      d.rev = 2; d.revBy = { userId: null, name: 'Representing agent' };
+    T.confirmParty('atx-1', { partyId: 'txp-1', at: NOW, by: PLAYER });
+    T.addNote('atx-1', { note: { id: 'txn-1', visibility: 'AGENT_PRIVATE', text: 'Note', by: AGENT, at: NOW } });
+    T.linkThread('atx-1', { thread: { id: 'txm-1', channelId: 'ch-1', linkedBy: CLUB_USER, linkedAt: NOW } });
+    T.recordTerms('atx-1', { terms: { id: 'txt-1', at: NOW, by: AGENT, recordedFor: 'individual', visibility: 'PLAYER_AGENT_SHARED', summary: 'Two years.', version: 1 } });
+    refused(() => T.recordTerms('atx-1', { terms: { id: 'txt-3', at: NOW, by: AGENT, recordedFor: 'individual', visibility: 'PLAYER_AGENT_SHARED', summary: 'Three.', version: 3 } }), /is version 2/, 'terms count from 1, in order');
+    const v = T.recordCompliance('atx-1', { snapshot: { evaluationId: ev.evaluationId, gate: null, evaluatedAt: NOW, pendingReason: null, verificationFreshness: 'VERIFIED', partyRevision: REV } }, {
+      at: NOW + 1, touch: true, bump: { at: NOW + 1, label: 'Representing agent' },
+      history: [entry('aud-t2', 'transaction_compliance_evaluated', { outcome: 'CLEAR', pendingReason: null, reasonCodes: ['FACET_VERIFIED'], policyVersions: result.policyVersions })],
     });
     assert.deepEqual(v.parties[0].confirmedBy, PLAYER); assert.equal(v.notes[0].text, 'Note'); assert.equal(v.linkedThreads[0].linkedBy.orgId, ORG.id);
-    assert.deepEqual(v.keys['status:k-s'], { key: 'k-s', fp: '{"to":"ACTIVE"}' }); assert.equal(v.terms.versions[0].version, 1);
+    assert.equal(v.terms.versions[0].version, 1); assert.deepEqual([v.rev, v.updatedAt], [2, NOW + 1]);
     assert.deepEqual(v.history.at(-1).detail, { outcome: 'CLEAR', reasonCodes: ['FACET_VERIFIED'], policyVersions: result.policyVersions }, 'the detail reads back with its lists (a null scalar is not kept)');
     assert.deepEqual(v.revBy, { userId: null, name: 'Representing agent' }, 'the shared rev token names a role');
     const view = snapshotView(v, v.compliance, ev);
     assert.deepEqual([view.outcome, view.clear, view.policyVersions, view.reasonCodes], ['CLEAR', true, result.policyVersions, ['FACET_VERIFIED']], 'the snapshot reads its outcome and versions from its evaluation row');
-    refused(() => T.update('atx-1', (d) => { d.type = 'loan'; }), /type cannot change/);
-    refused(() => T.update('atx-1', (d) => { d.notes.pop(); }), /notes only grow/);
-    refused(() => T.update('atx-1', (d) => { d.history.pop(); }), /history entries only grow/);
-    refused(() => T.update('atx-1', (d) => { delete d.keys['status:k-s']; }), /key status:k-s is written once/);
-    refused(() => T.update('atx-1', (d) => { T.update('atx-1', () => {}); d.status = 'CANCELLED'; }), /already being updated/);
     s.withContext('ctx-2', 'atx-2');
-    refused(() => T.update('atx-1', (d) => { d.compliance = { ...d.compliance, evaluationId: 'ctx-2#1' }; }), /names an evaluation of its own context/);
-    T.update('atx-1', (d) => { d.parties[1].removed = true; d.parties[1].removedAt = NOW; });
-    refused(() => T.update('atx-1', (d) => { d.parties[1].removed = false; d.parties[1].removedAt = null; }), /a removed party does not return/);
-    refused(() => T.update('atx-1', (d) => { d.parties[1].subjectId = 'org-other'; }), /keeps its role, subject and addition/);
+    refused(() => T.recordCompliance('atx-1', { snapshot: { ...v.compliance, evaluationId: 'ctx-2#1' } }), /REFERENCE_MISSING/, 'the snapshot names an evaluation of its own context');
+    refused(() => T.confirmParty('atx-1', { partyId: 'txp-1', at: NOW, by: PLAYER }), /STATE_CONFLICT.*already confirmed/, 'a party confirms once');
+    refused(() => T.recordCompliance('atx-1', { snapshot: v.compliance, to: 'READY' }), /STATE_CONFLICT.*cannot move to READY/, 'a draft makes no compliance claim');
+    refused(() => T.moveByActor('atx-1', { to: 'ACTIVE', at: NOW }), /STATE_CONFLICT.*by an actor/, 'an actor moves only along ACTOR_TRANSITIONS');
+    T.removeParty('atx-1', { partyId: 'txp-2', at: NOW });
+    refused(() => T.removeParty('atx-1', { partyId: 'txp-2', at: NOW }), /STATE_CONFLICT.*already removed/, 'a removed party does not return');
+    T.addParty('atx-1', { party: party({ id: 'txp-4', partyRole: 'engaging_entity', subjectKind: 'club', subjectId: ORG.id }), key: { key: 'k-p', fp: '{}' } });
+    assert.deepEqual(T.byId('atx-1').keys['party:k-p'], { key: 'k-p', fp: '{}' }, 'the replay key is a row of its own');
+    refused(() => T.addParty('atx-1', { party: party({ id: 'txp-5', partyRole: 'engaging_entity', subjectKind: 'club', subjectId: ORG.id }) }), /DUPLICATE/, 'one live party per role');
+    const c = T.moveByActor('atx-1', { to: 'CANCELLED', at: NOW + 2, key: { key: 'k-s', fp: '{"to":"CANCELLED"}' }, reasonCode: 'duplicate' });
+    assert.deepEqual([c.status, c.cancelReasonCode, c.cancelledAt, c.keys['status:k-s'].fp], ['CANCELLED', 'duplicate', NOW + 2, '{"to":"CANCELLED"}']);
+    refused(() => T.addNote('atx-1', { note: { id: 'txn-2', visibility: 'AGENT_PRIVATE', text: 'Late', by: AGENT, at: NOW } }), /STATE_CONFLICT.*has ended/, 'nothing is added to an ended transaction');
+    refused(() => T.recordAct('atx-none', {}), /NOT_FOUND/);
     assert.equal(T.byCreateKey(ORG.id, UID, 'k-tx').id, 'atx-1');
+    assert.equal(typeof T.update, 'undefined', 'there is no whole-record update');
   } finally { s.close(); rm(dir); }
 });
 
-test('[bindings and documents] a withdrawn binding is final and one binding per (role, agent) is live; a document version is superseded once', () => {
+test('[bindings and documents] a withdrawal is final and one binding per (role, agent) is live; a document version is superseded once, by the next version of its own transaction', () => {
   const dir = tempDir('s11c-reps'); saveFixture(dir);
   const s = serverOpen(dir);
   const { transactions: T, representations: R, documents: D } = s.repo;
@@ -164,19 +177,22 @@ test('[bindings and documents] a withdrawn binding is final and one binding per 
     s.withContext(); T.create(transaction());
     R.create(rep());
     refused(() => R.create(rep({ id: 'txr-2', keys: {}, history: [] })), /AGENT_TRANSACTIONS_DUPLICATE/, 'a second live binding for the same role and agent');
-    R.update('txr-1', (x) => { x.status = 'withdrawn'; x.withdrawnAt = NOW; x.withdrawnReason = 'agent_withdrew'; x.history.push(entry('aud-r2', 'transaction_representation_withdrawn', { partyRole: 'individual' })); });
-    refused(() => R.update('txr-1', (x) => { x.status = 'verified'; x.withdrawnAt = null; x.withdrawnReason = null; }), /a withdrawn binding does not return/);
+    const w = R.withdraw('txr-1', { at: NOW, reason: 'agent_withdrew' }, { history: [entry('aud-r2', 'transaction_representation_withdrawn', { partyRole: 'individual' })], bump: { at: NOW, by: { userId: null, name: 'Representing agent' } } });
+    assert.deepEqual([w.status, w.withdrawnReason, w.rev, w.history.length], ['withdrawn', 'agent_withdrew', 2, 2]);
+    refused(() => R.withdraw('txr-1', { at: NOW, reason: 'agent_withdrew' }), /STATE_CONFLICT.*already withdrawn/, 'a withdrawal is final');
+    refused(() => R.verifyByReview('txr-1', { at: NOW, reviewId: 'rr-1' }), /STATE_CONFLICT.*not awaiting review/);
     assert.equal(R.create(rep({ id: 'txr-2', keys: {}, history: [] })).status, 'verified', 'once withdrawn, the role can be bound again');
     assert.equal(R.byAttachKey('atx-1', 'k-r').id, 'txr-1');
     D.create(doc());
-    refused(() => D.create(doc({ id: 'txd-x', version: 3, supersedes: 'txd-1', history: undefined })), /supersedes the previous version/);
-    const v2 = D.create(doc({ id: 'txd-2', version: 2, supersedes: 'txd-1', label: 'Mandate v2', history: undefined }));
-    D.update('txd-1', (x) => { x.supersededBy = 'txd-2'; x.history.push(entry('aud-sup', 'transaction_document_superseded', { version: 1 })); });
-    refused(() => D.update('txd-1', (x) => { x.supersededBy = 'txd-9'; }), /superseded once/);
-    refused(() => D.create(doc({ id: 'txd-3', version: 2, supersedes: 'txd-1', history: undefined })), /AGENT_TRANSACTIONS_DUPLICATE/, 'a version is superseded by one document');
+    const next = (over) => doc({ id: 'txd-2', version: 2, supersedes: 'txd-1', label: 'Mandate v2', history: undefined, ...over });
+    refused(() => D.supersede('txd-1', { document: next({ id: 'txd-x', version: 3 }) }), /STATE_CONFLICT.*not the live previous version/);
+    refused(() => D.supersede('txd-1', { document: next({ supersedes: null }) }), /names the one it supersedes/);
+    const old = D.supersede('txd-1', { document: next() }, { history: [entry('aud-sup', 'transaction_document_superseded', { version: 1 })], bump: { at: NOW, by: { userId: null, name: 'Representing agent' } } });
+    assert.deepEqual([old.supersededBy, old.rev], ['txd-2', 2], 'the old version reads its successor from the row naming it');
+    refused(() => D.supersede('txd-1', { document: next({ id: 'txd-3' }) }), /AGENT_TRANSACTIONS_DUPLICATE/, 'a version is superseded once');
     assert.deepEqual(D.forTransaction('atx-1').map((d) => [d.id, d.supersededBy]), [['txd-1', 'txd-2'], ['txd-2', null]]);
     assert.deepEqual(D.byId('txd-1').history.at(-1).detail, { version: 1 }, 'a document entry is worked out from the document');
-    assert.equal(v2.supersedes, 'txd-1'); assert.equal(D.liveCount('atx-1'), 2);
+    assert.equal(D.byId('txd-2').supersedes, 'txd-1'); assert.equal(D.liveCount('atx-1'), 2);
   } finally { s.close(); rm(dir); }
 });
 
@@ -191,9 +207,9 @@ test('[reads] the agent\'s list pages newest first by cursor; its counts and the
     assert.deepEqual(T.agentPage({ agencyOrgId: ORG.id, agentUserId: UID, limit: 2, after: p1.rows[1].key }).rows.map((r) => r.record.id), ['atx-1']);
     assert.deepEqual(T.agentPage({ agencyOrgId: ORG.id, agentUserId: UID, status: 'CANCELLED', limit: 5 }).rows.map((r) => r.record.id), ['atx-3']);
     assert.deepEqual(T.agentCounts(ORG.id, UID), { live: 2, blocked: 0, pending: 0, ready: 0, awaitingConfirmation: 2 });
-    T.update('atx-1', (d) => { for (const p of d.parties) { p.confirmedAt = NOW; p.confirmedBy = p.subjectKind === 'player' ? PLAYER : CLUB_USER; } });
+    for (const p of T.byId('atx-1').parties) T.confirmParty('atx-1', { partyId: p.id, at: NOW, by: p.subjectKind === 'player' ? PLAYER : CLUB_USER });
     assert.equal(T.agentCounts(ORG.id, UID).awaitingConfirmation, 2, 'a transfer still awaits its releasing club');
-    T.update('atx-1', (d) => { d.parties.push(party({ id: 'txp-r', partyRole: 'releasing_entity', subjectKind: 'club', subjectId: 'org-rel', confirmedAt: NOW, confirmedBy: { kind: 'club_user', userId: 'u-r', name: 'R', orgId: 'org-rel' } })); });
+    T.addParty('atx-1', { party: party({ id: 'txp-r', partyRole: 'releasing_entity', subjectKind: 'club', subjectId: 'org-rel', confirmedAt: NOW, confirmedBy: { kind: 'club_user', userId: 'u-r', name: 'R', orgId: 'org-rel' } }) });
     assert.equal(T.agentCounts(ORG.id, UID).awaitingConfirmation, 1, 'once every required party confirmed, it awaits no one');
     assert.deepEqual(T.liveForIndividual('pl-1', 'transfer').map((t) => t.id), ['atx-1', 'atx-2'], 'the live transfers naming the individual (not the cancelled one)');
     assert.deepEqual(T.clubPage({ orgId: ORG.id, limit: 5 }).rows.map((r) => r.record.id), ['atx-3', 'atx-2', 'atx-1']);
@@ -238,8 +254,8 @@ test('[units] a rolled-back unit leaves nothing', () => {
   } finally { s.close(); rm(dir); }
 });
 
-// The fixture writes these the way the routes do: a context is opened and then evaluated (recordEvaluation); a new
-// document version names the one it replaces, which is then marked superseded (update).
+// The fixture writes contexts the way the routes do: a context is opened and then evaluated (recordEvaluation). A new
+// document version names the one it replaces, which reads it back as its successor.
 const WRITERS = {
   complianceContexts: (L, records) => {
     for (const { evaluations = [], ...c } of records) {
@@ -248,17 +264,10 @@ const WRITERS = {
       evaluations.forEach(({ snapshotOf, ...r }, i) => L.complianceRecords.contexts.recordEvaluation(c.id, r, snapshotOf, entries[i]));
     }
   },
-  transactionDocuments: (L, records) => {
-    const D = L.agentTransactions.documents;
-    for (const d of records) {
-      D.create(d);
-      if (d.supersedes) D.update(d.supersedes, (x) => { x.supersededBy = d.id; x.history.push(entry(`aud-sup-${d.id}`, 'transaction_document_superseded', { version: x.version })); });
-    }
-  },
 };
 const fixture = (dir, collections) => writeFixture(dir, fixtureDb(collections), { now: NOW, writers: WRITERS });
 
-test('[fixtures] records written through the repository are typed, junk and a row naming a missing context are refused (nothing written), and they read back as written', () => {
+test('[fixtures] records written through the repository are stored as written, junk and a row naming a missing context are refused (nothing written), and they read back as written', () => {
   const dir = tempDir('s11c-fix');
   try {
     const ctx = { ...context(), history: [...context().history, entry('aud-e1', 'compliance_context_evaluated', { outcome: 'CLEAR', reasonCodes: ['FACET_VERIFIED'], policyVersions: result.policyVersions })], evaluations: [{ ...result, snapshotOf: { parties: [], representations: [], proposed: null } }] };
@@ -269,7 +278,7 @@ test('[fixtures] records written through the repository are typed, junk and a ro
     assert.deepEqual(back.transactionDocuments.map((d) => [d.id, d.supersedes, d.supersededBy]), [['txd-1', null, 'txd-2'], ['txd-2', 'txd-1', null]], 'the version chain reads back both ways');
     const bad = [tempDir('s11c-fix-ctx'), tempDir('s11c-fix-status')];
     refused(() => fixture(bad[0], { agentTransactions: [transaction({ id: 'atx-9', contextId: 'ctx-gone' })] }), /AGENT_TRANSACTIONS_REFERENCE_MISSING: agent_transactions atx-9 names a row that is not there/, 'a row naming a missing context');
-    refused(() => fixture(bad[1], { complianceContexts: [ctx], agentTransactions: [{ ...tx, status: 'HALF_WRITTEN' }] }), /AGENT_TRANSACTIONS_INPUT_INVALID.*atx-1\.status/, 'a status the machine does not know');
+    refused(() => fixture(bad[1], { complianceContexts: [ctx], agentTransactions: [{ ...tx, status: 'HALF_WRITTEN' }] }), /AGENT_TRANSACTIONS_INPUT_INVALID.*atx-1.*status/, 'a status the machine does not know');
     for (const d of bad) { const r = readRecords(d); assert.deepEqual([r.complianceContexts.length, r.agentTransactions.length], [0, 0], 'a refused fixture wrote nothing'); }
     rm(...bad);
   } finally { rm(dir); }

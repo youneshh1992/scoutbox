@@ -52,14 +52,14 @@ export function registerIntegration(ctx) {
     byId, orgRouter, playerRouter, nextId, notify, broadcast,
     findPlayer, isAdult, isBlocked, orgCanSee, checkEligibility, distanceBand,
     agent, compliance, rateLimit,
-    agentCore, unit, // an opportunity share is a row of its agreement, written by agreements.update in a unit
+    agentCore, unit, // an opportunity share is a row of its agreement, written by agreements.addShare in a unit
     recruitmentCases, // the handoff is part of its case, written by the case's handoff acts
     recruitmentReads,
     transactionReads,
   } = ctx;
   if (typeof transactionReads?.transactions?.liveForIndividual !== 'function') throw new TypeError('registerIntegration needs transactionReads from the data layer');
   if (!recruitmentCases?.cases) throw new TypeError('registerIntegration needs the recruitment-cases repository from the data layer');
-  if (typeof agentCore?.agreements?.update !== 'function' || typeof unit !== 'function') throw new TypeError('registerIntegration needs the agent core repository and unit from the data layer');
+  if (typeof agentCore?.agreements?.recordAct !== 'function' || typeof unit !== 'function') throw new TypeError('registerIntegration needs the agent core repository and unit from the data layer');
   if (typeof recruitmentReads?.contacts?.forAgent !== 'function') throw new TypeError('registerIntegration needs recruitmentReads (contacts) from the data layer');
   const { cases } = recruitmentCases;
   /** A case history entry in the one shape every case writer uses. */
@@ -477,11 +477,8 @@ export function registerIntegration(ctx) {
         keys: key ? { share: { key, fp: payloadFingerprint({ opportunityId: opp.id, note }) } } : {},
         rev: 1, revAt: at,
       };
-      // A share is a row of its agreement, written by an explicit update (no agreement rev: a share changes no term).
-      agentCore.agreements.update(a.id, (d) => {
-        d.opportunityShares.push(draft);
-        d.history.push({ id: nextId('aud'), at, action: 'opportunity_shared', by: { kind: 'org', userId: req.orgUser.id, name: req.orgUser.name }, detail: { shareId: draft.id, via: draft.via } });
-      });
+      // A share is a row of its agreement (no agreement rev: a share changes no term).
+      agentCore.agreements.addShare(a.id, { share: draft }, { history: [{ id: nextId('aud'), at, action: 'opportunity_shared', by: { kind: 'org', userId: req.orgUser.id, name: req.orgUser.name }, detail: { shareId: draft.id, via: draft.via } }] });
       broadcast('agent_opportunity_shared', { orgId: a.agencyOrgId, agreementId: a.id, agentUserId: req.orgUser.id });
       notify({ kind: 'player', id: a.clientId }, 'representation_opportunity',
         `${draft.sharedBy.name ?? 'Your agent'} shared an opportunity with you${draft.orgName ? ` at ${draft.orgName}` : ''}. Applying is your own decision — nobody can apply on your behalf.`, draft.id);
@@ -511,13 +508,7 @@ export function registerIntegration(ctx) {
     // the loop the quota exists to close.
     if (limitedOr429(res, 'opportunity_share', req.orgUser.id)) return;
     const at = now();
-    const updated = unit(() => agentCore.agreements.update(a.id, (d) => {
-      const s2 = d.opportunityShares.find((x) => x.id === share.id);
-      s2.withdrawnAt = at;
-      s2.rev += 1;
-      s2.revAt = at;
-      d.history.push({ id: nextId('aud'), at, action: 'opportunity_share_withdrawn', by: { kind: 'org', userId: req.orgUser.id, name: req.orgUser.name }, detail: { shareId: share.id } });
-    }));
+    const updated = unit(() => agentCore.agreements.withdrawShare(a.id, { shareId: share.id, at }, { history: [{ id: nextId('aud'), at, action: 'opportunity_share_withdrawn', by: { kind: 'org', userId: req.orgUser.id, name: req.orgUser.name }, detail: { shareId: share.id } }] }));
     res.json({ share: shareView(updated.opportunityShares.find((x) => x.id === share.id)) });
   });
 

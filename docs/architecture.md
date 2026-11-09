@@ -49,7 +49,8 @@ transaction documents are evidence records.
 
 - **Named acts** (recruitment cases and their Room rows, contacts and offers, requests and trials:
   `repositories/recruitmentCases.mjs`, `repositories/recruitmentContactsOffers.mjs`, `repositories/recruitment.mjs`;
-  the direction for the other domains). A record is created whole, then
+  agent transactions, compliance records and the agent core: `repositories/agentTransactions.mjs`,
+  `repositories/complianceRecords.mjs`, `repositories/agentCore.mjs`; the direction for the other domains). A record is created whole, then
   changes only through operations named after what happened (`moveRoom`, `recordDelivery`, `issueRevision`), each an
   `UPDATE` of named columns or an `INSERT` of new rows, called as `act(id, input, bookkeeping)`; the bookkeeping is the
   history entries, rev bump and change instant the act leaves, and `recordAct(id, bookkeeping)` is it alone. History is
@@ -57,7 +58,11 @@ transaction documents are evidence records.
   one, and a state change is guarded in SQL by the domain's transition table. The columns and keys are the only check
   on stored values; there is no JavaScript copy of them. A whole-record `create`, and an act that inserts a sub-record
   (a task, a draft), must read back exactly as written, so a field with no column, or a value a column would coerce,
-  is refused rather than lost. The shared checks and the guarded update are `repositories/writes.mjs`.
+  is refused rather than lost. Where a history entry's detail is worked out on read (a compliance evaluation entry, a
+  review's resolution), the inserted entry must read back as the writer gave it. A fact that another row already
+  records is worked out on read, not stored twice (a document's or a review's `supersededBy` is the row naming it). The
+  agent core still types a `create` from its field specs; its acts have no JavaScript copy of the columns. The shared
+  checks and the guarded update are `repositories/writes.mjs`.
 - **Whole-record updates** (every other domain, for now): `create(record)` and `update(id, (draft) => …)`. The update
   hands the callback a plain copy, types the whole record, writes it at once, refuses unknown fields and returns the
   stored record. Updating a record from inside its own update is refused.

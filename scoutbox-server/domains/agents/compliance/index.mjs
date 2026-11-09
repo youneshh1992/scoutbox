@@ -29,7 +29,7 @@ import { guardRev, bumpRev, revMeta } from '../../platform/concurrency.mjs';
 import { rateLimitedBody } from '../../platform/rateLimit.mjs';
 import { normaliseClientKey, payloadFingerprint } from '../../recruitment/lifecycle/contact.mjs';
 import { hasVerLevel } from '../../verification/claims/shared.mjs';
-import { effectiveFacetState, RECHECK_MS, effectiveAgreementStatus, agreementGrantsAccess, affiliationActive, tiersOf, can, JURISDICTIONS, termEndAt } from '../core/shared.mjs';
+import { effectiveFacetState, RECHECK_MS, effectiveAgreementStatus, agreementGrantsAccess, affiliationActive, tiersOf, can, JURISDICTIONS } from '../core/shared.mjs';
 import { sendComplianceError } from './errors.mjs';
 import { RULE_STATUSES, CONSENT_KINDS } from './policyVersions.mjs';
 
@@ -60,12 +60,16 @@ export function registerCompliance(rawCtx) {
 
   const provider = verificationProvider ?? createVerificationProvider({ synthetic: process.env.AGENT_VERIFICATION_TEST_PROVIDER === '1' });
   if (typeof compliancePolicies?.reviewers?.update !== 'function') throw new TypeError('registerCompliance needs the compliance policies repository from the data layer');
-  if (typeof complianceRecords?.contexts?.update !== 'function') throw new TypeError('registerCompliance needs the compliance records repository from the data layer');
+  if (typeof complianceRecords?.contexts?.recordAct !== 'function') throw new TypeError('registerCompliance needs the compliance records repository from the data layer');
   const now = () => Date.now();
+  /** A history entry, for an act's bookkeeping or a whole record's history. */
+  const entry = (action, by, detail = null) => ({ id: nextId('aud'), at: now(), action, by, detail });
   const hist = (record, action, by, detail = null) => {
     record.history ??= [];
-    record.history.push({ id: nextId('aud'), at: now(), action, by, detail });
+    record.history.push(entry(action, by, detail));
   };
+  /** An act's rev bump, attributed to `by` (an org user, a reviewer, or a party `{ id, name }`). */
+  const bumped = (by) => ({ bump: { at: now(), by } });
   const byOrg = (req) => ({ kind: 'org', userId: req.orgUser.id, name: req.orgUser.name });
   const byPlayer = (req) => ({ kind: 'player', userId: req.player.id, name: req.player.name });
   const byClubUser = (req) => ({ kind: 'club_user', userId: req.orgUser.id, name: req.orgUser.name, orgId: req.org.id });
@@ -79,7 +83,7 @@ export function registerCompliance(rawCtx) {
   };
   // This module writes a facet or an agreement only through the agent core's explicit operations, inside the route's
   // unit of work.
-  if (typeof agentCore?.profiles?.update !== 'function' || typeof unit !== 'function') throw new TypeError('registerCompliance needs the agent core repository and unit from the data layer');
+  if (typeof agentCore?.profiles?.recordAct !== 'function' || typeof unit !== 'function') throw new TypeError('registerCompliance needs the agent core repository and unit from the data layer');
   const agentReads = agentCore.reads;
   const profileOf = (userId) => agentReads.profiles.forUser(userId);
   const activeAffiliationOf = (userId, orgId) => agentReads.affiliations.activeFor(userId, orgId, now());
@@ -293,8 +297,6 @@ export function registerCompliance(rawCtx) {
     minors_authorisation: Object.fromEntries(Object.entries(p?.facets?.minors_authorisation ?? {}).map(([k, v]) => [k, effectiveFacetState(v, at)])),
   });
   const facetRecord = (p, facet, ma) => (facet === 'fifa_licence' ? p?.facets?.fifa_licence : p?.facets?.[facet]?.[ma]) ?? null;
-  /** Set a facet on a profile DRAFT (inside `profiles.update`); the stored facet keeps no stale marker from before. */
-  const setFacet = (d, facet, ma, next) => { const rec = { staleNotifiedAt: null, ...next }; if (facet === 'fifa_licence') d.facets.fifa_licence = rec; else d.facets[facet][ma] = rec; };
 
   const { contexts, reviews, consents } = complianceRecords;
   const reviewPublic = (r, { forReviewer = false } = {}) => ({
@@ -309,14 +311,23 @@ export function registerCompliance(rawCtx) {
     honest: 'A ScoutBox reviewer decides whether the ScoutBox workflow may proceed under the encoded rules. This is not a legal determination and no governing body has approved anything.',
   });
   /** Request an attributed review item (one row with its first history entry); the caller holds the unit. */
-  function createReview({ kind, agencyOrgId, agentUserId, subject, reasons, policyVersions, snapshot = null, requestedBy }) {
+  /**
+   * Request an attributed review item (one row with its first history entry); the caller holds the unit. The snapshot is
+   * the outcome at request time and, when there was one, the evaluation row it came from. A reconsideration names the
+   * review it `supersedes`.
+   */
+  function createReview({ kind, agencyOrgId, agentUserId, subject, reasons, policyVersions, snapshot = null, requestedBy, supersedes = null }) {
     const r = {
       id: nextId('rrv'), kind, status: 'PENDING', agencyOrgId, agentUserId: agentUserId ?? null, subject,
-      reasons: reasons ?? [], policyVersions: policyVersions ?? [], snapshot,
+      reasons: reasons ?? [], policyVersions: policyVersions ?? [],
+      snapshot: snapshot && { outcome: snapshot.outcome, evaluationId: snapshot.evaluationId ?? null, evaluatedAt: snapshot.evaluatedAt ?? null },
       requestedAt: now(), requestedBy, startedAt: null, startedBy: null, decidedAt: null, decision: null,
-      supersedes: null, supersededBy: null, keys: {}, rev: 1, revAt: now(), revBy: null, history: [],
+      supersedes, supersededBy: null, keys: {}, rev: 1, revAt: now(), revBy: null,
+      history: [
+        entry('regulatory_review_requested', requestedBy, { kind, reasonCodes: [...new Set((reasons ?? []).map((x) => x.code))], policyVersions: policyVersions ?? [] }),
+        ...(supersedes ? [entry('regulatory_review_requested', requestedBy, { reasonCode: 'supersedes', reviewId: supersedes })] : []),
+      ],
     };
-    hist(r, 'regulatory_review_requested', requestedBy, { kind, reasonCodes: [...new Set((reasons ?? []).map((x) => x.code))], policyVersions: r.policyVersions });
     const out = reviews.create(r);
     broadcast('regulatory_review_requested', { orgId: agencyOrgId, reviewId: out.id, kind });
     if (agentUserId) notify({ kind: 'org_user', id: agentUserId }, 'regulatory_review_required', kind === 'verification_facet' ? 'A verification submission needs attributed Trust & Safety review. Nothing is verified until a named reviewer decides.' : 'A compliance question needs attributed Trust & Safety review. The workflow does not proceed until a named reviewer decides.', out.id);
@@ -359,11 +370,13 @@ export function registerCompliance(rawCtx) {
     const prevState = effectiveFacetState(cur, now());
     const nextState = effectiveFacetState(next, now());
     unit(() => {
-      const out = agentCore.profiles.update(p.id, (d) => {
-        setFacet(d, facet, ma, next);
-        hist(d, 'agent_facet_rechecked', byOrg(req), { facet, memberAssociation: ma, from: prevState, to: nextState });
-        if (prevState !== nextState) hist(d, 'agent_verification_state_changed', byOrg(req), { facet, memberAssociation: ma, from: prevState, to: nextState, state: next.state });
-        d.updatedAt = now(); bumpRev(d, { by: req.orgUser, at: now() });
+      // The stored facet keeps no stale marker from before.
+      const out = agentCore.profiles.setFacet(p.id, { facet, memberAssociation: ma, record: { ...next, staleNotifiedAt: null } }, {
+        at: now(), touch: true, ...bumped(req.orgUser),
+        history: [
+          entry('agent_facet_rechecked', byOrg(req), { facet, memberAssociation: ma, from: prevState, to: nextState }),
+          ...(prevState !== nextState ? [entry('agent_verification_state_changed', byOrg(req), { facet, memberAssociation: ma, from: prevState, to: nextState, state: next.state })] : []),
+        ],
       });
       if (next.state === 'MANUAL_REVIEW_REQUIRED') facetNeedsReview(out, { facet, memberAssociation: ma }, byOrg(req));
       if (prevState !== nextState) broadcast('agent_verification_state_changed', { orgId: req.org.id, userId: out.userId, facet, state: nextState });
@@ -509,7 +522,7 @@ export function registerCompliance(rawCtx) {
     broadcast('conflict_evaluated', { orgId: cur.agencyOrgId, ctxId: cur.id, outcome: result.outcome });
     return stored;
   }
-  const bumpContext = (id, req) => contexts.update(id, (d) => { bumpRev(d, { by: req.orgUser, at: now() }); });
+  const bumpContext = (id, req) => contexts.recordAct(id, bumped(req.orgUser));
   /** A refusal after a write that must not stand (a stale rev): the unit rolls back; the response was already sent. */
   const ROLLBACK = Symbol('compliance rollback');
   const unitOrSent = (work) => { try { return unit(work); } catch (e) { if (e === ROLLBACK) return undefined; throw e; } };
@@ -605,10 +618,7 @@ export function registerCompliance(rawCtx) {
     if (c.parties.some((x) => x.partyRole === party.partyRole && !x.removed)) return sendComplianceError(res, { error: 'CONTEXT_PARTY_EXISTS' }, 'parties');
     if (!guardRev(req, res, c, { errorCode: 'CONTEXT_VERSION_CONFLICT', current: {} })) return;
     const { result, ctx } = unit(() => {
-      contexts.update(c.id, (d) => {
-        d.parties.push(party);
-        hist(d, 'compliance_context_party_added', byOrg(req), { partyRole: party.partyRole, kind: party.subjectKind });
-      });
+      contexts.addParty(c.id, { party }, { history: [entry('compliance_context_party_added', byOrg(req), { partyRole: party.partyRole, kind: party.subjectKind })] });
       // A party change invalidates every prior check: re-evaluate now.
       const result = evaluateAndRecord(c, byOrg(req));
       return { result, ctx: bumpContext(c.id, req) };
@@ -671,24 +681,17 @@ export function registerCompliance(rawCtx) {
         if (!guardRev(req, res, c, { errorCode: 'CONTEXT_VERSION_CONFLICT', current: {} })) throw ROLLBACK;
         const repId = declaredOnly ? nextId('crp') : null;
         const kind = declaredOnly ? 'representation_declared' : 'conflict_evaluation';
-        const review = createReview({ kind, agencyOrgId: c.agencyOrgId, agentUserId: req.orgUser.id, subject: { contextId: c.id, representationId: repId, partyRole }, reasons: result.reasons.filter((r) => r.code !== 'FACET_VERIFIED'), policyVersions: result.policyVersions, snapshot: { ...result, proposed: { partyRole, agentUserId: req.orgUser.id } }, requestedBy: byOrg(req) });
-        contexts.update(c.id, (d) => {
-          if (declaredOnly) {
-            d.representations.push({ id: repId, agentUserId: req.orgUser.id, partyRole, agreementId: null, status: 'pending_review', declaredOnly: true, reviewId: review.id, declaredAt: now(), firstActAt: null, withdrawnAt: null, verifiedByReviewId: null, verifiedAt: null, keys: key ? { declare: { key, fp } } : {} });
-            hist(d, 'compliance_representation_declared', byOrg(req), { partyRole, status: 'pending_review' });
-          }
-          bumpRev(d, { by: req.orgUser, at: now() });
-        });
+        const review = createReview({ kind, agencyOrgId: c.agencyOrgId, agentUserId: req.orgUser.id, subject: { contextId: c.id, representationId: repId, partyRole }, reasons: result.reasons.filter((r) => r.code !== 'FACET_VERIFIED'), policyVersions: result.policyVersions, snapshot: result, requestedBy: byOrg(req) });
+        if (declaredOnly) {
+          const representation = { id: repId, agentUserId: req.orgUser.id, partyRole, agreementId: null, status: 'pending_review', declaredOnly: true, reviewId: review.id, declaredAt: now(), firstActAt: null, withdrawnAt: null, verifiedByReviewId: null, verifiedAt: null, keys: key ? { declare: { key, fp } } : {} };
+          contexts.declareRepresentation(c.id, { representation }, { ...bumped(req.orgUser), history: [entry('compliance_representation_declared', byOrg(req), { partyRole, status: 'pending_review' })] });
+        } else bumpContext(c.id, req);
         return { refuse: { error: 'REGULATORY_REVIEW_REQUIRED', reviewId: review.id, contextId: c.id, reasons: review.reasons, policyVersions: result.policyVersions, outcome: result.outcome, message: declaredOnly ? 'Representation of an entity without a ScoutBox agreement is recorded as declared and needs attributed review. It is not effective until a named reviewer confirms it.' : 'The deciding rule\'s operative status is uncertain or not encoded. An attributed review item was created; nothing proceeds until it is resolved under a named policy version.' } };
       }
       // 16 rev; 17 mutate; 18 audit + event.
       if (!guardRev(req, res, c, { errorCode: 'CONTEXT_VERSION_CONFLICT', current: {} })) throw ROLLBACK;
       const rep = { id: nextId('crp'), agentUserId: req.orgUser.id, partyRole, agreementId: agreement?.id ?? null, status: 'verified', declaredOnly: false, reviewId: null, declaredAt: now(), firstActAt: now(), withdrawnAt: null, verifiedByReviewId: null, verifiedAt: null, keys: key ? { declare: { key, fp } } : {} };
-      const ctx = contexts.update(c.id, (d) => {
-        d.representations.push(rep);
-        hist(d, 'compliance_representation_declared', byOrg(req), { partyRole, status: 'verified', outcome: result.outcome, policyVersions: result.policyVersions });
-        bumpRev(d, { by: req.orgUser, at: now() });
-      });
+      const ctx = contexts.declareRepresentation(c.id, { representation: rep }, { ...bumped(req.orgUser), history: [entry('compliance_representation_declared', byOrg(req), { partyRole, status: 'verified', outcome: result.outcome, policyVersions: result.policyVersions })] });
       return { ctx, rep, result };
     });
     if (!out) return;
@@ -702,11 +705,7 @@ export function registerCompliance(rawCtx) {
     if (rep.status === 'withdrawn') return res.json({ context: contextForAgent(c), idempotent: true });
     if (!guardRev(req, res, c, { errorCode: 'CONTEXT_VERSION_CONFLICT', current: {} })) return;
     const { result, ctx } = unit(() => {
-      contexts.update(c.id, (d) => {
-        const r = d.representations.find((x) => x.id === rep.id);
-        r.status = 'withdrawn'; r.withdrawnAt = now();
-        hist(d, 'compliance_representation_withdrawn', byOrg(req), { partyRole: rep.partyRole });
-      });
+      contexts.withdrawRepresentation(c.id, { representationId: rep.id, at: now() }, { history: [entry('compliance_representation_withdrawn', byOrg(req), { partyRole: rep.partyRole })] });
       const result = evaluateAndRecord(c, byOrg(req));
       return { result, ctx: bumpContext(c.id, req) };
     });
@@ -714,9 +713,9 @@ export function registerCompliance(rawCtx) {
   });
   /** Close a context and cancel its open review items, each attributed (`bump` names who bumped the review's rev). */
   function closeContextNow(c, by, bumpBy = null) {
-    contexts.update(c.id, (d) => { d.status = 'closed'; d.closedAt = now(); hist(d, 'compliance_context_closed', by); });
+    contexts.close(c.id, { at: now() }, { history: [entry('compliance_context_closed', by)] });
     for (const r of reviews.openForContext(c.id)) {
-      reviews.update(r.id, (d) => { d.status = 'CANCELLED'; d.decidedAt = now(); hist(d, 'regulatory_review_cancelled', by, { reasonCode: 'context_closed' }); if (bumpBy) bumpRev(d, { by: bumpBy, at: now() }); });
+      reviews.cancel(r.id, { at: now() }, { ...(bumpBy ? bumped(bumpBy) : {}), history: [entry('regulatory_review_cancelled', by, { reasonCode: 'context_closed' })] });
     }
   }
   orgRouter.post('/agent/compliance/contexts/:id/close', (req, res) => {
@@ -787,9 +786,9 @@ export function registerCompliance(rawCtx) {
       subject: { kind: party.subjectKind, id: party.subjectId }, regarding: c.parties.filter((x) => !x.removed && x.partyRole !== partyRole).map((x) => x.partyRole),
       status: 'requested', requestedAt: now(), requestedBy: byOrg(req), grantedAt: null, grantedBy: null, declinedAt: null, declinedBy: null,
       particulars: { fullParticularsProvided: !!b.fullParticularsProvided, legalAdviceOffered: !!b.legalAdviceOffered, proposedFeeDisclosed: !!b.proposedFeeDisclosed, acknowledged: null },
-      policyVersions: set.policies.map((x) => x.id), ruleIds: [rule.ruleId], keys: key ? { request: { key, fp } } : {}, rev: 1, revAt: now(), revBy: null, history: [],
+      policyVersions: set.policies.map((x) => x.id), ruleIds: [rule.ruleId], keys: key ? { request: { key, fp } } : {}, rev: 1, revAt: now(), revBy: null,
+      history: [entry('regulatory_consent_requested', byOrg(req), { partyRole, kind: 'dual_representation', policyVersions: set.policies.map((x) => x.id) })],
     };
-    hist(k, 'regulatory_consent_requested', byOrg(req), { partyRole, kind: k.kind, policyVersions: k.policyVersions });
     const out = unit(() => {
       const stored = consents.create(k);
       broadcast('regulatory_consent_requested', { orgId: c.agencyOrgId, consentId: k.id, ctxId: c.id });
@@ -818,12 +817,8 @@ export function registerCompliance(rawCtx) {
       if (!guardRev(req, res, k, { errorCode: 'CONSENT_VERSION_CONFLICT', current: { status: st } })) return;
       const out = unit(() => {
         // Append-only: the revocation is its own row; the granted row is never edited (only its key, history and rev).
-        consents.revoke(k.id, { id: nextId('rcs'), at: now(), by });
-        const next = consents.update(k.id, (d) => {
-          if (key) d.keys[action] = { key, fp };
-          hist(d, 'regulatory_consent_revoked', by, { consentId: k.id, partyRole: k.partyRole });
-          bumpRev(d, { by: revBy, at: now() });
-        });
+        const next = consents.revoke(k.id, { revocation: { id: nextId('rcs'), at: now(), by }, key: key ? { key, fp } : null },
+          { ...bumped(revBy), history: [entry('regulatory_consent_revoked', by, { consentId: k.id, partyRole: k.partyRole })] });
         const c = contextById(k.contextId);
         if (c && c.status === 'open') evaluateAndRecord(c, by);
         broadcast('regulatory_consent_revoked', { orgId: k.agencyOrgId, consentId: k.id, ctxId: k.contextId });
@@ -839,19 +834,12 @@ export function registerCompliance(rawCtx) {
       if (!ackP || !ackL) return sendComplianceError(res, { error: 'CONSENT_INPUT_INVALID', field: !ackP ? 'acknowledgedParticulars' : 'acknowledgedLegalAdvice', message: 'To grant, confirm you received the full particulars and were told you may take independent legal advice.' }, action);
     }
     const out = unit(() => {
-      const next = consents.update(k.id, (d) => {
-        if (action === 'grant') {
-          d.status = 'granted'; d.grantedAt = now(); // server clock; never a client timestamp
-          d.grantedBy = { ...by, ...(authority.signatory !== undefined ? { signatory: authority.signatory } : {}) };
-          d.particulars = { ...d.particulars, acknowledged: { particulars: true, legalAdvice: true, at: now() } };
-          hist(d, 'regulatory_consent_granted', by, { partyRole: d.partyRole, policyVersions: d.policyVersions });
-        } else {
-          d.status = 'declined'; d.declinedAt = now(); d.declinedBy = by;
-          hist(d, 'regulatory_consent_declined', by, { partyRole: d.partyRole });
-        }
-        if (key) d.keys[action] = { key, fp };
-        bumpRev(d, { by: revBy, at: now() });
-      });
+      const answerKey = key ? { key, fp } : null;
+      // The server's clock, never a client timestamp.
+      const next = action === 'grant'
+        ? consents.grant(k.id, { at: now(), by: { ...by, ...(authority.signatory !== undefined ? { signatory: authority.signatory } : {}) }, key: answerKey },
+          { ...bumped(revBy), history: [entry('regulatory_consent_granted', by, { partyRole: k.partyRole, policyVersions: k.policyVersions })] })
+        : consents.decline(k.id, { at: now(), by, key: answerKey }, { ...bumped(revBy), history: [entry('regulatory_consent_declined', by, { partyRole: k.partyRole })] });
       const c = contextById(k.contextId);
       if (c && c.status === 'open') evaluateAndRecord(c, by);
       // Literal event names: the event-registry contract (e2e/platform/contracts.mjs) reads call sites textually.
@@ -928,11 +916,8 @@ export function registerCompliance(rawCtx) {
     if (r.status !== 'PENDING') return sendComplianceError(res, { error: 'REVIEW_NOT_PENDING', status: r.status }, 'start');
     if (!guardRev(req, res, r, { errorCode: 'REVIEW_VERSION_CONFLICT', current: { status: r.status } })) return;
     const out = unit(() => {
-      const next = reviews.update(r.id, (d) => {
-        d.status = 'IN_REVIEW'; d.startedAt = now(); d.startedBy = { id: req.reviewer.id, name: req.reviewer.name, role: req.reviewer.role };
-        hist(d, 'regulatory_review_started', byReviewer(req), { rev: d.rev });
-        bumpRev(d, { by: req.reviewer, at: now() });
-      });
+      const next = reviews.start(r.id, { at: now(), by: { id: req.reviewer.id, name: req.reviewer.name, role: req.reviewer.role } },
+        { ...bumped(req.reviewer), history: [entry('regulatory_review_started', byReviewer(req), { rev: r.rev })] });
       broadcast('regulatory_review_started', { orgId: r.agencyOrgId, reviewId: r.id });
       return next;
     });
@@ -967,12 +952,10 @@ export function registerCompliance(rawCtx) {
     // context is a table write, like the review's).
     const out = unit(() => {
       const resultingState = applyReviewDecision(r, outcome, req);
-      const next = reviews.update(r.id, (d) => {
-        d.status = outcome; d.decidedAt = now();
-        d.decision = { reviewerId: req.reviewer.id, reviewerName: req.reviewer.name, reviewerRole: req.reviewer.role, outcome, reasonCode, reason, evidenceRefs, policyVersions: d.policyVersions, at: now(), priorState, resultingState };
-        if (key) d.keys.resolve = { key, fp };
-        hist(d, 'regulatory_review_resolved', byReviewer(req), { outcome, reasonCode, evidenceRefs, evidenceCount: evidenceRefs.length, policyVersions: d.policyVersions, priorState, resultingState, rev: d.rev });
-        bumpRev(d, { by: req.reviewer, at: now() });
+      const decision = { reviewerId: req.reviewer.id, reviewerName: req.reviewer.name, reviewerRole: req.reviewer.role, outcome, reasonCode, reason, evidenceRefs, policyVersions: r.policyVersions, at: now(), priorState, resultingState };
+      const next = reviews.resolve(r.id, { decision, key: key ? { key, fp } : null }, {
+        ...bumped(req.reviewer),
+        history: [entry('regulatory_review_resolved', byReviewer(req), { outcome, reasonCode, evidenceRefs, evidenceCount: evidenceRefs.length, policyVersions: r.policyVersions, priorState, resultingState, rev: r.rev })],
       });
       broadcast('regulatory_review_resolved', { orgId: r.agencyOrgId, reviewId: r.id, outcome });
       if (r.agentUserId) notify({ kind: 'org_user', id: r.agentUserId }, 'regulatory_review_completed', `Attributed Trust & Safety review ${outcome === 'APPROVED' ? 'approved' : 'did not approve'} a ${r.kind.replace(/_/g, ' ')} item under ScoutBox policy. This is a platform decision, not a legal determination.`, r.id);
@@ -996,10 +979,9 @@ export function registerCompliance(rawCtx) {
       const next = outcome === 'APPROVED'
         ? { ...cur, state: 'VERIFIED', verifiedAt: now(), recheckAt: now() + RECHECK_MS, provenance: { provider: 'attributed_review', kind: 'human_review', at: now(), reviewerId: req.reviewer.id, reviewId: r.id }, note: 'Verified by attributed Trust & Safety review against the cited evidence. Re-check due in 30 days.', staleNotifiedAt: null }
         : { ...cur, state: 'UNVERIFIED', verifiedAt: null, recheckAt: null, provenance: { provider: 'attributed_review', kind: 'human_review', at: now(), reviewerId: req.reviewer.id, reviewId: r.id }, note: 'Attributed Trust & Safety review could not verify this reference.' };
-      agentCore.profiles.update(p.id, (d) => {
-        setFacet(d, r.subject.facet, r.subject.memberAssociation, next);
-        hist(d, 'agent_verification_state_changed', by, { facet: r.subject.facet, memberAssociation: r.subject.memberAssociation, from: prev, to: next.state, state: next.state, reviewId: r.id });
-        d.updatedAt = now(); bumpRev(d, { by: req.reviewer, at: now() });
+      agentCore.profiles.setFacet(p.id, { facet: r.subject.facet, memberAssociation: r.subject.memberAssociation, record: { ...next, staleNotifiedAt: null } }, {
+        at: now(), touch: true, ...bumped(req.reviewer),
+        history: [entry('agent_verification_state_changed', by, { facet: r.subject.facet, memberAssociation: r.subject.memberAssociation, from: prev, to: next.state, state: next.state, reviewId: r.id })],
       });
       broadcast('agent_verification_state_changed', { orgId: p.agencyOrgId, userId: p.userId, facet: r.subject.facet, state: next.state });
       broadcast('agent_authorisation_state_changed', { orgId: p.agencyOrgId, userId: p.userId, state: next.state });
@@ -1008,16 +990,10 @@ export function registerCompliance(rawCtx) {
     if (r.kind === 'representation_dispute') {
       const a = agentReads.agreements.byId(r.subject.agreementId);
       if (!a || a.status !== 'disputed') return { agreementStatus: a ? effectiveAgreementStatus(a, now()) : null, note: 'not disputed any more' };
-      agentCore.agreements.update(a.id, (d) => {
-        if (outcome === 'APPROVED') {
-          // Reinstate: the client's confirmation is unchanged; only the dispute suspension lifts. An expired term stays expired.
-          d.status = 'active'; d.disputeResolvedAt = now(); d.disputeResolution = { reviewId: r.id, outcome: 'reinstated' };
-          if (typeof d.endAt !== 'number' && d.confirmedAt) d.endAt = termEndAt(d.startAt ?? d.confirmedAt, d.termMonths);
-        } else {
-          d.status = 'terminated_by_client'; d.terminatedAt = now(); d.terminatedBy = 'trust_safety'; d.terminationReasonCode = 'dispute_upheld'; d.disputeResolvedAt = now(); d.disputeResolution = { reviewId: r.id, outcome: 'ended' };
-        }
-        hist(d, outcome === 'APPROVED' ? 'representation_confirmed' : 'representation_terminated', by, { by: 'trust_safety', phase: 'disputed', reviewId: r.id, reasonCode: outcome === 'APPROVED' ? 'dispute_reinstated' : 'dispute_upheld' });
-        bumpRev(d, { by: req.reviewer, at: now() });
+      // Reinstated: the client's confirmation is unchanged; only the dispute suspension lifts. An expired term stays expired.
+      agentCore.agreements.resolveDispute(a.id, { outcome: outcome === 'APPROVED' ? 'reinstated' : 'ended', reviewId: r.id, at: now() }, {
+        ...bumped(req.reviewer),
+        history: [entry(outcome === 'APPROVED' ? 'representation_confirmed' : 'representation_terminated', by, { by: 'trust_safety', phase: 'disputed', reviewId: r.id, reasonCode: outcome === 'APPROVED' ? 'dispute_reinstated' : 'dispute_upheld' })],
       });
       broadcast(outcome === 'APPROVED' ? 'representation_confirmed' : 'representation_terminated', { orgId: a.agencyOrgId, agreementId: a.id, agentUserId: a.agentUserId });
       notify({ kind: 'player', id: a.clientId }, 'representation_disputed', outcome === 'APPROVED' ? 'Attributed Trust & Safety review resolved your dispute: the relationship record is reinstated. You can still end it at any time.' : 'Attributed Trust & Safety review resolved your dispute: the relationship record has been ended.', a.id);
@@ -1037,24 +1013,18 @@ export function registerCompliance(rawCtx) {
       const live = contextById(c.id);
       const rep = live.representations.find((x) => x.id === r.subject.representationId);
       if (rep && rep.status === 'pending_review') {
-        contexts.update(c.id, (d) => {
-          const x = d.representations.find((y) => y.id === rep.id);
-          x.status = outcome === 'APPROVED' ? 'verified' : 'withdrawn';
-          // A review-verified declaration records no act by the agent: firstActAt stays null until
-          // the agent themselves acts, so a later party-specific consent is still "in advance".
-          if (outcome === 'APPROVED') { x.declaredOnly = false; x.verifiedByReviewId = r.id; x.verifiedAt = now(); } else x.withdrawnAt = now();
-          hist(d, outcome === 'APPROVED' ? 'compliance_representation_verified' : 'compliance_representation_withdrawn', by, { partyRole: rep.partyRole, reviewId: r.id });
-        });
+        // A review-verified declaration records no act by the agent: firstActAt stays null until
+        // the agent themselves acts, so a later party-specific consent is still "in advance".
+        contexts.decideRepresentation(c.id, { representationId: rep.id, approved: outcome === 'APPROVED', reviewId: r.id, at: now() },
+          { history: [entry(outcome === 'APPROVED' ? 'compliance_representation_verified' : 'compliance_representation_withdrawn', by, { partyRole: rep.partyRole, reviewId: r.id })] });
       }
     } else if (r.kind === 'conflict_evaluation') {
-      contexts.update(c.id, (d) => {
-        if (outcome === 'APPROVED') d.resolvedFacts = [...new Set([...d.resolvedFacts, ...(r.reasons ?? []).map((x) => x.code).filter((code) => ['OTHER_SERVICES_PRESUMPTION', 'INTEREST_DECLARED', 'REPRESENTATION_UNVERIFIED'].includes(code))])];
-        else d.reviewRejectedAt = now();
-        hist(d, 'compliance_context_evaluated', by, { reviewId: r.id, outcome: outcome === 'APPROVED' ? 'review_approved' : 'review_rejected' });
-      });
+      const book = { history: [entry('compliance_context_evaluated', by, { reviewId: r.id, outcome: outcome === 'APPROVED' ? 'review_approved' : 'review_rejected' })] };
+      if (outcome === 'APPROVED') contexts.resolveFacts(c.id, { codes: (r.reasons ?? []).map((x) => x.code).filter((code) => ['OTHER_SERVICES_PRESUMPTION', 'INTEREST_DECLARED', 'REPRESENTATION_UNVERIFIED'].includes(code)) }, book);
+      else contexts.rejectByReview(c.id, { at: now() }, book);
     }
     if (contextById(c.id).status === 'open') evaluateAndRecord(c, by);
-    const after = contexts.update(c.id, (d) => { bumpRev(d, { by: req.reviewer, at: now() }); });
+    const after = contexts.recordAct(c.id, bumped(req.reviewer));
     return { contextOutcome: lastEvaluation(after)?.outcome ?? null, representationStatus: after.representations.find((x) => x.id === r.subject?.representationId)?.status ?? null };
   }
   tsRouter.post('/compliance/reviews/:id/cancel', (req, res) => {
@@ -1065,11 +1035,8 @@ export function registerCompliance(rawCtx) {
     const reason = String(req.body?.reason ?? '').trim().slice(0, 400);
     if (!reason) return sendComplianceError(res, { error: 'REVIEW_INPUT_INVALID', field: 'reason' }, 'cancel');
     if (!guardRev(req, res, r, { errorCode: 'REVIEW_VERSION_CONFLICT', current: { status: r.status } })) return;
-    const out = unit(() => reviews.update(r.id, (d) => {
-      d.status = 'CANCELLED'; d.decidedAt = now(); d.decision = { reviewerId: req.reviewer.id, reviewerName: req.reviewer.name, reviewerRole: req.reviewer.role, outcome: 'CANCELLED', reasonCode: 'cancelled', reason, evidenceRefs: [], policyVersions: d.policyVersions, at: now(), priorState: null, resultingState: null };
-      hist(d, 'regulatory_review_cancelled', byReviewer(req), { outcome: 'CANCELLED', reasonCode: 'cancelled', rev: d.rev });
-      bumpRev(d, { by: req.reviewer, at: now() });
-    }));
+    const decision = { reviewerId: req.reviewer.id, reviewerName: req.reviewer.name, reviewerRole: req.reviewer.role, outcome: 'CANCELLED', reasonCode: 'cancelled', reason, evidenceRefs: [], policyVersions: r.policyVersions, at: now(), priorState: null, resultingState: null };
+    const out = unit(() => reviews.cancel(r.id, { at: now(), decision }, { ...bumped(req.reviewer), history: [entry('regulatory_review_cancelled', byReviewer(req), { outcome: 'CANCELLED', reasonCode: 'cancelled', rev: r.rev })] }));
     res.json({ review: reviewPublic(out, { forReviewer: true }) });
   });
   /** Reconsideration never rewrites a final decision: a new review supersedes it, with the old one retained. */
@@ -1083,14 +1050,9 @@ export function registerCompliance(rawCtx) {
     if (!reason) return sendComplianceError(res, { error: 'REVIEW_INPUT_INVALID', field: 'reason' }, 'supersede');
     if (!guardRev(req, res, r, { errorCode: 'REVIEW_VERSION_CONFLICT', current: { status: r.status } })) return;
     const { next, old } = unit(() => {
-      const created = createReview({ kind: r.kind, agencyOrgId: r.agencyOrgId, agentUserId: r.agentUserId, subject: r.subject, reasons: r.reasons, policyVersions: policySetFor(r.subject?.memberAssociation ? [r.subject.memberAssociation] : (contextById(r.subject?.contextId)?.jurisdictions ?? [])).policies.map((p) => p.id), snapshot: r.snapshot, requestedBy: byReviewer(req) });
-      const next = reviews.update(created.id, (d) => { d.supersedes = r.id; hist(d, 'regulatory_review_requested', byReviewer(req), { reasonCode: 'supersedes', reviewId: r.id }); });
-      const priorStatus = r.status;
-      const old = reviews.update(r.id, (d) => {
-        d.status = 'SUPERSEDED'; d.supersededBy = next.id; // the decision object is retained untouched
-        hist(d, 'regulatory_review_superseded', byReviewer(req), { reasonCode: 'superseded', reviewId: next.id, priorState: { status: priorStatus }, rev: d.rev });
-        bumpRev(d, { by: req.reviewer, at: now() });
-      });
+      const next = createReview({ kind: r.kind, agencyOrgId: r.agencyOrgId, agentUserId: r.agentUserId, subject: r.subject, reasons: r.reasons, policyVersions: policySetFor(r.subject?.memberAssociation ? [r.subject.memberAssociation] : (contextById(r.subject?.contextId)?.jurisdictions ?? [])).policies.map((p) => p.id), snapshot: r.snapshot, requestedBy: byReviewer(req), supersedes: r.id });
+      // The decision is retained untouched.
+      const old = reviews.markSuperseded(r.id, {}, { ...bumped(req.reviewer), history: [entry('regulatory_review_superseded', byReviewer(req), { reasonCode: 'superseded', reviewId: next.id, priorState: { status: r.status }, rev: r.rev })] });
       return { next, old };
     });
     res.status(201).json({ review: reviewPublic(next, { forReviewer: true }), superseded: reviewPublic(old, { forReviewer: true }) });
@@ -1150,9 +1112,9 @@ export function registerCompliance(rawCtx) {
         id: nextId('ctx'), agencyOrgId, agentUserId, type, jurisdictions, parties: [], representations: [],
         resolvedFacts: [], reEvaluationPending: false, reviewRejectedAt: null, status: 'open',
         origin: 'transaction', transactionId,
-        openedAt: now(), closedAt: null, keys: {}, rev: 1, revAt: now(), revBy: null, history: [],
+        openedAt: now(), closedAt: null, keys: {}, rev: 1, revAt: now(), revBy: null,
+        history: [entry('compliance_context_opened', by, { type, policyVersions: policySetFor(jurisdictions).policies.map((x) => x.id) })],
       };
-      hist(c, 'compliance_context_opened', by, { type, policyVersions: policySetFor(jurisdictions).policies.map((x) => x.id) });
       return contexts.create(c);
     },
     contextById,
@@ -1163,9 +1125,9 @@ export function registerCompliance(rawCtx) {
      * cannot go stale.
      */
     project(c, { parties, representations }) {
-      contexts.update(c.id, (d) => {
-        d.parties = parties.map((p) => ({ id: p.id, partyRole: p.partyRole, subjectKind: p.subjectKind, subjectId: p.subjectId, addedAt: p.addedAt ?? null, removed: !!p.removed, removedAt: p.removed ? (p.removedAt ?? null) : null }));
-        d.representations = representations.map((r) => ({ id: r.id, agentUserId: r.agentUserId, partyRole: r.partyRole, agreementId: r.agreementId ?? null, status: r.status, declaredOnly: !!r.declaredOnly, reviewId: r.reviewId ?? null, declaredAt: null, firstActAt: r.firstActAt ?? null, withdrawnAt: null, verifiedByReviewId: null, verifiedAt: null, keys: {} }));
+      contexts.project(c.id, {
+        parties: parties.map((p) => ({ id: p.id, partyRole: p.partyRole, subjectKind: p.subjectKind, subjectId: p.subjectId, addedAt: p.addedAt ?? null, removed: !!p.removed, removedAt: p.removed ? (p.removedAt ?? null) : null })),
+        representations: representations.map((r) => ({ id: r.id, agentUserId: r.agentUserId, partyRole: r.partyRole, agreementId: r.agreementId ?? null, status: r.status, declaredOnly: !!r.declaredOnly, reviewId: r.reviewId ?? null, declaredAt: null, firstActAt: r.firstActAt ?? null, withdrawnAt: null, verifiedByReviewId: null, verifiedAt: null, keys: {} })),
       });
     },
     evaluate(c, by, opts = {}) { return evaluateAndRecord(c, by, opts); },
@@ -1175,7 +1137,7 @@ export function registerCompliance(rawCtx) {
     /** How long each answered consent of a transaction's context waited (the transaction metrics). */
     consentAnswerWaits: () => consents.transactionAnswerWaits(),
     /** A snapshot taken without an evaluation (the facet gate refused first) still answers the policy flag. */
-    clearReEvaluation(c) { if (c && contextById(c.id)?.reEvaluationPending) contexts.update(c.id, (d) => { d.reEvaluationPending = false; }); },
+    clearReEvaluation(c) { if (c && contextById(c.id)?.reEvaluationPending) contexts.clearReEvaluation(c.id); },
     consentsFor: engineConsentsFor,
     closeContext(c, by) {
       const cur = c ? contextById(c.id) : null;
