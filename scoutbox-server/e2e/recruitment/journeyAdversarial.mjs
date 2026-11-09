@@ -947,16 +947,16 @@ section('R — corrupt current pointers and unknown states fail closed');
   const Hh = globalThis.__H; const K = globalThis.__K;
   // The package's status is a CHECKed column — the unknown word is refused at the save, naming the package; it is planted in its own save so the two other corruptions land
   let bogusPkg = null; const bogus = await offline((db, { layer }) => { const pkg = db.signingPackages.find((p) => p.caseId === Hh.R5); bogusPkg = pkg?.id ?? null; if (pkg) layer.signingsFollowUps.signingPackages.patch(pkg.id, { status: 'BOGUS' }); });
-  // A current-revision pointer naming a revision the Offer does not hold is refused at the
-  // save, naming the Offer (planted in its own save, like R2); the Offer reads as before.
-  let gone = null; const goneRefused = await offline((db, { layer }) => { const o = db.recruitmentOffers.find((x) => x.id === K.OID); gone = o ?? null; layer.recruitmentContactsOffers.offers.update(K.OID, (x) => { x.currentRevisionId = 'rofr-gone'; }); });
+  // No offer operation re-points the current revision, so the plant is raw SQL: the pointer is a key into the offer's
+  // own revisions, and the commit refuses it (planted in its own save, like R2); the Offer reads as before.
+  let gone = null; const goneRefused = await offline((db, L) => { const o = db.recruitmentOffers.find((x) => x.id === K.OID); gone = o ?? null; L.sqlite.prepare("UPDATE recruitment_offers SET current_revision_id = 'rofr-gone' WHERE id = ?").run(K.OID); });
   // The room status is a CHECKed column — an unknown word is refused at the save, naming the
   // case (planted in its own save, like R1 and R2); the case reads as before.
   let r4Status = null; const unknownRefused = await offline((db, { layer }) => {
     const k = db.recruitmentCases.find((x) => x.id === globalThis.__B.R4); r4Status = k?.room?.status ?? null; if (k) layer.recruitmentCases.cases.update(k.id, (c) => { c.room.status = 'SIGNEDX'; });
   });
   const jK = await jb(K.RID);
-  neg(gone && goneRefused && goneRefused.message.includes(`${K.OID}.currentRevisionId names rofr-gone, not a revision of this offer`) && jK.resources.offerId === K.OID && jK.classification !== 'integrity_error', `R1 an Offer whose current-revision pointer names a missing revision cannot be stored: the save refuses it, naming the Offer; the case reads as before (${String(goneRefused?.message ?? 'no refusal').slice(0, 100)}…)`);
+  neg(gone && goneRefused && /FOREIGN KEY constraint failed/.test(goneRefused.message) && jK.resources.offerId === K.OID && jK.classification !== 'integrity_error', `R1 an Offer whose current-revision pointer names a missing revision cannot be stored: the commit refuses it; the case reads as before (${String(goneRefused?.message ?? 'no refusal').slice(0, 100)}…)`);
   const issue = await j('POST', `/org/offers/${K.OID}/issue`, { expectedRev: 1, clientKey: key() }, maria.token, at(T0));
   neg(issue.status >= 400, `R1b the domain route still answers by its own rules (${issue.status} ${issue.body?.error})`);
   const jN = await jb(Hh.R5);

@@ -35,8 +35,10 @@ const s8cDump = (s) => JSON.stringify(TABLES.map((t) => s.prepare(`SELECT * FROM
 const ddlOf = (s, t) => s.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?").get(t)?.sql ?? null;
 const col = (s, sql, ...p) => { const r = s.prepare(sql).get(...p); return r ? Object.values({ ...r })[0] : undefined; };
 const S8A_FIX = () => ({ requests: [acceptedRequest(p4bInvitation(), 'trial-1'), minorInvitation(), legacyTrialRequest()], trials: [scheduledTrial()] });
-/** The typed expectation of a fixture: what every read returns. */
-const typed = (name, raw) => { const t = (name === 'recruitmentContacts' ? mod.typeContact : mod.typeOffer)(persisted(raw)); assert.ok(t.ok, t.reason); return plain(t.record); };
+/** The typed expectation of a contact fixture: what every read returns. */
+const typedContact = (raw) => { const t = mod.typeContact(persisted(raw)); assert.ok(t.ok, t.reason); return plain(t.record); };
+/** An offer reads back exactly as it was written; a field the fixture leaves out reads null. */
+const storedOffer = (raw) => ({ subjectRemovedAt: null, ...persisted(raw) });
 
 /** The recruitment fixtures as one fixture; `two` overrides a contact/offer collection (undefined omits it). */
 function fixtureCollections({ more = {}, ...two } = {}) {
@@ -75,8 +77,8 @@ test('[schema] migration 0017 is registered before 0018 and creates the ten type
   const d = file('schema'); const back = readRecords(d); const s = new DatabaseSync(dbFile(d)); s.exec('PRAGMA foreign_keys = ON');
   const after = fullDump(s); assert.deepEqual(runDataMigrations(s, DATA_MIGRATIONS, { now: NOW, context: { sessionTtlMs: TTL } }).ran, []); assert.equal(fullDump(s), after, 'never runs twice');
   const fix = S8C_FIX();
-  assert.deepEqual(plain(back.recruitmentContacts), fix.recruitmentContacts.map((c) => typed('recruitmentContacts', c)));
-  assert.deepEqual(plain(back.recruitmentOffers), fix.recruitmentOffers.map((o) => typed('recruitmentOffers', o)));
+  assert.deepEqual(plain(back.recruitmentContacts), fix.recruitmentContacts.map(typedContact));
+  assert.deepEqual(plain(back.recruitmentOffers), fix.recruitmentOffers.map(storedOffer));
   assert.deepEqual(back.recruitmentContacts[2].keys.send, { key: null, fp: '{"contactId":"rct-3"}' }, 'the null-key send');
   assert.equal(Object.hasOwn(back.recruitmentOffers[1].revisions[2], 'discardedByResponseId'), true); assert.equal(Object.hasOwn(back.recruitmentOffers[1].revisions[1], 'discardedByResponseId'), false, 'only the discarded draft carries the pointer');
   assert.deepEqual(back.recruitmentOffers[2].lifecycle, { applied: false, action: 'considerOffer', from: 'offer_declined', to: 'offer_declined', at: TX.accepted + 60_000, reason: 'LIFECYCLE_NOT_ALLOWED', message: 'not from here', allowed: ['offer_accepted', 'withdrawn'] });
@@ -95,20 +97,24 @@ test('[fixtures][typed] a write STOPS with the id on a record the columns cannot
   refusedSave('nested', C({ emailCopy: { state: 'queued', to: 'guardian', outboxId: null, at: NOW, extra: 1 } }), /rct-1\.emailCopy\.extra is not a field this table stores/);
   refusedSave('rev', C({ rev: '1' }), /rct-1\.rev must be an integer or null \(got string\)/);
   refusedSave('attempts', C({ attempts: { not: 'a list' } }), /rct-1\.attempts must be a list/);
-  refusedSave('current', O(draftOffer({ currentRevisionId: 'rofr-missing' })), /rof-1\.currentRevisionId names rofr-missing, not a revision of this offer/);
+  refusedSave('current', O(draftOffer({ currentRevisionId: 'rofr-missing' })), /CONTACTS_OFFERS_INPUT_INVALID: recruitment_offers rof-1 currentRevisionId: rofr-missing is not a revision of this offer/);
   const foreign = acceptedOffer(); foreign.responses[0].revisionId = 'rofr-1';
-  refusedSave('foreign', O(foreign), /rof-2\.responses rofa-1\.revisionId names rofr-1, not a revision of this offer/);
+  refusedSave('foreign', O(foreign), /recruitment_offers rof-2 response rofa-1: FOREIGN KEY constraint failed/);
   const twice = acceptedOffer(); twice.responses.push({ ...twice.responses[0], id: 'rofa-9', clientKey: null });
-  refusedSave('twice', O(twice), /rof-2\.responses answer revision rofr-3 twice/);
-  refusedSave('receipt', O(draftOffer({ readReceipts: [{ revisionId: 'rofr-x', viewerKind: 'player', viewerId: 'pl-adult', firstViewedAt: NOW }] })), /rof-1\.readReceipts name rofr-x, not a revision of this offer/);
-  refusedSave('actor-empty', { recruitmentOffers: [acceptedOffer({ responses: [{ ...acceptedOffer().responses[0], actorId: '' }] })] }, /rof-2 responses\[0\]\.actorId must not be empty/);
+  refusedSave('twice', O(twice), /recruitment_offers rof-2 response rofa-9: UNIQUE constraint failed: offer_responses\.offer_id, offer_responses\.revision_id/);
+  refusedSave('receipt', O(draftOffer({ readReceipts: [{ revisionId: 'rofr-x', viewerKind: 'player', viewerId: 'pl-adult', firstViewedAt: NOW }] })), /recruitment_offers rof-1 read receipt 0: FOREIGN KEY constraint failed/);
+  refusedSave('actor-empty', { recruitmentOffers: [acceptedOffer({ responses: [{ ...acceptedOffer().responses[0], actorId: '' }] })] }, /recruitment_offers rof-2 response rofa-1: CHECK constraint failed: length\(actor_id\) > 0/);
+  refusedSave('offer-status', O(draftOffer({ status: 'SIGNED' })), /recruitment_offers rof-1 row: CHECK constraint failed: status/);
+  refusedSave('revision-number', O(draftOffer({ revisions: [revision({ revisionNumber: 0 })] })), /recruitment_offers rof-1 revision rofr-1: CHECK constraint failed: revision_number >= 1/);
+  refusedSave('calendar-day', O(draftOffer({ revisions: [revision({ terms: { ...revision().terms, startDate: '2026/09/01' } })] })), /recruitment_offers rof-1 revision rofr-1: CHECK constraint failed: term_start_date/);
+  refusedSave('supersedes', O(draftOffer({ revisions: [revision({ supersedesRevisionId: 'rofr-elsewhere' })] })), /recruitment_offers rof-1 revision rofr-1 pointers: FOREIGN KEY constraint failed/);
   refusedSave('case', C({ caseId: 'case-nowhere' }), /CONTACTS_OFFERS_REFERENCE_MISSING[\s\S]*recruitment_contacts holds 1 row\(s\) naming a recruitment_cases row that is not there \(rct-1 → recruitment_cases case-nowhere\)/);
   refusedSave('request', C({ status: 'delivered', requestId: 'req-nowhere', recipient: { type: 'player', playerId: 'pl-adult', guardianId: null, minor: false } }), /FOREIGN KEY constraint failed/); // the deferred request key, at COMMIT
 });
 
 // ------------------------------------------------------------- the repository
 
-test('[repository] explicit writes: there is no db.* view (reading or assigning db.recruitmentContacts / db.recruitmentOffers throws, naming the repository); every returned record is read-only (a field assignment and a nested push throw); create and update write their rows at once — a second connection sees them with no save — and return the fresh record; update hands out a plain copy, types the result whole and refuses junk, a changed identifier and an unknown id; nothing is written by a save; a reopen serves the same records', () => {
+test('[repository] explicit writes: there is no db.* view (reading or assigning db.recruitmentContacts / db.recruitmentOffers throws, naming the repository); every returned record is read-only (a field assignment and a nested push throw); create and update write their rows at once — a second connection sees them with no save — and return the fresh record; a contact\'s update hands out a plain copy, types the result whole and refuses junk, a changed identifier and an unknown id; an offer changes only through its named acts, which refuse a move its revision\'s state does not allow (an issued revision\'s terms are never edited), a key naming another offer\'s revision and an unknown id; nothing is written by a save; a reopen serves the same records', () => {
   const d = file('repo'); const L = serverOpen(d); const { contacts, offers } = L.repo;
   assert.throws(() => { contacts.byId('rct-1').status = 'cancelled'; }, TypeError);
   assert.throws(() => { offers.byId('rof-2').revisions[0].documents.push({}); }, TypeError);
@@ -123,9 +129,16 @@ test('[repository] explicit writes: there is no db.* view (reading or assigning 
   refused(() => contacts.update('rct-new', (draft) => { draft.caseId = 'case-2'; }), /rct-new: caseId cannot change/);
   refused(() => contacts.update('rct-nowhere', () => {}), /CONTACTS_OFFERS_NOT_FOUND/);
   assert.equal(contacts.byId('rct-new').subject, 'Edited', 'a refused update changed nothing');
-  const o = offers.update('rof-1', (draft) => { draft.revisions.push(revision({ id: 'rofr-n', revisionNumber: 2 })); draft.currentRevisionId = 'rofr-n'; draft.keys.revise.push({ key: 'k-n', revisionId: 'rofr-n' }); draft.rev = 2; });
-  assert.equal(o.revisions.length, 2); withRo(d, (s) => { assert.equal(col(s, "SELECT count(*) FROM offer_revisions WHERE offer_id = 'rof-1'"), 2); assert.equal(col(s, "SELECT key FROM offer_keys WHERE offer_id = 'rof-1'"), 'k-n'); });
-  refused(() => offers.update('rof-1', (draft) => { draft.currentRevisionId = 'rofr-2'; }), /rof-1\.currentRevisionId names rofr-2, not a revision of this offer/);
+  const by = { kind: 'org', id: 'usr-1', name: 'Maria', role: 'Head of Recruitment' };
+  const o = offers.addRevision('rof-1', revision({ id: 'rofr-n', revisionNumber: 2 }), { at: NOW, revBy: by, touch: true, bumpOffer: true, key: { act: 'revise', key: 'k-n', revisionId: 'rofr-n' }, history: [{ id: 'aud-n', at: NOW, action: 'offer_draft_created', by, detail: { revisionId: 'rofr-n' } }] });
+  assert.equal(o.revisions.length, 2); assert.equal(o.currentRevisionId, 'rofr-n'); assert.equal(o.rev, 2); assert.equal(o.history.at(-1).id, 'aud-n');
+  withRo(d, (s) => { assert.equal(col(s, "SELECT count(*) FROM offer_revisions WHERE offer_id = 'rof-1'"), 2); assert.equal(col(s, "SELECT key FROM offer_keys WHERE offer_id = 'rof-1'"), 'k-n'); });
+  const issued = offers.issueRevision('rof-1', 'rofr-n', { at: NOW, by, terms: revision().terms, recipientSnapshot: { type: 'player', playerId: 'pl-adult', guardianId: null, minor: false, at: NOW }, readinessSnapshot: null });
+  assert.equal(issued.status, 'ISSUED'); assert.equal(issued.revisions[1].issuedBy.id, 'usr-1');
+  refused(() => offers.editDraft('rof-1', 'rofr-n', { at: NOW, by, terms: revision().terms }), /CONTACTS_OFFERS_STATE_CONFLICT: offer_revisions rofr-n of recruitment_offers rof-1 is not a draft/);
+  refused(() => offers.issueRevision('rof-1', 'rofr-n', { at: NOW, by, terms: revision().terms }), /CONTACTS_OFFERS_STATE_CONFLICT: offer_revisions rofr-n of recruitment_offers rof-1 cannot move to ISSUED/);
+  refused(() => offers.recordAct('rof-1', { key: { act: 'issue', key: 'k-x', revisionId: 'rofr-2' } }), /recruitment_offers rof-1 issue key: FOREIGN KEY constraint failed/);
+  refused(() => offers.recordAct('rof-nowhere', {}), /CONTACTS_OFFERS_NOT_FOUND/);
   const dump = withRo(d, s8cDump); assert.equal(withRo(d, s8cDump), dump, 'a save writes no contact or offer row');
   const served = plain(L.repo.exportAll()); L.close();
   const R = serverOpen(d); assert.deepEqual(plain(R.repo.exportAll()), served); R.close(); rm(d);
@@ -158,7 +171,7 @@ test('[repository] SQL reads: byId and every list query return exactly the recor
   for (const r of [...contacts.forOrg(all.contacts[0].orgId), ...offers.forOrg(all.offers[0].orgId)]) assert.ok(Object.isFrozen(r), 'a listed record is read-only');
   for (const name of ['contacts', 'offers']) {
     assert.ok(Object.isFrozen(reads[name]));
-    for (const w of ['create', 'update', 'redactPlayer']) assert.equal(reads[name][w], undefined, `reads.${name} has no ${w}`);
+    for (const w of ['create', 'update', 'redactPlayer', 'editDraft', 'issueRevision', 'withdrawRevision', 'addRevision', 'recordResponse', 'addReadReceipt', 'setAgentShare', 'recordAct']) assert.equal(reads[name][w], undefined, `reads.${name} has no ${w}`);
     assert.equal(reads[name].byId, L.repo[name].byId);
   }
   assert.deepEqual(L.repo.counts(), { recruitmentContacts: all.contacts.length, recruitmentOffers: all.offers.length });

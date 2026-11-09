@@ -264,7 +264,7 @@ section('5 — stale pointers, cross-case, legacy mixes, a signed mismatch, key 
     Object.assign(clone, { id: 'rof-p81p-stale', caseId: SP, playerId: 'pl-martin', status: 'ISSUED', responses: [], readReceipts: [], history: [], agentShare: null, lifecycle: null, keys: { create: null, issue: [], withdraw: [], revise: [] }, revisions: [rev1, { ...rev1, id: 'rofr-p81p-2', revisionNumber: 2 }], currentRevisionId: 'rofr-missing' });
     const onDisk = JSON.stringify(readRecords(DATA).recruitmentOffers);
     let refused = null; try { plantOn((layer) => { layer.recruitmentCases.cases.update(SP, advance); layer.recruitmentContactsOffers.offers.create(clone); }); } catch (e) { refused = e; }
-    neg(!!refused && /rof-p81p-stale\.currentRevisionId names rofr-missing, not a revision of this offer/.test(refused.message) && JSON.stringify(readRecords(DATA).recruitmentOffers) === onDisk, `5.2 a pointer at a revision the Offer does not hold cannot be stored: the write refuses it, naming the row (${String(refused?.message ?? 'no refusal').slice(0, 100)})`);
+    neg(!!refused && /recruitment_offers rof-p81p-stale currentRevisionId: rofr-missing is not a revision of this offer/.test(refused.message) && JSON.stringify(readRecords(DATA).recruitmentOffers) === onDisk, `5.2 a pointer at a revision the Offer does not hold cannot be stored: the write refuses it, naming the row (${String(refused?.message ?? 'no refusal').slice(0, 100)})`);
     clone.currentRevisionId = 'rofr-p81p-1';
     plantOn((layer) => { layer.recruitmentCases.cases.update(SP, advance); layer.recruitmentContactsOffers.offers.create(clone); });
   }

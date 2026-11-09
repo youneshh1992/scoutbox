@@ -30,7 +30,7 @@
 
 import { buildShared } from '../../../m12/shared.mjs';
 import { roomRole, roomCan, ROOM_STATUS_LABELS } from '../rooms/shared.mjs';
-import { guardRev, bumpRev, expectedRevOf } from '../../platform/concurrency.mjs';
+import { guardRev, expectedRevOf } from '../../platform/concurrency.mjs';
 import { rateLimitedBody } from '../../platform/rateLimit.mjs';
 import { canTransitionRecruitmentCase, NULL_EVIDENCE_PROVIDER, RECRUITMENT_LIFECYCLE_POLICY_VERSION } from '../lifecycle/lifecycle.mjs';
 import { resolveContactRecipient } from '../lifecycle/contact.mjs';
@@ -82,15 +82,11 @@ export function registerOffers(rawCtx) {
     return Date.now();
   };
   const byOrg = (req) => ({ kind: 'org', id: req.orgUser.id, name: req.orgUser.name, role: req.orgUser.role ?? null });
-  const hist = (offer, action, by, detail, at) => {
-    offer.history ??= [];
-    offer.history.push({ id: nextId('aud'), at, action, by: { kind: by.kind, id: by.id ?? null, name: by.name ?? null }, detail: detail ?? null });
-  };
+  /** A history entry for an act (appended by the repository with the act). */
+  const entry = (action, by, detail, at) => ({ id: nextId('aud'), at, action, by: { kind: by.kind, id: by.id ?? null, name: by.name ?? null }, detail: detail ?? null });
 
   /** Idempotency keys live on the record, one list per act, never overwritten. */
   const keyRow = (offer, act, k) => (offer.keys?.[act] ?? []).find((x) => x && x.key === k) ?? null;
-  /** A revision of the editable copy an `offers.update` hands out. */
-  const revOf = (draft, id) => draft.revisions.find((r) => r.id === id);
   /**
    * A refusal decided INSIDE a unit of work (the case cannot take the move the
    * Offer asks for): thrown so the unit rolls back the Offer rows and the case
@@ -346,9 +342,9 @@ export function registerOffers(rawCtx) {
       decisionId: dp.sourceId ?? null, transactionId, status: 'DRAFT', currentRevisionId: rev.id,
       revisions: [rev], responses: [], readReceipts: [], agentShare: null,
       keys: { create: key.key ? { key: key.key, fp } : null, issue: [], withdraw: [], revise: [] },
-      lifecycle: null, history: [], createdAt: at, createdBy: by, updatedAt: at, rev: 1, revAt: at, revBy: null, policyVersion: OFFER_POLICY_VERSION,
+      lifecycle: null, history: [entry('offer_draft_created', by, { revisionId: rev.id, revisionNumber: 1 }, at)],
+      createdAt: at, createdBy: by, updatedAt: at, rev: 1, revAt: at, revBy: null, policyVersion: OFFER_POLICY_VERSION,
     };
-    hist(offer, 'offer_draft_created', by, { revisionId: rev.id, revisionNumber: 1 }, at);
     const stored = unit(() => {
       const fresh = offers.create(offer);
       caseAudit(kase, 'org', req.orgUser.id, req.orgUser.name, 'offer_draft_created', { offerId: offer.id, revisionId: rev.id });
@@ -393,20 +389,10 @@ export function registerOffers(rawCtx) {
     if (docRefs.documents !== undefined) { docs = resolveDocuments(docRefs.documents, kase.orgId); if (!docs.ok) return err(res, docs.error, docs.message, { field: docs.field }); }
     if (b.recipientMessage !== undefined && msgs.recipientMessage && !moderateOrRefuse(res, msgs.recipientMessage, { kind: 'recruitment_offer', orgId: req.org.id, userId: req.orgUser.id })) return;
     const by = byOrg(req);
-    const stored = unit(() => offers.update(offer.id, (d) => {
-      const r = revOf(d, rev.id);
-      if (terms) r.terms = terms.terms;
-      r.recipientMessage = msgs.recipientMessage;
-      r.internalNote = msgs.internalNote;
-      if (expiry) r.expiresAt = expiry.ms;
-      if (docs) r.documents = docs.documents;
-      r.updatedAt = at; r.updatedBy = by;
-      bumpRev(r, { by: req.orgUser, at });
-      d.type = r.terms.offerType;
-      d.updatedAt = at;
-      bumpRev(d, { by: req.orgUser, at });
-      hist(d, 'offer_draft_updated', by, { revisionId: r.id }, at);
-    }));
+    const stored = unit(() => offers.editDraft(offer.id, rev.id, {
+      at, by, terms: terms ? terms.terms : rev.terms, recipientMessage: msgs.recipientMessage, internalNote: msgs.internalNote,
+      expiresAt: expiry ? expiry.ms : rev.expiresAt, documents: docs ? docs.documents : undefined,
+    }, { at, revBy: req.orgUser, touch: true, bumpOffer: true, bumpRevisionId: rev.id, history: [entry('offer_draft_updated', by, { revisionId: rev.id }, at)] }));
     safe('offer_draft_updated', () => broadcast?.('offer_draft_updated', { orgId: kase.orgId, roomId: kase.id, offerId: offer.id }));
     res.json({ offer: clubView(stored, at) });
   });
@@ -473,29 +459,19 @@ export function registerOffers(rawCtx) {
     const prevIssued = (offer.revisions ?? []).find((r) => r.id === rev.supersedesRevisionId && r.status === 'ISSUED') ?? null;
     let moved = null;
     const done = inUnit(res, () => {
-      offers.update(offer.id, (d) => {
-        const r = revOf(d, rev.id);
-        r.status = 'ISSUED';
-        r.terms = terms.terms;
-        r.issuedAt = at; r.issuedBy = by;
-        r.recipientSnapshot = { type: rec.recipient.type, playerId: rec.recipient.playerId, guardianId: rec.recipient.guardianId ?? null, minor: rec.recipient.minor === true, at };
-        r.readinessSnapshot = readiness;
-        if (prevIssued) { const p = revOf(d, prevIssued.id); p.status = 'SUPERSEDED'; p.supersededByRevisionId = r.id; p.supersededAt = at; }
-        d.status = 'ISSUED';
+      offers.issueRevision(offer.id, rev.id, {
+        at, by, terms: terms.terms, readinessSnapshot: readiness, supersedesRevisionId: prevIssued?.id ?? null,
+        recipientSnapshot: { type: rec.recipient.type, playerId: rec.recipient.playerId, guardianId: rec.recipient.guardianId ?? null, minor: rec.recipient.minor === true, at },
       });
       moved = advanceCase({ req, room: kase, action: 'sendOffer', at, trigger: `offer:issue:${offer.id}`, keyDetail: { offerId: offer.id, revisionId: rev.id } });
       if (!moved.applied && moved.reason !== 'already_there') {
         throw new OfferRefusal({ error: 'OFFER_LIFECYCLE_CONFLICT', message: `The case at "${ROOM_STATUS_LABELS[moved.from] ?? moved.from}" cannot take the step an issued Offer asks for (sendOffer). ${moved.message ?? ''}`.trim(), lifecycle: moved.reason, allowed: moved.allowed ?? [], current: { status: moved.from } });
       }
-      const fresh = offers.update(offer.id, (d) => {
-        const r = revOf(d, rev.id);
-        d.lifecycle = moved;
-        if (key.key) d.keys.issue.push({ key: key.key, revisionId: r.id });
-        d.updatedAt = at;
-        bumpRev(r, { by: req.orgUser, at });
-        bumpRev(d, { by: req.orgUser, at });
-        hist(d, prevIssued ? 'offer_superseded' : 'offer_issued', by, { revisionId: r.id, revisionNumber: r.revisionNumber, supersedes: prevIssued?.id ?? null, expiresAt: r.expiresAt }, at);
-        if (prevIssued) hist(d, 'offer_issued', by, { revisionId: r.id, revisionNumber: r.revisionNumber, expiresAt: r.expiresAt }, at);
+      const history = [entry(prevIssued ? 'offer_superseded' : 'offer_issued', by, { revisionId: rev.id, revisionNumber: rev.revisionNumber, supersedes: prevIssued?.id ?? null, expiresAt: rev.expiresAt }, at)];
+      if (prevIssued) history.push(entry('offer_issued', by, { revisionId: rev.id, revisionNumber: rev.revisionNumber, expiresAt: rev.expiresAt }, at));
+      const fresh = offers.recordAct(offer.id, {
+        at, revBy: req.orgUser, touch: true, bumpOffer: true, bumpRevisionId: rev.id, lifecycle: moved,
+        key: key.key ? { act: 'issue', key: key.key, revisionId: rev.id } : null, history,
       });
       caseAudit(kase, 'org', req.orgUser.id, req.orgUser.name, prevIssued ? 'offer_superseded' : 'offer_issued', { offerId: offer.id, revisionId: rev.id, supersedes: prevIssued?.id ?? null, to: moved.applied ? moved.to : undefined });
       return fresh;
@@ -541,20 +517,12 @@ export function registerOffers(rawCtx) {
     // the decision still stands, and the club may reissue. A withdrawn draft moves nothing.
     let moved = { applied: false, action: null, reason: 'draft', from: kase.room.status, to: kase.room.status, at };
     const withdrawn = unit(() => {
-      offers.update(offer.id, (d) => {
-        const r = revOf(d, rev.id);
-        r.status = 'WITHDRAWN'; r.withdrawnAt = at; r.withdrawnBy = by; r.withdrawReason = reason;
-        d.status = 'WITHDRAWN';
-      });
+      offers.withdrawRevision(offer.id, rev.id, { at, by, reason });
       if (wasIssued && kase.room?.status === 'offer_made') moved = advanceCase({ req, room: kase, action: 'considerOffer', at, trigger: `offer:withdraw:${offer.id}`, keyDetail: { offerId: offer.id, revisionId: rev.id } });
-      const fresh = offers.update(offer.id, (d) => {
-        const r = revOf(d, rev.id);
-        d.lifecycle = moved;
-        if (key.key) d.keys.withdraw.push({ key: key.key, revisionId: r.id });
-        d.updatedAt = at;
-        bumpRev(r, { by: req.orgUser, at });
-        bumpRev(d, { by: req.orgUser, at });
-        hist(d, 'offer_withdrawn', by, { revisionId: r.id, wasIssued, hadReason: !!reason }, at);
+      const fresh = offers.recordAct(offer.id, {
+        at, revBy: req.orgUser, touch: true, bumpOffer: true, bumpRevisionId: rev.id, lifecycle: moved,
+        key: key.key ? { act: 'withdraw', key: key.key, revisionId: rev.id } : null,
+        history: [entry('offer_withdrawn', by, { revisionId: rev.id, wasIssued, hadReason: !!reason }, at)],
       });
       caseAudit(kase, 'org', req.orgUser.id, req.orgUser.name, 'offer_withdrawn', { offerId: offer.id, revisionId: rev.id, wasIssued, to: moved.applied ? moved.to : undefined });
       return fresh;
@@ -607,14 +575,10 @@ export function registerOffers(rawCtx) {
       recipientSnapshot: null, readinessSnapshot: null, rev: 1, revAt: at, revBy: null,
     };
     const revised = unit(() => {
-      const fresh = offers.update(offer.id, (d) => {
-        d.revisions.push(rev);
-        d.currentRevisionId = rev.id;
-        d.status = 'DRAFT';
-        if (key.key) d.keys.revise.push({ key: key.key, revisionId: rev.id });
-        d.updatedAt = at;
-        bumpRev(d, { by: req.orgUser, at });
-        hist(d, 'offer_draft_created', by, { revisionId: rev.id, revisionNumber: rev.revisionNumber, supersedes: rev.supersedesRevisionId }, at);
+      const fresh = offers.addRevision(offer.id, rev, {
+        at, revBy: req.orgUser, touch: true, bumpOffer: true,
+        key: key.key ? { act: 'revise', key: key.key, revisionId: rev.id } : null,
+        history: [entry('offer_draft_created', by, { revisionId: rev.id, revisionNumber: rev.revisionNumber, supersedes: rev.supersedesRevisionId }, at)],
       });
       caseAudit(kase, 'org', req.orgUser.id, req.orgUser.name, 'offer_draft_created', { offerId: offer.id, revisionId: rev.id, revises: prev.id });
       return fresh;
@@ -688,10 +652,7 @@ export function registerOffers(rawCtx) {
   function markViewed(o, { kind, id }, at) {
     if (!receiptDue(o, { kind, id })) return o;
     const cur = liveRevision(o);
-    return offers.update(o.id, (d) => {
-      d.readReceipts.push({ revisionId: cur.id, viewerKind: kind, viewerId: id, firstViewedAt: at });
-      hist(d, 'offer_viewed', { kind, id, name: null }, { revisionId: cur.id }, at);
-    });
+    return offers.addReadReceipt(o.id, { revisionId: cur.id, viewerKind: kind, viewerId: id, firstViewedAt: at }, { history: [entry('offer_viewed', { kind, id, name: null }, { revisionId: cur.id }, at)] });
   }
 
   function listHandler(by) {
@@ -791,14 +752,7 @@ export function registerOffers(rawCtx) {
       const room = caseOfOrg(o.caseId, o.orgId);
       let moved = { applied: false, action: null, reason: 'no_case', at };
       const done = inUnit(res, () => {
-        offers.update(o.id, (d) => {
-          const r = revOf(d, rev.id);
-          d.responses.push(response);
-          r.status = responseType === 'accepted' ? 'ACCEPTED' : 'DECLINED';
-          r.respondedAt = at; r.response = { id: response.id };
-          if (discard) { const x = revOf(d, discard.id); x.status = 'WITHDRAWN'; x.withdrawnAt = at; x.withdrawnBy = null; x.withdrawReason = null; x.discardedByResponseId = response.id; d.currentRevisionId = r.id; }
-          d.status = r.status;
-        });
+        offers.recordResponse(o.id, response, { discardRevisionId: discard?.id ?? null });
         if (room) {
           moved = advanceCase({ room, action: responseType === 'accepted' ? 'recordOfferAccepted' : 'recordOfferDeclined', at, trigger: `offer:${responseType}:${o.id}`, actor: who, keyDetail: { offerId: o.id, revisionId: rev.id } });
           if (!moved.applied && moved.reason !== 'already_there') {
@@ -806,14 +760,9 @@ export function registerOffers(rawCtx) {
             throw new OfferRefusal({ error: 'OFFER_LIFECYCLE_CONFLICT', message: 'This Offer cannot be answered right now; the club has paused or ended the case. Nothing was recorded.', lifecycle: moved.reason });
           }
         }
-        const fresh = offers.update(o.id, (d) => {
-          d.lifecycle = moved;
-          d.updatedAt = at;
-          bumpRev(revOf(d, rev.id), { by: null, at });
-          bumpRev(d, { by: null, at });
-          if (discard) hist(d, 'offer_draft_discarded', who, { revisionId: discard.id, byResponseId: response.id }, at);
-          hist(d, responseType === 'accepted' ? 'offer_accepted' : 'offer_declined', who, { revisionId: rev.id, responseId: response.id, hadReason: !!reason }, at);
-        });
+        const history = discard ? [entry('offer_draft_discarded', who, { revisionId: discard.id, byResponseId: response.id }, at)] : [];
+        history.push(entry(responseType === 'accepted' ? 'offer_accepted' : 'offer_declined', who, { revisionId: rev.id, responseId: response.id, hadReason: !!reason }, at));
+        const fresh = offers.recordAct(o.id, { at, revBy: null, touch: true, bumpOffer: true, bumpRevisionId: rev.id, lifecycle: moved, history });
         if (room) caseAudit(room, by, actorId, actorName, responseType === 'accepted' ? 'offer_accepted' : 'offer_declined', { offerId: o.id, revisionId: rev.id, to: moved.applied ? moved.to : undefined });
         return fresh;
       });
@@ -839,11 +788,8 @@ export function registerOffers(rawCtx) {
     if (!isAdult(req.player)) return err(res, 'OFFER_NOT_PERMITTED', 'Sharing an Offer with an agent is an adult client\'s own act.');
     // Un-sharing needs no agent at all: a client whose mandate has ended must still be able to clear the share.
     if (req.body?.share === false) {
-      const cleared = unit(() => offers.update(o.id, (d) => {
-        if (d.agentShare) hist(d, 'offer_agent_share_withdrawn', { kind: 'player', id: req.player.id, name: req.player.name }, null, at);
-        d.agentShare = null;
-        d.updatedAt = at;
-      }));
+      const history = o.agentShare ? [entry('offer_agent_share_withdrawn', { kind: 'player', id: req.player.id, name: req.player.name }, null, at)] : [];
+      const cleared = unit(() => offers.setAgentShare(o.id, null, { at, touch: true, history }));
       return res.json({ offer: recipientView(cleared, at) });
     }
     const sole = integration?.soleActiveAgentFor?.(req.player.id, at) ?? { agreement: null, ambiguous: false };
@@ -854,10 +800,8 @@ export function registerOffers(rawCtx) {
     // A share is the recipient's own fact about their agent: it changes no term
     // and must not make the club's next edit conflict. No rev bump.
     const shared = unit(() => {
-      const fresh = offers.update(o.id, (d) => {
-        d.agentShare = { agentUserId: agreement.agentUserId, agreementId: agreement.id, at, by: { kind: 'player', id: req.player.id } };
-        hist(d, 'offer_agent_shared', { kind: 'player', id: req.player.id, name: req.player.name }, { agreementId: agreement.id }, at);
-        d.updatedAt = at;
+      const fresh = offers.setAgentShare(o.id, { agentUserId: agreement.agentUserId, agreementId: agreement.id, at, by: { kind: 'player', id: req.player.id } }, {
+        at, touch: true, history: [entry('offer_agent_shared', { kind: 'player', id: req.player.id, name: req.player.name }, { agreementId: agreement.id }, at)],
       });
       notify({ kind: 'org_user', id: agreement.agentUserId }, 'recruitment_offer', `${req.player.name} shared an Offer with you to read. Their answer is their own act.`, o.id);
       return fresh;

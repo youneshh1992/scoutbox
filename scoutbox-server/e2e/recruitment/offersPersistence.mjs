@@ -237,10 +237,10 @@ section('4 — a corrupt Offer row is named and refused, never repaired, and nev
   // An Offer with no revision is a row the tables cannot hold. Its create REFUSES it, naming the
   // row, and writes nothing — the directory keeps the five sound rows. An ACCEPTED row with no response is a typed row
   // (every field valid) whose states disagree: it is still planted, and still judged on read.
-  const corrupt = { ...structuredClone(db.recruitmentOffers.find((o) => o.id === R.sven.OID)), id: 'rof-corrupt', revisions: [], currentRevisionId: 'rofr-none', status: 'ISSUED' };
+  const corrupt = { ...structuredClone(db.recruitmentOffers.find((o) => o.id === R.sven.OID)), id: 'rof-corrupt', revisions: [], responses: [], readReceipts: [], history: [], keys: { create: null, issue: [], withdraw: [], revise: [] }, currentRevisionId: 'rofr-none', status: 'ISSUED' };
   const stored = JSON.stringify(readRecords(DIR).recruitmentOffers);
   let refused = null; try { writeFixture(DIR, { recruitmentOffers: [corrupt] }); } catch (e) { refused = e; }
-  neg(refused?.code === 'CONTACTS_OFFERS_INPUT_INVALID' && /rof-corrupt\.revisions must hold at least one revision/.test(refused.message) && JSON.stringify(readRecords(DIR).recruitmentOffers) === stored, `4.2 an Offer with no revision cannot be stored: its create refuses it, naming the row, and nothing was written (${String(refused?.message ?? 'no refusal').slice(0, 120)})`);
+  neg(refused?.code === 'CONTACTS_OFFERS_INPUT_INVALID' && /recruitment_offers rof-corrupt currentRevisionId: rofr-none is not a revision of this offer/.test(refused.message) && JSON.stringify(readRecords(DIR).recruitmentOffers) === stored, `4.2 an Offer with no revision cannot be stored: its create refuses it, naming the row, and nothing was written (${String(refused?.message ?? 'no refusal').slice(0, 120)})`);
   const kolaOffer = db.recruitmentOffers.find((o) => o.id === R.kola.OID);
   const { discardedByResponseId: _d, ...kolaRev } = structuredClone(kolaOffer.revisions[0]);
   const fake = { ...structuredClone(kolaOffer), id: 'rof-fake-accepted', status: 'ACCEPTED', currentRevisionId: 'rofr-f1', revisions: [{ ...kolaRev, id: 'rofr-f1', revisionNumber: 1, status: 'ACCEPTED', documents: [], issuedAt: T0, expiresAt: T0 + DAY, respondedAt: null, response: null, supersedesRevisionId: null, supersededByRevisionId: null, supersededAt: null }], responses: [], readReceipts: [], history: [], keys: { create: null, issue: [], withdraw: [], revise: [] }, agentShare: null, lifecycle: null, createdAt: T0, rev: 1 };
@@ -296,7 +296,7 @@ section('5 — lazy expiry, temporal corruption, unknown statuses, legacy rows, 
   // values the columns cannot hold — each create is REFUSED, naming the row, and the directory is unchanged. The other
   // planted rows are typed rows whose values disagree (time order, bounds, pointers, the case): judged on read.
   const storedNow = JSON.stringify(readRecords(DIR).recruitmentOffers);
-  for (const [row, pattern, why] of [[tUnknownStatus, /rof-t4[ .][^;]*status must be one of DRAFT\|ISSUED/, 'an unknown Offer status'], [tRevisionUnknown, /rof-t5 revisions\[0\]\.status must be one of DRAFT\|ISSUED/, 'an unknown revision status'], [tNegativeNumber, /rof-t7 revisions\[0\]\.revisionNumber must be at least 1/, 'a revision number below 1']]) {
+  for (const [row, pattern, why] of [[tUnknownStatus, /recruitment_offers rof-t4 row: CHECK constraint failed: status/, 'an unknown Offer status'], [tRevisionUnknown, /recruitment_offers rof-t5 revision rofr-t5: CHECK constraint failed: status/, 'an unknown revision status'], [tNegativeNumber, /recruitment_offers rof-t7 revision rofr-t7: CHECK constraint failed: revision_number >= 1/, 'a revision number below 1']]) {
     let refusal = null; try { writeFixture(DIR, { recruitmentOffers: [row] }); } catch (e) { refusal = e; }
     neg(refusal?.code === 'CONTACTS_OFFERS_INPUT_INVALID' && pattern.test(refusal.message) && JSON.stringify(readRecords(DIR).recruitmentOffers) === storedNow, `5.0 ${row.id} (${why}) cannot be stored: its create refuses it, naming the row, nothing written (${String(refusal?.message ?? 'no refusal').slice(0, 120)})`);
   }

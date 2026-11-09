@@ -47,10 +47,17 @@ transaction documents are evidence records.
 
 ## Writes
 
-- `create(record)` and `update(id, (draft) => …)`. The update hands the callback a plain copy, types the whole record,
-  writes it at once, refuses unknown fields and returns the stored record. A route that writes and then answers must
-  use the returned record: the one it held is the old version. Updating a record from inside its own update is
-  refused.
+- **Named acts** (offers, `repositories/recruitmentContactsOffers.mjs`; the direction for the other domains). A
+  record is created whole, then changes only through operations named after what happened (`issueRevision`,
+  `recordResponse`, `recordAct`), each an `UPDATE` of named columns or an `INSERT` of new rows. History is only
+  inserted. Pointers inside an aggregate are composite keys `(owner_id, id)`, so a record can't point into another
+  one, and a state change is guarded in SQL by the domain's transition table. The columns and keys are the only
+  check on stored values; there is no JavaScript copy of them.
+- **Whole-record updates** (every other domain, for now): `create(record)` and `update(id, (draft) => …)`. The update
+  hands the callback a plain copy, types the whole record, writes it at once, refuses unknown fields and returns the
+  stored record. Updating a record from inside its own update is refused.
+- Either way, a write returns the stored record. A route that writes and then answers must use it: the one it held is
+  the old version.
 - **Units of work.** A route that writes more than one row (including its notifications and ledger rows) runs inside
   `store.unitOfWork(() => …)`: one `BEGIN IMMEDIATE` transaction, all or nothing. The callback must be synchronous
   (an `async` one is refused). Nested units join the outer one, and an inner failure fails the whole unit even if

@@ -3,24 +3,28 @@
  * history, keys).
  *
  * Every field is a typed column with the vocabulary and length CHECKs of the domain rules
- * (domains/recruitment/lifecycle/contact.mjs, domains/recruitment/offers/offer.mjs). A record the columns cannot hold,
- * an unknown field at any level included, is refused with its id at a repository write (the unit rolls back). The
- * idempotency keys are columns of their owner (`create_key`, `send_key`, …) and the offer's per-act key lists are the
- * rows of `offer_keys`.
+ * (domains/recruitment/lifecycle/contact.mjs, domains/recruitment/offers/offer.mjs). The idempotency keys are columns
+ * of their owner (`create_key`, `send_key`, …) and the offer's per-act key lists are the rows of `offer_keys`.
+ *
+ * Writes. A contact is created and updated whole, typed in JavaScript (an unknown field at any level is refused). An
+ * offer is created whole and then changes only through named acts (`editDraft`, `issueRevision`, `recordResponse`, …),
+ * each an UPDATE or INSERT of the rows it concerns; its columns and keys are the only judge of its values, and a
+ * revision moves only along `OFFER_REVISION_TRANSITIONS`. Either way a refusal names the record and the unit rolls back.
  *
  * References. `org_id` → orgs and `case_id` → recruitment_cases (RESTRICT). A contact's `request_id` →
  * recruitment_requests is DEFERRABLE INITIALLY DEFERRED (checked at COMMIT): a send writes its contact before the
  * request row it names. Staff ids → org_users. Player ids: no key, tolerant and counted (Q8c-a in docs/decisions.md).
  * Guardian ids: no key (the routes resolve the guardian before they write, Q8c-b). The offer's own pointers (current
- * revision, response, supersedes, superseded by, discarded by, a receipt's or response's revision) must name a row of
- * the same offer.
+ * revision, response, supersedes, superseded by, discarded by, a receipt's, response's or key's revision) are composite
+ * keys `(offer_id, …)` into the same offer's rows; the current-revision key is deferred, as the offer row is written
+ * before its revisions.
  *
  * Refusals name tables, fields and ids, never a subject, a body, a note, a message or a name.
  */
 import { transaction, migrationApplied, newestHistory, childRowsOf } from './database.mjs';
 import { isPlainObject, ids } from './recruitment.mjs';
 import { CONTACT_STATUSES, CONTACT_CHANNELS, CONTACT_MODES, CONTACT_LIMITS, RESPONSE_KINDS } from '../domains/recruitment/lifecycle/contact.mjs';
-import { OFFER_STATUSES, OFFER_TYPES, OFFER_LIMITS, OFFER_RESPONSE_TYPES, OFFER_RESPONSE_ACTORS } from '../domains/recruitment/offers/offer.mjs';
+import { OFFER_STATUSES, OFFER_REVISION_TRANSITIONS, OFFER_TYPES, OFFER_LIMITS, OFFER_RESPONSE_TYPES, OFFER_RESPONSE_ACTORS } from '../domains/recruitment/offers/offer.mjs';
 
 export const RECRUITMENT_CONTACTS_OFFERS_MIGRATION = '0017_recruitment_contacts_offers';
 export const RECRUITMENT_CONTACTS_OFFERS_COLLECTIONS = Object.freeze(['recruitmentContacts', 'recruitmentOffers']);
@@ -38,6 +42,7 @@ const OFFER_KEY_LISTS = ['issue', 'withdraw', 'revise'];
 const inList = (col, list) => `CHECK (${col} IS NULL OR ${col} IN (${list.map((v) => `'${v}'`).join(',')}))`;
 const maxLen = (col, n) => `CHECK (${col} IS NULL OR length(${col}) <= ${n})`;
 const bool = (col) => `CHECK (${col} IS NULL OR ${col} IN (0,1))`;
+const calendarDay = (col) => `CHECK (${col} IS NULL OR ${col} GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]')`;
 const staff = (p) => `  ${p}_user_id TEXT REFERENCES org_users(id) ON DELETE RESTRICT,\n  ${p}_name TEXT`;
 const orgActor = (p) => `${staff(p)},\n  ${p}_role TEXT`;
 
@@ -173,7 +178,8 @@ CREATE TABLE recruitment_offers (
   policy_version INTEGER NOT NULL,
   subject_removed_at INTEGER,
   CHECK ((agent_share_user_id IS NULL) = (agent_share_at IS NULL)),
-  CHECK ((create_key IS NULL) = (create_fp IS NULL))
+  CHECK ((create_key IS NULL) = (create_fp IS NULL)),
+  FOREIGN KEY (id, current_revision_id) REFERENCES offer_revisions(offer_id, id) DEFERRABLE INITIALLY DEFERRED
 ) STRICT;
 CREATE INDEX recruitment_offers_case_org ON recruitment_offers (case_id, org_id);
 CREATE INDEX recruitment_offers_org_player ON recruitment_offers (org_id, player_id);
@@ -189,8 +195,8 @@ CREATE TABLE offer_revisions (
   term_offer_type TEXT NOT NULL ${inList('term_offer_type', OFFER_TYPES)},
   term_role TEXT ${maxLen('term_role', OFFER_LIMITS.role)},
   term_squad TEXT ${maxLen('term_squad', OFFER_LIMITS.squad)},
-  term_start_date TEXT CHECK (term_start_date IS NULL OR length(term_start_date) = 10),
-  term_end_date TEXT CHECK (term_end_date IS NULL OR length(term_end_date) = 10),
+  term_start_date TEXT ${calendarDay('term_start_date')},
+  term_end_date TEXT ${calendarDay('term_end_date')},
   term_conditions TEXT ${maxLen('term_conditions', OFFER_LIMITS.conditions)},
   recipient_message TEXT ${maxLen('recipient_message', OFFER_LIMITS.recipientMessage)},
   internal_note TEXT ${maxLen('internal_note', OFFER_LIMITS.internalNote)},
@@ -224,8 +230,13 @@ ${orgActor('withdrawn_by')},
   rev_by_name TEXT,
   discarded_by_response_id TEXT,
   CHECK ((recipient_type IS NULL) = (recipient_at IS NULL)),
+  UNIQUE (offer_id, id),
   UNIQUE (offer_id, revision_number),
-  UNIQUE (offer_id, position)
+  UNIQUE (offer_id, position),
+  FOREIGN KEY (offer_id, supersedes_revision_id) REFERENCES offer_revisions(offer_id, id),
+  FOREIGN KEY (offer_id, superseded_by_revision_id) REFERENCES offer_revisions(offer_id, id),
+  FOREIGN KEY (offer_id, response_id) REFERENCES offer_responses(offer_id, id),
+  FOREIGN KEY (offer_id, discarded_by_response_id) REFERENCES offer_responses(offer_id, id)
 ) STRICT;
 CREATE INDEX offer_revisions_offer_status ON offer_revisions (offer_id, status);
 CREATE TABLE offer_revision_documents (
@@ -245,14 +256,16 @@ CREATE TABLE offer_responses (
   revision_id TEXT NOT NULL,
   response_type TEXT NOT NULL ${inList('response_type', OFFER_RESPONSE_TYPES)},
   actor_type TEXT NOT NULL ${inList('actor_type', OFFER_RESPONSE_ACTORS)},
-  actor_id TEXT NOT NULL,
+  actor_id TEXT NOT NULL CHECK (length(actor_id) > 0),
   actor_name TEXT,
   for_player_id TEXT NOT NULL,
   occurred_at INTEGER NOT NULL,
   reason TEXT ${maxLen('reason', OFFER_LIMITS.declineReason)},
   client_key TEXT,
+  UNIQUE (offer_id, id),
   UNIQUE (offer_id, revision_id),
-  UNIQUE (offer_id, position)
+  UNIQUE (offer_id, position),
+  FOREIGN KEY (offer_id, revision_id) REFERENCES offer_revisions(offer_id, id)
 ) STRICT;
 CREATE UNIQUE INDEX offer_responses_offer_client_key ON offer_responses (offer_id, client_key) WHERE client_key IS NOT NULL;
 CREATE TABLE offer_read_receipts (
@@ -263,7 +276,8 @@ CREATE TABLE offer_read_receipts (
   viewer_id TEXT NOT NULL,
   first_viewed_at INTEGER NOT NULL,
   PRIMARY KEY (offer_id, position),
-  UNIQUE (offer_id, revision_id, viewer_kind, viewer_id)
+  UNIQUE (offer_id, revision_id, viewer_kind, viewer_id),
+  FOREIGN KEY (offer_id, revision_id) REFERENCES offer_revisions(offer_id, id)
 ) STRICT;
 CREATE TABLE offer_history (
   id TEXT PRIMARY KEY,
@@ -284,7 +298,8 @@ CREATE TABLE offer_keys (
   position INTEGER NOT NULL,
   key TEXT NOT NULL,
   revision_id TEXT NOT NULL,
-  PRIMARY KEY (offer_id, act, position)
+  PRIMARY KEY (offer_id, act, position),
+  FOREIGN KEY (offer_id, revision_id) REFERENCES offer_revisions(offer_id, id)
 ) STRICT;
 CREATE INDEX offer_keys_key ON offer_keys (offer_id, act, key);
 `;
@@ -341,14 +356,6 @@ const contactStaff = (v, label, field, { required = false } = {}) => {
   oneOf(v.kind, ['org'], label, `${field}.kind`);
   return { kind: 'org', userId: str(v.userId, label, `${field}.userId`, { required: true }), name: str(v.name, label, `${field}.name`) };
 };
-/** domains/recruitment/offers byOrg(req): `{kind:'org', id, name, role}`. */
-const offerStaff = (v, label, field, { required = false } = {}) => {
-  if (v === undefined || v === null) { if (required) fail(label, field, 'is required'); return null; }
-  onlyKeys(v, ['kind', 'id', 'name', 'role'], label, field);
-  oneOf(v.kind, ['org'], label, `${field}.kind`);
-  return { kind: 'org', id: str(v.id, label, `${field}.id`, { required: true }), name: str(v.name, label, `${field}.name`), role: str(v.role, label, `${field}.role`) };
-};
-
 function typeContactHistory(h, label) {
   onlyKeys(h, ['id', 'at', 'action', 'by', 'detail'], label, 'entry');
   let by = null;
@@ -423,126 +430,6 @@ export function typeContact(raw, at = 'recruitmentContacts') {
   } catch (e) { if (e instanceof Bad) return { ok: false, reason: e.message }; throw e; }
 }
 
-const REVISION_KEYS = ['id', 'revisionNumber', 'status', 'terms', 'recipientMessage', 'internalNote', 'documents', 'expiresAt', 'createdAt', 'createdBy', 'updatedAt', 'updatedBy', 'issuedAt', 'issuedBy', 'withdrawnAt', 'withdrawnBy', 'withdrawReason', 'respondedAt', 'response', 'supersedesRevisionId', 'supersededByRevisionId', 'supersededAt', 'recipientSnapshot', 'readinessSnapshot', 'rev', 'revAt', 'revBy', 'discardedByResponseId'];
-function typeRevision(r, L) {
-  onlyKeys(r, REVISION_KEYS, L, 'revision');
-  const t = onlyKeys(r.terms, ['offerType', 'role', 'squad', 'startDate', 'endDate', 'conditions'], L, 'terms');
-  for (const k of ['startDate', 'endDate']) if (t[k] !== undefined && t[k] !== null && !dateOnly(t[k])) fail(L, `terms.${k}`, 'must be a calendar day (YYYY-MM-DD) or null');
-  const terms = { offerType: oneOf(t.offerType, OFFER_TYPES, L, 'terms.offerType'), role: str(t.role, L, 'terms.role', { max: OFFER_LIMITS.role }), squad: str(t.squad, L, 'terms.squad', { max: OFFER_LIMITS.squad }), startDate: orNull(t.startDate), endDate: orNull(t.endDate), conditions: str(t.conditions, L, 'terms.conditions', { max: OFFER_LIMITS.conditions }) };
-  const documents = list(r.documents, L, 'documents').map((d, i) => { onlyKeys(d, ['id', 'evidenceId', 'label', 'mime', 'bytes'], L, `documents[${i}]`); return { id: str(d.id, L, `documents[${i}].id`, { required: true }), evidenceId: str(d.evidenceId, L, `documents[${i}].evidenceId`, { required: true }), label: str(d.label, L, `documents[${i}].label`, { max: OFFER_LIMITS.documentLabel }), mime: str(d.mime, L, `documents[${i}].mime`), bytes: int(d.bytes, L, `documents[${i}].bytes`) }; });
-  const response = r.response === undefined || r.response === null ? null : (onlyKeys(r.response, ['id'], L, 'response'), { id: str(r.response.id, L, 'response.id', { required: true }) });
-  const recipientSnapshot = r.recipientSnapshot === undefined || r.recipientSnapshot === null ? null : (() => {
-    const s = onlyKeys(r.recipientSnapshot, ['type', 'playerId', 'guardianId', 'minor', 'at'], L, 'recipientSnapshot');
-    return { type: oneOf(s.type, RECIPIENT_TYPES, L, 'recipientSnapshot.type'), playerId: str(s.playerId, L, 'recipientSnapshot.playerId'), guardianId: str(s.guardianId, L, 'recipientSnapshot.guardianId'), minor: flag(s.minor, L, 'recipientSnapshot.minor', { required: true }), at: int(s.at, L, 'recipientSnapshot.at', { required: true }) };
-  })();
-  const readinessSnapshot = r.readinessSnapshot === undefined || r.readinessSnapshot === null ? null : (() => {
-    const s = onlyKeys(r.readinessSnapshot, ['transactionId', 'evaluatedAt', 'status', 'blockers'], L, 'readinessSnapshot');
-    return { transactionId: str(s.transactionId, L, 'readinessSnapshot.transactionId'), evaluatedAt: int(s.evaluatedAt, L, 'readinessSnapshot.evaluatedAt'), status: str(s.status, L, 'readinessSnapshot.status'), blockers: list(s.blockers, L, 'readinessSnapshot.blockers').map((b, i) => str(b, L, `readinessSnapshot.blockers[${i}]`, { required: true })) };
-  })();
-  const out = {
-    id: str(r.id, L, 'id', { required: true }), revisionNumber: int(r.revisionNumber, L, 'revisionNumber', { required: true, min: 1 }), status: oneOf(r.status, OFFER_STATUSES, L, 'status'), terms,
-    recipientMessage: str(r.recipientMessage, L, 'recipientMessage', { max: OFFER_LIMITS.recipientMessage }), internalNote: str(r.internalNote, L, 'internalNote', { max: OFFER_LIMITS.internalNote }), documents,
-    expiresAt: int(r.expiresAt, L, 'expiresAt'), createdAt: int(r.createdAt, L, 'createdAt', { required: true }), createdBy: offerStaff(r.createdBy, L, 'createdBy', { required: true }),
-    updatedAt: int(r.updatedAt, L, 'updatedAt', { required: true }), updatedBy: offerStaff(r.updatedBy, L, 'updatedBy'),
-    issuedAt: int(r.issuedAt, L, 'issuedAt'), issuedBy: offerStaff(r.issuedBy, L, 'issuedBy'), withdrawnAt: int(r.withdrawnAt, L, 'withdrawnAt'), withdrawnBy: offerStaff(r.withdrawnBy, L, 'withdrawnBy'),
-    withdrawReason: str(r.withdrawReason, L, 'withdrawReason', { max: OFFER_LIMITS.withdrawReason }), respondedAt: int(r.respondedAt, L, 'respondedAt'), response,
-    supersedesRevisionId: str(r.supersedesRevisionId, L, 'supersedesRevisionId'), supersededByRevisionId: str(r.supersededByRevisionId, L, 'supersededByRevisionId'), supersededAt: int(r.supersededAt, L, 'supersededAt'),
-    recipientSnapshot, readinessSnapshot, rev: int(r.rev, L, 'rev', { required: true, min: 1 }), revAt: int(r.revAt, L, 'revAt'), revBy: revBy(r.revBy, L),
-  };
-  // Present only on a draft an acceptance discarded (domains/recruitment/offers respondHandler); every other revision has no such key.
-  const discarded = str(r.discardedByResponseId, L, 'discardedByResponseId');
-  if (discarded !== null) out.discardedByResponseId = discarded;
-  return out;
-}
-
-const OFFER_KEYS = ['id', 'orgId', 'caseId', 'playerId', 'type', 'decisionId', 'transactionId', 'status', 'currentRevisionId', 'revisions', 'responses', 'readReceipts', 'agentShare', 'keys', 'lifecycle', 'history', 'createdAt', 'createdBy', 'updatedAt', 'rev', 'revAt', 'revBy', 'policyVersion', 'subjectRemovedAt'];
-
-/** An offer as the routes write it, typed, with every pointer resolved inside the offer. `{ ok, record }` or `{ ok: false, reason }`. */
-export function typeOffer(raw, at = 'recruitmentOffers') {
-  try {
-    if (!isPlainObject(raw)) return { ok: false, reason: `${at} is not an object (${describe(raw)})` };
-    if (!nonEmpty(raw.id)) return { ok: false, reason: `${at}.id must be a non-empty string` };
-    const L = `${at} ${raw.id}`;
-    onlyKeys(raw, OFFER_KEYS, L, 'record');
-    const revisions = list(raw.revisions, L, 'revisions').map((r, i) => typeRevision(r, `${L} revisions[${i}]`));
-    if (revisions.length === 0) fail(L, 'revisions', 'must hold at least one revision');
-    const responses = list(raw.responses, L, 'responses').map((x, i) => {
-      const P = `${L} responses[${i}]`;
-      onlyKeys(x, ['id', 'revisionId', 'responseType', 'actorType', 'actorId', 'actorName', 'forPlayerId', 'occurredAt', 'reason', 'clientKey'], P, 'response');
-      return { id: str(x.id, P, 'id', { required: true }), revisionId: str(x.revisionId, P, 'revisionId', { required: true }), responseType: oneOf(x.responseType, OFFER_RESPONSE_TYPES, P, 'responseType'), actorType: oneOf(x.actorType, OFFER_RESPONSE_ACTORS, P, 'actorType'), actorId: str(x.actorId, P, 'actorId', { required: true }), actorName: str(x.actorName, P, 'actorName'), forPlayerId: str(x.forPlayerId, P, 'forPlayerId', { required: true }), occurredAt: int(x.occurredAt, P, 'occurredAt', { required: true }), reason: str(x.reason, P, 'reason', { max: OFFER_LIMITS.declineReason }), clientKey: str(x.clientKey, P, 'clientKey') };
-    });
-    const readReceipts = list(raw.readReceipts, L, 'readReceipts').map((x, i) => {
-      const P = `${L} readReceipts[${i}]`;
-      onlyKeys(x, ['revisionId', 'viewerKind', 'viewerId', 'firstViewedAt'], P, 'receipt');
-      return { revisionId: str(x.revisionId, P, 'revisionId', { required: true }), viewerKind: oneOf(x.viewerKind, RECIPIENT_TYPES, P, 'viewerKind'), viewerId: str(x.viewerId, P, 'viewerId', { required: true }), firstViewedAt: int(x.firstViewedAt, P, 'firstViewedAt', { required: true }) };
-    });
-    const agentShare = raw.agentShare === undefined || raw.agentShare === null ? null : (() => {
-      const s = onlyKeys(raw.agentShare, ['agentUserId', 'agreementId', 'at', 'by'], L, 'agentShare');
-      onlyKeys(s.by, ['kind', 'id'], L, 'agentShare.by');
-      return { agentUserId: str(s.agentUserId, L, 'agentShare.agentUserId', { required: true }), agreementId: str(s.agreementId, L, 'agentShare.agreementId'), at: int(s.at, L, 'agentShare.at', { required: true }), by: { kind: oneOf(s.by.kind, ['player'], L, 'agentShare.by.kind'), id: str(s.by.id, L, 'agentShare.by.id', { required: true }) } };
-    })();
-    const keys = (() => {
-      const k = raw.keys === undefined || raw.keys === null ? {} : onlyKeys(raw.keys, ['create', ...OFFER_KEY_LISTS], L, 'keys');
-      let create = null;
-      if (k.create !== undefined && k.create !== null) { onlyKeys(k.create, ['key', 'fp'], L, 'keys.create'); create = { key: str(k.create.key, L, 'keys.create.key', { required: true }), fp: str(k.create.fp, L, 'keys.create.fp', { required: true }) }; }
-      const out = { create };
-      for (const act of OFFER_KEY_LISTS) out[act] = list(k[act], L, `keys.${act}`).map((e, i) => { onlyKeys(e, ['key', 'revisionId'], L, `keys.${act}[${i}]`); return { key: str(e.key, L, `keys.${act}[${i}].key`, { required: true }), revisionId: str(e.revisionId, L, `keys.${act}[${i}].revisionId`, { required: true }) }; });
-      return out;
-    })();
-    const lifecycle = raw.lifecycle === undefined || raw.lifecycle === null ? null : (() => {
-      const c = onlyKeys(raw.lifecycle, ['applied', 'action', 'reason', 'message', 'allowed', 'from', 'to', 'at'], L, 'lifecycle');
-      const out = { applied: flag(c.applied, L, 'lifecycle.applied', { required: true }), action: str(c.action, L, 'lifecycle.action'), from: str(c.from, L, 'lifecycle.from'), to: str(c.to, L, 'lifecycle.to'), at: int(c.at, L, 'lifecycle.at') };
-      const reason = str(c.reason, L, 'lifecycle.reason'); const message = str(c.message, L, 'lifecycle.message');
-      const allowed = c.allowed === undefined || c.allowed === null ? null : list(c.allowed, L, 'lifecycle.allowed').map((a, i) => str(a, L, `lifecycle.allowed[${i}]`, { required: true }));
-      if (reason !== null) out.reason = reason; if (message !== null) out.message = message; if (allowed !== null) out.allowed = allowed;
-      return out;
-    })();
-    const history = list(raw.history, L, 'history').map((h, i) => {
-      const P = `${L} history[${i}]`;
-      onlyKeys(h, ['id', 'at', 'action', 'by', 'detail'], P, 'entry');
-      let by = null;
-      if (h.by !== undefined && h.by !== null) { onlyKeys(h.by, ['kind', 'id', 'name'], P, 'by'); by = { kind: oneOf(h.by.kind, OFFER_ACTOR_KINDS, P, 'by.kind'), id: str(h.by.id, P, 'by.id'), name: str(h.by.name, P, 'by.name') }; }
-      return { id: str(h.id, P, 'id', { required: true }), at: int(h.at, P, 'at', { required: true }), action: str(h.action, P, 'action', { required: true }), by, detail: detail(h.detail, P, 'detail') };
-    });
-    const record = {
-      id: raw.id, orgId: str(raw.orgId, L, 'orgId', { required: true }), caseId: str(raw.caseId, L, 'caseId', { required: true }), playerId: str(raw.playerId, L, 'playerId', { required: true }),
-      type: oneOf(raw.type, OFFER_TYPES, L, 'type'), decisionId: str(raw.decisionId, L, 'decisionId'), transactionId: str(raw.transactionId, L, 'transactionId'), status: oneOf(raw.status, OFFER_STATUSES, L, 'status'),
-      currentRevisionId: str(raw.currentRevisionId, L, 'currentRevisionId', { required: true }), revisions, responses, readReceipts, agentShare, keys, lifecycle, history,
-      createdAt: int(raw.createdAt, L, 'createdAt', { required: true }), createdBy: offerStaff(raw.createdBy, L, 'createdBy', { required: true }), updatedAt: int(raw.updatedAt, L, 'updatedAt', { required: true }),
-      rev: int(raw.rev, L, 'rev', { required: true, min: 1 }), revAt: int(raw.revAt, L, 'revAt'), revBy: revBy(raw.revBy, L), policyVersion: int(raw.policyVersion, L, 'policyVersion', { required: true }),
-      subjectRemovedAt: int(raw.subjectRemovedAt, L, 'subjectRemovedAt'),
-    };
-    // Uniqueness and the pointers, all inside this offer.
-    const revIds = new Set(); const nums = new Set(); const respIds = new Set(); const respRevs = new Set(); const docIds = new Set(); const histIds = new Set();
-    for (const r of revisions) {
-      if (revIds.has(r.id)) fail(L, 'revisions', `repeats the revision id ${r.id}`); revIds.add(r.id);
-      if (nums.has(r.revisionNumber)) fail(L, 'revisions', `repeats revision number ${r.revisionNumber}`); nums.add(r.revisionNumber);
-      for (const d of r.documents) { if (docIds.has(d.id)) fail(L, 'documents', `repeats the document id ${d.id}`); docIds.add(d.id); }
-    }
-    for (const x of responses) {
-      if (respIds.has(x.id)) fail(L, 'responses', `repeats the response id ${x.id}`); respIds.add(x.id);
-      if (respRevs.has(x.revisionId)) fail(L, 'responses', `answer revision ${x.revisionId} twice`); respRevs.add(x.revisionId);
-      if (!revIds.has(x.revisionId)) fail(L, `responses ${x.id}.revisionId`, `names ${x.revisionId}, not a revision of this offer`);
-    }
-    if (!revIds.has(record.currentRevisionId)) fail(L, 'currentRevisionId', `names ${record.currentRevisionId}, not a revision of this offer`);
-    for (const r of revisions) {
-      for (const [field, target, set] of [['supersedesRevisionId', r.supersedesRevisionId, revIds], ['supersededByRevisionId', r.supersededByRevisionId, revIds], ['response.id', r.response?.id ?? null, respIds], ['discardedByResponseId', r.discardedByResponseId ?? null, respIds]]) {
-        if (target !== null && !set.has(target)) fail(L, `revisions ${r.id}.${field}`, `names ${target}, not a row of this offer`);
-      }
-    }
-    const receipts = new Set();
-    for (const x of readReceipts) {
-      if (!revIds.has(x.revisionId)) fail(L, 'readReceipts', `name ${x.revisionId}, not a revision of this offer`);
-      const k = `${x.revisionId}/${x.viewerKind}/${x.viewerId}`; if (receipts.has(k)) fail(L, 'readReceipts', `repeat a receipt for ${x.revisionId}`); receipts.add(k);
-    }
-    for (const act of OFFER_KEY_LISTS) for (const e of keys[act]) if (!revIds.has(e.revisionId)) fail(L, `keys.${act}`, `name ${e.revisionId}, not a revision of this offer`);
-    for (const h of history) { if (histIds.has(h.id)) fail(L, 'history', `repeats the entry id ${h.id}`); histIds.add(h.id); }
-    const clientKeys = responses.map((x) => x.clientKey).filter((k) => k !== null);
-    if (new Set(clientKeys).size !== clientKeys.length) fail(L, 'responses', 'repeat a clientKey');
-    return { ok: true, record };
-  } catch (e) { if (e instanceof Bad) return { ok: false, reason: e.message }; throw e; }
-}
-
 // ------------------------------------------------------------------ rows
 const b = (v) => (v === null || v === undefined ? null : v ? 1 : 0);
 const json = (v) => (v === null || v === undefined ? null : JSON.stringify(v));
@@ -561,41 +448,52 @@ const contactRow = (c) => ({
   create_key: c.keys.create?.key ?? null, create_fp: c.keys.create?.fp ?? null, send_key: c.keys.send?.key ?? null, send_fp: c.keys.send?.fp ?? null, record_key: c.keys.record?.key ?? null, record_fp: c.keys.record?.fp ?? null,
   rev: c.rev, rev_at: c.revAt, rev_by_user_id: c.revBy?.userId ?? null, rev_by_name: c.revBy?.name ?? null, policy_version: c.policyVersion,
 });
+// The offer encoders take the record as the routes build it (or a fixture writes it); an absent field is NULL, and
+// the columns' CHECKs and keys judge the values.
+const n = (v) => (v === undefined ? null : v);
 const offerRow = (o) => ({
-  id: o.id, org_id: o.orgId, case_id: o.caseId, player_id: o.playerId, type: o.type, decision_id: o.decisionId, transaction_id: o.transactionId, status: o.status, current_revision_id: o.currentRevisionId,
-  agent_share_user_id: o.agentShare?.agentUserId ?? null, agent_share_agreement_id: o.agentShare?.agreementId ?? null, agent_share_at: o.agentShare?.at ?? null, agent_share_by_kind: o.agentShare?.by.kind ?? null, agent_share_by_id: o.agentShare?.by.id ?? null,
-  create_key: o.keys.create?.key ?? null, create_fp: o.keys.create?.fp ?? null,
-  lifecycle_applied: b(o.lifecycle?.applied), lifecycle_action: o.lifecycle?.action ?? null, lifecycle_reason: o.lifecycle?.reason ?? null, lifecycle_message: o.lifecycle?.message ?? null, lifecycle_allowed_json: json(o.lifecycle?.allowed), lifecycle_from: o.lifecycle?.from ?? null, lifecycle_to: o.lifecycle?.to ?? null, lifecycle_at: o.lifecycle?.at ?? null,
-  created_at: o.createdAt, created_by_user_id: o.createdBy.id, created_by_name: o.createdBy.name, created_by_role: o.createdBy.role, updated_at: o.updatedAt,
-  rev: o.rev, rev_at: o.revAt, rev_by_user_id: o.revBy?.userId ?? null, rev_by_name: o.revBy?.name ?? null, policy_version: o.policyVersion, subject_removed_at: o.subjectRemovedAt,
+  id: n(o.id), org_id: n(o.orgId), case_id: n(o.caseId), player_id: n(o.playerId), type: n(o.type), decision_id: n(o.decisionId), transaction_id: n(o.transactionId), status: n(o.status), current_revision_id: n(o.currentRevisionId),
+  ...agentShareCols(o.agentShare),
+  create_key: o.keys?.create?.key ?? null, create_fp: o.keys?.create?.fp ?? null,
+  ...lifecycleCols(o.lifecycle),
+  created_at: n(o.createdAt), created_by_user_id: o.createdBy?.id ?? null, created_by_name: o.createdBy?.name ?? null, created_by_role: o.createdBy?.role ?? null, updated_at: n(o.updatedAt),
+  rev: n(o.rev), ...revByCols(o.revAt, o.revBy), policy_version: n(o.policyVersion), subject_removed_at: n(o.subjectRemovedAt),
 });
+const agentShareCols = (s) => ({ agent_share_user_id: s?.agentUserId ?? null, agent_share_agreement_id: s?.agreementId ?? null, agent_share_at: s?.at ?? null, agent_share_by_kind: s?.by?.kind ?? null, agent_share_by_id: s?.by?.id ?? null });
+const lifecycleCols = (l) => ({ lifecycle_applied: b(l?.applied), lifecycle_action: l?.action ?? null, lifecycle_reason: l?.reason ?? null, lifecycle_message: l?.message ?? null, lifecycle_allowed_json: json(l?.allowed), lifecycle_from: l?.from ?? null, lifecycle_to: l?.to ?? null, lifecycle_at: l?.at ?? null });
+const revByCols = (at, by) => ({ rev_at: n(at), rev_by_user_id: by?.userId ?? null, rev_by_name: by?.name ?? null });
 const actorCols = (p, a) => ({ [`${p}_user_id`]: a?.id ?? null, [`${p}_name`]: a?.name ?? null, [`${p}_role`]: a?.role ?? null });
+const termCols = (t) => ({ term_offer_type: t?.offerType ?? null, term_role: t?.role ?? null, term_squad: t?.squad ?? null, term_start_date: t?.startDate ?? null, term_end_date: t?.endDate ?? null, term_conditions: t?.conditions ?? null });
+const recipientCols = (s) => ({ recipient_type: s?.type ?? null, recipient_player_id: s?.playerId ?? null, recipient_guardian_id: s?.guardianId ?? null, recipient_minor: b(s?.minor), recipient_at: s?.at ?? null });
+const readinessCols = (s) => ({ readiness_transaction_id: s?.transactionId ?? null, readiness_evaluated_at: s?.evaluatedAt ?? null, readiness_status: s?.status ?? null, readiness_blockers_json: json(s?.blockers) });
+/** A revision's pointers to other rows of its offer: written once those rows exist. */
+const revisionPointers = (r) => ({ supersedes_revision_id: r.supersedesRevisionId ?? null, superseded_by_revision_id: r.supersededByRevisionId ?? null, response_id: r.response?.id ?? null, discarded_by_response_id: r.discardedByResponseId ?? null });
 const revisionRow = (offerId, r, position) => ({
-  id: r.id, offer_id: offerId, position, revision_number: r.revisionNumber, status: r.status,
-  term_offer_type: r.terms.offerType, term_role: r.terms.role, term_squad: r.terms.squad, term_start_date: r.terms.startDate, term_end_date: r.terms.endDate, term_conditions: r.terms.conditions,
-  recipient_message: r.recipientMessage, internal_note: r.internalNote, expires_at: r.expiresAt, created_at: r.createdAt, ...actorCols('created_by', r.createdBy), updated_at: r.updatedAt, ...actorCols('updated_by', r.updatedBy),
-  issued_at: r.issuedAt, ...actorCols('issued_by', r.issuedBy), withdrawn_at: r.withdrawnAt, ...actorCols('withdrawn_by', r.withdrawnBy), withdraw_reason: r.withdrawReason,
-  responded_at: r.respondedAt, response_id: r.response?.id ?? null, supersedes_revision_id: r.supersedesRevisionId, superseded_by_revision_id: r.supersededByRevisionId, superseded_at: r.supersededAt,
-  recipient_type: r.recipientSnapshot?.type ?? null, recipient_player_id: r.recipientSnapshot?.playerId ?? null, recipient_guardian_id: r.recipientSnapshot?.guardianId ?? null, recipient_minor: b(r.recipientSnapshot?.minor), recipient_at: r.recipientSnapshot?.at ?? null,
-  readiness_transaction_id: r.readinessSnapshot?.transactionId ?? null, readiness_evaluated_at: r.readinessSnapshot?.evaluatedAt ?? null, readiness_status: r.readinessSnapshot?.status ?? null, readiness_blockers_json: json(r.readinessSnapshot?.blockers),
-  rev: r.rev, rev_at: r.revAt, rev_by_user_id: r.revBy?.userId ?? null, rev_by_name: r.revBy?.name ?? null, discarded_by_response_id: r.discardedByResponseId ?? null,
+  id: n(r.id), offer_id: offerId, position, revision_number: n(r.revisionNumber), status: n(r.status), ...termCols(r.terms),
+  recipient_message: n(r.recipientMessage), internal_note: n(r.internalNote), expires_at: n(r.expiresAt), created_at: n(r.createdAt), ...actorCols('created_by', r.createdBy), updated_at: n(r.updatedAt), ...actorCols('updated_by', r.updatedBy),
+  issued_at: n(r.issuedAt), ...actorCols('issued_by', r.issuedBy), withdrawn_at: n(r.withdrawnAt), ...actorCols('withdrawn_by', r.withdrawnBy), withdraw_reason: n(r.withdrawReason),
+  responded_at: n(r.respondedAt), superseded_at: n(r.supersededAt), ...recipientCols(r.recipientSnapshot), ...readinessCols(r.readinessSnapshot),
+  rev: n(r.rev), ...revByCols(r.revAt, r.revBy), ...revisionPointers({}),
 });
+const documentRow = (revisionId, d, position) => ({ id: n(d.id), revision_id: revisionId, position, evidence_id: n(d.evidenceId), label: n(d.label), mime: n(d.mime), bytes: n(d.bytes) });
+const responseRow = (offerId, x, position) => ({ id: n(x.id), offer_id: offerId, position, revision_id: n(x.revisionId), response_type: n(x.responseType), actor_type: n(x.actorType), actor_id: n(x.actorId), actor_name: n(x.actorName), for_player_id: n(x.forPlayerId), occurred_at: n(x.occurredAt), reason: n(x.reason), client_key: n(x.clientKey) });
+const receiptRow = (offerId, x, position) => ({ offer_id: offerId, position, revision_id: n(x.revisionId), viewer_kind: n(x.viewerKind), viewer_id: n(x.viewerId), first_viewed_at: n(x.firstViewedAt) });
+const offerHistoryRow = (offerId, h, position) => ({ id: n(h.id), offer_id: offerId, position, at: n(h.at), action: n(h.action), by_kind: h.by?.kind ?? null, by_id: h.by?.id ?? null, by_name: h.by?.name ?? null, detail_json: json(h.detail) });
 
 // ------------------------------------------------------------------ statements and the record readers
 const COLS = {
   recruitment_contacts: Object.keys(contactRow(typeContactSample())),
-  recruitment_offers: Object.keys(offerRow(typeOfferSample())),
-  offer_revisions: Object.keys(revisionRow('o', typeOfferSample().revisions[0], 0)),
+  recruitment_offers: Object.keys(offerRow({})),
+  offer_revisions: Object.keys(revisionRow('o', {}, 0)),
   contact_attempts: ['contact_id', 'position', 'at', 'ok', 'code'],
   contact_history: ['id', 'contact_id', 'position', 'at', 'action', 'by_kind', 'by_user_id', 'by_name', 'detail_json'],
-  offer_revision_documents: ['id', 'revision_id', 'position', 'evidence_id', 'label', 'mime', 'bytes'],
-  offer_responses: ['id', 'offer_id', 'position', 'revision_id', 'response_type', 'actor_type', 'actor_id', 'actor_name', 'for_player_id', 'occurred_at', 'reason', 'client_key'],
-  offer_read_receipts: ['offer_id', 'position', 'revision_id', 'viewer_kind', 'viewer_id', 'first_viewed_at'],
-  offer_history: ['id', 'offer_id', 'position', 'at', 'action', 'by_kind', 'by_id', 'by_name', 'detail_json'],
+  offer_revision_documents: Object.keys(documentRow('r', {}, 0)),
+  offer_responses: Object.keys(responseRow('o', {}, 0)),
+  offer_read_receipts: Object.keys(receiptRow('o', {}, 0)),
+  offer_history: Object.keys(offerHistoryRow('o', {}, 0)),
   offer_keys: ['offer_id', 'act', 'position', 'key', 'revision_id'],
 };
 function typeContactSample() { return { id: 'x', orgId: 'o', caseId: 'c', playerId: 'p', status: 'draft', channel: 'in_app', recipient: null, contactMode: 'player_only', routingSnapshot: null, subject: null, body: null, summary: null, createdBy: { kind: 'org', userId: 'u', name: null }, createdAt: 0, updatedAt: 0, sentBy: null, sentAt: null, deliveredAt: null, failedAt: null, failureCode: null, attempts: [], requestId: null, emailCopy: null, lifecycle: null, occurredAt: null, recordedBy: null, recordedAt: null, respondedAt: null, response: null, cancelledAt: null, cancelledBy: null, keys: { create: null, send: null, record: null }, history: [], rev: 1, revAt: null, revBy: null, policyVersion: 1 }; }
-function typeOfferSample() { const by = { kind: 'org', id: 'u', name: null, role: null }; return { id: 'x', orgId: 'o', caseId: 'c', playerId: 'p', type: OFFER_TYPES[0], decisionId: null, transactionId: null, status: 'DRAFT', currentRevisionId: 'r', revisions: [{ id: 'r', revisionNumber: 1, status: 'DRAFT', terms: { offerType: OFFER_TYPES[0], role: null, squad: null, startDate: null, endDate: null, conditions: null }, recipientMessage: null, internalNote: null, documents: [], expiresAt: null, createdAt: 0, createdBy: by, updatedAt: 0, updatedBy: by, issuedAt: null, issuedBy: null, withdrawnAt: null, withdrawnBy: null, withdrawReason: null, respondedAt: null, response: null, supersedesRevisionId: null, supersededByRevisionId: null, supersededAt: null, recipientSnapshot: null, readinessSnapshot: null, rev: 1, revAt: null, revBy: null }], responses: [], readReceipts: [], agentShare: null, keys: { create: null, issue: [], withdraw: [], revise: [] }, lifecycle: null, history: [], createdAt: 0, createdBy: by, updatedAt: 0, rev: 1, revAt: null, revBy: null, policyVersion: 1, subjectRemovedAt: null }; }
 
 const stmtCache = new WeakMap();
 function statements(sqlite) {
@@ -607,10 +505,9 @@ function statements(sqlite) {
   };
   s = {
     contact: insert('recruitment_contacts', { upsert: true }), attempt: insert('contact_attempts'), chist: insert('contact_history'),
-    offer: insert('recruitment_offers', { upsert: true }), revision: insert('offer_revisions'), doc: insert('offer_revision_documents'), response: insert('offer_responses'), receipt: insert('offer_read_receipts'), ohist: insert('offer_history'), okey: insert('offer_keys'),
+    offer: insert('recruitment_offers'), revision: insert('offer_revisions'), doc: insert('offer_revision_documents'), response: insert('offer_responses'), receipt: insert('offer_read_receipts'), ohist: insert('offer_history'), okey: insert('offer_keys'),
     contactChildrenDel: [sqlite.prepare('DELETE FROM contact_attempts WHERE contact_id = ?'), sqlite.prepare('DELETE FROM contact_history WHERE contact_id = ?')],
-    offerChildrenDel: [sqlite.prepare('DELETE FROM offer_revisions WHERE offer_id = ?'), sqlite.prepare('DELETE FROM offer_responses WHERE offer_id = ?'), sqlite.prepare('DELETE FROM offer_read_receipts WHERE offer_id = ?'), sqlite.prepare('DELETE FROM offer_history WHERE offer_id = ?'), sqlite.prepare('DELETE FROM offer_keys WHERE offer_id = ?')],
-    contactDel: sqlite.prepare('DELETE FROM recruitment_contacts WHERE id = ?'), offerDel: sqlite.prepare('DELETE FROM recruitment_offers WHERE id = ?'),
+    contactDel: sqlite.prepare('DELETE FROM recruitment_contacts WHERE id = ?'),
     contactById: sqlite.prepare('SELECT * FROM recruitment_contacts WHERE id = ?'), contactAll: sqlite.prepare('SELECT * FROM recruitment_contacts ORDER BY rowid'),
     attemptsOf: sqlite.prepare('SELECT * FROM contact_attempts WHERE contact_id = ? ORDER BY position'), chistOf: sqlite.prepare('SELECT * FROM contact_history WHERE contact_id = ? ORDER BY position'),
     offerById: sqlite.prepare('SELECT * FROM recruitment_offers WHERE id = ?'), offerAll: sqlite.prepare('SELECT * FROM recruitment_offers ORDER BY rowid'),
@@ -636,15 +533,36 @@ function writeContact(st, c) {
   c.attempts.forEach((a, i) => st.attempt.run({ contact_id: c.id, position: i, at: a.at, ok: b(a.ok), code: a.code }));
   c.history.forEach((h, i) => st.chist.run({ id: h.id, contact_id: c.id, position: i, at: h.at, action: h.action, by_kind: h.by?.kind ?? null, by_user_id: h.by?.userId ?? null, by_name: h.by?.name ?? null, detail_json: json(h.detail) }));
 }
-function writeOffer(st, o) {
+/** A constraint failure on an offer's rows, as a refusal naming the offer and the part that broke it. */
+function offerStep(offerId, part, fn) {
+  try { return fn(); } catch (e) {
+    if (e?.code !== 'ERR_SQLITE_ERROR' || !/constraint failed/.test(e.message)) throw e;
+    throw refusal('CONTACTS_OFFERS_INPUT_INVALID', `recruitment_offers ${offerId} ${part}: ${e.message}`);
+  }
+}
+const revisionPointerSql = 'UPDATE offer_revisions SET supersedes_revision_id = @supersedes_revision_id, superseded_by_revision_id = @superseded_by_revision_id, response_id = @response_id, discarded_by_response_id = @discarded_by_response_id WHERE id = @id';
+/**
+ * A whole offer, inserted. The revisions go in before the rows that name them; their own pointers (to each other and
+ * to the responses) are set last, so every key inside the offer is checked as it is written. The current-revision
+ * pointer is checked here too: its key is deferred (the offer row is written before its revisions).
+ */
+function insertOffer(sqlite, st, o) {
   caseMustExist(st, 'recruitment_offers', o);
-  st.offer.run(offerRow(o));
-  for (const d of st.offerChildrenDel) d.run(o.id);
-  o.revisions.forEach((r, i) => { st.revision.run(revisionRow(o.id, r, i)); r.documents.forEach((d, j) => st.doc.run({ id: d.id, revision_id: r.id, position: j, evidence_id: d.evidenceId, label: d.label, mime: d.mime, bytes: d.bytes })); });
-  o.responses.forEach((x, i) => st.response.run({ id: x.id, offer_id: o.id, position: i, revision_id: x.revisionId, response_type: x.responseType, actor_type: x.actorType, actor_id: x.actorId, actor_name: x.actorName, for_player_id: x.forPlayerId, occurred_at: x.occurredAt, reason: x.reason, client_key: x.clientKey }));
-  o.readReceipts.forEach((x, i) => st.receipt.run({ offer_id: o.id, position: i, revision_id: x.revisionId, viewer_kind: x.viewerKind, viewer_id: x.viewerId, first_viewed_at: x.firstViewedAt }));
-  o.history.forEach((h, i) => st.ohist.run({ id: h.id, offer_id: o.id, position: i, at: h.at, action: h.action, by_kind: h.by?.kind ?? null, by_id: h.by?.id ?? null, by_name: h.by?.name ?? null, detail_json: json(h.detail) }));
-  for (const act of OFFER_KEY_LISTS) o.keys[act].forEach((e, i) => st.okey.run({ offer_id: o.id, act, position: i, key: e.key, revision_id: e.revisionId }));
+  const id = o.id;
+  offerStep(id, 'row', () => st.offer.run(offerRow(o)));
+  (o.revisions ?? []).forEach((r, i) => {
+    offerStep(id, `revision ${r.id}`, () => st.revision.run(revisionRow(id, r, i)));
+    (r.documents ?? []).forEach((d, j) => offerStep(id, `revision ${r.id} document ${d.id}`, () => st.doc.run(documentRow(r.id, d, j))));
+  });
+  (o.responses ?? []).forEach((x, i) => offerStep(id, `response ${x.id}`, () => st.response.run(responseRow(id, x, i))));
+  const pointers = sqlite.prepare(revisionPointerSql);
+  for (const r of o.revisions ?? []) offerStep(id, `revision ${r.id} pointers`, () => pointers.run({ id: r.id, ...revisionPointers(r) }));
+  (o.readReceipts ?? []).forEach((x, i) => offerStep(id, `read receipt ${i}`, () => st.receipt.run(receiptRow(id, x, i))));
+  (o.history ?? []).forEach((h, i) => offerStep(id, `history ${h.id}`, () => st.ohist.run(offerHistoryRow(id, h, i))));
+  for (const act of OFFER_KEY_LISTS) (o.keys?.[act] ?? []).forEach((e, i) => offerStep(id, `${act} key ${i}`, () => st.okey.run({ offer_id: id, act, position: i, key: e.key, revision_id: e.revisionId })));
+  if (!sqlite.prepare('SELECT 1 FROM offer_revisions WHERE offer_id = ? AND id = ?').get(id, o.currentRevisionId)) {
+    throw refusal('CONTACTS_OFFERS_INPUT_INVALID', `recruitment_offers ${id} currentRevisionId: ${o.currentRevisionId} is not a revision of this offer`);
+  }
 }
 
 /**
@@ -745,8 +663,6 @@ export function retainedPlayerReferences(sqlite) {
 
 
 // ------------------------------------------------------------------ the whole-domain read
-const TYPERS = { recruitmentContacts: typeContact, recruitmentOffers: typeOffer };
-const TABLE_OF = { recruitmentContacts: 'recruitment_contacts', recruitmentOffers: 'recruitment_offers' };
 export const CONTACTS_OFFERS_RECORDS = {
   names: RECRUITMENT_CONTACTS_OFFERS_COLLECTIONS,
   read(sqlite) { if (!recruitmentContactsOffersLive(sqlite)) return null; return { recruitmentContacts: readContacts(sqlite), recruitmentOffers: readOffers(sqlite) }; },
@@ -788,9 +704,8 @@ export function createRecruitmentContactsOffersRepository({ sqlite, unit = null,
   const rowById = { recruitmentContacts: st.contactById, recruitmentOffers: st.offerById };
   const read = (name, id) => { if (typeof id !== 'string') return null; const row = rowById[name].get(id); return row ? decode[name](row) : null; };
   const must = (name, id) => { const r = read(name, id); if (!r) throw refusal('CONTACTS_OFFERS_NOT_FOUND', `${name} ${id} is not a record of the repository`); return r; };
-  const typedOr = (name, raw) => { const t = TYPERS[name](raw, name); if (!t.ok) throw refusal('CONTACTS_OFFERS_INPUT_INVALID', t.reason); return t.record; };
+  const typedContact = (raw) => { const t = typeContact(raw, 'recruitmentContacts'); if (!t.ok) throw refusal('CONTACTS_OFFERS_INPUT_INVALID', t.reason); return t.record; };
   const IMMUTABLE = ['id', 'orgId', 'caseId', 'playerId', 'createdAt'];
-  const write = (name, record) => (name === 'recruitmentContacts' ? writeContact(st, record) : writeOffer(st, record));
   /** Decode many rows; a list reads its records' children in one batch (batchStatements). */
   const BATCHED = { recruitmentContacts: [decodeContact, 'contactIds'], recruitmentOffers: [decodeOffer, 'offerIds'] };
   const decodeAll = (name, rows) => {
@@ -805,29 +720,29 @@ export function createRecruitmentContactsOffersRepository({ sqlite, unit = null,
   const countOf = (table) => sqlite.prepare(`SELECT COUNT(*) AS n FROM ${table}`);
   const counters = { recruitmentContacts: countOf('recruitment_contacts'), recruitmentOffers: countOf('recruitment_offers') };
 
-  /** `create(record)`: a new record, typed whole; an existing id is refused. */
-  const create = (name) => (raw) => operation(() => {
-    const r = typedOr(name, raw);
-    if (rowById[name].get(r.id)) throw refusal('CONTACTS_OFFERS_DUPLICATE', `${TABLE_OF[name]} ${r.id} already exists`);
-    write(name, r); return must(name, r.id);
+  /** `create(record)`: a new contact, typed whole; an existing id is refused. */
+  const createContact = (raw) => operation(() => {
+    const r = typedContact(raw);
+    if (st.contactById.get(r.id)) throw refusal('CONTACTS_OFFERS_DUPLICATE', `recruitment_contacts ${r.id} already exists`);
+    writeContact(st, r); return must('recruitmentContacts', r.id);
   });
   /**
-   * `update(id, change)`: `change` receives a plain copy of the stored record and edits it (or returns a replacement);
+   * `update(id, change)`: `change` receives a plain copy of the stored contact and edits it (or returns a replacement);
    * the result is typed whole and written at once. The identifiers and the creation instant cannot change.
    */
-  const update = (name) => (id, change) => operation(() => {
-    if (typeof change !== 'function') throw new TypeError(`${name}.update(id, change) needs a function that edits the copy it is given`);
-    const stored = must(name, id);
+  const updateContact = (id, change) => operation(() => {
+    if (typeof change !== 'function') throw new TypeError('recruitmentContacts.update(id, change) needs a function that edits the copy it is given');
+    const stored = must('recruitmentContacts', id);
     const draft = clone(stored);
     const returned = change(draft);
-    const next = typedOr(name, returned === undefined ? draft : returned);
-    for (const k of IMMUTABLE) if (next[k] !== stored[k]) throw refusal('CONTACTS_OFFERS_INPUT_INVALID', `${TABLE_OF[name]} ${id}: ${k} cannot change`);
-    write(name, next); return must(name, id);
+    const next = typedContact(returned === undefined ? draft : returned);
+    for (const k of IMMUTABLE) if (next[k] !== stored[k]) throw refusal('CONTACTS_OFFERS_INPUT_INVALID', `recruitment_contacts ${id}: ${k} cannot change`);
+    writeContact(st, next); return must('recruitmentContacts', id);
   });
 
   const contactHistoryFrom = (orgId, actions) => ({ from: 'contact_history h JOIN recruitment_contacts c ON c.id = h.contact_id', where: `c.org_id = ? AND h.action IN (${actions.map(() => '?').join(', ') || 'NULL'})`, params: [orgId, ...actions] });
   const contacts = {
-    create: create('recruitmentContacts'), update: update('recruitmentContacts'),
+    create: createContact, update: updateContact,
     /** One contact by id, or null. Callers check the organisation and case they expect. */
     byId: (id) => read('recruitmentContacts', id),
     /** forCase(caseId), forOrgPlayer(orgId, playerId), forPlayer(playerId), forRequest(requestId), forAgent(agentUserId), forOrg(orgId). */
@@ -852,8 +767,115 @@ export function createRecruitmentContactsOffersRepository({ sqlite, unit = null,
       });
     },
   };
+  // ---- offers: every write is a named act on the offer's own rows.
+  const sqlCache = new Map();
+  const q = (sql) => { let s = sqlCache.get(sql); if (!s) sqlCache.set(sql, (s = sqlite.prepare(sql))); return s; };
+  const offerMust = (id) => must('recruitmentOffers', id);
+  const offerExists = (id) => { if (!st.offerById.get(id)) throw refusal('CONTACTS_OFFERS_NOT_FOUND', `recruitment_offers ${id} is not a record of the repository`); };
+  const nextPosition = (table, offerId, act = null) => (act === null
+    ? q(`SELECT COALESCE(MAX(position) + 1, 0) AS p FROM ${table} WHERE offer_id = ?`).get(offerId)
+    : q(`SELECT COALESCE(MAX(position) + 1, 0) AS p FROM ${table} WHERE offer_id = ? AND act = ?`).get(offerId, act)).p;
+  const assign = (cols) => Object.keys(cols).map((c) => `${c} = @${c}`).join(', ');
+  const stamp = (prefix, a) => ({ [`${prefix}_user_id`]: a?.id ?? null, [`${prefix}_name`]: a?.name ?? null, [`${prefix}_role`]: a?.role ?? null });
+  /**
+   * Move one revision into `to`, only from a status the domain's transition table leads from. A revision anywhere else
+   * means a gate let through a move it should have refused: the unit rolls back.
+   */
+  const moveRevision = (offerId, revisionId, to, cols = {}) => {
+    const from = OFFER_STATUSES.filter((st0) => OFFER_REVISION_TRANSITIONS[st0].includes(to));
+    const r = q(`UPDATE offer_revisions SET status = @to${Object.keys(cols).length ? `, ${assign(cols)}` : ''} WHERE id = @rid AND offer_id = @oid AND status IN (${from.map((x) => `'${x}'`).join(', ')})`)
+      .run({ ...cols, to, rid: revisionId, oid: offerId });
+    if (r.changes !== 1) throw refusal('CONTACTS_OFFERS_STATE_CONFLICT', `offer_revisions ${revisionId} of recruitment_offers ${offerId} cannot move to ${to} from where it is`);
+  };
+  const setOffer = (id, cols) => q(`UPDATE recruitment_offers SET ${assign(cols)} WHERE id = @id`).run({ ...cols, id });
+  const insertRevision = (offerId, r) => {
+    offerStep(offerId, `revision ${r.id}`, () => st.revision.run(revisionRow(offerId, r, nextPosition('offer_revisions', offerId))));
+    offerStep(offerId, `revision ${r.id} pointers`, () => q(revisionPointerSql).run({ id: r.id, ...revisionPointers(r) }));
+    replaceDocuments(offerId, r.id, r.documents ?? []);
+  };
+  const replaceDocuments = (offerId, revisionId, documents) => {
+    q('DELETE FROM offer_revision_documents WHERE revision_id = ?').run(revisionId);
+    documents.forEach((d, j) => offerStep(offerId, `revision ${revisionId} document ${d.id}`, () => st.doc.run(documentRow(revisionId, d, j))));
+  };
+  /**
+   * The bookkeeping an act leaves on its offer: the outcome of the case move it asked for, its client key, the rev
+   * bumps, the last-changed instant and its history entries (history is only ever appended).
+   */
+  const applyAct = (id, { at = null, revBy = null, touch = false, bumpOffer = false, bumpRevisionId = null, lifecycle, key = null, history = [] } = {}) => {
+    const rev = { rev_at: at, rev_by_user_id: revBy?.id ?? null, rev_by_name: revBy?.name ?? null };
+    if (bumpRevisionId) q(`UPDATE offer_revisions SET rev = rev + 1, ${assign(rev)} WHERE id = @rid AND offer_id = @oid`).run({ ...rev, rid: bumpRevisionId, oid: id });
+    const cols = { ...(touch ? { updated_at: at } : {}), ...(lifecycle !== undefined ? lifecycleCols(lifecycle) : {}) };
+    if (bumpOffer) q(`UPDATE recruitment_offers SET rev = rev + 1, ${assign(rev)} WHERE id = @id`).run({ ...rev, id });
+    if (Object.keys(cols).length) setOffer(id, cols);
+    if (key) offerStep(id, `${key.act} key`, () => st.okey.run({ offer_id: id, act: key.act, position: nextPosition('offer_keys', id, key.act), key: key.key, revision_id: key.revisionId }));
+    for (const h of history) offerStep(id, `history ${h.id}`, () => st.ohist.run(offerHistoryRow(id, h, nextPosition('offer_history', id))));
+  };
+  const act = (fn) => (id, ...args) => operation(() => { offerExists(id); fn(id, ...args); return offerMust(id); });
+
   const offers = {
-    create: create('recruitmentOffers'), update: update('recruitmentOffers'),
+    /** A new offer, whole: the club's first draft, or a fixture's record. An existing id is refused. */
+    create: (o) => operation(() => {
+      if (!isPlainObject(o) || !nonEmpty(o.id)) throw refusal('CONTACTS_OFFERS_INPUT_INVALID', 'recruitment_offers: a record needs an id');
+      if (st.offerById.get(o.id)) throw refusal('CONTACTS_OFFERS_DUPLICATE', `recruitment_offers ${o.id} already exists`);
+      insertOffer(sqlite, st, o);
+      return offerMust(o.id);
+    }),
+    /**
+     * Change a DRAFT revision's content (`documents` undefined keeps them). There is no other write of a revision's
+     * terms, so an issued revision is frozen by construction.
+     */
+    editDraft: act((id, revisionId, { at, by, terms, recipientMessage, internalNote, expiresAt, documents }, bookkeeping) => {
+      const cols = { ...termCols(terms), recipient_message: recipientMessage ?? null, internal_note: internalNote ?? null, expires_at: expiresAt ?? null, updated_at: at, ...stamp('updated_by', by) };
+      const r = q(`UPDATE offer_revisions SET ${assign(cols)} WHERE id = @rid AND offer_id = @oid AND status = 'DRAFT'`).run({ ...cols, rid: revisionId, oid: id });
+      if (r.changes !== 1) throw refusal('CONTACTS_OFFERS_STATE_CONFLICT', `offer_revisions ${revisionId} of recruitment_offers ${id} is not a draft`);
+      if (documents !== undefined) replaceDocuments(id, revisionId, documents);
+      setOffer(id, { type: terms.offerType });
+      applyAct(id, bookkeeping);
+    }),
+    /** Issue a DRAFT revision with its final terms and the recipient and readiness it was issued against; it supersedes the revision it names. */
+    issueRevision: act((id, revisionId, { at, by, terms, recipientSnapshot, readinessSnapshot, supersedesRevisionId = null }, bookkeeping) => {
+      moveRevision(id, revisionId, 'ISSUED', { ...termCols(terms), issued_at: at, ...stamp('issued_by', by), ...recipientCols(recipientSnapshot), ...readinessCols(readinessSnapshot) });
+      if (supersedesRevisionId) moveRevision(id, supersedesRevisionId, 'SUPERSEDED', { superseded_by_revision_id: revisionId, superseded_at: at });
+      setOffer(id, { status: 'ISSUED' });
+      applyAct(id, bookkeeping);
+    }),
+    withdrawRevision: act((id, revisionId, { at, by, reason = null }, bookkeeping) => {
+      moveRevision(id, revisionId, 'WITHDRAWN', { withdrawn_at: at, ...stamp('withdrawn_by', by), withdraw_reason: reason });
+      setOffer(id, { status: 'WITHDRAWN' });
+      applyAct(id, bookkeeping);
+    }),
+    /** A new DRAFT revision, which becomes the current one. */
+    addRevision: act((id, revision, bookkeeping) => {
+      insertRevision(id, revision);
+      setOffer(id, { current_revision_id: revision.id, status: 'DRAFT' });
+      applyAct(id, bookkeeping);
+    }),
+    /**
+     * The recipient's answer to an ISSUED revision. A draft open beside it is discarded (recorded WITHDRAWN, naming the
+     * answer), and the answered revision becomes the current one.
+     */
+    recordResponse: act((id, response, { discardRevisionId = null } = {}, bookkeeping) => {
+      offerStep(id, `response ${response.id}`, () => st.response.run(responseRow(id, response, nextPosition('offer_responses', id))));
+      const to = response.responseType === 'accepted' ? 'ACCEPTED' : 'DECLINED';
+      moveRevision(id, response.revisionId, to, { responded_at: response.occurredAt, response_id: response.id });
+      if (discardRevisionId) {
+        moveRevision(id, discardRevisionId, 'WITHDRAWN', { withdrawn_at: response.occurredAt, ...stamp('withdrawn_by', null), withdraw_reason: null, discarded_by_response_id: response.id });
+        setOffer(id, { current_revision_id: response.revisionId });
+      }
+      setOffer(id, { status: to });
+      applyAct(id, bookkeeping);
+    }),
+    addReadReceipt: act((id, receipt, bookkeeping) => {
+      offerStep(id, 'read receipt', () => st.receipt.run(receiptRow(id, receipt, nextPosition('offer_read_receipts', id))));
+      applyAct(id, bookkeeping);
+    }),
+    /** The recipient's share with their agent, or `null` to clear it. */
+    setAgentShare: act((id, share, bookkeeping) => {
+      offerStep(id, 'agent share', () => setOffer(id, agentShareCols(share)));
+      applyAct(id, bookkeeping);
+    }),
+    /** The bookkeeping alone, for the second half of an act whose case move came in between. */
+    recordAct: act((id, bookkeeping) => applyAct(id, bookkeeping)),
     /** One offer by id, or null. Callers check the organisation they expect. */
     byId: (id) => read('recruitmentOffers', id),
     /** forCase(caseId), forOrgPlayer(orgId, playerId), forPlayer(playerId), forAgentShare(agentUserId), forOrg(orgId). */
@@ -876,7 +898,8 @@ export function createRecruitmentContactsOffersRepository({ sqlite, unit = null,
     },
   };
 
-  const readOnly = (o) => Object.freeze(Object.fromEntries(Object.entries(o).filter(([k]) => !['create', 'update', 'redactPlayer'].includes(k))));
+  const WRITES = ['create', 'update', 'redactPlayer', 'editDraft', 'issueRevision', 'withdrawRevision', 'addRevision', 'recordResponse', 'addReadReceipt', 'setAgentShare', 'recordAct'];
+  const readOnly = (o) => Object.freeze(Object.fromEntries(Object.entries(o).filter(([k]) => !WRITES.includes(k))));
   return {
     contacts, offers,
     /** The queries alone, for the pure projectors and providers that must not write (the evidence provider, the journey). */
