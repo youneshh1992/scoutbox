@@ -2,9 +2,8 @@
 
 This is the working guide for the sync backend in `scoutbox-server/`. There is no live
 deployment and no production data. Every database is seed or test data, so if a data
-directory gets into a bad state, delete it and boot again. The previous long-form runbook
-is archived in git under the tag `docs-archive-2026-11`. The migration's status and how to do the next step:
-[`../docs/architecture/migration.md`](../docs/architecture/migration.md).
+directory gets into a bad state, delete it and boot again. How the data layer works and the rules for
+server code: [`../docs/architecture.md`](../docs/architecture.md).
 
 ## Running locally
 
@@ -38,7 +37,7 @@ is archived in git under the tag `docs-archive-2026-11`. The migration's status 
 | `npm test` | Runtime contract, data-layer, repository, migration and per-domain batteries, plus their real-server variants (`scripts/runTests.mjs`, the list is `SUITES`). Each suite runs on its own temporary directories and free ports, up to 4 at a time (`TEST_JOBS`); a failing suite prints its whole log (`TEST_VERBOSE=1` prints every log). Each suite's temporary files live in a folder of its own (its `TMPDIR`), deleted when it exits; `TEST_KEEP_TMP=1` keeps a failing suite's folder and prints its path. `npm test -- testOrgs testSessions` runs only those. |
 | `npm run e2e` | Every end-to-end battery in `e2e/<domain>/` (`scripts/runE2E.mjs`, the list is `BATTERIES`; it refuses to run while a battery is unlisted). Up to 4 at a time like `npm test`, with the same `TEST_JOBS`, `TEST_VERBOSE`, `TEST_KEEP_TMP` and temporary-folder clean-up. `npm run e2e -- recruitment` runs one domain, `npm run e2e -- platform/api` one battery. A check that fails for a reason in `docs/known-issues.md` uses `e2e/support/knownFailure.mjs` and fails the battery once it passes. |
 | `node e2e/platform/api.mjs` | The API battery. Starts its own freshly seeded server on a free port and a temporary `DATA_DIR`, and removes both. To test a server you started yourself, pass both `API_URL` and that server's `DATA_DIR`; `API_URL` alone is refused, because the persistence checks read the data directory. |
-| `npm run perf:recruitment -- [players] [clones] [busy]` | Recruitment at scale through the real server: synthetic players and cloned recruitment graphs, hot-route timings, one write's log volume, the sweep queries (migration.md §4.3 step 4). |
+| `npm run perf:recruitment -- [players] [clones] [busy]` | Recruitment at scale through the real server: synthetic players and cloned recruitment graphs, hot-route timings, one write's log volume, the sweep queries. `PERF_ONLY=<path>` limits it to matching routes, for a CPU profile. |
 | `node scripts/tools/boxCamCvEvaluation.mjs` | Re-measures the Box Cam engine against its golden fixtures and rewrites `domains/development/boxcam/cv/evaluation.json`, which the Combine production gate reads. Run it when the engine changes and commit the result. `scripts/tools/boxCamCvHoldout.mjs` is the matching holdout run (`domains/development/boxcam/cv/holdout.json`). |
 | `node e2e/operations/clubOperations.mjs` | Delivery, webhook, backup and restore end to end (sets `M13_FAST_RETRY`, `ALLOW_LOCAL_WEBHOOKS`). |
 
@@ -83,111 +82,18 @@ are refused in production.
 
 A trust-weights total other than 100 is also fatal (`TRUST_WEIGHTS_INVALID`).
 
-## Data layer contract
+## Data layer
 
-`DATA_DIR/scoutbox.db` holds tables only, each owned by one repository in `repositories/`. There is no blob store
-(S14a dropped the `collections` table). Besides the domain tables: `data_migrations` (the schema history), `meta`
-(the first installation's initialisation states, the session lifetime) and `counters` (the id counter, written at
-every mint).
+`DATA_DIR/scoutbox.db` holds only tables, each owned by one repository in `repositories/` (the rules are in
+[`../docs/architecture.md`](../docs/architecture.md)). Besides the domain tables: `data_migrations` (the schema
+history), `meta` (the first installation's initialisation states, the session lifetime) and `counters` (the id
+counter, written at every mint). The schema version is the latest migration's number, reported on `/healthz`, in
+`/capabilities` → `schema` and on every response as `X-ScoutBox-Schema`. `GET /capabilities` → `dataLayer` lists
+the tables, the applied migrations and each domain's counts.
 
-Every repository writes its rows at once, inside the unit of work it joined (or a transaction of its own), and reads
-through SQL. No repository keeps records in memory, and there is no save step: a write is durable when its
-transaction commits.
-
-`GET /capabilities` → `dataLayer` lists the tables, the applied migrations and each
-domain's counts.
-
-**Boot order** (`server.mjs`): open the store → `attachDataLayer` (table migrations, then repositories; a first
-installation imports `buildSeed()`'s organisations, players and guardians once) → integrity report → module
-registration → listen.
-
-### Rules when writing server code
-
-- **Write through the repository.** There is no `db` object: every domain is owned by its repository. Add records with the repository's `create` / `add*` operations and change them with
-  `update(id, (draft) => …)` (or a player's lists with `addItem` / `setItems` / `patchItem`). New domains follow
-  S8b (`repositories/recruitmentCases.mjs`, cases and rooms), S8a
-  (`repositories/recruitment.mjs`, requests and trials), S8c
-  (`repositories/recruitmentContactsOffers.mjs`) or S8d (`repositories/signingsFollowUps.mjs`):
-  `create(record)` and `update(id, (draft) => …)`, which types the whole record and writes it
-  at once. A route that edits a record and then reads it must use the record `update`
-  returns; the one it held before is the old version. Don't call `update` for a record from
-  inside its own `update` (it is refused): make the second change after the first returns.
-- **Look records up by id through the index.** Every module context carries `byId`
-  (`domains/platform/lookups.mjs`): `byId.player(id)`, `byId.guardian(id)`, `byId.user(id)`,
-  `byId.org(id)` and `byId.mediaOwner(clipId)`, each answering the record view or null, with an
-  optional further condition (`byId.user(id, (u) => u.orgId === org.id && !u.removedAt)`). Since
-  S14h these are SQL lookups answering fresh, deep-frozen records: `req.player` and `req.guardian` are
-  copies taken when the request was authenticated, so a route that writes and then answers reads the
-  record the write returned (or `players.byId` again), never the one it held. A route that needs many
-  players asks the identity repository: `players.visibleCandidates(org, filters)` (since S14i the
-  whole visibility rule in SQL: the under-18 wall, the exact Grassroots radius and the blocks; the
-  views still apply `visibleToOrg` at the source), a page in SQL (`players.directoryPage`,
-  `players.visiblePage(org, filter, { order, where }, page)`, `players.clipPage`, `players.fixturePage`),
-  light rows for a ranking over every candidate (`players.scanLight`: the row's own columns and
-  `profileSignal`, no lists; decode only the winners with `players.byIds`), `players.recentFor`,
-  `players.drillBests`, `players.scan` / `list`, `players.byExternalId`, `guardians.forPlayer`,
-  `guardians.byEmail`. `players.profile_signal` is kept by the repositories (every player write, every
-  trial write); nothing else writes it.
-- **Read SQL.** Every domain is read through its repository's queries. The whole recruitment domain (cases and Room records, requests, trials,
-  contacts, offers, signing packages, signings, follow-ups, outcome reports) has moved, and so
-  have the scouting evidence passport, coach affiliations and squad invitations (S9a) the assessment templates, assessments, video segments and playlists (S9b), and a club's tactical setup, squad, shadow list, looking-for, federation request and vacancies (S9c, which also retired the organisation facets `tactical`, `squad`, `lookingFor` and `federationCheck`; since S14g an organisation record has only its typed fields and writing one of these is refused, naming the repository), the opportunity board, applications, assessment campaigns and players' private suitability preferences (S9d), and the verification claims, their evidence vault, tokens, administrators, root applications, disputes, references, squad invitations by code, conflicts, domain requests and verified domains (S10a, which also retired the organisation facet `verification`: its revocation is the organisation field `verificationRevokedAt`), the Passport's preferences, career entries, achievements, share links and correction requests (S10b), and transition cases and coach references (S10c; a reference's one-time code is stored only as its hash): ask the repository (`recruitmentContactsOffers.contacts.forCase`,
-  `signingsFollowUps.signings.forOrgPlayer`, `scoutingEvidence.evidence.currentForPlayer`, …, or the read-only `recruitmentReads`
-  `scoutingReads` and `verificationReads` every module context carries). A list that grows without limit pages by cursor through
-  `domains/platform/paging.mjs` (`readPage` at the route, a `pageFor…` query in the
-  repository that asks for one row more than the page). Each record is a fresh,
-  deep-frozen decode; a query inside a unit of work sees the unit's own writes. Pure
-  projectors take the queries as an argument (`reads`).
-- **Units of work.** If one operation touches more than one table, wrap it in `unit(() => { ... })` (`store.unitOfWork`). Inside the unit:
-  - The callback must be **synchronous**. An `async` function is refused before it runs.
-    A returned promise is not cancelled and counts as a stray. Prepare async work before
-    the unit and publish it after.
-  - Everything commits or rolls back together. On failure the error is rethrown with
-    `err.unitOfWork = 'rolled_back'`; there is no memory to restore.
-  - A nested unit joins the outer one. An inner failure fails the whole unit even if the
-    caller catches it. Repository refusals do the same (participant failure).
-  - Retry is explicit: rerun the whole operation.
-  - Every repository's writes join the unit: staff and sessions since S14f, organisations since S14g, players and
-    guardians since S14h. An empty unit runs no statement on any of them (`scripts/testUnitOfWork.mjs`).
-  - Expected negative results (no live code, nothing to delete) are return values and do
-    not poison the unit.
-- **`store.afterCommit(fn)`** is the mechanism for side effects: broadcasts, pushes, SSE
-  events and mail sent after a write. The function runs only after `COMMIT`. A throw or a
-  rejected promise inside it is counted and logged, and it never undoes the data. Outside
-  a unit it runs immediately. A notification's push and `notify` event go through it too:
-  inside a unit they wait for its commit, outside one the row is already committed.
-- **Transactions.** Every unit begins with `BEGIN IMMEDIATE`, and every connection sets
-  `busy_timeout = 5000`.
-- **Responses use allowlists.** Player and guardian responses are built in
-  `views/playerViews.mjs`. Add a field to an allowlist on purpose. Never serialise a raw
-  record.
-- **Typed columns, valid input only**. Each field is a typed column. Routes
-  reject junk input; there are no `absent_keys_json` / `offtype_json` / `extra_json` side
-  columns. List order is kept with `seq` / `position`.
-- **Refusals name ids, not content.** Validation errors from repositories and migrations
-  carry codes, ids and reasons. They never include a name, e-mail, message body, token or
-  code.
-
-### Migrations
-
-**Table migrations** (`repositories/migrations/NNNN_name.mjs`, registered in
-  `repositories/index.mjs`) are the one registry. They export `{ id, note, up(sqlite) }`. They run once, in id order,
-  each inside a transaction. Each is recorded in **`data_migrations`** (`id`,
-  `applied_at`). A step that rebuilds a referenced table
-  sets `foreignKeysOff` and must leave `PRAGMA foreign_key_check` empty before it
-  commits. A failure rolls the step back and aborts the boot with the file unchanged.
-  The schema version is the number of the latest one (`0039_retire_blob` → 39), reported on
-  `/healthz`, in `/capabilities` → `schema` and on every response as `X-ScoutBox-Schema`.
-
-A migration's `up()` is its DDL (plus any table rebuild the step needs). It does not carry
-data over: there is no production data, and rollback means re-seed.
-
-The latest table migration is `0040_match_facts`.
-
-**Tools and test suites.** There is no whole-file load or save. Tools and suites open a directory the way the server
-does (`scripts/dataLayerFixture.mjs`: `openLayer` runs the migrations and attaches every repository) and write
-through the repositories: `writeFixture(dir, collections)` writes each record through its repository's own
-operation, in dependency order, in one unit of work, so a refused fixture writes nothing. `readRecords(dir)` reads
-every collection back on a read-only connection (`readAllRecords` in `repositories/index.mjs`).
+**Boot order** (`server.mjs`): open the store → `attachDataLayer` (the table migrations, then the repositories; a
+first installation imports `buildSeed()`'s organisations, players and guardians once) → integrity report → module
+registration → listen. A failed migration rolls back and stops the boot with the file unchanged.
 
 ## Backups and restore
 
@@ -215,8 +121,8 @@ These routes exist (`domains/enterprise/enterprise.mjs`). Admin routes need the 
 ## External adapters (`adapters.mjs`, `m13/delivery.mjs`)
 
 Every external service has a dev transport that fully works, and tests use it. Setting
-the named variable switches the adapter. `ONFIDO_API_TOKEN`, `STRIPE_SECRET_KEY` and `S3_BUCKET`
-used to relabel stubs as live providers; production now refuses them (`PROVIDER_NOT_IMPLEMENTED`).
+the named variable switches the adapter. Production refuses `ONFIDO_API_TOKEN`, `STRIPE_SECRET_KEY` and `S3_BUCKET`
+(`PROVIDER_NOT_IMPLEMENTED`): no real provider exists behind them.
 
 | Adapter | Switch | Dev behaviour | Live behaviour today |
 |---|---|---|---|

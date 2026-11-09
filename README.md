@@ -13,7 +13,7 @@ grassroots clubs and agents discover and recruit them, with safeguarding for und
 | `scoutbox-admin/` | Trust & Safety console (dev key `scoutbox-admin`) | `npm run dev` | 5174 |
 | `design-system/` | Shared tokens, styles and components for the web portals | | |
 | `e2e/` | End-to-end tests and the self-contained demo builds | | |
-| `docs/` | Decisions, product rules, UI approvals, the migration plan: **start at [`docs/README.md`](docs/README.md)** | | |
+| `docs/` | Decisions, product rules, UI approvals, server architecture: **start at [`docs/README.md`](docs/README.md)** | | |
 
 ## Running it locally
 

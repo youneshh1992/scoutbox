@@ -8,7 +8,7 @@ consequences in plain terms, and don't ask him storage questions.
 ## Before you start
 
 - Read [`docs/decisions.md`](docs/decisions.md): the decisions in force and the open questions. Don't re-ask settled ones.
-- Server or storage work: read [`docs/architecture/migration.md`](docs/architecture/migration.md) and
+- Server or storage work: read [`docs/architecture.md`](docs/architecture.md) and
   [`scoutbox-server/OPERATIONS.md`](scoutbox-server/OPERATIONS.md).
 - UI work: read [`docs/design.md`](docs/design.md).
 - Changing a domain: read its file in [`docs/product/`](docs/product/).
@@ -17,15 +17,15 @@ consequences in plain terms, and don't ask him storage questions.
 
 - **There is no production data and no live deployment.** Every database is seed or test data. Rollback means
   re-seed. Don't build rollback tools, compatibility with old dev-build files, or operator procedures.
-- **Feature freeze until the SQLite migration is finished.** In scope: the migration, defects, security, tests, and
-  design changes the Founder explicitly asks for.
+- **Feature freeze until Tom lifts it.** The SQLite migration is complete; the freeze stays while the codebase is
+  cleaned up and its architecture tightened. In scope: clean-ups and architecture work, defects, security, tests,
+  and design changes the Founder explicitly asks for.
 
 ## Server rules
 
 - New persistent state goes in tables owned by a domain repository under `scoutbox-server/repositories/`, created
-  by a numbered migration and matched in `docs/architecture/sql/*.sql`. No new `db.<collection>` arrays, no new
-  `migrateMxx` lines, no new milestone-named modules (`m30/…`). New server code goes in
-  `scoutbox-server/domains/<domain>/` (`platform` and `recruitment` exist; start a new one with its first module).
+  by a numbered migration. No in-memory copies of tables, no new milestone-named modules (`m30/…`). New server
+  code goes in `scoutbox-server/domains/<domain>/`.
 - Writes are explicit repository operations, inside `store.unitOfWork(() => …)` when they touch more than one row
   or domain. Side effects go through `store.afterCommit`. Provider calls happen before the unit. Don't edit
   in-memory records and rely on the save to find the change.
@@ -65,9 +65,8 @@ data the current build can produce, where a real user could lose or corrupt data
   Design notes and test evidence go in the PR description. When behaviour changes, update the relevant file in
   `docs/` in place.
 - Commit messages: a subject line and a few bullets.
-- Code comments that cite UPPER_CASE milestone docs (e.g. `M23_P56A_AGENT_STORE_PROPOSAL.md`) or old
-  `docs/architecture/*` files point at documents removed in November 2026. Read them with
-  `git show docs-archive-2026-11:<path>`.
+- Code comments explain why the code is surprising, not what it does or how it used to work. Don't cite milestones,
+  migration steps or PRs in comments; git history has those.
 
 ## Git
 

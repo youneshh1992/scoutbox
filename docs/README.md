@@ -3,10 +3,10 @@
 | Read this | When |
 |---|---|
 | [`decisions.md`](decisions.md) | Always. The decisions in force (process, data, UI, product) and the open questions. |
-| [`architecture/migration.md`](architecture/migration.md) | Before any server or storage work. Status of the SQLite migration and how to do the next step. |
+| [`architecture.md`](architecture.md) | Before any server or storage work. How the data layer works, the rules for server code, and how to add a table. |
 | [`design.md`](design.md) | Before changing any UI. The Founder-approved designs for each app and the cross-app UI rules. |
 | [`product/`](product/) | Before changing a domain. How it works and what must stay true. |
-| [`known-issues.md`](known-issues.md) | Bugs and stale spots that are known but not yet fixed. |
+| [`known-issues.md`](known-issues.md) | Known defects, performance limits and flaky tests, not yet fixed. |
 | [`reference/`](reference/) | Research and catalogues: agent regulations (Sept 2026), the recruitment metric catalogue, the Combine validation protocol. |
 
 Product docs:
@@ -21,13 +21,12 @@ Product docs:
 - [`platform.md`](product/platform.md): errors, boot, dates and time zones, capabilities, sessions, codes, notifications, deployment
 
 Elsewhere: [`../scoutbox-server/OPERATIONS.md`](../scoutbox-server/OPERATIONS.md) (running the server, environment
-variables, the data-layer contract), [`../design-system/README.md`](../design-system/README.md) (shared tokens and
+variables, backups, adapters), [`../design-system/README.md`](../design-system/README.md) (shared tokens and
 components), [`../e2e/README.md`](../e2e/README.md) (end-to-end tests and demo builds).
 
 ## Keeping the docs useful
 
 - Update these files in place when behaviour changes. Don't add new files for a milestone, a review or a test run;
   that belongs in the PR description.
-- Until November 2026 the repository root held about 290 milestone documents. They were distilled into this folder
-  and removed. Each product doc names its sources in brackets; read any original with
-  `git show docs-archive-2026-11:<FILE>.md`.
+- Write down what is true now and why, not how it got there: git history has that. Older milestone documents are
+  archived under the tag `docs-archive-2026-11` (`git show docs-archive-2026-11:<FILE>.md`).
