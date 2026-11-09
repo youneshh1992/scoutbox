@@ -124,5 +124,18 @@ The rules are likely well under half of the production lines.
    (`repositories/writes.mjs`) now serves contacts and offers too.
    **Follow-up:** `offerIntegrity` (`offer.mjs`) still checks shapes the schema now rules out (unknown statuses, duplicate
    or missing revisions). Trim it once the batteries that test it on in-memory records have been looked at.
+   **Still to do (9 Nov):** about 223 draft edits remain in domain code, across ~25 repositories; ~30 repositories
+   still have JavaScript validators. In order:
+   1. **Trials and trial requests** (`repositories/recruitment.mjs`, ~32 edits). The last of recruitment on drafts;
+      trial scheduling has revisions, confirmations and supersession, the same shape as offers.
+   2. **Agent transactions, compliance and core** (`agentTransactions.mjs`, `complianceRecords.mjs`, `agentCore.mjs`,
+      ~40 edits). State machines with history, and the modules in the agent core ↔ compliance ↔ transactions cycle:
+      do them together with the wiring (step 3), so each module's dependencies change once.
+   3. **Verification** (claims, `transitionsVouches.mjs`, ~17 edits) and **Box Cam sessions** (`boxCam.mjs`, ~10).
+   4. **Then decide whether to stop.** The identity long tail (`identity.mjs`, `users.mjs`, `orgs.mjs` and others,
+      ~60 edits, mostly 1–7 single-field edits per repository) carries little state-machine risk: convert a repository
+      when it is next worked on. The repositories with validators but no draft updates (`integrations`,
+      `insightCoverage`, `signingsFollowUps`, `enterprise`, …) can move to "reads back as written" in one pass, with no
+      route changes.
 3. **Wiring (item 2)** after the pilot, since row-level repositories change what each domain needs.
 4. **Comments (item 4)** as files are touched.
