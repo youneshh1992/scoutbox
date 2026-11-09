@@ -114,7 +114,9 @@ The rules are likely well under half of the production lines.
    **Done (9 Nov):** 11 draft edits became 8 named acts; the offer validator is gone, and its pointer rules are now
    composite foreign keys. Size: the route module went from 950 to 894 lines; the repository grew slightly in lines
    (895 → 914) but shrank 6% in characters. The saving per domain is small; the case for continuing is soundness.
-   Contacts, in the same file, are still whole-record.
+   **Contacts done too (9 Nov):** the repository has no JavaScript validator left (895 → 832 lines, 75k → 63k
+   characters); acts share one `act(id, input, bookkeeping)` shape, and a whole-record create must read back as
+   written.
    **Follow-up:** `offerIntegrity` (`offer.mjs`) still checks shapes the schema now rules out (unknown statuses, duplicate
    or missing revisions). Trim it once the batteries that test it on in-memory records have been looked at.
 3. **Wiring (item 2)** after the pilot, since row-level repositories change what each domain needs.

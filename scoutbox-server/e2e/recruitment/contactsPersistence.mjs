@@ -205,14 +205,14 @@ const CORRUPT_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-cp-corrupt-'));
     }
   };
   const req1 = [{ ...REQ, id: 'req-1', contactId: 'rct-1' }];
-  await refusedAtCutover('a null entry', PORT + 4, [soundContact(), null], req1, /CONTACTS_OFFERS_INPUT_INVALID: recruitmentContacts is not an object \(null\)/);
+  await refusedAtCutover('a null entry', PORT + 4, [soundContact(), null], req1, /CONTACTS_OFFERS_INPUT_INVALID: recruitment_contacts: a record must be an object \(got null\)/);
   await refusedAtCutover('a duplicated id', PORT + 5, [soundContact(), soundContact({ id: 'rct-1', requestId: null })], req1, /CONTACTS_OFFERS_DUPLICATE: recruitment_contacts rct-1 already exists/);
   await refusedAtCutover('a request that is not in the file', PORT + 6, [soundContact({ requestId: 'req-ghost' })], [], /FOREIGN KEY constraint failed/); // recruitment_contacts.request_id → recruitment_requests
-  await refusedAtCutover('an unknown status word', null, [soundContact({ id: 'rct-badstatus', status: 'sent', requestId: null })], [], /rct-badstatus\.status must be one of draft\|delivered/);
-  await refusedAtCutover('a history that is not a list', null, [soundContact({ id: 'rct-nohist', history: 'not-a-list', requestId: null })], [], /rct-nohist\.history must be a list/);
-  await refusedAtCutover('a timestamp that is not an instant', null, [soundContact({ id: 'rct-badts', deliveredAt: 'yesterday', requestId: null })], [], /rct-badts\.deliveredAt must be an integer or null/);
-  await refusedAtCutover('a prototype-key channel', null, [soundContact({ id: 'rct-badchan', channel: 'constructor', requestId: null })], [], /rct-badchan\.channel must be one of in_app\|phone/);
-  await refusedAtCutover('a record missing the writer\'s fields', null, [{ id: 'rct-partial', orgId: 'org-x', caseId: 'case-x', playerId: 'pl-x', status: 'draft', channel: 'in_app', history: [], rev: 1 }], [], /rct-partial\.contactMode must be one of player_only\|both/);
+  await refusedAtCutover('an unknown status word', null, [soundContact({ id: 'rct-badstatus', status: 'sent', requestId: null })], [], /recruitment_contacts rct-badstatus row: CHECK constraint failed: status/);
+  await refusedAtCutover('a history that is not a list', null, [soundContact({ id: 'rct-nohist', history: 'not-a-list', requestId: null })], [], /recruitment_contacts rct-nohist history: must be a list/);
+  await refusedAtCutover('a timestamp that is not an instant', null, [soundContact({ id: 'rct-badts', deliveredAt: 'yesterday', requestId: null })], [], /recruitment_contacts rct-badts row: cannot store TEXT value in INTEGER column recruitment_contacts\.delivered_at/);
+  await refusedAtCutover('a prototype-key channel', null, [soundContact({ id: 'rct-badchan', channel: 'constructor', requestId: null })], [], /recruitment_contacts rct-badchan row: CHECK constraint failed: channel/);
+  await refusedAtCutover('a record missing the writer\'s fields', null, [{ id: 'rct-partial', orgId: 'org-x', caseId: 'case-x', playerId: 'pl-x', status: 'draft', channel: 'in_app', history: [], rev: 1 }], [], /recruitment_contacts rct-partial row: NOT NULL constraint failed: recruitment_contacts\.contact_mode/);
   // Pure: the read-time integrity function still names each of those defects, should one ever reach it.
   const unstorable = [soundContact({ id: 'rct-badstatus', status: 'sent' }), soundContact({ id: 'rct-nohist', history: 'not-a-list' }), soundContact({ id: 'rct-badts', deliveredAt: 'yesterday' }), soundContact({ id: 'rct-badchan', channel: 'constructor' })];
   ok(unstorable.every((c) => contactIntegrity(c, { orgId: 'org-x', caseId: 'case-x' }).length > 0), 'the integrity check still names a problem on each of the four unstorable rows');

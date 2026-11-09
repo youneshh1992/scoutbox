@@ -47,12 +47,15 @@ transaction documents are evidence records.
 
 ## Writes
 
-- **Named acts** (offers, `repositories/recruitmentContactsOffers.mjs`; the direction for the other domains). A
-  record is created whole, then changes only through operations named after what happened (`issueRevision`,
-  `recordResponse`, `recordAct`), each an `UPDATE` of named columns or an `INSERT` of new rows. History is only
-  inserted. Pointers inside an aggregate are composite keys `(owner_id, id)`, so a record can't point into another
-  one, and a state change is guarded in SQL by the domain's transition table. The columns and keys are the only
-  check on stored values; there is no JavaScript copy of them.
+- **Named acts** (contacts and offers, `repositories/recruitmentContactsOffers.mjs`; the direction for the other
+  domains). A record is created whole, then changes only through operations named after what happened
+  (`recordDelivery`, `issueRevision`, `recordResponse`), each an `UPDATE` of named columns or an `INSERT` of new rows,
+  called as `act(id, input, bookkeeping)`; the bookkeeping is the history entries, rev bump and change instant the act
+  leaves, and `recordAct(id, bookkeeping)` is it alone. History is only inserted. Pointers inside an aggregate are
+  composite keys `(owner_id, id)`, so a record can't point into another one, and a state change is guarded in SQL by
+  the domain's transition table. The columns and keys are the only check on stored values; there is no JavaScript
+  copy of them. A whole-record `create` must read back exactly as written, so a field with no column, or a value a
+  column would coerce, is refused rather than lost.
 - **Whole-record updates** (every other domain, for now): `create(record)` and `update(id, (draft) => …)`. The update
   hands the callback a plain copy, types the whole record, writes it at once, refuses unknown fields and returns the
   stored record. Updating a record from inside its own update is refused.
