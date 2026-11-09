@@ -2,7 +2,7 @@
  * Players, guardians and the guardian–child links become authoritative in their tables (S4a; amended in place by
  * S14h: the final typed tables, with no facet storage — repositories/identity.mjs `IDENTITY_DDL`).
  * `meta.coreIdentityInit` is `pending`: the data layer imports the seed once, on the first boot
- * (repositories/identity.mjs `initialize`), and a snapshot save settles it.
+ * (repositories/identity.mjs `initialize`).
  * REGISTERED in DATA_MIGRATIONS.
  */
 import { IDENTITY_DDL, CORE_IDENTITY_LIVE_MIGRATION, CORE_IDENTITY_INIT_META } from '../identity.mjs';

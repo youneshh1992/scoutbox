@@ -61,7 +61,7 @@ const delivery = (over = {}) => ({ id: 'dlv-1', endpointId: 'whk-1', orgId: ORG.
 
 const FIX = () => ({ users: [...USERS()], notifications: [], dispatches: [] });
 function serverOpen(dir) {
-  const store = openStore(dir, { tableBacked: TABLE_BACKED });
+  const store = openStore(dir);
   const layer = attachDataLayer({ store, nextId, sessionTtlMs: TTL, now: () => NOW, warn: () => {} });
   return { store, repo: layer.integrations, unit: (w) => store.unitOfWork(w), close: () => store.sqlite.close() };
 }

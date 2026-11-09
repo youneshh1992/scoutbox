@@ -175,7 +175,7 @@ const firstInstallation = (server, records, extra = {}) => { const layer = attac
 
 test('identity records: players and guardians read back from the live tables as the records the server sees (childIds from the links, in order, roles per side); records added later are created through the repositories, and the next server boot attaches to exactly that', () => {
   const dir = tempDir('s4-records');
-  const server = openStore(dir, { tableBacked: TABLE_BACKED });
+  const server = openStore(dir);
   const layer = firstInstallation(server, cleanRecords());
   assert.deepEqual(layer.boot.identity, { engine: 'sqlite', players: 2, guardians: 2, links: 2, imported: 4 }, 'a first installation initialises from the records once (imported counts players and guardians)');
   assert.equal(hasBlobTable(server.sqlite), false, 'no blob table: the records are rows (rewritten in S14a: it listed the blob rows)');
@@ -197,7 +197,7 @@ test('identity records: players and guardians read back from the live tables as 
   assert.equal(hasBlobTable(s), false);
   s.close();
   // The server attaches to exactly that; stale records handed in as a seed import nothing.
-  const again = openStore(dir, { tableBacked: TABLE_BACKED });
+  const again = openStore(dir);
   const layer2 = attachDataLayer({ seed: { players: [PLAYER_ADULT()], guardians: [GUARDIAN_1(), GUARDIAN_2()] }, store: again, nextId, sessionTtlMs: TTL, now: () => NOW });
   assert.deepEqual(layer2.boot.identity, { engine: 'sqlite', players: 3, guardians: 3, links: 3, imported: 0 });
   assert.deepEqual([...layer2.guardians.byId('gd-3').childIds], ['pl-new']);

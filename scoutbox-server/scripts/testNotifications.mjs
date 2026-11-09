@@ -10,7 +10,7 @@ import fs from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import { runDataMigrations } from '../repositories/database.mjs';
 import { attachDataLayer, DATA_MIGRATIONS, TABLE_BACKED } from '../repositories/index.mjs';
-import { createNotificationsRepository, feedItem, typeNotification, typeNotificationPrefs, NOTIFICATIONS_MIGRATION, NOTIFICATION_TABLES, NOTIFY_COALESCE_MS, NOTIFICATION_LIMITS } from '../repositories/notifications.mjs';
+import { createNotificationsRepository, feedItem, NOTIFICATIONS_MIGRATION, NOTIFICATION_TABLES, NOTIFY_COALESCE_MS, NOTIFICATION_LIMITS } from '../repositories/notifications.mjs';
 import { createOutboxPushRepository } from '../repositories/outboxPush.mjs';
 import { createDispatchesRepository } from '../repositories/dispatches.mjs';
 import { registerNotificationPrefs, CATEGORY_NAMES } from '../domains/platform/notificationPrefs.mjs';
@@ -38,19 +38,16 @@ const TEXT = 'Eastport FC (Head of Recruitment) sent a message.';
 const ntf = (over = {}) => ({ id: 'ntf-a', ts: NOW - MIN, audience: STAFF, type: 'message', text: TEXT, refId: 'chan-1', read: false, repeatCount: 1, category: 'messages', deferredPush: false, ...over });
 const pref = (over = {}) => ({ audienceKind: 'org_user', audienceId: 'usr-1', categories: { mentions: false }, emailIntent: false, updatedAt: NOW - HOUR, ...over });
 
-const recordInvalid = (reason) => Object.assign(new Error(`NOTIFICATION_RECORD_INVALID: ${reason}`), { code: 'NOTIFICATION_RECORD_INVALID' });
 /**
- * The fixture writers: a whole notification record typed (junk refused by field), then written the way the routes
- * write it (create, a coalesce per repeat, the acknowledgment, the delivery marker, markRead); a preference record
- * typed, then one updatePrefs. markRead reads the audience's whole feed, so a read record cannot follow an unread one
- * of the same audience.
+ * The fixture writers: a notification record written the way the routes write it (create, a coalesce per repeat, the
+ * acknowledgment, the delivery marker, markRead); a preference record through one updatePrefs. markRead reads the
+ * audience's whole feed, so a read record cannot follow an unread one of the same audience.
  */
 const WRITERS = {
   notifications: (L, records) => {
     const repo = L.notifications;
     for (const raw of records) {
-      const v = typeNotification(raw); if (!v.ok) throw recordInvalid(v.reason);
-      const r = v.row;
+      const r = { repeatCount: 1, read: false, dispatchedAt: null, refId: null, category: null, deferredPush: false, ...raw, action: raw.actionRequired ?? null };
       if (r.read && repo.unreadCount(r.audience.kind, r.audience.id) > 0) throw new Error(`fixture: notification ${r.id} is read but an earlier one of its audience is not (markRead reads the whole feed)`);
       repo.create({ id: r.id, audience: r.audience, type: r.type, text: r.text, refId: r.refId, category: r.category, deferredPush: r.deferredPush, actionRequired: r.action ? { deadline: r.action.deadline } : null, at: r.ts });
       for (let i = 1; i < r.repeatCount; i++) repo.coalesce(r.id, { at: r.ts });
@@ -61,8 +58,7 @@ const WRITERS = {
   },
   notificationPrefs: (L, records) => {
     for (const raw of records) {
-      const v = typeNotificationPrefs(raw); if (!v.ok) throw recordInvalid(v.reason);
-      L.notifications.updatePrefs(v.row.audienceKind, v.row.audienceId, { categories: v.row.categories, emailIntent: v.row.emailIntent }, { at: v.row.updatedAt });
+      L.notifications.updatePrefs(raw.audienceKind, raw.audienceId, { categories: raw.categories, emailIntent: raw.emailIntent }, { at: raw.updatedAt });
     }
   },
 };
@@ -77,7 +73,7 @@ function fixtureFile(dir, { notifications, notificationPrefs } = {}) {
 const migrate = (s, { now = NOW } = {}) => runDataMigrations(s, DATA_MIGRATIONS, { now, context: { sessionTtlMs: TTL } });
 /** A server-mode store with the data layer attached, as the server runs it. */
 function live(dir) {
-  const store = openStore(dir, { tableBacked: TABLE_BACKED });
+  const store = openStore(dir);
   const layer = attachDataLayer({ store, nextId, sessionTtlMs: TTL, now: () => NOW, warn: () => {} });
   return { store, layer, repo: layer.notifications, close: () => store.sqlite.close() };
 }
@@ -130,7 +126,7 @@ test('fixtures: rows are written in array position (the feed order, whatever the
   s.close(); rm(dir);
 });
 
-test('fixture refusals: an unknown field, a wrong-typed field, a duplicate id, an audience kind outside player/guardian/org_user, a staff audience that does not exist, an empty or over-long text, an unknown category, a group key that is not the worked-out one, an acknowledger who is not the audience; a preference with an unknown field, a non-boolean value, an unknown category or no updatedAt, or of a staff member that does not exist — each refuses the whole fixture, naming the entry and never the text, and writes nothing', () => {
+test('fixture refusals go through the repository (the field-by-field junk is the create path\'s, tested below): a duplicate id and a staff audience that does not exist refuse the whole fixture, and nothing is written', () => {
   const dir = tempDir('ntf-fix-bad'); fixtureFile(dir, { notifications: [ntf({ id: 'ok' })], notificationPrefs: [pref()] });
   const SECRET = 'SECRET-TEXT-S14E';
   const before = fileDump(dir);
@@ -139,30 +135,8 @@ test('fixture refusals: an unknown field, a wrong-typed field, a duplicate id, a
     assert.throws(() => write(dir, { ...db, notifications: [ntf({ id: 'ok-2' }), ...(db.notifications ?? [])] }), (e) => re.test(e.message) && !e.message.includes(SECRET), label);
     assert.equal(fileDump(dir), before, `${label}: nothing written`);
   };
-  for (const [label, over, re] of [
-    ['an unknown field', { future: { x: 1 } }, /notification bad: unknown field\(s\) future/],
-    ['a string ts', { ts: String(NOW) }, /notification bad: ts must be/],
-    ['a system audience', { audience: { kind: 'system', id: 'x' } }, /notification bad: audience\.kind must be one of player, guardian, org_user/],
-    ['an audience with an extra field', { audience: { ...PLAYER, name: 'x' } }, /audience carries unknown field/],
-    ['an empty text', { text: '' }, /notification bad: text must be text of 1 to 2000/],
-    ['an over-long text', { text: SECRET + 'x'.repeat(2000) }, /notification bad: text must be text of 1 to 2000/],
-    ['an unknown category', { category: 'gossip' }, /notification bad: category must be a notification category/],
-    ['a numeric-string deferredPush', { deferredPush: '1' }, /notification bad: deferredPush must be a boolean/],
-    ['a repeatCount of 0', { repeatCount: 0 }, /notification bad: repeatCount must be/],
-    ['a group key not worked out', { groupKey: 'message:other' }, /notification bad: groupKey is worked out/],
-    ['another acknowledger', { actionRequired: { deadline: null, ackedAt: NOW, ackedBy: 'usr-2' } }, /notification bad: actionRequired\.ackedBy/],
-    ['an acknowledger without an acknowledgment', { actionRequired: { deadline: null, ackedAt: null, ackedBy: 'usr-1' } }, /notification bad: actionRequired\.ackedBy/],
-  ]) refuse({ notifications: [ntf({ id: 'bad', text: SECRET, ...over })] }, new RegExp(`NOTIFICATION_RECORD_INVALID[\\s\\S]*${re.source}`), label);
   refuse({ notifications: [ntf({ id: 'dup' }), ntf({ id: 'dup' })] }, /NOTIFICATION_DUPLICATE: notifications dup already exists/, 'a duplicate id');
   refuse({ notifications: [ntf({ id: 'ghost', audience: { kind: 'org_user', id: 'usr-ghost' } })] }, /NOTIFICATIONS_STAFF_MISSING[\s\S]*usr-ghost/, 'a staff member that does not exist');
-  for (const [label, over, re] of [
-    ['an unknown field', { extra: 1 }, /unknown field\(s\) extra/],
-    ['a numeric value', { categories: { mentions: 0 } }, /categories\.mentions must be a boolean/],
-    ['an unknown category', { categories: { gossip: true } }, /categories\.gossip is not a notification category/],
-    ['a prototype-named category', { categories: JSON.parse('{"__proto__": true}') }, /categories\.__proto__ is not a notification category/],
-    ['no updatedAt', { updatedAt: null }, /updatedAt must be an integer timestamp/],
-    ['a system audience', { audienceKind: 'system' }, /audienceKind \/ audienceId\.kind must be one of/],
-  ]) refuse({ notificationPrefs: [pref(over)] }, re, `preference: ${label}`);
   refuse({ notificationPrefs: [pref({ audienceId: 'usr-ghost' })] }, /NOTIFICATIONS_STAFF_MISSING[\s\S]*usr-ghost/, 'a preference of a staff member that does not exist');
   rm(dir);
 });

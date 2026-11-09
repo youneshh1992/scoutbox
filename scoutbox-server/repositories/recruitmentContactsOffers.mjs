@@ -10,7 +10,7 @@
  * EVERY FIELD IS A TYPED COLUMN with the vocabulary and length CHECKs of the domain rules (domains/recruitment/lifecycle/contact.mjs,
  * domains/recruitment/offers/offer.mjs). There is no `absent_keys_json`, `offtype_json`, `extra_json` or `raw_json`. A record the columns
  * cannot hold — an unknown field at any level included — is REFUSED with its id, at a repository write (the unit
- * rolls back) and at a snapshot write (the save rolls back). The idempotency keys are columns of their owner
+ * rolls back). The idempotency keys are columns of their owner
  * (`create_key`, `send_key`, …) and the offer's per-act key lists the rows of `offer_keys`.
  *
  * EXPLICIT WRITES, SQL READS. There is no in-memory mirror and no `db.<collection>` view (§4.3 step 2): readers
@@ -24,15 +24,15 @@
  * References. `org_id` → orgs and `case_id` → recruitment_cases (RESTRICT). A contact's `request_id` →
  * recruitment_requests is DEFERRABLE INITIALLY DEFERRED (checked at COMMIT): a send writes its contact before the
  * request row it names. Staff ids →
- * org_users. Player ids: no key, tolerant and counted (Q8c-a). Guardian ids: no key; a snapshot write naming a
- * guardian that is not in the final guardians table is refused (Q8c-b). The offer's own pointers (current revision,
+ * org_users. Player ids: no key, tolerant and counted (Q8c-a). Guardian ids: no key (the routes resolve the
+ * guardian before they write, Q8c-b). The offer's own pointers (current revision,
  * response, supersedes, superseded by, discarded by, a receipt's or response's revision) must name a row of the
  * same offer.
  *
  * Refusals name tables, fields and ids — never a subject, a body, a note, a message or a name.
  */
 import { transaction, migrationApplied, newestHistory, childRowsOf } from './database.mjs';
-import { isPlainObject, ids, tableExists } from './recruitment.mjs';
+import { isPlainObject, ids } from './recruitment.mjs';
 import { CONTACT_STATUSES, CONTACT_CHANNELS, CONTACT_MODES, CONTACT_LIMITS, RESPONSE_KINDS } from '../domains/recruitment/lifecycle/contact.mjs';
 import { OFFER_STATUSES, OFFER_TYPES, OFFER_LIMITS, OFFER_RESPONSE_TYPES, OFFER_RESPONSE_ACTORS } from '../domains/recruitment/offers/offer.mjs';
 
@@ -660,8 +660,6 @@ function writeOffer(st, o) {
   o.history.forEach((h, i) => st.ohist.run({ id: h.id, offer_id: o.id, position: i, at: h.at, action: h.action, by_kind: h.by?.kind ?? null, by_id: h.by?.id ?? null, by_name: h.by?.name ?? null, detail_json: json(h.detail) }));
   for (const act of OFFER_KEY_LISTS) o.keys[act].forEach((e, i) => st.okey.run({ offer_id: o.id, act, position: i, key: e.key, revision_id: e.revisionId }));
 }
-function deleteContact(st, id) { for (const d of st.contactChildrenDel) d.run(id); st.contactDel.run(id); }
-function deleteOffer(st, id) { for (const d of st.offerChildrenDel) d.run(id); st.offerDel.run(id); }
 
 /**
  * The statements `decodeContact` and `decodeOffer` read children through, answered for many records at once (§4.3
@@ -681,7 +679,6 @@ function batchStatements(sqlite, st, { contactIds = [], offerIds = [] }) {
   };
 }
 
-const flagOut = (v) => (v === null ? null : v === 1);
 const pick = (row, p, keys) => keys.every((k) => row[`${p}_${k}`] === null);
 const contactHistoryOut = (h) => ({ id: h.id, at: h.at, action: h.action, by: h.by_kind === null ? null : h.by_kind === 'org' ? { kind: 'org', userId: h.by_user_id, name: h.by_name } : { kind: h.by_kind, name: h.by_name }, detail: h.detail_json === null ? null : JSON.parse(h.detail_json) });
 function decodeContact(st, row) {
@@ -746,7 +743,7 @@ function decodeOffer(st, row) {
 export const readContacts = (sqlite) => { const st = statements(sqlite); const rows = st.contactAll.all(); const bst = batchStatements(sqlite, st, { contactIds: rows.map((r) => r.id) }); return rows.map((r) => decodeContact(bst, r)); };
 export const readOffers = (sqlite) => { const st = statements(sqlite); const rows = st.offerAll.all(); const bst = batchStatements(sqlite, st, { offerIds: rows.map((r) => r.id) }); return rows.map((r) => decodeOffer(bst, r)); };
 
-// ------------------------------------------------------------------ references (Q8c-a counted, Q8c-b strict on a snapshot write)
+// ------------------------------------------------------------------ references (Q8c-a counted)
 const PLAYER_REFS_SQL = {
   recruitmentContacts: 'SELECT player_id AS pid FROM recruitment_contacts UNION ALL SELECT recipient_player_id FROM recruitment_contacts WHERE recipient_player_id IS NOT NULL',
   recruitmentOffers: "SELECT player_id AS pid FROM recruitment_offers UNION ALL SELECT recipient_player_id FROM offer_revisions WHERE recipient_player_id IS NOT NULL UNION ALL SELECT for_player_id FROM offer_responses UNION ALL SELECT actor_id FROM offer_responses WHERE actor_type = 'player' UNION ALL SELECT viewer_id FROM offer_read_receipts WHERE viewer_kind = 'player'",
@@ -759,31 +756,12 @@ export function retainedPlayerReferences(sqlite) {
   if (!recruitmentContactsOffersLive(sqlite)) return null;
   return Object.fromEntries(RECRUITMENT_CONTACTS_OFFERS_COLLECTIONS.map((c) => [c, sqlite.prepare(`SELECT count(*) AS n FROM (${PLAYER_REFS_SQL[c]}) x WHERE EXISTS (SELECT 1 FROM players p WHERE p.id = x.pid AND p.deleted_at IS NOT NULL)`).get().n]));
 }
-/** Every guardian id a typed record names (recipient, revision recipient, guardian response actor, guardian receipt viewer). */
-function guardianIdsOf(name, r) {
-  if (name === 'recruitmentContacts') return r.recipient?.guardianId !== null && r.recipient?.guardianId !== undefined ? [r.recipient.guardianId] : [];
-  return [...r.revisions.map((x) => x.recipientSnapshot?.guardianId ?? null), ...r.responses.filter((x) => x.actorType === 'guardian').map((x) => x.actorId), ...r.readReceipts.filter((x) => x.viewerKind === 'guardian').map((x) => x.viewerId)].filter((x) => x !== null);
-}
 
-/** The pair the respond routes read both ways: a contact's request never names another contact. */
-function assertPairs(sqlite, label) {
-  const broken = sqlite.prepare('SELECT c.id AS contact, c.request_id AS request FROM recruitment_contacts c JOIN recruitment_requests r ON r.id = c.request_id WHERE r.contact_id IS NOT NULL AND r.contact_id <> c.id').all();
-  if (broken.length) throw refusal('CONTACT_REQUEST_MISMATCH', `${label}: ${broken.length} contact(s) name a request that does not name them back (${ids(broken.map((x) => `${x.contact} → ${x.request}`))}); the write was rolled back`);
-}
-function assertKeys(sqlite, label) {
-  for (const t of RECRUITMENT_CONTACTS_OFFERS_TABLES) {
-    const broken = sqlite.prepare(`PRAGMA foreign_key_check(${t})`).all();
-    if (broken.length) {
-      const idOf = (r) => sqlite.prepare(`SELECT ${t === 'contact_attempts' ? 'contact_id' : t === 'offer_read_receipts' || t === 'offer_keys' ? 'offer_id' : 'id'} AS id FROM ${t} WHERE rowid = ?`).get(r.rowid)?.id ?? `rowid ${r.rowid}`;
-      throw refusal('CONTACTS_OFFERS_REFERENCE_MISSING', `${label}: ${t} holds ${broken.length} row(s) naming a ${broken[0].parent} row that is not there (${ids(broken.map((r) => `${idOf(r)} → ${r.parent}`))}); the write was rolled back`);
-    }
-  }
-}
 
-// ------------------------------------------------------------------ the snapshot path (tools, fixtures, the persistence suites)
+// ------------------------------------------------------------------ the whole-domain read
 const TYPERS = { recruitmentContacts: typeContact, recruitmentOffers: typeOffer };
 const TABLE_OF = { recruitmentContacts: 'recruitment_contacts', recruitmentOffers: 'recruitment_offers' };
-export const CONTACTS_OFFERS_SNAPSHOT = {
+export const CONTACTS_OFFERS_RECORDS = {
   names: RECRUITMENT_CONTACTS_OFFERS_COLLECTIONS,
   read(sqlite) { if (!recruitmentContactsOffersLive(sqlite)) return null; return { recruitmentContacts: readContacts(sqlite), recruitmentOffers: readOffers(sqlite) }; },
   /**
@@ -791,51 +769,11 @@ export const CONTACTS_OFFERS_SNAPSHOT = {
    * the guardian references against the final guardians (Q8c-b), and remove the departing records. Returns the plan
    * `write` takes, or null before the 0017 record.
    */
-  begin(sqlite, db, { guardians, label = 'the snapshot' } = {}) {
-    if (!recruitmentContactsOffersLive(sqlite)) return null;
-    const supplied = Object.fromEntries(RECRUITMENT_CONTACTS_OFFERS_COLLECTIONS.map((n) => [n, Object.hasOwn(db, n) && db[n] !== undefined ? db[n] : undefined]));
-    const typed = {}; const written = [];
-    for (const name of RECRUITMENT_CONTACTS_OFFERS_COLLECTIONS) {
-      const value = supplied[name];
-      if (value === undefined) continue;
-      if (!Array.isArray(value)) throw refusal('CONTACTS_OFFERS_INPUT_INVALID', `the ${name} collection of ${label} must be an array of records (got ${describe(value)}); nothing was written`);
-      const seen = new Set();
-      typed[name] = value.map((raw, i) => {
-        const t = TYPERS[name](raw, `${name} entry #${i}`);
-        if (!t.ok) throw refusal('CONTACTS_OFFERS_INPUT_INVALID', `${label}: ${t.reason}; nothing was written`);
-        if (seen.has(t.record.id)) throw refusal('CONTACTS_OFFERS_INPUT_INVALID', `${label}: ${name} entry #${i} duplicates the id of an earlier entry (${t.record.id}); nothing was written`);
-        seen.add(t.record.id); return t.record;
-      });
-      written.push(name);
-    }
-    if (!written.length) return { written, typed };
-    // The child ids are keys of their tables across records (the writers' nextId makes them so): a repeat is named.
-    const childIds = { recruitmentContacts: (c) => [['contact_history', c.history.map((h) => h.id)]], recruitmentOffers: (o) => [['offer_revisions', o.revisions.map((r) => r.id)], ['offer_revision_documents', o.revisions.flatMap((r) => r.documents.map((d) => d.id))], ['offer_responses', o.responses.map((x) => x.id)], ['offer_history', o.history.map((h) => h.id)]] };
-    const repeats = [];
-    for (const name of written) {
-      const owner = new Map();
-      for (const r of typed[name]) for (const [table, list] of childIds[name](r)) for (const id of list) { const k = `${table} ${id}`; if (owner.has(k) && owner.get(k) !== r.id) repeats.push(`${k} (${owner.get(k)} and ${r.id})`); else owner.set(k, r.id); }
-    }
-    if (repeats.length) throw refusal('CONTACTS_OFFERS_INPUT_INVALID', `${label}: ${repeats.length} child id(s) appear under two records (${ids(repeats)}); nothing was written`);
-    const known = guardians !== undefined && Array.isArray(guardians) ? new Set(guardians.filter(isPlainObject).map((g) => g.id)) : tableExists(sqlite, 'guardians') ? new Set(sqlite.prepare('SELECT id FROM guardians').all().map((r) => r.id)) : new Set();
-    const missing = [];
-    for (const name of written) for (const r of typed[name]) for (const g of guardianIdsOf(name, r)) if (!known.has(g)) missing.push(`${TABLE_OF[name]} ${r.id} → guardians ${g === '' ? '""' : g}`);
-    if (missing.length) throw refusal('CONTACTS_OFFERS_GUARDIAN_MISSING', `${label}: ${missing.length} guardian reference(s) name no guardian (${ids(missing)}); nothing was written`);
-    const st = statements(sqlite);
-    for (const name of written) {
-      const keep = new Set(typed[name].map((r) => r.id));
-      for (const id of st.ids(TABLE_OF[name])) if (!keep.has(id)) (name === 'recruitmentContacts' ? deleteContact : deleteOffer)(st, id);
-    }
-    return { written, typed, label };
-  },
+
   /** The supplied records written (after the cases and requests of the same snapshot are in place). */
-  write(sqlite, plan) {
-    if (!plan) return; const st = statements(sqlite);
-    for (const c of plan.typed.recruitmentContacts ?? []) writeContact(st, c);
-    for (const o of plan.typed.recruitmentOffers ?? []) writeOffer(st, o);
-  },
+
   /** Every key and the contact/request pairs, named with ids before COMMIT would refuse them anonymously. */
-  assert(sqlite, { label = 'the snapshot' } = {}) { if (!recruitmentContactsOffersLive(sqlite)) return; assertKeys(sqlite, label); assertPairs(sqlite, label); },
+
 };
 
 // ------------------------------------------------------------------ the repository (explicit writes; SQL reads; the participant)
@@ -977,7 +915,7 @@ export function createRecruitmentContactsOffersRepository({ sqlite, unit = null,
     },
     counts() { return Object.fromEntries(RECRUITMENT_CONTACTS_OFFERS_COLLECTIONS.map((n) => [n, counters[n].get().n])); },
     pending: () => 0,
-    exportAll() { return CONTACTS_OFFERS_SNAPSHOT.read(sqlite); },
+    exportAll() { return CONTACTS_OFFERS_RECORDS.read(sqlite); },
     log,
     now,
   };

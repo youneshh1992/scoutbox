@@ -738,7 +738,6 @@ export function typeConsent(raw, at = 'regulatoryConsents') {
     };
   } catch (e) { if (e.code === 'COMPLIANCE_RECORDS_INPUT_INVALID') return { ok: false, reason: e.message.replace(/^[A-Z_]+: /, '') }; throw e; }
 }
-const okOr = (fn) => (raw, at) => { const out = fn(raw, at); return out && out.ok === false ? out : { ok: true, record: out }; };
 
 // ------------------------------------------------------------------ rows
 const st = new WeakMap();
@@ -1057,111 +1056,17 @@ function readAll(sqlite) {
     regulatoryConsents: consents.flatMap(({ revocation, ...k }) => [k, ...(revocation ? [{ id: revocation.id, kind: 'revocation', of: k.id, at: revocation.at, by: revocation.by }] : [])]),
   };
 }
-/**
- * Whole-snapshot access (readTableBacked / writeTableBacked). A supplied collection IS the whole final collection; an
- * omitted one is kept whole. Every record is typed (junk refused with ids); then the supplied collections' tables are
- * rewritten — contexts (with their evaluations) first, then reviews, then consents (with revocation rows).
- */
-export const COMPLIANCE_RECORDS_SNAPSHOT = {
+/** The whole domain read back as plain records (`readAllRecords` in index.mjs: the test suites' read-back); null before its migration. */
+export const COMPLIANCE_RECORDS_RECORDS = {
   names: COMPLIANCE_RECORDS_COLLECTIONS,
   read(sqlite) { return complianceRecordsLive(sqlite) ? readAll(sqlite) : null; },
   /**
    * Set the records aside before the tables they name (agreements, profiles, policies, reviewers) are rewritten: read
    * them, then empty the tables. `replace(…, { kept })` writes them back (or the snapshot's own).
    */
-  stash(sqlite) {
-    if (!complianceRecordsLive(sqlite)) return null;
-    const kept = readAll(sqlite);
-    sqlite.exec('DELETE FROM regulatory_consents');
-    sqlite.exec('DELETE FROM compliance_context_history');
-    sqlite.exec('DELETE FROM compliance_context_representations');
-    sqlite.exec('UPDATE regulatory_reviews SET supersedes_id = NULL, superseded_by_id = NULL');
-    sqlite.exec('DELETE FROM regulatory_review_history');
-    sqlite.exec('DELETE FROM regulatory_reviews');
-    sqlite.exec('DELETE FROM compliance_evaluations');
-    sqlite.exec('DELETE FROM compliance_contexts');
-    return kept;
-  },
-  replace(sqlite, db, { label = 'the snapshot (compliance records)', kept = null } = {}) {
-    if (!complianceRecordsLive(sqlite)) return [];
-    const written = COMPLIANCE_RECORDS_COLLECTIONS.filter((n) => Object.hasOwn(db, n) && db[n] !== undefined);
-    if (!written.length && !kept) return [];
-    const blocked = (m) => refusal('COMPLIANCE_RECORDS_IMPORT_BLOCKED', `${label}: ${m}`);
-    const typedList = (name, typer, list, map = (x) => x) => {
-      if (!Array.isArray(list)) throw blocked(`the ${name} collection must be an array of entries (got ${describe(list)})`);
-      const seen = new Set();
-      return list.map((raw, i) => {
-        const t = typer(map(raw), `${name} entry #${i}`);
-        if (!t.ok) throw blocked(t.reason);
-        if (seen.has(t.record.id)) throw blocked(`${name} entry #${i} duplicates an earlier entry (${t.record.id})`);
-        seen.add(t.record.id);
-        return t.record;
-      });
-    };
-    // The three collections reference each other (a review its context and evaluation, a representation its review, a
-    // consent its context): an omitted one is kept as it is, and all three are rewritten in dependency order.
-    const current = kept ?? readAll(sqlite);
-    const src = (n) => (written.includes(n) ? db[n] : current[n]);
-    const s = statements(sqlite);
-    try {
-      const rawContexts = src('complianceContexts');
-      const contexts = typedList('complianceContexts', okOr(typeContext), rawContexts, (c) => { if (!isPlainObject(c)) return c; const { evaluations: _e, otherServices: _o, interests: _i, ...rest } = c; return rest; });
-      const evals = rawContexts.map((raw, i) => (raw.evaluations ?? []).map((e, j) => { const { snapshotOf, alias: _a, requiredActions: _r, missingEvidence: _m, ruleStatuses: _s, ...result } = e; return typeEvaluation(result, snapshotOf ?? { parties: [], representations: [], proposed: null }, `complianceContexts entry #${i}.evaluations[${j}]`); }));
-      const reviews = typedList('regulatoryReviews', okOr(typeReview), src('regulatoryReviews'));
-      const ledgerAll = src('regulatoryConsents');
-      if (!Array.isArray(ledgerAll)) throw blocked(`the regulatoryConsents collection must be an array of entries (got ${describe(ledgerAll)})`);
-      const consents = typedList('regulatoryConsents', okOr(typeConsent), ledgerAll.filter((k) => k?.kind !== 'revocation'));
-      const revocations = ledgerAll.filter((k) => k?.kind === 'revocation');
-      // Out, children before parents.
-      sqlite.exec('DELETE FROM regulatory_consents');
-      sqlite.exec('DELETE FROM compliance_context_history');
-      sqlite.exec('DELETE FROM compliance_context_representations');
-      sqlite.exec('UPDATE regulatory_reviews SET supersedes_id = NULL, superseded_by_id = NULL');
-      sqlite.exec('DELETE FROM regulatory_review_history');
-      sqlite.exec('DELETE FROM regulatory_reviews');
-      sqlite.exec('DELETE FROM compliance_evaluations');
-      sqlite.exec('DELETE FROM compliance_contexts');
-      // In: contexts and their evaluations, reviews, then what names a review, then consents.
-      const evIds = contexts.map((c, i) => { writeContext(s, { ...c, representations: [], history: [] }, { isNew: true }); return evals[i].map((e, j) => writeEvaluation(s, c.id, j + 1, e)); });
-      for (const r of reviews) writeReview(s, { ...r, supersedes: null, supersededBy: null, history: [] }, { isNew: true });
-      for (const r of reviews) { if (r.supersedes || r.supersededBy) s.review.run(reviewRow(r)); writeReviewHistory(s, r); }
-      contexts.forEach((c, i) => {
-        c.representations.forEach((r, j) => s.repIns.run(c.id, j, r.id, r.agentUserId, r.partyRole, r.agreementId, r.status, r.declaredOnly ? 1 : 0, r.reviewId, r.declaredAt, r.firstActAt, r.withdrawnAt, r.verifiedByReviewId, r.verifiedAt, r.keys.declare?.key ?? null, r.keys.declare?.fp ?? null));
-        // An entry that repeats an evaluation names the one it follows (evaluations and their entries are one to one, in order).
-        let evIndex = -1;
-        c.history.forEach((h, j) => {
-          const d = h.detail ?? {};
-          if (h.action === 'compliance_context_evaluated' && !d.reviewId) evIndex += 1;
-          const linked = (h.action === 'compliance_context_evaluated' && !d.reviewId) || (h.action === 'compliance_representation_declared' && d.status === 'verified');
-          writeContextEntry(s, c.id, j, h, linked ? evIds[i][Math.max(evIndex, 0)] ?? null : null);
-        });
-      });
-      for (const k of consents) writeConsent(s, k, { isNew: true });
-      const seen = new Set();
-      for (const [i, rv] of revocations.entries()) {
-        const at = `regulatoryConsents revocation #${i}`;
-        if (!(isPlainObject(rv) && isId(rv.id) && isId(rv.of) && isInt(rv.at) && isPlainObject(rv.by))) throw blocked(`${at} is not { id, kind: revocation, of, at, by }`);
-        const k = consents.find((x) => x.id === rv.of);
-        if (!k || k.status !== 'granted') throw blocked(`${at} (${rv.id}) revokes ${rv.of}, which is not a granted consent of the snapshot`);
-        if (seen.has(rv.of)) throw blocked(`${at} (${rv.id}) revokes ${rv.of} a second time`);
-        seen.add(rv.of);
-        const by = typeBy(rv.by, `${at}.by`, { kinds: ['player', 'club_user'] });
-        s.revocation.run(rv.id, rv.of, rv.at, by.kind, by.userId, by.name, by.orgId ?? null);
-      }
-    } catch (e) {
-      if (e.code === 'COMPLIANCE_RECORDS_INPUT_INVALID') throw blocked(e.message.replace(/^[A-Z_]+: /, ''));
-      if (/FOREIGN KEY/.test(String(e.message))) throw refusal('COMPLIANCE_RECORDS_REFERENCE_MISSING', `${label}: a record names a row that is not there (${e.message}); the write was rolled back and nothing was changed`);
-      throw e;
-    }
-    return written;
-  },
-  assert(sqlite, { label = 'the snapshot (compliance records)' } = {}) {
-    if (!complianceRecordsLive(sqlite)) return;
-    for (const t of COMPLIANCE_RECORDS_TABLES) {
-      const broken = sqlite.prepare(`PRAGMA foreign_key_check(${t})`).all();
-      if (broken.length) throw refusal('COMPLIANCE_RECORDS_KEY_VIOLATION', `${label}: ${t} holds ${broken.length} row(s) whose reference is not there (first: rowid ${broken[0].rowid} → ${broken[0].parent}); the write was rolled back`);
-    }
-  },
+
+
+
 };
 const playerRefCount = (sqlite, sql) => sqlite.prepare(sql).get().n;
 export const unresolvedPlayerReferences = (sqlite) => (complianceRecordsLive(sqlite) ? { complianceRecords: playerRefCount(sqlite, "SELECT count(*) AS n FROM compliance_context_parties x WHERE subject_kind = 'player' AND NOT EXISTS (SELECT 1 FROM players p WHERE p.id = x.subject_id)") } : null);
@@ -1452,7 +1357,7 @@ export function createComplianceRecordsRepository({ sqlite, unit = null, now = D
     },
     counts() { return Object.fromEntries(COMPLIANCE_RECORDS_COLLECTIONS.map((n) => [n, counters[n].get().n])); },
     pending: () => 0,
-    exportAll() { return COMPLIANCE_RECORDS_SNAPSHOT.read(sqlite); },
+    exportAll() { return COMPLIANCE_RECORDS_RECORDS.read(sqlite); },
     log,
     now,
   };

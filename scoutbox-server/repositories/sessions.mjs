@@ -42,40 +42,7 @@ export const DEFAULT_SESSION_TTL_MS = 30 * 24 * 3600 * 1000;
 export const SESSIONS_CUTOVER_MIGRATION = '0003_sessions_live';
 
 export const sha256 = (s) => crypto.createHash('sha256').update(String(s)).digest('hex');
-const isHash = (s) => typeof s === 'string' && /^[0-9a-f]{64}$/.test(s);
-const KNOWN_KEYS = new Set(['token', 'tokenHash', 'sid', 'kind', 'refId', 'userId', 'via', 'createdAt', 'expiresAt']);
 
-/**
- * Decide whether a snapshot session row can be stored, without coercing it.
- * Returns `{ ok: true, row }` with the row normalised to the table's fields
- * (`tokenHash`, `sid`, `kind`, `refId`, `userId`, `via`, `createdAt`), or
- * `{ ok: false, reason }`. `orgUserExists(id, orgId)` answers whether that staff row exists in
- * that organisation. A missing `sid` is derived from the token hash (the server has
- * backfilled sids at boot since M13; that is the one normalisation kept).
- */
-export function validateSessionRow(raw, { orgUserExists }) {
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return { ok: false, reason: 'not an object' };
-  for (const key of Object.keys(raw)) if (!KNOWN_KEYS.has(key)) return { ok: false, reason: `unknown field "${key}"` };
-  let tokenHash = null;
-  if (typeof raw.token === 'string' && raw.token.length > 0) tokenHash = sha256(raw.token);
-  else if (isHash(raw.tokenHash)) tokenHash = raw.tokenHash;
-  else return { ok: false, reason: 'no token' };
-  if (!SESSION_KINDS.includes(raw.kind)) return { ok: false, reason: `kind "${String(raw.kind)}" is not a session kind` };
-  if (typeof raw.refId !== 'string' || !raw.refId) return { ok: false, reason: 'no refId' };
-  if (!Number.isInteger(raw.createdAt) || raw.createdAt <= 0) return { ok: false, reason: 'createdAt is not a positive integer timestamp' };
-  if (raw.via !== undefined && raw.via !== null && !SESSION_VIAS.includes(raw.via)) return { ok: false, reason: `via "${String(raw.via)}" is not supported` };
-  if (raw.kind === 'org') {
-    if (typeof raw.userId !== 'string' || !raw.userId) return { ok: false, reason: 'an org session names no staff member' };
-    if (!orgUserExists(raw.userId, raw.refId)) return { ok: false, reason: `staff member ${raw.userId} does not exist in organisation ${raw.refId}` };
-  } else if (raw.userId !== undefined && raw.userId !== null) {
-    return { ok: false, reason: `a ${raw.kind} session must not name a staff member` };
-  }
-  let sid = raw.sid;
-  let sidDerived = false;
-  if (sid === undefined || sid === null) { sid = tokenHash.slice(0, 12); sidDerived = true; }
-  if (typeof sid !== 'string' || !sid) return { ok: false, reason: 'sid is not a string' };
-  return { ok: true, sidDerived, row: { tokenHash, sid, kind: raw.kind, refId: raw.refId, userId: raw.kind === 'org' ? raw.userId : null, via: raw.via ?? null, createdAt: raw.createdAt } };
-}
 
 const SELECT = 'SELECT sid, kind, ref_id, org_user_id, via, created_at, expires_at FROM sessions';
 const toRow = (r) => {
@@ -86,20 +53,8 @@ const toRow = (r) => {
 };
 /** The table is the source of truth only once the cutover migration is recorded. */
 const cutOver = (sqlite) => migrationApplied(sqlite, SESSIONS_CUTOVER_MIGRATION);
-const readTtl = (sqlite) => Number(sqlite.prepare("SELECT value FROM meta WHERE key = 'sessionTtlMs'").get()?.value) || DEFAULT_SESSION_TTL_MS;
-const label = (raw, i) => (raw && typeof raw === 'object' && typeof raw.sid === 'string' ? `sid ${raw.sid}` : `entry #${i}`);
 
-/**
- * Whole-table access for tools that treat the file as one snapshot (backups,
- * restores, the persistence suites). Before the cutover record exists both
- * methods decline (`null` / `false`) so the caller keeps reading and writing
- * the legacy `sessions` blob, which is still authoritative then — whatever an
- * S1 shadow projection may have left in the table. Afterwards rows carry
- * `tokenHash`, never a token: a hash cannot be turned back into a bearer
- * token, so a snapshot that is written back keeps exactly the sessions it
- * read. A tool may also supply a plain `token` on a row it fabricates (test
- * fixtures); it is hashed on the way in and never stored.
- */
+/** The whole domain read back as plain records (`readAllRecords` in index.mjs: the test suites' read-back); null before its migration. */
 export const SESSIONS_TABLE = {
   name: 'sessions',
   read(sqlite) {
@@ -117,30 +72,7 @@ export const SESSIONS_TABLE = {
    * session is an explicit act (the repository's revoke methods, or a snapshot
    * that simply no longer lists it), never a side effect of a bad row.
    */
-  replace(sqlite, rows) {
-    if (!cutOver(sqlite)) return false;
-    if (!Array.isArray(rows)) throw new TypeError('sessions: the snapshot "sessions" collection is not an array');
-    const ttl = readTtl(sqlite);
-    const orgUserExists = (id, orgId) => !!sqlite.prepare('SELECT 1 FROM org_users WHERE id = ? AND org_id = ?').get(id, orgId);
-    const valid = [];
-    const seenHash = new Set();
-    const seenSid = new Set();
-    rows.forEach((raw, i) => {
-      const v = validateSessionRow(raw, { orgUserExists });
-      if (!v.ok) throw new Error(`sessions: snapshot row ${label(raw, i)} was refused (${v.reason}); the save was rolled back and no session was changed`);
-      if (seenHash.has(v.row.tokenHash)) throw new Error(`sessions: snapshot row ${label(raw, i)} was refused (duplicate token); the save was rolled back and no session was changed`);
-      if (seenSid.has(v.row.sid)) throw new Error(`sessions: snapshot row ${label(raw, i)} was refused (duplicate sid); the save was rolled back and no session was changed`);
-      seenHash.add(v.row.tokenHash); seenSid.add(v.row.sid);
-      valid.push(v.row);
-    });
-    sqlite.exec('DELETE FROM sessions');
-    const insert = sqlite.prepare('INSERT INTO sessions (token_hash, sid, kind, ref_id, org_user_id, via, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
-    for (const r of valid) {
-      try { insert.run(r.tokenHash, r.sid, r.kind, r.refId, r.userId, r.via, r.createdAt, r.createdAt + ttl); }
-      catch (err) { throw new Error(`sessions: snapshot row sid ${r.sid} could not be stored (${String(err?.message ?? err).replace(/^SQLITE_\w+:\s*/, '')}); the save was rolled back and no session was changed`); }
-    }
-    return true;
-  },
+
 };
 
 export function createSessionsRepository({ sqlite, sessionTtlMs = DEFAULT_SESSION_TTL_MS, now = Date.now, newToken = () => crypto.randomBytes(24).toString('hex'), newSid = () => crypto.randomBytes(6).toString('hex'), log = () => {} }) {

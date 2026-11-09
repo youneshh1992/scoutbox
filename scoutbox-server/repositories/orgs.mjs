@@ -21,7 +21,7 @@
  * deep-frozen records. Refusals carry a code and name the id and the field, never a value.
  *
  * A first installation's organisations (the seed) are imported once by `initialize`, while `meta.orgsInit` is
- * `pending` (set by the migration); a snapshot save settles it.
+ * `pending` (set by the migration); the first installation's import settles it.
  */
 import { PLANS } from '../catalogue.mjs';
 import { transaction, migrationApplied } from './database.mjs';
@@ -161,7 +161,7 @@ const passwordProblem = (h) => (h === null || textOk(h, L.passwordHash) ? null :
 
 const cutOver = (sqlite) => migrationApplied(sqlite, ORGS_CUTOVER_MIGRATION);
 
-// ------------------------------------------------------------------ the snapshot path
+// ------------------------------------------------------------------ the whole-domain read
 /**
  * Type one snapshot organisation: `{ ok: true, row, passwordHash }` or `{ ok: false, reason }`. A snapshot row is a
  * record plus `password` (the hash, or null); absent optional fields take their defaults (`createdAt` the save's
@@ -178,49 +178,12 @@ export function typeOrgSnapshotRow(raw, { now = Date.now() } = {}) {
   return { ok: true, row: r, passwordHash: password };
 }
 
-const blocked = (detail, extra = {}) => refusal('ORGS_IMPORT_BLOCKED', `${detail}; nothing was written`, extra);
 const readSnapshot = (sqlite) => sqlite.prepare(`${SELECT} ORDER BY rowid`).all().map((d) => ({ ...fromDb(d), password: d.password_hash }));
 
-/**
- * Whole-table access for snapshot mode (tools, fixtures, the persistence suites). `replace` types every row first
- * (an unknown field or a wrong-typed value refuses the whole write, naming the row) and upserts in place, so the
- * many tables that reference a kept organisation keep their rows. `prune` deletes the rows a snapshot no longer
- * lists; it runs after every table that names an organisation, so a row still referenced makes the save fail.
- */
+/** The whole domain read back as plain records (`readAllRecords` in index.mjs: the test suites' read-back); null before its migration. */
 export const ORGS_TABLE = {
   name: 'orgs',
   read(sqlite) { return cutOver(sqlite) ? readSnapshot(sqlite) : null; },
-  replace(sqlite, rows, { now = Date.now() } = {}) {
-    if (!cutOver(sqlite)) return false;
-    if (!sqlite.isTransaction) throw new Error('orgs: replace() runs inside the caller\'s transaction');
-    if (!Array.isArray(rows)) throw blocked(`the orgs snapshot collection must be an array (got ${describe(rows)})`);
-    const typed = []; const problems = []; const seen = new Set();
-    rows.forEach((raw, i) => {
-      const v = typeOrgSnapshotRow(raw, { now });
-      if (!v.ok) { problems.push(`entry #${i}: ${v.reason}`); return; }
-      if (seen.has(v.row.id)) { problems.push(`entry #${i}: duplicates organisation ${v.row.id}`); return; }
-      seen.add(v.row.id); typed.push(v);
-    });
-    if (problems.length) throw blocked(`${problems.length} invalid entr${problems.length === 1 ? 'y' : 'ies'} in the orgs snapshot collection — ${problems.slice(0, 20).join('; ')}`, { problems });
-    const upsert = sqlite.prepare(`${INSERT} ON CONFLICT(id) DO UPDATE SET ${COL_LIST.filter((c) => c !== 'id').map((c) => `${c} = excluded.${c}`).join(', ')}`);
-    try {
-      for (const { row, passwordHash } of typed) upsert.run(params(row, passwordHash));
-    } catch (err) {
-      throw blocked(`the orgs snapshot collection could not be stored (${String(err?.message ?? err).replace(/^SQLITE_\w+:\s*/, '')})`);
-    }
-    return true;
-  },
-  prune(sqlite, rows) {
-    if (!cutOver(sqlite) || !Array.isArray(rows)) return;
-    const keep = new Set(rows.filter((r) => isPlainObject(r)).map((r) => r.id));
-    const del = sqlite.prepare('DELETE FROM orgs WHERE id = ?');
-    for (const r of sqlite.prepare('SELECT id FROM orgs').all()) {
-      if (keep.has(r.id)) continue;
-      try { del.run(r.id); } catch (err) {
-        throw new Error(`orgs: the snapshot no longer lists organisation ${r.id} but other records still reference it (${String(err?.message ?? err).replace(/^SQLITE_\w+:\s*/, '')}); the save was rolled back`);
-      }
-    }
-  },
 };
 
 // ------------------------------------------------------------------ the repository

@@ -320,15 +320,6 @@ function referencesOf(n, r) {
   if (n === 'opsEvents') { org('detail.orgId', r.detail?.orgId); staff('detail.userId', r.detail?.userId); }
   return out;
 }
-/**
- * The ID-check queue's guardian rule (Q4b), on the final state: every entry names a guardian in the guardians table.
- * Runs inside the caller's transaction after a snapshot wrote the queue or the identity pair; a miss throws (ids only).
- */
-export function assertIdvQueueGuardiansConsistent(sqlite, { label = 'the snapshot' } = {}) {
-  if (!safetyAuditLive(sqlite)) return;
-  const missing = sqlite.prepare('SELECT id, guardian_id FROM idv_queue WHERE guardian_id NOT IN (SELECT id FROM guardians) ORDER BY seq').all();
-  if (missing.length) throw refusal('IDV_GUARDIAN_MISSING', `${missing.length} IDV entr${missing.length === 1 ? 'y' : 'ies'} in ${label} name a guardian that does not exist (entries ${ids(missing.map((r) => r.id))}; guardians ${ids([...new Set(missing.map((r) => r.guardian_id))])}); the write was rolled back and nothing was changed`, { entries: missing.map((r) => r.id) });
-}
 /** Q4, the diagnostic (never a refusal): per collection, rows naming a player id that is not in the players table. */
 export function unresolvedPlayerReferences(sqlite) {
   const players = tableExists(sqlite, 'players');
@@ -346,48 +337,10 @@ export function retainedPlayerReferences(sqlite) {
 function readAll(sqlite) {
   return Object.fromEntries(AUDIT_COLLECTIONS.map((n) => [n, decodeRows(sqlite, n, sqlite.prepare(`SELECT * FROM ${TABLE_OF[n]} ORDER BY seq`).all())]));
 }
-/**
- * Whole-snapshot access (readTableBacked / writeTableBacked): a supplied collection IS the whole final collection, in
- * order; an omitted one is kept. Every entry is typed (an unknown field or a wrong type refused, naming the field and
- * the id) and its organisation and staff references checked. `assert` checks the keys and the ID-check queue's
- * guardians on the final state.
- */
-export const SAFETY_AUDIT_SNAPSHOT = {
+/** The whole domain read back as plain records (`readAllRecords` in index.mjs: the test suites' read-back); null before its migration. */
+export const SAFETY_AUDIT_RECORDS = {
   names: AUDIT_COLLECTIONS,
   read(sqlite) { return safetyAuditLive(sqlite) ? readAll(sqlite) : null; },
-  replace(sqlite, db, { label = 'the snapshot (safety and audit)' } = {}) {
-    if (!safetyAuditLive(sqlite)) return [];
-    const written = AUDIT_COLLECTIONS.filter((n) => Object.hasOwn(db, n) && db[n] !== undefined);
-    const typed = {};
-    for (const n of written) {
-      const list = db[n];
-      if (!Array.isArray(list)) throw refusal('SAFETY_AUDIT_IMPORT_BLOCKED', `the ${n} collection of ${label} must be an array of entries (got ${describe(list)})`);
-      const seen = new Set();
-      typed[n] = list.map((raw, i) => {
-        const t = AUDIT_TYPERS[n](raw, `${n} entry #${i}`);
-        if (!t.ok) throw refusal('SAFETY_AUDIT_IMPORT_BLOCKED', `${label}: ${t.reason}`);
-        if (seen.has(t.record.id)) throw refusal('SAFETY_AUDIT_IMPORT_BLOCKED', `${label}: ${n} entry #${i} duplicates an earlier entry (${t.record.id})`);
-        seen.add(t.record.id);
-        return t;
-      });
-    }
-    const missing = [];
-    for (const n of written) for (const t of typed[n]) for (const [what, tbl, id] of referencesOf(n, t.record)) if (!sqlite.prepare(`SELECT 1 FROM ${tbl} WHERE id = ?`).get(id)) missing.push(`${what} → ${tbl} ${id}`);
-    if (missing.length) throw refusal('SAFETY_AUDIT_REFERENCE_MISSING', `${missing.length} reference(s) in ${label} are not there (${ids(missing)}); the write was rolled back and nothing was changed`, { rows: missing });
-    for (const n of written) {
-      sqlite.prepare(`DELETE FROM ${TABLE_OF[n]}`).run();
-      for (const t of typed[n]) writeRecord(sqlite, n, t);
-    }
-    return written;
-  },
-  assert(sqlite, { label = 'the snapshot (safety and audit)' } = {}) {
-    if (!safetyAuditLive(sqlite)) return;
-    for (const t of AUDIT_TABLE_NAMES) {
-      const broken = sqlite.prepare(`PRAGMA foreign_key_check(${t})`).all();
-      if (broken.length) throw refusal('SAFETY_AUDIT_KEY_VIOLATION', `${label}: ${t} holds ${broken.length} row(s) whose reference is not there (first: rowid ${broken[0].rowid} → ${broken[0].parent}); the write was rolled back`);
-    }
-    assertIdvQueueGuardiansConsistent(sqlite, { label });
-  },
 };
 
 // ------------------------------------------------------------------ the repository

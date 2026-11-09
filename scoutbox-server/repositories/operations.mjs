@@ -31,10 +31,8 @@ import { PLAYER_POSITIONS, PLAYER_FEET, PLAYER_AVAILABILITY } from './identity.m
 import { pageOf } from '../domains/platform/paging.mjs';
 
 export const OPERATIONS_MIGRATION = '0038_operations';
-/** The blob collections this repository replaced (lists; the snapshot path carries them). */
+/** The blob collections this repository replaced (lists; the whole-domain read returns them). */
 export const OPERATIONS_COLLECTIONS = Object.freeze(['uploadSessions', 'savedSearches', 'invoices', 'reputationSeed', 'deliveryCallbacksSeen']);
-/** The blob singletons it replaced (a number and an object): rows of delivery_centre and delivery_fail_injections, not in snapshots. */
-export const OPERATIONS_SINGLETONS = Object.freeze(['deliveryCentreSince', 'deliveryFailInject']);
 
 // ------------------------------------------------------------------ vocabularies and limits (one definition)
 export const UPLOAD_MIMES = Object.freeze(['video/webm', 'video/mp4', 'video/quicktime', 'image/jpeg', 'image/png', 'image/webp']);
@@ -221,64 +219,10 @@ const TYPED = {
   reputationSeed: (list, label) => typeList('reputationSeed', list, typeReputation, label, (r) => `${r.scoutName}|${r.orgName}`),
   deliveryCallbacksSeen: (list, label) => typeList('deliveryCallbacksSeen', list, (v, at) => (typeof v === 'string' && v.length > 0 && v.length <= L.callbackId ? { ok: true, record: v } : { ok: false, reason: `${at} is not a callback id (${describe(v)})` }), label, (v) => v),
 };
-function crossCheck(sqlite, t) {
-  const out = [];
-  const has = (tbl) => { const s = sqlite.prepare(`SELECT 1 FROM ${tbl} WHERE id = ?`); return (id) => !!s.get(id); };
-  const org = has('orgs'); const staff = has('org_users'); const signing = has('signings');
-  for (const s of t.savedSearches) { if (!org(s.orgId)) out.push(`saved_searches ${s.id} → orgs ${s.orgId}`); if (!staff(s.userId)) out.push(`saved_searches ${s.id} → org_users ${s.userId}`); }
-  for (const i of t.invoices) { if (!org(i.orgId)) out.push(`invoices ${i.id} → orgs ${i.orgId}`); if (!signing(i.signingId)) out.push(`invoices ${i.id} → signings ${i.signingId}`); }
-  return out;
-}
-function writeFinal(sqlite, t, written) {
-  const run = (sql, ...a) => sqlite.prepare(sql).run(...a);
-  if (written.includes('uploadSessions')) {
-    run('DELETE FROM upload_sessions');
-    const ins = sqlite.prepare(insertSql('upload_sessions', UPLOAD_SPEC)); const chunk = sqlite.prepare('INSERT INTO upload_session_chunks (upload_session_id, chunk_index) VALUES (?, ?)');
-    for (const u of t.uploadSessions) { ins.run(encode(UPLOAD_SPEC, u)); for (const c of u.received) chunk.run(u.id, c); }
-  }
-  if (written.includes('savedSearches')) {
-    run('DELETE FROM saved_searches');
-    const ins = sqlite.prepare(insertSql('saved_searches', SAVED_SEARCH_SPEC));
-    for (const s of t.savedSearches) ins.run(encode(SAVED_SEARCH_SPEC, s));
-  }
-  if (written.includes('invoices')) {
-    run('DELETE FROM invoices');
-    const ins = sqlite.prepare(insertSql('invoices', INVOICE_SPEC));
-    for (const i of t.invoices) ins.run(encode(INVOICE_SPEC, i));
-  }
-  if (written.includes('reputationSeed')) {
-    run('DELETE FROM reputation_seed');
-    const ins = sqlite.prepare(insertSql('reputation_seed', REPUTATION_SPEC));
-    for (const r of t.reputationSeed) ins.run(encode(REPUTATION_SPEC, r));
-  }
-  if (written.includes('deliveryCallbacksSeen')) {
-    run('DELETE FROM delivery_callbacks_seen');
-    const ins = sqlite.prepare('INSERT INTO delivery_callbacks_seen (callback_id, seen_at) VALUES (?, ?)');
-    for (const id of t.deliveryCallbacksSeen) ins.run(id, 0);
-  }
-}
-/** Whole-snapshot access (readTableBacked / writeTableBacked): a supplied collection IS the whole final collection; an omitted one is kept. */
-export const OPERATIONS_SNAPSHOT = {
+/** The whole domain read back as plain records (`readAllRecords` in index.mjs: the test suites' read-back); null before its migration. */
+export const OPERATIONS_RECORDS = {
   names: OPERATIONS_COLLECTIONS,
   read(sqlite) { return operationsLive(sqlite) ? readAll(sqlite) : null; },
-  replace(sqlite, db, { label = 'the snapshot (operations)' } = {}) {
-    if (!operationsLive(sqlite)) return [];
-    const written = OPERATIONS_COLLECTIONS.filter((n) => Object.hasOwn(db, n) && db[n] !== undefined);
-    if (!written.length) return [];
-    const typed = { savedSearches: [], invoices: [] };
-    for (const name of written) typed[name] = TYPED[name](db[name], label);
-    const missing = crossCheck(sqlite, typed);
-    if (missing.length) throw refusal('OPERATIONS_REFERENCE_MISSING', `${missing.length} reference(s) in ${label} are not there (${ids(missing)}); the write was rolled back and nothing was changed`, { rows: missing });
-    writeFinal(sqlite, typed, written);
-    return written;
-  },
-  assert(sqlite, { label = 'the snapshot (operations)' } = {}) {
-    if (!operationsLive(sqlite)) return;
-    for (const t of OPERATIONS_TABLES) {
-      const broken = sqlite.prepare(`PRAGMA foreign_key_check(${t})`).all();
-      if (broken.length) throw refusal('OPERATIONS_KEY_VIOLATION', `${label}: ${t} holds ${broken.length} row(s) whose reference is not there (first: rowid ${broken[0].rowid} → ${broken[0].parent}); the write was rolled back`);
-    }
-  },
 };
 
 // ------------------------------------------------------------------ the repository
@@ -454,7 +398,7 @@ export function createOperationsRepository({ sqlite, unit = null, now = Date.now
     },
     counts() { return Object.fromEntries(Object.entries(counters).map(([n, s]) => [n, s.get().n])); },
     pending: () => 0,
-    exportAll() { return OPERATIONS_SNAPSHOT.read(sqlite); },
+    exportAll() { return OPERATIONS_RECORDS.read(sqlite); },
     log,
     now,
   };

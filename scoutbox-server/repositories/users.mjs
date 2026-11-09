@@ -143,35 +143,7 @@ function clashOf(q, r) {
   return null;
 }
 
-// ------------------------------------------------------------------ the snapshot path
-/**
- * Type one snapshot staff row: `{ ok: true, row, mfa }` or `{ ok: false, reason }`. The snapshot carries what a
- * round trip needs: the record's fields, with `mfa` as `{ secretB32, enabledAt, recoveryHashes }`. Absent optional
- * fields take their defaults; an unknown field is refused.
- */
-export function typeStaffSnapshotRow(raw) {
-  if (!isPlainObject(raw)) return { ok: false, reason: `not an object (${describe(raw)})` };
-  const at = `staff ${typeof raw.id === 'string' ? raw.id : '(no id)'}`;
-  const unknown = Object.keys(raw).filter((k) => !RECORD_KEYS.includes(k));
-  if (unknown.length) return { ok: false, reason: `${at}: unknown field(s) ${unknown.join(', ')}` };
-  const r = { email: null, ssoSubject: null, removedAt: null, removedById: null, provenance: null, ...raw, deliveryPrefs: raw.deliveryPrefs == null ? DEFAULT_PREFS : raw.deliveryPrefs };
-  const problems = recordProblems(r);
-  if (problems.length) return { ok: false, reason: `${at}: ${problems.join('; ')}` };
-  let mfa = null;
-  if (raw.mfa != null) {
-    const m = raw.mfa;
-    if (!isPlainObject(m) || Object.keys(m).some((k) => !['secretB32', 'enabledAt', 'recoveryHashes'].includes(k))) return { ok: false, reason: `${at}: mfa must be { secretB32, enabledAt, recoveryHashes } or null` };
-    if (!textOk(m.secretB32, L.secret, 16)) return { ok: false, reason: `${at}: mfa.secretB32 must be text of 16 to ${L.secret} characters` };
-    if (m.enabledAt != null && !isClock(m.enabledAt)) return { ok: false, reason: `${at}: mfa.enabledAt must be an integer timestamp or null` };
-    const hashes = m.recoveryHashes ?? [];
-    if (!Array.isArray(hashes) || !hashes.every(isHash) || new Set(hashes).size !== hashes.length) return { ok: false, reason: `${at}: mfa.recoveryHashes must be distinct sha256 hex hashes` };
-    if (hashes.length && m.enabledAt == null) return { ok: false, reason: `${at}: recovery codes exist only once MFA is enabled` };
-    mfa = { secret: m.secretB32, enabledAt: m.enabledAt ?? null, hashes };
-  }
-  return { ok: true, row: { id: r.id, orgId: r.orgId, name: r.name, role: r.role, email: r.email, ssoSubject: r.ssoSubject, createdAt: r.createdAt, removedAt: r.removedAt, removedById: r.removedById, provenance: r.provenance, deliveryPrefs: prefsOf(r.deliveryPrefs) }, mfa };
-}
 
-const blocked = (detail, extra = {}) => refusal('ORG_USERS_IMPORT_BLOCKED', `${detail}; nothing was written`, extra);
 function readSnapshot(sqlite) {
   const codes = new Map();
   for (const c of sqlite.prepare('SELECT org_user_id, code_hash FROM org_user_recovery_codes ORDER BY rowid').all()) {
@@ -183,56 +155,14 @@ function readSnapshot(sqlite) {
     mfa: d.mfa_secret === null ? null : { secretB32: d.mfa_secret, enabledAt: d.mfa_enabled_at, recoveryHashes: codes.get(d.id) ?? [] },
   }));
 }
-const keptIds = (rows) => new Set((Array.isArray(rows) ? rows : []).filter((r) => isPlainObject(r) && typeof r.id === 'string').map((r) => r.id));
 
-/**
- * Whole-table access for snapshot mode (tools, fixtures, the persistence suites). `replace` types every row first
- * (an unknown field, a wrong-typed value or a broken uniqueness rule refuses the whole write, naming the row) and
- * upserts in place, so the sessions and the many tables that reference a kept staff member keep their rows.
- * `prune: false` leaves the deletions to a later `prune(sqlite, rows)` (after the tables that name staff).
- */
+/** The whole domain read back as plain records (`readAllRecords` in index.mjs: the test suites' read-back); null before its migration. */
 export const USERS_TABLE = {
   name: 'users',
   read(sqlite) { return usersLive(sqlite) ? readSnapshot(sqlite) : null; },
-  replace(sqlite, rows, { prune = true } = {}) {
-    if (!usersLive(sqlite)) return false;
-    if (!sqlite.isTransaction) throw new Error('org_users: replace() runs inside the caller\'s transaction');
-    if (!Array.isArray(rows)) throw blocked(`the users snapshot collection must be an array (got ${describe(rows)})`);
-    const typed = []; const problems = []; const seen = new Set(); const names = new Set();
-    rows.forEach((raw, i) => {
-      const v = typeStaffSnapshotRow(raw);
-      if (!v.ok) { problems.push(`entry #${i}: ${v.reason}`); return; }
-      if (seen.has(v.row.id)) { problems.push(`entry #${i}: duplicates staff ${v.row.id}`); return; }
-      const nk = `${v.row.orgId}\u0000${staffNameKey(v.row.name)}`;
-      if (names.has(nk)) { problems.push(`entry #${i}: staff ${v.row.id} has the name of another staff account of ${v.row.orgId}`); return; }
-      seen.add(v.row.id); names.add(nk); typed.push(v);
-    });
-    if (problems.length) throw blocked(`${problems.length} invalid entr${problems.length === 1 ? 'y' : 'ies'} in the users snapshot collection — ${problems.slice(0, 20).join('; ')}`, { problems });
-    // Names move between rows only through a delete; clear the keys first so a swap of names between kept rows is not a clash.
-    const upsert = sqlite.prepare(`${INSERT} ON CONFLICT(id) DO UPDATE SET ${COLS.split(', ').filter((c) => c !== 'id').map((c) => `${c} = excluded.${c}`).join(', ')}`);
-    const clearKey = sqlite.prepare("UPDATE org_users SET name_key = char(0) || id WHERE id = ?");
-    for (const { row } of typed) clearKey.run(row.id);
-    const delCodes = sqlite.prepare('DELETE FROM org_user_recovery_codes WHERE org_user_id = ?');
-    const addCode = sqlite.prepare('INSERT INTO org_user_recovery_codes (org_user_id, code_hash) VALUES (?, ?)');
-    const setRemover = sqlite.prepare('UPDATE org_users SET removed_by_id = ? WHERE id = ?');
-    try {
-      // Removers are set in a second pass: a row may name a staff member listed after it.
-      for (const { row, mfa } of typed) upsert.run(params({ ...row, removedById: null }, mfa ? { secret: mfa.secret, enabledAt: mfa.enabledAt } : {}));
-      for (const { row } of typed) if (row.removedById !== null) setRemover.run(row.removedById, row.id);
-      for (const { row, mfa } of typed) { delCodes.run(row.id); for (const h of mfa?.hashes ?? []) addCode.run(row.id, h); }
-    } catch (err) {
-      throw blocked(`the users snapshot collection could not be stored (${String(err?.message ?? err).replace(/^SQLITE_\w+:\s*/, '')})`);
-    }
-    if (prune) USERS_TABLE.prune(sqlite, rows);
-    return true;
-  },
+
   /** Delete every staff row whose id is absent from `rows` (their sessions and recovery codes cascade; the caller owns the transaction). */
-  prune(sqlite, rows) {
-    if (!usersLive(sqlite)) return;
-    const keep = keptIds(rows);
-    const del = sqlite.prepare('DELETE FROM org_users WHERE id = ?');
-    for (const r of sqlite.prepare('SELECT id FROM org_users ORDER BY rowid DESC').all()) if (!keep.has(r.id)) del.run(r.id);
-  },
+
 };
 
 // ------------------------------------------------------------------ the repository

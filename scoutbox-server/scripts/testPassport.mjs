@@ -44,7 +44,7 @@ const share = (over = {}) => ({ id: 'pshr-1', playerId: PID, mode: 'public', tok
 const correction = (over = {}) => ({ id: 'pcor-1', playerId: PID, targetType: 'club_history', targetId: null, reason: 'Joined in August.', by: { kind: 'player', id: PID, name: 'Kola' }, status: 'open', resolution: null, createdAt: NOW - 100, ...over });
 
 function serverOpen(dir) {
-  const store = openStore(dir, { tableBacked: TABLE_BACKED });
+  const store = openStore(dir);
   const layer = attachDataLayer({ store, nextId, sessionTtlMs: TTL, now: () => NOW, warn: () => {} });
   return { store, repo: layer.passport, unit: (w) => store.unitOfWork(w), close: () => store.sqlite.close() };
 }

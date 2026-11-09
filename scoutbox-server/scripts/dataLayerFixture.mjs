@@ -16,14 +16,17 @@
 // Synthetic data only; temporary directories only.
 import { createHash } from 'node:crypto';
 import { openStore } from '../store.mjs';
-import { attachDataLayer, TABLE_BACKED, readTableBacked } from '../repositories/index.mjs';
+import { attachDataLayer, readAllRecords } from '../repositories/index.mjs';
+import { DatabaseSync } from 'node:sqlite';
+import path from 'node:path';
+import fs from 'node:fs';
 
 const TTL = 30 * 86_400_000;
 const sha256 = (s) => createHash('sha256').update(String(s)).digest('hex');
 
 /** Open `dir` in server mode with every repository attached. `seed` is a first installation's records (ignored later). */
 export function openLayer(dir, { seed = {}, now = Date.now, nextId = null, warn = () => {}, sessionTtlMs = TTL } = {}) {
-  const store = openStore(dir, { tableBacked: TABLE_BACKED });
+  const store = openStore(dir);
   let counter = null;
   const mint = nextId ?? ((prefix) => { counter ??= Number(store.sqlite.prepare("SELECT value FROM counters WHERE name = 'id'").get()?.value) || 0; counter += 1; store.sqlite.prepare("UPDATE counters SET value = MAX(value, ?) WHERE name = 'id'").run(counter); return `${prefix}-${counter}`; });
   const layer = attachDataLayer({ seed, store, nextId: mint, sessionTtlMs, now, warn, log: () => {} });
@@ -244,6 +247,9 @@ export function writeFixture(dir, collections = {}, { now = Date.now(), idCounte
 }
 /** Every collection read back as plain records (the shapes the repositories hand out). */
 export function readRecords(dir) {
-  const L = openLayer(dir);
-  try { return JSON.parse(JSON.stringify(readTableBacked(L.sqlite))); } finally { L.close(); }
+  // A read-only connection: nothing attaches, so no boot sweep runs (an expired fixture code is still there to read). A
+  // directory with no database yet is initialised first (the migrations), so it reads as a clean database.
+  if (!fs.existsSync(path.join(dir, 'scoutbox.db'))) openLayer(dir).close();
+  const sqlite = new DatabaseSync(path.join(dir, 'scoutbox.db'), { readOnly: true });
+  try { return JSON.parse(JSON.stringify(readAllRecords(sqlite))); } finally { sqlite.close(); }
 }

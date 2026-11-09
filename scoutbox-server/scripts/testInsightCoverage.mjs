@@ -61,7 +61,7 @@ const assignment = (over = {}) => ({
 
 const FIX = () => ({ users: [...USERS(), SCOUT2], notifications: [], dispatches: [] });
 function serverOpen(dir) {
-  const store = openStore(dir, { tableBacked: TABLE_BACKED });
+  const store = openStore(dir);
   const layer = attachDataLayer({ store, nextId, sessionTtlMs: TTL, now: () => NOW, warn: () => {} });
   return { store, repo: layer.insightCoverage, grassroots: layer.grassroots, unit: (w) => store.unitOfWork(w), close: () => store.sqlite.close() };
 }

@@ -28,7 +28,7 @@ const ORGS = () => [
 
 /** A server-mode store on a new directory with the data layer attached the way the server attaches it (the seed imported once). */
 function boot(dir = tempDir('idrepo'), { players = FIXTURE().players, guardians = FIXTURE().guardians } = {}) {
-  const store = openStore(dir, { tableBacked: TABLE_BACKED });
+  const store = openStore(dir);
   const layer = attachDataLayer({ seed: { orgs: ORGS(), players: clone(players), guardians: clone(guardians) }, store, nextId, sessionTtlMs: TTL, now: () => NOW });
   const all = (sql, ...p) => store.sqlite.prepare(sql).all(...p).map((r) => ({ ...r }));
   const get = (sql, ...p) => store.sqlite.prepare(sql).get(...p);

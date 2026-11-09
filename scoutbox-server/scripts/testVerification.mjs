@@ -53,7 +53,7 @@ const evidence = (over = {}) => ({
 const dispute = (over = {}) => ({ id: 'vdsp-1', claimId: 'vclm-1', byKind: 'org_user', byId: SCOUT.userId, byName: SCOUT.name, reason: 'Wrong dates', status: 'open', resolution: null, createdAt: NOW - 100, resolvedAt: null, resolvedBy: null, resolvedById: null, resolutionAttribution: null, ...over });
 
 function serverOpen(dir) {
-  const store = openStore(dir, { tableBacked: TABLE_BACKED });
+  const store = openStore(dir);
   const db = {}; // S14a: a fixture-saved file is not a first installation, so there is nothing to hand in
   const layer = attachDataLayer({ db, store, nextId, persist: () => {}, sessionTtlMs: TTL, now: () => NOW, warn: () => {} });
   const snapshot = () => ({ savedAt: NOW, idCounter: 1000, db });

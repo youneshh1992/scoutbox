@@ -63,7 +63,7 @@ const refusedSave = (tag, fixture, pattern) => {
   return err;
 };
 function serverOpen(dir) {
-  const store = openStore(dir, { tableBacked: TABLE_BACKED });
+  const store = openStore(dir);
   const layer = attachDataLayer({ store, nextId, sessionTtlMs: TTL, now: () => NOW, warn: () => {} });
   return { store, layer, unit: (w) => store.unitOfWork(w), repo: layer.recruitment, close: () => store.sqlite.close() };
 }

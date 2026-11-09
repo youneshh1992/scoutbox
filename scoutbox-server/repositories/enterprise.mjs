@@ -20,7 +20,7 @@
  * References. Organisations and the staff named are RESTRICT keys; so are the keys inside the domain (a grant's
  * ticket). Child rows cascade with their owner, except the access log, which is audit and RESTRICT.
  */
-import { isPlainObject, ids, describe } from './recruitment.mjs';
+import { isPlainObject, describe } from './recruitment.mjs';
 import { transaction, migrationApplied, childRowsOf } from './database.mjs';
 import { deepFreeze } from './scoutingEvidence.mjs';
 import { text, int, oneOf, tableDdl, bad, typeSpec, encode, decode, insertSql, upsertSql } from './fieldSpecs.mjs';
@@ -258,69 +258,10 @@ function readAll(sqlite) {
     supportAccessGrants: decodeGrants(sqlite, all('support_access_grants')),
   };
 }
-const TYPERS = { orgInvites: typeInvite, ssoConfigs: typeSsoConfig, ssoStates: typeSsoState, supportTickets: typeTicket, supportAccessGrants: typeGrant };
-function crossCheck(sqlite, t) {
-  const out = [];
-  const dup = (list, key, what) => { const keys = list.map(key); if (new Set(keys).size !== keys.length) out.push(what); };
-  dup(t.orgInvites, (i) => i.tokenHash, 'two invites have the same code hash');
-  dup(t.ssoConfigs, (c) => c.orgId, 'two SSO configurations name the same organisation');
-  dup(t.ssoStates, (s) => s.stateHash, 'two SSO states have the same state hash');
-  const tickets = new Map(t.supportTickets.map((x) => [x.id, x]));
-  for (const g of t.supportAccessGrants) {
-    const tk = tickets.get(g.ticketId);
-    if (!tk) out.push(`support_access_grants ${g.id} ticket → support_tickets ${g.ticketId}`);
-    else if (tk.orgId !== g.orgId) out.push(`support_access_grants ${g.id} names another organisation's ticket`);
-  }
-  const staffOrg = sqlite.prepare('SELECT org_id FROM org_users WHERE id = ?');
-  for (const tk of t.supportTickets) { const u = staffOrg.get(tk.byUserId); if (u && u.org_id !== tk.orgId) out.push(`support_tickets ${tk.id} names another organisation's staff member`); }
-  for (const i of t.orgInvites) { if (i.userId === null) continue; const u = staffOrg.get(i.userId); if (u && u.org_id !== i.orgId) out.push(`org_invites ${i.id} names another organisation's staff member`); }
-  return out;
-}
-const DELETE_ORDER = ['support_access_log', 'support_access_grants', 'support_tickets', 'sso_states', 'sso_configs', 'org_invites'];
-function writeFinal(sqlite, t) {
-  for (const tbl of DELETE_ORDER) sqlite.exec(`DELETE FROM ${tbl}`);
-  const st = statements(sqlite);
-  for (const i of t.orgInvites) st.invite.run(encode(INVITE_SPEC, i));
-  for (const c of t.ssoConfigs) st.ssoConfig.run(encode(SSO_CONFIG_SPEC, c));
-  for (const s of t.ssoStates) st.ssoState.run(encode(SSO_STATE_SPEC, s));
-  for (const tk of t.supportTickets) writeTicket(st, tk);
-  for (const g of t.supportAccessGrants) writeGrant(st, g);
-}
-/** Whole-snapshot access (readTableBacked / writeTableBacked): a supplied collection IS the whole final collection; an omitted one is kept. */
-export const ENTERPRISE_SNAPSHOT = {
+/** The whole domain read back as plain records (`readAllRecords` in index.mjs: the test suites' read-back); null before its migration. */
+export const ENTERPRISE_RECORDS = {
   names: ENTERPRISE_COLLECTIONS,
   read(sqlite) { return enterpriseLive(sqlite) ? readAll(sqlite) : null; },
-  replace(sqlite, db, { label = 'the snapshot (enterprise)' } = {}) {
-    if (!enterpriseLive(sqlite)) return [];
-    const written = ENTERPRISE_COLLECTIONS.filter((n) => Object.hasOwn(db, n) && db[n] !== undefined);
-    if (!written.length) return [];
-    const current = readAll(sqlite);
-    const typed = {};
-    for (const name of ENTERPRISE_COLLECTIONS) {
-      if (!written.includes(name)) { typed[name] = current[name]; continue; }
-      const list = db[name];
-      if (!Array.isArray(list)) throw refusal('ENTERPRISE_IMPORT_BLOCKED', `the ${name} collection of ${label} must be an array of entries (got ${describe(list)})`);
-      const seen = new Set();
-      typed[name] = list.map((raw, i) => {
-        const t = TYPERS[name](raw, `${name} entry #${i}`);
-        if (!t.ok) throw refusal('ENTERPRISE_IMPORT_BLOCKED', `${label}: ${t.reason}`);
-        if (seen.has(t.record.id)) throw refusal('ENTERPRISE_IMPORT_BLOCKED', `${label}: ${name} entry #${i} duplicates an earlier entry (${t.record.id})`);
-        seen.add(t.record.id);
-        return t.record;
-      });
-    }
-    const missing = crossCheck(sqlite, typed);
-    if (missing.length) throw refusal('ENTERPRISE_REFERENCE_MISSING', `${missing.length} reference(s) in ${label} are not there (${ids(missing)}); the write was rolled back and nothing was changed`, { rows: missing });
-    writeFinal(sqlite, typed);
-    return written;
-  },
-  assert(sqlite, { label = 'the snapshot (enterprise)' } = {}) {
-    if (!enterpriseLive(sqlite)) return;
-    for (const t of ENTERPRISE_TABLES) {
-      const broken = sqlite.prepare(`PRAGMA foreign_key_check(${t})`).all();
-      if (broken.length) throw refusal('ENTERPRISE_KEY_VIOLATION', `${label}: ${t} holds ${broken.length} row(s) whose reference is not there (first: rowid ${broken[0].rowid} → ${broken[0].parent}); the write was rolled back`);
-    }
-  },
 };
 
 // ------------------------------------------------------------------ the repository
@@ -505,7 +446,7 @@ export function createEnterpriseRepository({ sqlite, unit = null, now = Date.now
     },
     counts() { return Object.fromEntries(ENTERPRISE_COLLECTIONS.map((n) => [n, counters[n].get().n])); },
     pending: () => 0,
-    exportAll() { return ENTERPRISE_SNAPSHOT.read(sqlite); },
+    exportAll() { return ENTERPRISE_RECORDS.read(sqlite); },
     log,
     now,
   };

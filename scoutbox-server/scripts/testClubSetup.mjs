@@ -49,7 +49,7 @@ const vacancy = (over = {}) => ({ id: 'vac-1', orgId: ORG.id, roleId: 'role-1', 
 const federation = (over = {}) => ({ orgId: ORG.id, federation: 'Manchester FA', registrationId: 'MFA-1', contactEmail: 'club@example.com', status: 'pending', submittedAt: NOW - 1000, ...over });
 
 function serverOpen(dir) {
-  const store = openStore(dir, { tableBacked: TABLE_BACKED });
+  const store = openStore(dir);
   const layer = attachDataLayer({ store, nextId, sessionTtlMs: TTL, now: () => NOW, warn: () => {} });
   return { store, repo: layer.clubSetup, layer, unit: (w) => store.unitOfWork(w), close: () => store.sqlite.close() };
 }

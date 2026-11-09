@@ -4,8 +4,7 @@
  *
  * Tables: evidence, evidence_media, evidence_disputes, evidence_history; coach_affiliations, coach_affiliation_history;
  * squad_invites. Every field is a typed column with its vocabulary and length CHECKs; there are no side columns, and a
- * record the columns cannot hold is refused with its id — at the repository (the routes check first and answer 400)
- * and at a snapshot write (the save rolls back).
+ * record the columns cannot hold is refused with its id — at the repository (the routes check first and answer 400).
  *
  * WRITES are explicit: `create(record)` and `update(id, (draft) => …)` type the whole record and write its rows at once,
  * joined into the open unit of work (a failure poisons it), the caller's open transaction, or a transaction of their
@@ -374,48 +373,6 @@ const decodeInvite = (_st, r) => ({ id: r.id, orgId: r.org_id, orgName: r.org_na
 const DECODERS = { evidence: decodeEvidence, coachAffiliations: decodeAffiliation, squadInvites: decodeInvite };
 const BATCH_KEY = { evidence: 'evidenceIds', coachAffiliations: 'affiliationIds' };
 
-// ------------------------------------------------------------------ the rules the code keeps, named with ids before the engine would
-function checkRecords(sqlite, typed, label) {
-  const problems = [];
-  const orgs = new Set(sqlite.prepare('SELECT id FROM orgs').all().map((r) => r.id));
-  const users = new Set(sqlite.prepare('SELECT id FROM org_users').all().map((r) => r.id));
-  const evidenceIds = new Set(typed.evidence.map((e) => e.id));
-  for (const e of typed.evidence) {
-    if (e.correctionOf && !evidenceIds.has(e.correctionOf)) problems.push(`evidence ${e.id} correctionOf → ${e.correctionOf}`);
-    if (e.supersededBy && !evidenceIds.has(e.supersededBy)) problems.push(`evidence ${e.id} supersededBy → ${e.supersededBy}`);
-  }
-  for (const a of typed.coachAffiliations) {
-    if (!orgs.has(a.orgId)) problems.push(`coach_affiliations ${a.id} → orgs ${a.orgId}`);
-    if (!users.has(a.confirmedBy.userId)) problems.push(`coach_affiliations ${a.id} confirmedBy → org_users ${a.confirmedBy.userId}`);
-  }
-  for (const i of typed.squadInvites) {
-    if (!orgs.has(i.orgId)) problems.push(`squad_invites ${i.id} → orgs ${i.orgId}`);
-    if (!users.has(i.byUserId)) problems.push(`squad_invites ${i.id} byUserId → org_users ${i.byUserId}`);
-  }
-  if (problems.length) throw refusal('SCOUTING_REFERENCE_MISSING', `${problems.length} reference(s) in ${label} name a row that is not there (${ids(problems)}); the write was rolled back and nothing was changed`, { rows: problems });
-  const unique = []; const seen = new Map(); const childIds = new Map();
-  const once = (map, key, what) => { if (map.has(key)) unique.push(`${what} (${map.get(key)} and ${key})`); else map.set(key, what); };
-  for (const i of typed.squadInvites) if (i.status.startsWith('pending')) once(seen, `${i.orgId}/${i.playerId}`, `one pending invitation per organisation and player: ${i.id}`);
-  for (const e of typed.evidence) { for (const d of e.disputes) once(childIds, d.id, `a dispute id in ${e.id}`); for (const h of e.history) once(childIds, h.id, `a history id in ${e.id}`); }
-  for (const a of typed.coachAffiliations) for (const h of a.history) once(childIds, h.id, `a history id in ${a.id}`);
-  if (unique.length) throw refusal('SCOUTING_UNIQUENESS', `${unique.length} rule(s) violated in ${label}: ${ids(unique)}; the write was rolled back and nothing was changed`, { rows: unique });
-}
-function typeCollections(supplied, label) {
-  const typed = {};
-  for (const name of SCOUTING_EVIDENCE_COLLECTIONS) {
-    const list = supplied[name]; typed[name] = [];
-    if (list === undefined) continue;
-    if (!Array.isArray(list)) throw refusal('SCOUTING_IMPORT_BLOCKED', `the ${name} collection of ${label} must be an array of entries (got ${describe(list)})`);
-    const seen = new Set();
-    list.forEach((raw, i) => {
-      const t = TYPERS[name](raw, `${name} entry #${i}`);
-      if (!t.ok) throw refusal('SCOUTING_IMPORT_BLOCKED', `${label}: ${t.reason}`);
-      if (seen.has(t.record.id)) throw refusal('SCOUTING_IMPORT_BLOCKED', `${label}: ${name} entry #${i} duplicates the id of an earlier entry (${t.record.id})`);
-      seen.add(t.record.id); typed[name].push(t.record);
-    });
-  }
-  return typed;
-}
 export const scoutingEvidenceLive = (sqlite) => migrationApplied(sqlite, SCOUTING_EVIDENCE_MIGRATION);
 const PLAYER_REFS_SQL = {
   evidence: "SELECT player_id AS pid FROM evidence UNION ALL SELECT source_id FROM evidence WHERE source_kind = 'player' UNION ALL SELECT by_id FROM evidence_disputes WHERE by_kind = 'player'",
@@ -432,54 +389,10 @@ function readAll(sqlite) {
   return { evidence: ev.map((r) => decodeEvidence(bst, r)), coachAffiliations: af.map((r) => decodeAffiliation(bst, r)), squadInvites: st.inviteAll.all().map((r) => decodeInvite(st, r)) };
 }
 
-/**
- * Whole-snapshot access (readTableBacked / writeTableBacked). A supplied collection IS the whole final collection
- * (the rows it no longer lists are removed); an omitted one is kept whole. Every record is typed (junk refused with
- * ids), every reference and uniqueness rule of the FINAL combined state is named before the engine would. Written
- * after the organisations and staff are upserted and before they are pruned, so a staff member or organisation the
- * snapshot removes while a row still names it refuses the save.
- */
-export const SCOUTING_EVIDENCE_SNAPSHOT = {
+/** The whole domain read back as plain records (`readAllRecords` in index.mjs: the test suites' read-back); null before its migration. */
+export const SCOUTING_EVIDENCE_RECORDS = {
   names: SCOUTING_EVIDENCE_COLLECTIONS,
   read(sqlite) { return scoutingEvidenceLive(sqlite) ? readAll(sqlite) : null; },
-  replace(sqlite, db, { label = 'the snapshot (evidence, coach affiliations and squad invitations)' } = {}) {
-    if (!scoutingEvidenceLive(sqlite)) return [];
-    const supplied = Object.fromEntries(SCOUTING_EVIDENCE_COLLECTIONS.map((n) => [n, Object.hasOwn(db, n) ? db[n] : undefined]));
-    const written = SCOUTING_EVIDENCE_COLLECTIONS.filter((n) => supplied[n] !== undefined);
-    if (!written.length) return [];
-    const typed = typeCollections(supplied, label);
-    const stored = readAll(sqlite);
-    const final = Object.fromEntries(SCOUTING_EVIDENCE_COLLECTIONS.map((n) => [n, supplied[n] === undefined ? stored[n] : typed[n]]));
-    checkRecords(sqlite, final, label);
-    const st = statements(sqlite);
-    // departures (children first); evidence self references are cleared before any evidence row leaves
-    if (supplied.evidence !== undefined) {
-      const keep = new Set(typed.evidence.map((e) => e.id));
-      const leaving = st.ids('evidence').filter((id) => !keep.has(id));
-      for (const id of st.ids('evidence')) st.clearSelfRefs.run(id);
-      for (const id of leaving) { st.mediaOf.run(id); st.disputesOf.run(id); st.evHistOf.run(id); st.evidenceDel.run(id); }
-      for (const e of typed.evidence) writeEvidence(st, e, { selfRefs: false });
-      for (const e of typed.evidence) if (e.correctionOf || e.supersededBy) st.setSelfRefs.run(e.correctionOf, e.supersededBy, e.id);
-    }
-    if (supplied.coachAffiliations !== undefined) {
-      const keep = new Set(typed.coachAffiliations.map((a) => a.id));
-      for (const id of st.ids('coach_affiliations').filter((x) => !keep.has(x))) { st.affHistOf.run(id); st.affiliationDel.run(id); }
-      for (const a of typed.coachAffiliations) writeAffiliation(st, a);
-    }
-    if (supplied.squadInvites !== undefined) {
-      const keep = new Set(typed.squadInvites.map((i) => i.id));
-      for (const id of st.ids('squad_invites').filter((x) => !keep.has(x))) st.inviteDel.run(id);
-      for (const i of typed.squadInvites) writeInvite(st, i);
-    }
-    return written;
-  },
-  assert(sqlite, { label = 'the snapshot (evidence, coach affiliations and squad invitations)' } = {}) {
-    if (!scoutingEvidenceLive(sqlite)) return;
-    for (const t of SCOUTING_EVIDENCE_TABLES) {
-      const broken = sqlite.prepare(`PRAGMA foreign_key_check(${t})`).all();
-      if (broken.length) throw refusal('SCOUTING_KEY_VIOLATION', `${label}: ${t} holds ${broken.length} row(s) whose reference is not there (first: rowid ${broken[0].rowid} → ${broken[0].parent}); the write was rolled back`);
-    }
-  },
 };
 
 // ------------------------------------------------------------------ the repository
@@ -595,7 +508,7 @@ export function createScoutingEvidenceRepository({ sqlite, unit = null, now = Da
     },
     counts() { return Object.fromEntries(SCOUTING_EVIDENCE_COLLECTIONS.map((n) => [n, counters[n].get().n])); },
     pending: () => 0,
-    exportAll() { return SCOUTING_EVIDENCE_SNAPSHOT.read(sqlite); },
+    exportAll() { return SCOUTING_EVIDENCE_RECORDS.read(sqlite); },
     log,
     now,
   };

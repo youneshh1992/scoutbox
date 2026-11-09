@@ -31,9 +31,7 @@ import { transaction, migrationApplied } from './database.mjs';
 import { deepFreeze } from './scoutingEvidence.mjs';
 import { text, int, oneOf, group, tableDdl, bad, typeSpec, encode, decode, upsertSql, quote } from './fieldSpecs.mjs';
 import { JURISDICTIONS } from '../domains/agents/core/shared.mjs';
-import {
-  RULE_STATUSES, TEXT_STATUSES, OVERRIDE_SCOPES, RULE_PARAMS, typeRuleParams, isCalendarDay, SEEDED_POLICY_VERSIONS,
-} from '../domains/agents/compliance/policyVersions.mjs';
+import { RULE_STATUSES, TEXT_STATUSES, OVERRIDE_SCOPES, RULE_PARAMS, typeRuleParams, isCalendarDay, SEEDED_POLICY_VERSIONS } from '../domains/agents/compliance/policyVersions.mjs';
 
 export const COMPLIANCE_POLICIES_MIGRATION = '0027_compliance_policies';
 export const COMPLIANCE_POLICIES_COLLECTIONS = Object.freeze(['tsReviewers', 'jurisdictionPolicies']);
@@ -472,64 +470,10 @@ function readAll(sqlite) {
     jurisdictionPolicies: decodePolicies(sqlite, sqlite.prepare('SELECT * FROM jurisdiction_policies ORDER BY rowid').all()),
   };
 }
-const TYPERS = { tsReviewers: typeReviewer, jurisdictionPolicies: typePolicy };
-/**
- * Whole-snapshot access (readTableBacked / writeTableBacked). A supplied collection IS the whole final collection; an
- * omitted one is kept whole. Every record is typed (junk refused with ids); then the supplied collections' tables are
- * rewritten, reviewers first.
- */
-export const COMPLIANCE_POLICIES_SNAPSHOT = {
+/** The whole domain read back as plain records (`readAllRecords` in index.mjs: the test suites' read-back); null before its migration. */
+export const COMPLIANCE_POLICIES_RECORDS = {
   names: COMPLIANCE_POLICIES_COLLECTIONS,
   read(sqlite) { return compliancePoliciesLive(sqlite) ? readAll(sqlite) : null; },
-  replace(sqlite, db, { label = 'the snapshot (compliance policies)' } = {}) {
-    if (!compliancePoliciesLive(sqlite)) return [];
-    const written = COMPLIANCE_POLICIES_COLLECTIONS.filter((n) => Object.hasOwn(db, n) && db[n] !== undefined);
-    if (!written.length) return [];
-    const typed = {};
-    for (const name of written) {
-      const list = db[name];
-      if (!Array.isArray(list)) throw refusal('COMPLIANCE_POLICIES_IMPORT_BLOCKED', `the ${name} collection of ${label} must be an array of entries (got ${describe(list)})`);
-      const seen = new Set();
-      typed[name] = list.map((raw, i) => {
-        const t = TYPERS[name](raw, `${name} entry #${i}`);
-        if (!t.ok) throw refusal('COMPLIANCE_POLICIES_IMPORT_BLOCKED', `${label}: ${t.reason}`);
-        if (seen.has(t.record.id)) throw refusal('COMPLIANCE_POLICIES_IMPORT_BLOCKED', `${label}: ${name} entry #${i} duplicates an earlier entry (${t.record.id})`);
-        seen.add(t.record.id);
-        return t.record;
-      });
-    }
-    const st = statements(sqlite);
-    const histIds = new Set();
-    const noteHist = (list) => { for (const h of list) { if (histIds.has(h.id)) throw refusal('COMPLIANCE_POLICIES_IMPORT_BLOCKED', `${label}: two history entries share the id ${h.id}`); histIds.add(h.id); } };
-    // Policies name reviewers: when both are replaced the policies go first and come back last.
-    if (typed.jurisdictionPolicies) { sqlite.exec('UPDATE jurisdiction_policies SET supersedes_id = NULL'); sqlite.exec('DELETE FROM jurisdiction_policies'); }
-    if (typed.tsReviewers) {
-      sqlite.exec("UPDATE ts_reviewers SET revoked_by_id = NULL, revoked_at = NULL, status = 'active'"); // RESTRICT acts per row: clear the self keys so the rows can go
-      sqlite.exec('DELETE FROM ts_reviewers');
-      // Revokers first is not guaranteed by the list order: write every row without its revoker, then set it.
-      for (const r of typed.tsReviewers) { noteHist(r.history); writeReviewer(st, { ...r, status: 'active', revokedAt: null, revokedBy: null }); }
-      for (const r of typed.tsReviewers) if (r.revokedBy) st.reviewer.run(encode(REVIEWER_SPEC, r));
-    }
-    if (typed.jurisdictionPolicies) {
-      const missing = [];
-      const known = new Set(typed.jurisdictionPolicies.map((p) => p.id));
-      for (const p of typed.jurisdictionPolicies) if (p.supersedes && !known.has(p.supersedes)) missing.push(`jurisdiction_policies ${p.id} supersedes → ${p.supersedes}`);
-      if (missing.length) throw refusal('COMPLIANCE_POLICIES_REFERENCE_MISSING', `${missing.length} reference(s) in ${label} name a row that is not there (${ids(missing)}); the write was rolled back and nothing was changed`, { rows: missing });
-      // A version that supersedes another is written after it.
-      const order = []; const placed = new Set();
-      const place = (p) => { if (placed.has(p.id)) return; placed.add(p.id); if (p.supersedes) place(typed.jurisdictionPolicies.find((x) => x.id === p.supersedes)); order.push(p); };
-      typed.jurisdictionPolicies.forEach(place);
-      for (const p of order) { noteHist(p.history); writePolicy(st, p, { isNew: true }); }
-    }
-    return written;
-  },
-  assert(sqlite, { label = 'the snapshot (compliance policies)' } = {}) {
-    if (!compliancePoliciesLive(sqlite)) return;
-    for (const t of COMPLIANCE_POLICIES_TABLES) {
-      const broken = sqlite.prepare(`PRAGMA foreign_key_check(${t})`).all();
-      if (broken.length) throw refusal('COMPLIANCE_POLICIES_KEY_VIOLATION', `${label}: ${t} holds ${broken.length} row(s) whose reference is not there (first: rowid ${broken[0].rowid} → ${broken[0].parent}); the write was rolled back`);
-    }
-  },
 };
 
 // ------------------------------------------------------------------ the repository
@@ -652,7 +596,7 @@ export function createCompliancePoliciesRepository({ sqlite, unit = null, now = 
     },
     counts() { return Object.fromEntries(COMPLIANCE_POLICIES_COLLECTIONS.map((n) => [n, counters[n].get().n])); },
     pending: () => 0,
-    exportAll() { return COMPLIANCE_POLICIES_SNAPSHOT.read(sqlite); },
+    exportAll() { return COMPLIANCE_POLICIES_RECORDS.read(sqlite); },
     log,
     now,
   };

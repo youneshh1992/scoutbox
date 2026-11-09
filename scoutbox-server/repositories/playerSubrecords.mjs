@@ -35,7 +35,6 @@ export const SUBRECORD_TABLES = Object.freeze([
 ]);
 
 const isPlainObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
-const hasOwn = (o, k) => Object.hasOwn(o, k);
 const setOwn = (o, k, v) => { Object.defineProperty(o, k, { value: v, writable: true, enumerable: true, configurable: true }); return o; };
 const describe = (v) => (v === null ? 'null' : v === undefined ? 'absent' : Array.isArray(v) ? 'an array' : typeof v === 'object' ? 'an object' : typeof v === 'bigint' ? 'a bigint' : `a ${typeof v}`);
 const absentOrNull = (v) => v === null || v === undefined;
@@ -347,12 +346,6 @@ export function validateSubrecordArray(key, items) {
   return problems;
 }
 
-/** Every problem of every sub-record array of a record. */
-export function validateSubrecords(rec) {
-  const problems = [];
-  for (const key of SUBRECORD_KEYS) problems.push(...validateSubrecordArray(key, getSubrecords(rec, key)));
-  return problems;
-}
 // ------------------------------------------------------------------ item ⇄ row
 const insertSql = (table, columns) => `INSERT INTO ${table} (${columns.join(', ')}) VALUES (${columns.map((c) => `@${c}`).join(', ')})`;
 
@@ -448,7 +441,7 @@ export function writeArrayRows(st, key, playerId, items) {
   });
   return items.length;
 }
-/** Write every array of a record (`players.insert`, the migration, the snapshot writer). Returns rows per table. */
+/** Write every array of a record (`players.insert`, the migration). Returns rows per table. */
 export function writeChildRows(st, rec) {
   const counts = {};
   for (const key of SUBRECORD_KEYS) {

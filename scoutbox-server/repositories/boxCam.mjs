@@ -47,8 +47,6 @@ export const BOX_CAM_COLLECTIONS = Object.freeze([
   'boxCamPrefs', 'boxChallenges', 'boxChallengeEntries', 'boxAssignments', 'boxSessions', 'boxCamDisputes',
   'combineRequests', 'combineAttempts', 'boxCamCvResults',
 ]);
-/** Reserved since M16 and never written: retired with the domain, no table. */
-export const BOX_CAM_RETIRED = Object.freeze(['boxSessionEvents']);
 
 // ------------------------------------------------------------------ vocabularies and limits (one definition; the routes import them)
 export const SHARE_CHOICES = Object.freeze(['private', 'recruitment']);
@@ -585,88 +583,10 @@ function readAll(sqlite) {
     boxCamCvResults: decodeCv(sqlite, all('box_cam_cv_results')),
   };
 }
-const TYPERS = { boxCamPrefs: typePrefs, boxChallenges: typeChallenge, boxChallengeEntries: typeEntry, boxAssignments: typeAssignment, boxSessions: typeSession, boxCamDisputes: typeDispute, combineRequests: typeRequest, combineAttempts: typeAttempt, boxCamCvResults: typeCvResult };
-const ID_OF = { boxCamPrefs: (r) => r.playerId, boxCamCvResults: (r) => r.providerSessionId };
-function crossCheck(t) {
-  const out = [];
-  const by = (list) => new Map(list.map((x) => [x.id, x]));
-  const challenges = by(t.boxChallenges); const entries = by(t.boxChallengeEntries); const assignments = by(t.boxAssignments);
-  const sessions = by(t.boxSessions); const requests = by(t.combineRequests);
-  for (const e of t.boxChallengeEntries) if (!challenges.has(e.challengeId)) out.push(`box_challenge_entries ${e.id} challengeId → box_challenges ${e.challengeId}`);
-  const pairs = new Set();
-  for (const e of t.boxChallengeEntries) { const k = `${e.challengeId}\u0000${e.playerId}`; if (pairs.has(k)) out.push(`box_challenge_entries ${e.id} is a second entry of ${e.playerId} in ${e.challengeId}`); pairs.add(k); }
-  for (const s of t.boxSessions) {
-    if (s.assignmentId && assignments.get(s.assignmentId)?.playerId !== s.playerId) out.push(`box_sessions ${s.id} assignmentId → an assignment of its player (${s.assignmentId})`);
-    if (s.challengeEntryId && entries.get(s.challengeEntryId)?.playerId !== s.playerId) out.push(`box_sessions ${s.id} challengeEntryId → an entry of its player (${s.challengeEntryId})`);
-  }
-  for (const d of t.boxCamDisputes) if (sessions.get(d.sessionId)?.playerId !== d.playerId) out.push(`box_cam_disputes ${d.id} sessionId → a session of its player (${d.sessionId})`);
-  const bound = new Set();
-  for (const a of t.combineAttempts) {
-    if (sessions.get(a.boxSessionId)?.playerId !== a.playerId) out.push(`combine_attempts ${a.id} boxSessionId → a session of its player (${a.boxSessionId})`);
-    if (bound.has(a.boxSessionId)) out.push(`combine_attempts ${a.id} binds session ${a.boxSessionId}, already bound`);
-    bound.add(a.boxSessionId);
-    if (a.requestId && requests.get(a.requestId)?.playerId !== a.playerId) out.push(`combine_attempts ${a.id} requestId → a request of its player (${a.requestId})`);
-  }
-  for (const r of t.boxCamCvResults) if (!sessions.has(r.sessionId)) out.push(`box_cam_cv_results ${r.providerSessionId} sessionId → box_sessions ${r.sessionId}`);
-  return out;
-}
-const DELETE_ORDER = ['box_cam_cv_results', 'combine_attempts', 'combine_requests', 'box_cam_disputes', 'box_sessions', 'box_assignments', 'box_challenge_entries', 'box_challenges', 'box_cam_prefs'];
-function writeFinal(sqlite, t) {
-  for (const table of DELETE_ORDER) sqlite.exec(`DELETE FROM ${table}`);
-  const st = statements(sqlite);
-  for (const p of t.boxCamPrefs) st.prefs.run(encode(PREFS_SPEC, p));
-  for (const c of t.boxChallenges) st.challenge.run(encode(CHALLENGE_SPEC, c));
-  for (const e of t.boxChallengeEntries) st.entry.run(encode(ENTRY_SPEC, e));
-  for (const a of t.boxAssignments) st.assignment.run(encode(ASSIGNMENT_SPEC, a));
-  for (const s of t.boxSessions) writeSession(st, s, { isNew: true });
-  for (const d of t.boxCamDisputes) st.dispute.run(encode(DISPUTE_SPEC, d));
-  for (const r of t.combineRequests) writeRequest(st, r, { isNew: true });
-  for (const a of t.combineAttempts) writeAttempt(st, a);
-  for (const r of t.boxCamCvResults) writeCv(st, r);
-}
-/**
- * Whole-snapshot access (readTableBacked / writeTableBacked). A supplied collection IS the whole final collection; an
- * omitted one is kept whole. Every record is typed (junk refused with ids), the references between the final state's
- * records named, and the domain's tables rewritten together.
- */
-export const BOX_CAM_SNAPSHOT = {
+/** The whole domain read back as plain records (`readAllRecords` in index.mjs: the test suites' read-back); null before its migration. */
+export const BOX_CAM_RECORDS = {
   names: BOX_CAM_COLLECTIONS,
   read(sqlite) { return boxCamLive(sqlite) ? readAll(sqlite) : null; },
-  replace(sqlite, db, { label = 'the snapshot (Box Cam)' } = {}) {
-    if (!boxCamLive(sqlite)) return [];
-    const written = BOX_CAM_COLLECTIONS.filter((n) => Object.hasOwn(db, n) && db[n] !== undefined);
-    if (!written.length) return [];
-    const current = readAll(sqlite);
-    const typed = {};
-    for (const name of BOX_CAM_COLLECTIONS) {
-      if (!written.includes(name)) {
-        typed[name] = name === 'boxSessions' ? current[name].map((s) => typeSession(s).record) : current[name].map((x) => TYPERS[name](x).record);
-        continue;
-      }
-      const list = db[name];
-      if (!Array.isArray(list)) throw refusal('BOX_CAM_IMPORT_BLOCKED', `the ${name} collection of ${label} must be an array of entries (got ${describe(list)})`);
-      const seen = new Set();
-      typed[name] = list.map((raw, i) => {
-        const t = TYPERS[name](raw, `${name} entry #${i}`);
-        if (!t.ok) throw refusal('BOX_CAM_IMPORT_BLOCKED', `${label}: ${t.reason}`);
-        const id = (ID_OF[name] ?? ((r) => r.id))(t.record);
-        if (seen.has(id)) throw refusal('BOX_CAM_IMPORT_BLOCKED', `${label}: ${name} entry #${i} duplicates an earlier entry (${id})`);
-        seen.add(id);
-        return t.record;
-      });
-    }
-    const missing = crossCheck(typed);
-    if (missing.length) throw refusal('BOX_CAM_REFERENCE_MISSING', `${missing.length} reference(s) in ${label} are not there (${ids(missing)}); the write was rolled back and nothing was changed`, { rows: missing });
-    writeFinal(sqlite, typed);
-    return written;
-  },
-  assert(sqlite, { label = 'the snapshot (Box Cam)' } = {}) {
-    if (!boxCamLive(sqlite)) return;
-    for (const t of BOX_CAM_TABLES) {
-      const broken = sqlite.prepare(`PRAGMA foreign_key_check(${t})`).all();
-      if (broken.length) throw refusal('BOX_CAM_KEY_VIOLATION', `${label}: ${t} holds ${broken.length} row(s) whose reference is not there (first: rowid ${broken[0].rowid} → ${broken[0].parent}); the write was rolled back`);
-    }
-  },
 };
 const PLAYER_REFS_SQL = 'SELECT player_id AS pid FROM box_sessions UNION ALL SELECT player_id FROM box_assignments UNION ALL SELECT player_id FROM combine_attempts UNION ALL SELECT player_id FROM combine_requests';
 export const unresolvedPlayerReferences = (sqlite) => (boxCamLive(sqlite) ? { boxCam: sqlite.prepare(`SELECT count(*) AS n FROM (${PLAYER_REFS_SQL}) x WHERE NOT EXISTS (SELECT 1 FROM players p WHERE p.id = x.pid)`).get().n } : null);
@@ -960,7 +880,7 @@ export function createBoxCamRepository({ sqlite, unit = null, now = Date.now, lo
     },
     counts() { return Object.fromEntries(BOX_CAM_COLLECTIONS.map((n) => [n, counters[n].get().n])); },
     pending: () => 0,
-    exportAll() { return BOX_CAM_SNAPSHOT.read(sqlite); },
+    exportAll() { return BOX_CAM_RECORDS.read(sqlite); },
     log,
     now,
   };

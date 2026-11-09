@@ -30,10 +30,7 @@
  */
 import { isPlainObject, ids, describe } from './recruitment.mjs';
 import { transaction, migrationApplied, childRowsOf } from './database.mjs';
-import {
-  txt, historyTable, refusal, isInt, isStr, nonEmpty, orNull, clone, bad, optText, reqText, optInstant, reqInstant,
-  unknownFields, first, typeHistory, typeList, histRow, histOut, deepFreeze,
-} from './scoutingEvidence.mjs';
+import { txt, historyTable, refusal, isInt, isStr, nonEmpty, orNull, clone, bad, optText, reqText, optInstant, reqInstant, unknownFields, first, typeHistory, typeList, histRow, histOut, deepFreeze } from './scoutingEvidence.mjs';
 
 export const SCOUTING_ASSESSMENTS_MIGRATION = '0020_scouting_assessments';
 export const SCOUTING_ASSESSMENTS_COLLECTIONS = Object.freeze(['assessmentTemplates', 'assessments', 'videoSegments', 'playlists']);
@@ -462,54 +459,6 @@ const BATCH_KEY = { assessments: 'assessmentIds', videoSegments: 'segmentIds', p
 
 // ------------------------------------------------------------------ the rules the code keeps, named with ids before the engine would
 const templateKey = (id, version) => `${id}@${version}`;
-function checkRecords(sqlite, typed, label) {
-  const problems = [];
-  const orgs = new Set(sqlite.prepare('SELECT id FROM orgs').all().map((r) => r.id));
-  const users = new Set(sqlite.prepare('SELECT id FROM org_users').all().map((r) => r.id));
-  const templates = new Set(typed.assessmentTemplates.map((t) => templateKey(t.id, t.version)));
-  const segments = new Set(typed.videoSegments.map((s) => s.id));
-  const assessments = new Set(typed.assessments.map((a) => a.id));
-  for (const s of typed.videoSegments) {
-    if (!orgs.has(s.orgId)) problems.push(`video_segments ${s.id} → orgs ${s.orgId}`);
-    if (!users.has(s.createdBy.userId)) problems.push(`video_segments ${s.id} createdBy → org_users ${s.createdBy.userId}`);
-  }
-  for (const p of typed.playlists) {
-    if (!orgs.has(p.orgId)) problems.push(`playlists ${p.id} → orgs ${p.orgId}`);
-    if (!users.has(p.createdBy.userId)) problems.push(`playlists ${p.id} createdBy → org_users ${p.createdBy.userId}`);
-    for (const s of p.segmentIds) if (!segments.has(s)) problems.push(`playlists ${p.id} → video_segments ${s}`);
-  }
-  for (const a of typed.assessments) {
-    if (!orgs.has(a.orgId)) problems.push(`assessments ${a.id} → orgs ${a.orgId}`);
-    if (!users.has(a.scoutUserId)) problems.push(`assessments ${a.id} scoutUserId → org_users ${a.scoutUserId}`);
-    if (a.publishedFeedback && !users.has(a.publishedFeedback.byUserId)) problems.push(`assessments ${a.id} publishedFeedback.byUserId → org_users ${a.publishedFeedback.byUserId}`);
-    if (!templates.has(templateKey(a.templateId, a.templateVersion))) problems.push(`assessments ${a.id} → assessment_templates ${templateKey(a.templateId, a.templateVersion)}`);
-    if (a.secondOpinionOf && !assessments.has(a.secondOpinionOf)) problems.push(`assessments ${a.id} secondOpinionOf → ${a.secondOpinionOf}`);
-    for (const r of a.ratings) for (const ref of r.evidenceRefs) if (ref.segmentId && !segments.has(ref.segmentId)) problems.push(`assessments ${a.id} ${r.attrId} → video_segments ${ref.segmentId}`);
-  }
-  if (problems.length) throw refusal('SCOUTING_REFERENCE_MISSING', `${problems.length} reference(s) in ${label} name a row that is not there (${ids(problems)}); the write was rolled back and nothing was changed`, { rows: problems });
-  const unique = []; const seen = new Map();
-  const once = (key, what) => { if (seen.has(key)) unique.push(`${what} (${seen.get(key)} and ${key})`); else seen.set(key, what); };
-  for (const t of typed.assessmentTemplates) once(`group/${t.positionGroup}/${t.version}`, `one template version per position group: ${t.id}@${t.version}`);
-  for (const a of typed.assessments) for (const h of a.history) once(`hist/${h.id}`, `a history id in ${a.id}`);
-  if (unique.length) throw refusal('SCOUTING_UNIQUENESS', `${unique.length} rule(s) violated in ${label}: ${ids(unique)}; the write was rolled back and nothing was changed`, { rows: unique });
-}
-function typeCollections(supplied, label) {
-  const typed = {};
-  for (const name of SCOUTING_ASSESSMENTS_COLLECTIONS) {
-    const list = supplied[name]; typed[name] = [];
-    if (list === undefined) continue;
-    if (!Array.isArray(list)) throw refusal('SCOUTING_IMPORT_BLOCKED', `the ${name} collection of ${label} must be an array of entries (got ${describe(list)})`);
-    const seen = new Set();
-    list.forEach((raw, i) => {
-      const t = TYPERS[name](raw, `${name} entry #${i}`);
-      if (!t.ok) throw refusal('SCOUTING_IMPORT_BLOCKED', `${label}: ${t.reason}`);
-      const key = name === 'assessmentTemplates' ? templateKey(t.record.id, t.record.version) : t.record.id;
-      if (seen.has(key)) throw refusal('SCOUTING_IMPORT_BLOCKED', `${label}: ${name} entry #${i} duplicates the id of an earlier entry (${key})`);
-      seen.add(key); typed[name].push(t.record);
-    });
-  }
-  return typed;
-}
 export const scoutingAssessmentsLive = (sqlite) => migrationApplied(sqlite, SCOUTING_ASSESSMENTS_MIGRATION);
 const PLAYER_REFS_SQL = { assessments: 'SELECT player_id AS pid FROM assessments', videoSegments: 'SELECT player_id AS pid FROM video_segments' };
 const playerRefCounts = (sqlite, cond) => Object.fromEntries(Object.entries(PLAYER_REFS_SQL).map(([c, sql]) => [c, sqlite.prepare(`SELECT count(*) AS n FROM (${sql}) x WHERE ${cond}`).get().n]));
@@ -527,52 +476,11 @@ function readAll(sqlite) {
     playlists: pl.map((r) => decodePlaylist(bst, r)),
   };
 }
-const LABEL = 'the snapshot (assessment templates, assessments, video segments and playlists)';
 
-/**
- * Whole-snapshot access (readTableBacked / writeTableBacked), as S9a. A supplied collection IS the whole final
- * collection (the rows it no longer lists are removed); an omitted one is kept whole. Every record is typed (junk
- * refused with ids), every reference and uniqueness rule of the FINAL combined state is named before the engine
- * would. Written after the organisations and staff are upserted and before they are pruned.
- */
-export const SCOUTING_ASSESSMENTS_SNAPSHOT = {
+/** The whole domain read back as plain records (`readAllRecords` in index.mjs: the test suites' read-back); null before its migration. */
+export const SCOUTING_ASSESSMENTS_RECORDS = {
   names: SCOUTING_ASSESSMENTS_COLLECTIONS,
   read(sqlite) { return scoutingAssessmentsLive(sqlite) ? readAll(sqlite) : null; },
-  replace(sqlite, db, { label = LABEL } = {}) {
-    if (!scoutingAssessmentsLive(sqlite)) return [];
-    const supplied = Object.fromEntries(SCOUTING_ASSESSMENTS_COLLECTIONS.map((n) => [n, Object.hasOwn(db, n) ? db[n] : undefined]));
-    const written = SCOUTING_ASSESSMENTS_COLLECTIONS.filter((n) => supplied[n] !== undefined);
-    if (!written.length) return [];
-    const typed = typeCollections(supplied, label);
-    const stored = readAll(sqlite);
-    const final = Object.fromEntries(SCOUTING_ASSESSMENTS_COLLECTIONS.map((n) => [n, supplied[n] === undefined ? stored[n] : typed[n]]));
-    checkRecords(sqlite, final, label);
-    const st = statements(sqlite);
-    const keepOf = (name) => new Set(typed[name].map((r) => r.id));
-    const leavingOf = (name, table) => (supplied[name] === undefined ? [] : st.ids(table).filter((x) => !keepOf(name).has(x)));
-    // 1. the records that name others and leave (newest assessment first: a second opinion goes before its first)
-    for (const id of leavingOf('playlists', 'playlists')) { st.plSegsOf.run(id); st.playlistDel.run(id); }
-    for (const id of leavingOf('assessments', 'assessments').reverse()) { st.refsOf.run(id); st.ratingsOf.run(id); st.asHistOf.run(id); st.assessmentDel.run(id); }
-    // 2. arrivals and changes, what is named before what names it
-    if (supplied.assessmentTemplates !== undefined) for (const t of typed.assessmentTemplates) writeTemplate(st, t);
-    if (supplied.videoSegments !== undefined) for (const x of typed.videoSegments) writeSegment(st, x);
-    if (supplied.assessments !== undefined) for (const a of typed.assessments) writeAssessment(st, a);
-    if (supplied.playlists !== undefined) for (const x of typed.playlists) writePlaylist(st, x);
-    // 3. the named records that leave (the final state was checked: nothing still names them)
-    for (const id of leavingOf('videoSegments', 'video_segments')) { st.segLabelsOf.run(id); st.segmentDel.run(id); }
-    if (supplied.assessmentTemplates !== undefined) {
-      const keep = new Set(typed.assessmentTemplates.map((t) => templateKey(t.id, t.version)));
-      for (const t of stored.assessmentTemplates) if (!keep.has(templateKey(t.id, t.version))) { st.attributesOf.run(t.id, t.version); st.templateDel.run(t.id, t.version); }
-    }
-    return written;
-  },
-  assert(sqlite, { label = LABEL } = {}) {
-    if (!scoutingAssessmentsLive(sqlite)) return;
-    for (const t of SCOUTING_ASSESSMENTS_TABLES) {
-      const broken = sqlite.prepare(`PRAGMA foreign_key_check(${t})`).all();
-      if (broken.length) throw refusal('SCOUTING_KEY_VIOLATION', `${label}: ${t} holds ${broken.length} row(s) whose reference is not there (first: rowid ${broken[0].rowid} → ${broken[0].parent}); the write was rolled back`);
-    }
-  },
 };
 
 /** Migration 0020's catalogue rows: the four v1 templates, stamped with the migration's clock. */
@@ -709,7 +617,7 @@ export function createScoutingAssessmentsRepository({ sqlite, unit = null, now =
     },
     counts() { return Object.fromEntries(SCOUTING_ASSESSMENTS_COLLECTIONS.map((n) => [n, counters[n].get().n])); },
     pending: () => 0,
-    exportAll() { return SCOUTING_ASSESSMENTS_SNAPSHOT.read(sqlite); },
+    exportAll() { return SCOUTING_ASSESSMENTS_RECORDS.read(sqlite); },
     log,
     now,
   };

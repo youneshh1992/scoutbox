@@ -21,7 +21,7 @@
 import { isPlainObject, ids, describe } from './recruitment.mjs';
 import { transaction, migrationApplied, childRowsOf } from './database.mjs';
 import { deepFreeze } from './scoutingEvidence.mjs';
-import { text, int, bool, oneOf, tableDdl, bad, typeSpec, encode, decode, insertSql, upsertSql, isFootballDate } from './fieldSpecs.mjs';
+import { text, int, bool, oneOf, tableDdl, bad, typeSpec, encode, decode, insertSql, isFootballDate } from './fieldSpecs.mjs';
 import { pageOf } from '../domains/platform/paging.mjs';
 
 export const GRASSROOTS_MIGRATION = '0037_grassroots';
@@ -240,81 +240,10 @@ function readAll(sqlite) {
   const all = (t) => sqlite.prepare(`SELECT * FROM ${t} ORDER BY rowid`).all();
   return { openTrials: decodeTrials(sqlite, all('open_trials')), matchdays: decodeMatchdays(sqlite, all('matchdays')), friendlies: decodeFriendlies(sqlite, all('friendlies')) };
 }
-const TYPERS = { openTrials: typeOpenTrial, matchdays: typeMatchday, friendlies: typeFriendly };
-function crossCheck(sqlite, t) {
-  const out = [];
-  const org = sqlite.prepare('SELECT 1 FROM orgs WHERE id = ?');
-  const staff = sqlite.prepare('SELECT 1 FROM org_users WHERE id = ?');
-  const needOrg = (what, id) => { if (!org.get(id)) out.push(`${what} → orgs ${id}`); };
-  const needStaff = (what, id) => { if (!staff.get(id)) out.push(`${what} → org_users ${id}`); };
-  for (const x of t.openTrials) { needOrg(`open_trials ${x.id}`, x.orgId); needStaff(`open_trials ${x.id}`, x.createdByUserId); }
-  for (const x of t.matchdays) { needOrg(`matchdays ${x.id}`, x.orgId); needStaff(`matchdays ${x.id}`, x.loggedByUserId); }
-  for (const x of t.friendlies) {
-    needOrg(`friendlies ${x.id}`, x.orgId); needStaff(`friendlies ${x.id}`, x.postedByUserId);
-    for (const r of x.responses) { needOrg(`friendlies ${x.id} response`, r.orgId); needStaff(`friendlies ${x.id} response`, r.respondedByUserId); }
-  }
-  const regIds = t.openTrials.flatMap((x) => x.registrations.map((r) => r.id));
-  if (new Set(regIds).size !== regIds.length) out.push('two open-day registrations have the same id');
-  return out;
-}
-// A whole replacement diffs by id: a kept row is updated in place (a coverage assignment may name it), its child rows
-// rewritten; a dropped row is deleted, and refused (RESTRICT) while an assignment still names it.
-const OWNERS = [
-  ['open_trials', OPEN_TRIAL_SPEC, ['open_trial_positions', 'open_trial_registrations'], 'open_trial_id', 'openTrials', writeTrialChildren],
-  ['matchdays', MATCHDAY_SPEC, ['matchday_players'], 'matchday_id', 'matchdays', writeMatchdayChildren],
-  ['friendlies', FRIENDLY_SPEC, ['friendly_responses'], 'friendly_id', 'friendlies', writeFriendlyChildren],
-];
-function writeFinal(sqlite, t) {
-  const st = statements(sqlite);
-  for (const [table, spec, children, parentCol, name, writeChildren] of OWNERS) {
-    const keep = JSON.stringify(t[name].map((x) => x.id));
-    for (const c of children) sqlite.prepare(`DELETE FROM ${c} WHERE ${parentCol} IN (SELECT id FROM ${table} WHERE id NOT IN (SELECT value FROM json_each(?)))`).run(keep);
-    try { sqlite.prepare(`DELETE FROM ${table} WHERE id NOT IN (SELECT value FROM json_each(?))`).run(keep); } catch (err) {
-      throw refusal('GRASSROOTS_REFERENCE_MISSING', `the snapshot drops a ${table} row that a coverage assignment still names (${String(err?.message ?? err)}); the write was rolled back`);
-    }
-    const upsert = sqlite.prepare(upsertSql(table, spec));
-    for (const x of t[name]) {
-      upsert.run(encode(spec, x));
-      for (const c of children) sqlite.prepare(`DELETE FROM ${c} WHERE ${parentCol} = ?`).run(x.id);
-      writeChildren(st, x);
-    }
-  }
-}
-/** Whole-snapshot access (readTableBacked / writeTableBacked): a supplied collection IS the whole final collection; an omitted one is kept. */
-export const GRASSROOTS_SNAPSHOT = {
+/** The whole domain read back as plain records (`readAllRecords` in index.mjs: the test suites' read-back); null before its migration. */
+export const GRASSROOTS_RECORDS = {
   names: GRASSROOTS_COLLECTIONS,
   read(sqlite) { return grassrootsLive(sqlite) ? readAll(sqlite) : null; },
-  replace(sqlite, db, { label = 'the snapshot (grassroots)' } = {}) {
-    if (!grassrootsLive(sqlite)) return [];
-    const written = GRASSROOTS_COLLECTIONS.filter((n) => Object.hasOwn(db, n) && db[n] !== undefined);
-    if (!written.length) return [];
-    const current = readAll(sqlite);
-    const typed = {};
-    for (const name of GRASSROOTS_COLLECTIONS) {
-      if (!written.includes(name)) { typed[name] = current[name]; continue; }
-      const list = db[name];
-      if (!Array.isArray(list)) throw refusal('GRASSROOTS_IMPORT_BLOCKED', `the ${name} collection of ${label} must be an array of entries (got ${describe(list)})`);
-      const seen = new Set();
-      typed[name] = list.map((raw, i) => {
-        const t = TYPERS[name](raw, `${name} entry #${i}`);
-        if (!t.ok) throw refusal('GRASSROOTS_IMPORT_BLOCKED', `${label}: ${t.reason}`);
-        if (seen.has(t.record.id)) throw refusal('GRASSROOTS_IMPORT_BLOCKED', `${label}: ${name} entry #${i} duplicates an earlier entry (${t.record.id})`);
-        seen.add(t.record.id);
-        return t.record;
-      });
-    }
-    const missing = crossCheck(sqlite, typed);
-    if (missing.length) throw refusal('GRASSROOTS_REFERENCE_MISSING', `${missing.length} reference(s) in ${label} are not there (${ids(missing)}); the write was rolled back and nothing was changed`, { rows: missing });
-    writeFinal(sqlite, typed);
-    return written;
-  },
-  assert(sqlite, { label = 'the snapshot (grassroots)' } = {}) {
-    if (!grassrootsLive(sqlite)) return;
-    for (const t of [...GRASSROOTS_TABLES, 'coverage_assignments']) {
-      const broken = sqlite.prepare(`PRAGMA foreign_key_check(${t})`).all();
-      if (broken.length) throw refusal('GRASSROOTS_KEY_VIOLATION', `${label}: ${t} holds ${broken.length} row(s) whose reference is not there (first: rowid ${broken[0].rowid} → ${broken[0].parent}); the write was rolled back`);
-    }
-  },
 };
 
 // ------------------------------------------------------------------ the repository
@@ -476,7 +405,7 @@ export function createGrassrootsRepository({ sqlite, unit = null, now = Date.now
     },
     counts() { return Object.fromEntries(GRASSROOTS_COLLECTIONS.map((n) => [n, counters[n].get().n])); },
     pending: () => 0,
-    exportAll() { return GRASSROOTS_SNAPSHOT.read(sqlite); },
+    exportAll() { return GRASSROOTS_RECORDS.read(sqlite); },
     log,
     now,
   };

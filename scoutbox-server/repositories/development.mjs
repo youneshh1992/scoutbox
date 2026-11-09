@@ -36,10 +36,7 @@ import { isPlainObject, ids, describe } from './recruitment.mjs';
 import { transaction, migrationApplied, childRowsOf } from './database.mjs';
 import { deepFreeze } from './scoutingEvidence.mjs';
 import { text, int, num, bool, oneOf, group, tableDdl, bad, typeSpec, encode, decode, upsertSql, insertSql, flat } from './fieldSpecs.mjs';
-import {
-  PLAN_OWNER_KINDS, PLAN_VISIBILITY, VISIBILITY_BY_OWNER, PLAN_STATUSES, GOAL_CATEGORIES, GOAL_STATUSES, BLOCK_REASONS,
-  ACTION_TYPES, ACTION_STATUSES, ASSIGNEE_KINDS, EVIDENCE_SOURCES, REVIEWER_KINDS, SHARE_SCOPES, PLAN_TEMPLATES, M21_LIMITS, completionPhrase,
-} from '../domains/development/hub/shared.mjs';
+import { PLAN_OWNER_KINDS, PLAN_VISIBILITY, VISIBILITY_BY_OWNER, PLAN_STATUSES, GOAL_CATEGORIES, GOAL_STATUSES, BLOCK_REASONS, ACTION_TYPES, ACTION_STATUSES, ASSIGNEE_KINDS, EVIDENCE_SOURCES, REVIEWER_KINDS, SHARE_SCOPES, PLAN_TEMPLATES, M21_LIMITS, completionPhrase } from '../domains/development/hub/shared.mjs';
 import { TARGET_SOURCES, TARGET_OPERATORS, TARGET_STATES, NO_MEASUREMENT_REASONS } from '../domains/development/hub/targets.mjs';
 
 export const DEVELOPMENT_MIGRATION = '0030_development';
@@ -556,101 +553,11 @@ function readAll(sqlite) {
     developmentReviews: decodeReviews(sqlite, all('development_reviews')),
   };
 }
-const TYPERS = { devObjectives: typeObjective, drillGuidance: typeDrillReview, developmentPlans: typePlan, developmentGoals: typeGoal, developmentActions: typeAction, developmentEvidenceLinks: typeLink, developmentReviews: typeReview };
-const ID_OF = { drillGuidance: (r) => r.drillId };
 
-/** The references between a final state's records, named before the engine would (ids only). */
-function crossCheck(t) {
-  const out = [];
-  const by = (list) => new Map(list.map((x) => [x.id, x]));
-  const objectives = by(t.devObjectives); const plans = by(t.developmentPlans); const goals = by(t.developmentGoals); const actions = by(t.developmentActions); const reviews = by(t.developmentReviews);
-  for (const p of t.developmentPlans) if (p.originObjectiveId && !objectives.has(p.originObjectiveId)) out.push(`development_plans ${p.id} originObjectiveId → dev_objectives ${p.originObjectiveId}`);
-  for (const g of t.developmentGoals) {
-    const p = plans.get(g.planId);
-    if (!p) out.push(`development_goals ${g.id} planId → development_plans ${g.planId}`);
-    else if (p.playerId !== g.playerId) out.push(`development_goals ${g.id} playerId is not its plan's player`);
-    if (g.originObjectiveId && !objectives.has(g.originObjectiveId)) out.push(`development_goals ${g.id} originObjectiveId → dev_objectives ${g.originObjectiveId}`);
-  }
-  for (const a of t.developmentActions) {
-    const g = goals.get(a.goalId);
-    if (!g) out.push(`development_actions ${a.id} goalId → development_goals ${a.goalId}`);
-    else if (g.planId !== a.planId || g.playerId !== a.playerId) out.push(`development_actions ${a.id} is not in its goal's plan`);
-  }
-  for (const l of t.developmentEvidenceLinks) {
-    const holder = l.goalId ? goals.get(l.goalId) : actions.get(l.actionId);
-    if (!holder) out.push(`development_evidence_links ${l.id} ${l.goalId ? `goalId → development_goals ${l.goalId}` : `actionId → development_actions ${l.actionId}`}`);
-    else if (holder.planId !== l.planId || holder.playerId !== l.playerId) out.push(`development_evidence_links ${l.id} is not in its holder's plan`);
-  }
-  for (const r of t.developmentReviews) {
-    const p = plans.get(r.planId);
-    if (!p) out.push(`development_reviews ${r.id} planId → development_plans ${r.planId}`);
-    else if (p.playerId !== r.playerId) out.push(`development_reviews ${r.id} playerId is not its plan's player`);
-    if (r.supersedes && reviews.get(r.supersedes)?.planId !== r.planId) out.push(`development_reviews ${r.id} supersedes → a review of the same plan (${r.supersedes})`);
-    for (const s of r.goalSnapshots) if (goals.get(s.goalId)?.planId !== r.planId) out.push(`development_reviews ${r.id} goalSnapshots → a goal of the same plan (${s.goalId})`);
-  }
-  const sup = t.developmentReviews.map((r) => r.supersedes).filter(Boolean);
-  if (new Set(sup).size !== sup.length) out.push('two development reviews supersede the same review');
-  return out;
-}
-const DELETE_ORDER = ['development_evidence_links', 'development_reviews', 'development_actions', 'development_goals', 'development_plans', 'dev_objectives', 'drill_guidance'];
-function writeFinal(sqlite, t) {
-  sqlite.exec('DELETE FROM development_history; UPDATE development_reviews SET supersedes_review_id = NULL;');
-  for (const table of DELETE_ORDER) sqlite.exec(`DELETE FROM ${table}`);
-  const st = statements(sqlite);
-  for (const o of t.devObjectives) writeObjective(st, o, { isNew: true });
-  for (const d of t.drillGuidance) st.drill.run(encode(DRILL_SPEC, d));
-  for (const p of t.developmentPlans) writePlan(st, p);
-  for (const g of t.developmentGoals) writeGoal(st, g);
-  for (const a of t.developmentActions) writeAction(st, a);
-  for (const l of t.developmentEvidenceLinks) st.link.run(encode(LINK_SPEC, l));
-  // A review names the review it corrects: write the corrected one first.
-  const pending = [...t.developmentReviews]; const done = new Set();
-  while (pending.length) {
-    const i = pending.findIndex((r) => !r.supersedes || done.has(r.supersedes));
-    if (i < 0) throw refusal('DEVELOPMENT_IMPORT_BLOCKED', `the development reviews' corrections form a loop (${ids(pending.map((r) => r.id))})`);
-    const [r] = pending.splice(i, 1); writeReview(st, r, { isNew: true }); done.add(r.id);
-  }
-}
-/**
- * Whole-snapshot access (readTableBacked / writeTableBacked). A supplied collection IS the whole final collection; an
- * omitted one is kept whole. Every record is typed (junk refused with ids), the references between the final state's
- * records named, and the domain's tables rewritten together (their keys run both ways between them).
- */
-export const DEVELOPMENT_SNAPSHOT = {
+/** The whole domain read back as plain records (`readAllRecords` in index.mjs: the test suites' read-back); null before its migration. */
+export const DEVELOPMENT_RECORDS = {
   names: DEVELOPMENT_COLLECTIONS,
   read(sqlite) { return developmentLive(sqlite) ? readAll(sqlite) : null; },
-  replace(sqlite, db, { label = 'the snapshot (development)' } = {}) {
-    if (!developmentLive(sqlite)) return [];
-    const written = DEVELOPMENT_COLLECTIONS.filter((n) => Object.hasOwn(db, n) && db[n] !== undefined);
-    if (!written.length) return [];
-    const current = readAll(sqlite);
-    const typed = {};
-    for (const name of DEVELOPMENT_COLLECTIONS) {
-      if (!written.includes(name)) { typed[name] = current[name]; continue; }
-      const list = db[name];
-      if (!Array.isArray(list)) throw refusal('DEVELOPMENT_IMPORT_BLOCKED', `the ${name} collection of ${label} must be an array of entries (got ${describe(list)})`);
-      const seen = new Set();
-      typed[name] = list.map((raw, i) => {
-        const t = TYPERS[name](raw, `${name} entry #${i}`);
-        if (!t.ok) throw refusal('DEVELOPMENT_IMPORT_BLOCKED', `${label}: ${t.reason}`);
-        const id = (ID_OF[name] ?? ((r) => r.id))(t.record);
-        if (seen.has(id)) throw refusal('DEVELOPMENT_IMPORT_BLOCKED', `${label}: ${name} entry #${i} duplicates an earlier entry (${id})`);
-        seen.add(id);
-        return t.record;
-      });
-    }
-    const missing = crossCheck(typed);
-    if (missing.length) throw refusal('DEVELOPMENT_REFERENCE_MISSING', `${missing.length} reference(s) in ${label} are not there (${ids(missing)}); the write was rolled back and nothing was changed`, { rows: missing });
-    writeFinal(sqlite, typed);
-    return written;
-  },
-  assert(sqlite, { label = 'the snapshot (development)' } = {}) {
-    if (!developmentLive(sqlite)) return;
-    for (const t of DEVELOPMENT_TABLES) {
-      const broken = sqlite.prepare(`PRAGMA foreign_key_check(${t})`).all();
-      if (broken.length) throw refusal('DEVELOPMENT_KEY_VIOLATION', `${label}: ${t} holds ${broken.length} row(s) whose reference is not there (first: rowid ${broken[0].rowid} → ${broken[0].parent}); the write was rolled back`);
-    }
-  },
 };
 const PLAYER_REFS_SQL = 'SELECT player_id AS pid FROM dev_objectives UNION ALL SELECT player_id FROM development_plans';
 const playerRefCount = (sqlite, cond) => sqlite.prepare(`SELECT count(*) AS n FROM (${PLAYER_REFS_SQL}) x WHERE ${cond}`).get().n;
@@ -919,7 +826,7 @@ export function createDevelopmentRepository({ sqlite, unit = null, now = Date.no
     },
     counts() { return Object.fromEntries(DEVELOPMENT_COLLECTIONS.map((n) => [n, counters[n].get().n])); },
     pending: () => 0,
-    exportAll() { return DEVELOPMENT_SNAPSHOT.read(sqlite); },
+    exportAll() { return DEVELOPMENT_RECORDS.read(sqlite); },
     log,
     now,
   };

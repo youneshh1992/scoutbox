@@ -46,7 +46,7 @@ const grant = (over = {}) => ({ id: 'sag-1', ticketId: 'tkt-1', orgId: ORG.id, h
 
 const FIX = () => ({ users: [...USERS()], notifications: [], dispatches: [] });
 function serverOpen(dir) {
-  const store = openStore(dir, { tableBacked: TABLE_BACKED });
+  const store = openStore(dir);
   const layer = attachDataLayer({ store, nextId, sessionTtlMs: TTL, now: () => NOW, warn: () => {} });
   return { store, repo: layer.enterprise, unit: (w) => store.unitOfWork(w), close: () => store.sqlite.close() };
 }

@@ -4,8 +4,8 @@
  *
  * The first domain built under the fidelity rule: EVERY field is a typed column with the vocabulary and length CHECKs
  * of the drafted schema (docs/architecture/sql/02_recruitment.sql), there is no `absent_keys_json`, `offtype_json` or
- * `extra_json`, and a record the columns cannot hold is REFUSED with its id — at a route (400, the field named), at
- * the cutover (the boot stops) and at a snapshot write (the save rolls back). The cutover normalises exactly what the
+ * `extra_json`, and a record the columns cannot hold is REFUSED with its id — at a route (400, the field named), and at
+ * the cutover (the boot stops). The cutover normalises exactly what the
  * design note lists (a legacy signing without `method` → LEGACY_RECORDED, a missing `rev` → 1, the three dead signing
  * fields dropped, an unknown field dropped) and REPORTS each normalisation with the row id in the boot log and in
  * `meta.signingsFollowUpsCutover.notes`; nothing else is coerced.
@@ -29,7 +29,7 @@
  * became the primary key when S8c moved to typed tables, migration.md §4.3; turning this into a real key is a later change). Player ids: NO key, tolerant and counted —
  * Q7a/Q8a/Q8c-a applied a fourth time, not re-asked. Guardian and party ids: polymorphic, no key.
  */
-import { idempotencyKeysDdl, isPlainObject, ids, tableExists } from './recruitment.mjs';
+import { isPlainObject, ids } from './recruitment.mjs';
 import { pageOf } from '../domains/platform/paging.mjs';
 import { transaction, migrationApplied, childRowsOf } from './database.mjs';
 
@@ -306,7 +306,7 @@ const actorOut = (p, row, { user = true, role = true, kind = true } = {}) => {
 };
 const actorCols = (p, a, { user = true, role = true, kind = true } = {}) => ({ ...(kind ? { [`${p}_kind`]: a?.kind ?? null } : {}), [user ? `${p}_user_id` : `${p}_id`]: a?.id ?? null, [`${p}_name`]: a?.name ?? null, ...(role ? { [`${p}_role`]: a?.role ?? null } : {}) });
 
-// ------------------------------------------------------------------ validation + normalisation (one function per record, used by the routes' writers, the cutover and the snapshot write)
+// ------------------------------------------------------------------ validation + normalisation (one function per record, used by the routes' writers, the cutover)
 
 /** The signing package the writers produce, typed. Returns `{ ok, record, notes }` or `{ ok: false, reason }`; `notes` are the normalisations applied (ids only). */
 export function typeSigningPackage(raw, at = 'signingPackages') {
@@ -511,7 +511,6 @@ export function typeConfirmation(c, label) {
   if (!isInt(c.at)) return bad(label, 'at', 'must be an integer instant');
   return { ok: true, record: { by: { kind: c.by.kind, id: c.by.id, name: orNull(c.by.name) }, agree: c.agree, note: orNull(c.note), experienceRating: orNull(c.experienceRating), at: c.at } };
 }
-const TYPERS = { signingPackages: typeSigningPackage, signings: typeSigning, followUps: typeFollowUp, outcomeReports: typeOutcomeReport };
 
 // ------------------------------------------------------------------ rows ↔ records
 const insertFor = (sqlite, table, cols, { upsert = null } = {}) => sqlite.prepare(`INSERT INTO ${table} (${cols.join(', ')}) VALUES (${cols.map((c) => `@${c}`).join(', ')})${upsert ? ` ON CONFLICT(${upsert}) DO UPDATE SET ${cols.filter((c) => c !== upsert).map((c) => `${c} = excluded.${c}`).join(', ')}` : ''}`);
@@ -628,69 +627,7 @@ function writePackage(st, p) {
 }
 function writeSigning(st, s) { st.signing.run(signingRow(s)); st.spartiesOf.run(s.id); s.parties.forEach((p, i) => st.sparty.run(spartyRow(s.id, p, i))); }
 function writeOutcome(st, r) { st.out.run(outRow(r)); st.confsOf.run(r.id); r.confirmations.forEach((c, i) => st.conf.run(confRow(r.id, c, i))); }
-function deletePackage(st, id) { st.docsOf.run(id); st.partiesOf.run(id); st.histOf.run(id); st.keysOf.run(id); st.revsOf.run(id); st.pkgDel.run(id); }
 
-/** Every reference a record names that must exist (ids only), checked before the engine would name a rowid. */
-function checkReferences(sqlite, typed, label) {
-  const has = (table, id) => !!sqlite.prepare(`SELECT 1 FROM ${table} WHERE id = ?`).get(id);
-  const orgs = new Set(sqlite.prepare('SELECT id FROM orgs').all().map((r) => r.id)); const users = new Set(sqlite.prepare('SELECT id FROM org_users').all().map((r) => r.id));
-  const pkgIds = new Set(typed.signingPackages.map((p) => p.id)); const revIds = new Set(typed.signingPackages.flatMap((p) => p.revisions.map((r) => r.id)));
-  const signingIds = new Set(typed.signings.map((s) => s.id)); const fupIds = new Set(typed.followUps.map((f) => f.id));
-  const problems = [];
-  const need = (ok, what) => { if (!ok) problems.push(what); };
-  for (const p of typed.signingPackages) {
-    need(orgs.has(p.orgId), `signing_packages ${p.id} → orgs ${p.orgId}`); need(tableExists(sqlite, 'recruitment_cases') && has('recruitment_cases', p.caseId), `signing_packages ${p.id} → recruitment_cases ${p.caseId}`); need(tableExists(sqlite, 'recruitment_offers') && has('recruitment_offers', p.offerId), `signing_packages ${p.id} → recruitment_offers ${p.offerId}`);
-    for (const [f, a] of [['createdBy', p.createdBy], ['cancelledBy', p.cancelledBy], ['completion.completedBy', p.completion?.completedBy]]) if (a?.id && a.kind === 'org') need(users.has(a.id), `signing_packages ${p.id} ${f} → org_users ${a.id}`);
-    if (p.completion) need(signingIds.has(p.completion.signingId), `signing_packages ${p.id} completion → signings ${p.completion.signingId}`);
-    for (const r of p.revisions) { for (const [f, a] of [['createdBy', r.createdBy], ['readyBy', r.readyBy], ['completedBy', r.completedBy], ['document.uploadedBy', r.document?.uploadedBy], ['executedDocument.uploadedBy', r.executedDocument?.uploadedBy]]) if (a?.id && a.kind === 'org') need(users.has(a.id), `signing_revisions ${r.id} ${f} → org_users ${a.id}`); if (r.supersedesRevisionId) need(revIds.has(r.supersedesRevisionId), `signing_revisions ${r.id} supersedes → ${r.supersedesRevisionId}`); if (r.supersededByRevisionId) need(revIds.has(r.supersededByRevisionId), `signing_revisions ${r.id} supersededBy → ${r.supersededByRevisionId}`); }
-  }
-  for (const s of typed.signings) {
-    need(orgs.has(s.orgId), `signings ${s.id} → orgs ${s.orgId}`); if (s.userId) need(users.has(s.userId), `signings ${s.id} → org_users ${s.userId}`);
-    if (s.signingPackageId) need(pkgIds.has(s.signingPackageId), `signings ${s.id} → signing_packages ${s.signingPackageId}`); if (s.signingRevisionId) need(revIds.has(s.signingRevisionId), `signings ${s.id} → signing_revisions ${s.signingRevisionId}`);
-    if (s.caseId) need(has('recruitment_cases', s.caseId), `signings ${s.id} → recruitment_cases ${s.caseId}`); if (s.offerId) need(has('recruitment_offers', s.offerId), `signings ${s.id} → recruitment_offers ${s.offerId}`);
-  }
-  for (const f of typed.followUps) { need(orgs.has(f.orgId), `follow_ups ${f.id} → orgs ${f.orgId}`); need(signingIds.has(f.signingId), `follow_ups ${f.id} → signings ${f.signingId}`); }
-  for (const r of typed.outcomeReports) { need(orgs.has(r.orgId), `outcome_reports ${r.id} → orgs ${r.orgId}`); need(signingIds.has(r.signingId), `outcome_reports ${r.id} → signings ${r.signingId}`); need(fupIds.has(r.followUpId), `outcome_reports ${r.id} → follow_ups ${r.followUpId}`); need(users.has(r.by.id), `outcome_reports ${r.id} by → org_users ${r.by.id}`); }
-  if (problems.length) throw refusal('SIGNINGS_REFERENCE_MISSING', `${problems.length} reference(s) in ${label} name a row that is not there (${ids(problems)}); the write was rolled back and nothing was changed`, { rows: problems });
-}
-/** The uniqueness rules the code keeps, named with ids before the engine would. */
-function checkUniqueness(typed, label) {
-  const problems = []; const seen = (m, k, what) => { if (k === null || k === undefined) return; if (m.has(k)) problems.push(`${what} ${k} (${m.get(k)} and this)`); else m.set(k, what); };
-  const done = new Map(); const perPkg = new Map(); const perOffer = new Map(); const legacy = new Map(); const perMilestone = new Map(); const perFup = new Map();
-  // one LIVE package per offer is a rule of the clock (EXPIRED is derived from expires_at, never stored: an expired
-  // READY package and the next one share the offer), so it stays with m29 canStart; one COMPLETED per offer is a column
-  const revIds = new Map(); const docIds = new Map(); const histIds = new Map();
-  for (const p of typed.signingPackages) { if (p.status === 'COMPLETED') seen(done, p.offerId, 'a completed package per offer'); for (const r of p.revisions) { seen(revIds, r.id, `a revision id in ${p.id}`); for (const d of [r.document, r.executedDocument]) if (d) seen(docIds, d.id, `a document id in ${p.id}`); } for (const h of p.history) seen(histIds, h.id, `a history id in ${p.id}`); }
-  for (const s of typed.signings) { seen(perPkg, s.signingPackageId, 'a signing per package'); seen(perOffer, s.offerId, 'a signing per offer'); if (!s.signingPackageId) seen(legacy, `${s.orgId}/${s.playerId}`, 'a standing legacy signing per organisation and player'); }
-  for (const f of typed.followUps) seen(perMilestone, `${f.signingId}/${f.milestone}`, 'a follow-up per signing and milestone');
-  for (const r of typed.outcomeReports) seen(perFup, r.followUpId, 'a report per follow-up');
-  if (problems.length) throw refusal('SIGNINGS_UNIQUENESS', `${problems.length} rule(s) violated in ${label}: ${ids(problems)}; the write was rolled back and nothing was changed`, { rows: problems });
-}
-/** Type every entry of the supplied collections (array order kept); refuse on the first problem with ids only. */
-function typeCollections(supplied, label) {
-  const typed = {}; const notes = []; const counts = {};
-  for (const name of SIGNINGS_FOLLOWUPS_COLLECTIONS) {
-    const list = supplied[name]; typed[name] = [];
-    if (list === undefined) continue;
-    if (!Array.isArray(list)) throw refusal('SIGNINGS_IMPORT_BLOCKED', `the ${name} collection of ${label} must be an array of entries (got ${describe(list)})`);
-    const seen = new Set(); let normalised = 0;
-    list.forEach((raw, i) => { const t = TYPERS[name](raw, `${name} entry #${i}`); if (!t.ok) throw refusal('SIGNINGS_IMPORT_BLOCKED', `${label}: ${t.reason}`); if (seen.has(t.record.id)) throw refusal('SIGNINGS_IMPORT_BLOCKED', `${label}: ${name} entry #${i} duplicates the id of an earlier entry (${t.record.id})`); seen.add(t.record.id); typed[name].push(t.record); if (t.notes.length) normalised += 1; notes.push(...t.notes); });
-    counts[name] = { imported: list.length, normalised };
-  }
-  return { typed, notes, counts };
-}
-/** Count the player references (every occurrence) as live, retained or missing — Q7a/Q8a/Q8c-a applied; never refused. */
-function countPlayers(sqlite, typed) {
-  const counts = { live: 0, retained: 0, missing: 0 };
-  if (!tableExists(sqlite, 'players')) return counts;
-  const live = new Set(sqlite.prepare('SELECT id FROM players WHERE deleted_at IS NULL').all().map((r) => r.id)); const retained = new Set(sqlite.prepare('SELECT id FROM players WHERE deleted_at IS NOT NULL').all().map((r) => r.id));
-  const count = (pid) => { if (live.has(pid)) counts.live += 1; else if (retained.has(pid)) counts.retained += 1; else counts.missing += 1; };
-  for (const p of typed.signingPackages) { count(p.playerId); for (const r of p.revisions) for (const pt of r.requiredParties) { if (isStr(pt.forPlayerId)) count(pt.forPlayerId); if (pt.partyType === 'PLAYER' && isStr(pt.forEntityId)) count(pt.forEntityId); if (pt.completedBy?.kind === 'player' && isStr(pt.completedBy.id)) count(pt.completedBy.id); } for (const h of p.history) if (h.by?.kind === 'player' && isStr(h.by.id)) count(h.by.id); }
-  for (const s of typed.signings) count(s.playerId);
-  for (const f of typed.followUps) count(f.playerId);
-  for (const r of typed.outcomeReports) { count(r.playerId); for (const c of r.confirmations) if (c.by.kind === 'player') count(c.by.id); }
-  return counts;
-}
 const PLAYER_REFS_SQL = {
   signingPackages: "SELECT player_id AS pid FROM signing_packages UNION ALL SELECT for_player_id FROM signing_revision_parties WHERE for_player_id IS NOT NULL UNION ALL SELECT for_entity_id FROM signing_revision_parties WHERE party_type = 'PLAYER' AND for_entity_id IS NOT NULL UNION ALL SELECT completed_by_id FROM signing_revision_parties WHERE completed_by_kind = 'player' AND completed_by_id IS NOT NULL UNION ALL SELECT by_id FROM signing_history WHERE by_kind = 'player' AND by_id IS NOT NULL",
   signings: 'SELECT player_id AS pid FROM signings', followUps: 'SELECT player_id AS pid FROM follow_ups',
@@ -706,20 +643,9 @@ export function retainedPlayerReferences(sqlite) {
   return Object.fromEntries(SIGNINGS_FOLLOWUPS_COLLECTIONS.map((c) => [c, sqlite.prepare(`SELECT count(*) AS n FROM (${PLAYER_REFS_SQL[c]}) x WHERE EXISTS (SELECT 1 FROM players p WHERE p.id = x.pid AND p.deleted_at IS NOT NULL)`).get().n]));
 }
 
-/** Write typed collections in dependency order: packages (deferred completion key) → signings → follow-ups → reports. */
-function writeTyped(sqlite, typed) {
-  const st = statements(sqlite);
-  for (const p of typed.signingPackages) writePackage(st, p);
-  for (const s of typed.signings) writeSigning(st, s);
-  for (const f of typed.followUps) st.fup.run(fupRow(f));
-  for (const r of typed.outcomeReports) writeOutcome(st, r);
-}
-function assertKeys(sqlite, label) {
-  for (const t of SIGNINGS_FOLLOWUPS_TABLES) { const broken = sqlite.prepare(`PRAGMA foreign_key_check(${t})`).all(); if (broken.length) throw refusal('SIGNINGS_KEY_VIOLATION', `${label}: ${t} holds ${broken.length} row(s) whose reference is not there (first: rowid ${broken[0].rowid} → ${broken[0].parent}); the write was rolled back`); }
-}
 
-/** Whole-snapshot access (readTableBacked / writeTableBacked). */
-export const SIGNINGS_FOLLOWUPS_SNAPSHOT = {
+/** The whole domain read back as plain records (`readAllRecords` in index.mjs: the test suites' read-back); null before its migration. */
+export const SIGNINGS_FOLLOWUPS_RECORDS = {
   names: SIGNINGS_FOLLOWUPS_COLLECTIONS,
   read(sqlite) { if (!signingsFollowUpsLive(sqlite)) return null; const st = statements(sqlite); const pkgs = st.pkgAll.all(); const sgs = st.signingAll.all(); const bst = batchStatements(sqlite, st, { packageIds: pkgs.map((r) => r.id), signingIds: sgs.map((r) => r.id) }); return { signingPackages: pkgs.map((r) => decodePackage(bst, r)), signings: sgs.map((r) => decodeSigning(bst, r)), followUps: st.fupAll.all().map(decodeFollowUp), outcomeReports: st.outAll.all().map((r) => decodeOutcome(st, r)) }; },
   /**
@@ -728,48 +654,10 @@ export const SIGNINGS_FOLLOWUPS_SNAPSHOT = {
    * (a departing row a RETAINED collection still references is refused with ids), BEFORE the S8c departures so a
    * package can leave with its offer. Returns the plan `write` and `assert` take, or null before the 0018 record.
    */
-  begin(sqlite, db, { label = 'the snapshot', log = () => {} } = {}) {
-    if (!signingsFollowUpsLive(sqlite)) return null;
-    const supplied = Object.fromEntries(SIGNINGS_FOLLOWUPS_COLLECTIONS.map((n) => [n, Object.hasOwn(db, n) && db[n] !== undefined ? db[n] : undefined]));
-    if (SIGNINGS_FOLLOWUPS_COLLECTIONS.every((n) => supplied[n] === undefined)) return { written: [], typed: null };
-    const { typed, notes } = typeCollections(supplied, label);
-    for (const n of notes) log(`signings/follow-ups snapshot: ${n}`);
-    const st = statements(sqlite);
-    const stored = Object.fromEntries([['signingPackages', 'signing_packages'], ['signings', 'signings'], ['followUps', 'follow_ups'], ['outcomeReports', 'outcome_reports']].map(([n, t]) => [n, st.ids(t)]));
-    const final = (n) => (supplied[n] === undefined ? new Set(stored[n]) : new Set(typed[n].map((r) => r.id)));
-    const departing = (n) => (supplied[n] === undefined ? [] : stored[n].filter((id) => !final(n).has(id)));
-    // the retained dependants of a departing row, named before the engine would
-    const problems = [];
-    const finalPkgs = final('signingPackages'); const finalSignings = final('signings'); const finalFups = final('followUps');
-    // every row that will be there after this save — the supplied (typed) ones or the stored ones — against every id that will be there
-    const finalRows = (n, fromRow, fromRecord) => (supplied[n] === undefined ? st[{ signingPackages: 'pkgAll', signings: 'signingAll', followUps: 'fupAll', outcomeReports: 'outAll' }[n]].all().map(fromRow) : typed[n].map(fromRecord));
-    const pkgs = finalRows('signingPackages', (p) => ({ id: p.id, signingId: p.completion_signing_id }), (p) => ({ id: p.id, signingId: p.completion?.signingId ?? null }));
-    const sgs = finalRows('signings', (s) => ({ id: s.id, pkg: s.signing_package_id }), (s) => ({ id: s.id, pkg: s.signingPackageId }));
-    const fups = finalRows('followUps', (f) => ({ id: f.id, signingId: f.signing_id }), (f) => ({ id: f.id, signingId: f.signingId }));
-    const outs = finalRows('outcomeReports', (r) => ({ id: r.id, signingId: r.signing_id, fup: r.follow_up_id }), (r) => ({ id: r.id, signingId: r.signingId, fup: r.followUpId }));
-    for (const p of pkgs) if (p.signingId && !finalSignings.has(p.signingId)) problems.push(`signing_packages ${p.id} → signings ${p.signingId}`);
-    for (const s of sgs) if (s.pkg && !finalPkgs.has(s.pkg)) problems.push(`signings ${s.id} → signing_packages ${s.pkg}`);
-    for (const f of fups) if (!finalSignings.has(f.signingId)) problems.push(`follow_ups ${f.id} → signings ${f.signingId}`);
-    for (const r of outs) { if (!finalSignings.has(r.signingId)) problems.push(`outcome_reports ${r.id} → signings ${r.signingId}`); if (!finalFups.has(r.fup)) problems.push(`outcome_reports ${r.id} → follow_ups ${r.fup}`); }
-    if (problems.length) throw refusal('SIGNINGS_STILL_REFERENCED', `${problems.length} row(s) of ${label} still name a row this snapshot does not carry (${ids(problems)}); the save was rolled back and nothing was changed`, { rows: problems });
-    for (const id of departing('outcomeReports')) { st.confsOf.run(id); st.outDel.run(id); }
-    for (const id of departing('followUps')) st.fupDel.run(id);
-    // the package ↔ signing cycle (each side's CHECK forbids a half-state): the signings leave first — the package's
-    // completion key is deferred (NO ACTION, checked at COMMIT; a RESTRICT would fire at once), the signing's package
-    // key is immediate — then the packages, and COMMIT finds the pair gone
-    for (const id of departing('signings')) { st.spartiesOf.run(id); st.signingDel.run(id); }
-    for (const id of departing('signingPackages')) deletePackage(st, id);
-    const written = SIGNINGS_FOLLOWUPS_COLLECTIONS.filter((n) => supplied[n] !== undefined);
-    return { written, typed, supplied, label };
-  },
+
   /** The supplied rows upserted (after the offers and cases of the same snapshot are in place). */
-  write(sqlite, plan) {
-    if (!plan || !plan.typed) return;
-    const all = { signingPackages: plan.supplied.signingPackages === undefined ? SIGNINGS_FOLLOWUPS_SNAPSHOT.read(sqlite).signingPackages : plan.typed.signingPackages, signings: plan.supplied.signings === undefined ? SIGNINGS_FOLLOWUPS_SNAPSHOT.read(sqlite).signings : plan.typed.signings, followUps: plan.supplied.followUps === undefined ? SIGNINGS_FOLLOWUPS_SNAPSHOT.read(sqlite).followUps : plan.typed.followUps, outcomeReports: plan.supplied.outcomeReports === undefined ? SIGNINGS_FOLLOWUPS_SNAPSHOT.read(sqlite).outcomeReports : plan.typed.outcomeReports };
-    checkReferences(sqlite, all, plan.label); checkUniqueness(all, plan.label);
-    writeTyped(sqlite, plan.typed);
-  },
-  assert(sqlite, { label = 'the snapshot' } = {}) { assertKeys(sqlite, label); },
+
+
 };
 
 // ------------------------------------------------------------------ the repository (explicit writes; SQL reads)
@@ -924,7 +812,7 @@ export function createSigningsFollowUpsRepository({ sqlite, unit = null, now = D
     attach() { if (!signingsFollowUpsLive(sqlite)) throw new Error(`the signings/follow-ups repository needs ${SIGNINGS_FOLLOWUPS_MIGRATION} recorded; it never imports an in-memory array`); return { counts: this.counts() }; },
     counts() { return Object.fromEntries(SIGNINGS_FOLLOWUPS_TABLES_OF.map(([n]) => [n, counters[n].get().n])); },
     pending: () => 0,
-    exportAll() { return SIGNINGS_FOLLOWUPS_SNAPSHOT.read(sqlite); },
+    exportAll() { return SIGNINGS_FOLLOWUPS_RECORDS.read(sqlite); },
     log,
     now,
   };

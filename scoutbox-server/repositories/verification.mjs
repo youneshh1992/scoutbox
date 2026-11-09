@@ -28,14 +28,12 @@
  * token's subject and ref, an invitation's inviter of record 'trust_safety') carry none.
  */
 import { isPlainObject, ids, describe } from './recruitment.mjs';
-import { text, int, bool, oneOf, group, flat, quote, tableDdl, bad, typeSpec, encode, decode, upsertSql } from './fieldSpecs.mjs';
+import { text, int, bool, oneOf, group, quote, tableDdl, bad, typeSpec, encode, decode, upsertSql } from './fieldSpecs.mjs';
 import { transaction, migrationApplied, childRowsOf } from './database.mjs';
 import { deepFreeze } from './scoutingEvidence.mjs';
 
 export const VERIFICATION_MIGRATION = '0023_verification';
 export const VERIFICATION_COLLECTIONS = Object.freeze(['verClaims', 'verEvents', 'verEvidence', 'verTokens', 'verAdmins', 'verRootTransfers', 'verRootRequests', 'verDisputes', 'verReferences', 'verPlayerInvites', 'verConflicts', 'verDomainRequests', 'orgVerifiedDomains']);
-/** Blob-era names that are gone without a collection of their own (the M14 boot marker is a ver_migrations row). */
-export const VERIFICATION_RETIRED = Object.freeze(['verMigrated']);
 
 // ------------------------------------------------------------------ vocabularies (one definition; the domain module imports them)
 export const CLAIM_TYPES = Object.freeze(['PERSON_IDENTITY', 'ORGANISATION_IDENTITY', 'ORGANISATION_DOMAIN', 'ORGANISATION_ADMIN', 'CLUB_AFFILIATION', 'CLUB_ROLE', 'LICENCE', 'AGENCY_AFFILIATION', 'AGENCY_ROLE', 'GRASSROOTS_AFFILIATION', 'FEDERATION_AFFILIATION']);
@@ -428,62 +426,6 @@ export function eventDetail(before, after) {
   return line ? (line.length > L.detail ? `${line.slice(0, L.detail - 1)}…` : line) : null;
 }
 
-// ------------------------------------------------------------------ the rules the code keeps, named with ids before the engine would
-function checkRecords(sqlite, typed, label) {
-  const problems = [];
-  const orgs = new Set(sqlite.prepare('SELECT id FROM orgs').all().map((r) => r.id));
-  const users = new Set(sqlite.prepare('SELECT id FROM org_users').all().map((r) => r.id));
-  const idsOf = (n) => new Set(typed[n].map((r) => r.id));
-  const claims = idsOf('verClaims'); const evidence = idsOf('verEvidence'); const roots = idsOf('verRootRequests'); const refs = idsOf('verReferences');
-  const need = (ok, what) => { if (!ok) problems.push(what); };
-  const org = (r, n, k) => { if (r[k] != null) need(orgs.has(r[k]), `${n} ${r.id ?? `${r.orgId}/${r.domain}`} ${k} → orgs ${r[k]}`); };
-  const user = (r, n, k) => { if (r[k] != null) need(users.has(r[k]), `${n} ${r.id} ${k} → org_users ${r[k]}`); };
-  for (const c of typed.verClaims) { org(c, 'ver_claims', 'organisationId'); for (const ev of c.evidenceIds) need(evidence.has(ev), `ver_claims ${c.id} evidenceIds → ver_evidence ${ev}`); if (c.metadata.rootRequest) need(roots.has(c.metadata.rootRequest), `ver_claims ${c.id} rootRequest → ver_root_requests ${c.metadata.rootRequest}`); }
-  for (const e of typed.verEvidence) { org(e, 'ver_evidence', 'orgId'); if (e.meta.rootRequest) need(roots.has(e.meta.rootRequest), `ver_evidence ${e.id} rootRequest → ver_root_requests ${e.meta.rootRequest}`); }
-  for (const e of typed.verEvents) { org(e, 'ver_events', 'orgId'); org(e, 'ver_events', 'actorOrgId'); if (e.claimId) need(claims.has(e.claimId), `ver_events ${e.id} claimId → ver_claims ${e.claimId}`); }
-  for (const t of typed.verTokens) org(t, 'ver_tokens', 'orgId');
-  for (const a of typed.verAdmins) { org(a, 'ver_admins', 'orgId'); user(a, 'ver_admins', 'userId'); user(a, 'ver_admins', 'revokedBy'); }
-  for (const t of typed.verRootTransfers) { org(t, 'ver_root_transfers', 'orgId'); for (const k of ['toUserId', 'proposedBy', 'approvedBy']) user(t, 'ver_root_transfers', k); }
-  for (const r of typed.verRootRequests) { org(r, 'ver_root_requests', 'existingOrgId'); org(r, 'ver_root_requests', 'resultOrgId'); user(r, 'ver_root_requests', 'resultUserId'); }
-  for (const d of typed.verDisputes) { need(claims.has(d.claimId), `ver_disputes ${d.id} claimId → ver_claims ${d.claimId}`); user(d, 'ver_disputes', 'byId'); }
-  for (const r of typed.verReferences) { org(r, 'ver_references', 'orgId'); user(r, 'ver_references', 'coachUserId'); need(claims.has(r.provenanceSnapshot.claimId), `ver_references ${r.id} provenance → ver_claims ${r.provenanceSnapshot.claimId}`); if (r.supersedesId) need(refs.has(r.supersedesId), `ver_references ${r.id} supersedesId → ver_references ${r.supersedesId}`); }
-  for (const i of typed.verPlayerInvites) { org(i, 'ver_player_invites', 'orgId'); user(i, 'ver_player_invites', 'byUserId'); }
-  for (const c of typed.verConflicts) { org(c, 'ver_conflicts', 'orgId'); user(c, 'ver_conflicts', 'userId'); }
-  for (const r of typed.verDomainRequests) { org(r, 'ver_domain_requests', 'orgId'); user(r, 'ver_domain_requests', 'requestedBy'); }
-  for (const d of typed.orgVerifiedDomains) org(d, 'org_verified_domains', 'orgId');
-  if (problems.length) throw refusal('VERIFICATION_REFERENCE_MISSING', `${problems.length} reference(s) in ${label} name a row that is not there (${ids(problems)}); the write was rolled back and nothing was changed`, { rows: problems });
-  const unique = []; const seen = new Map();
-  const once = (key, what) => { if (seen.has(key)) unique.push(`${what} (${seen.get(key)})`); else seen.set(key, what); };
-  const open = ['unverified', 'collecting_evidence', 'pending', 'automated_checks_passed', 'requires_human_review', 'verified'];
-  for (const c of typed.verClaims) {
-    if (c.subjectType === 'user' && c.claimType === 'PERSON_IDENTITY' && open.includes(c.status)) once(`identity/${c.subjectId}`, `one open identity claim per user: ${c.id}`);
-    if (c.subjectType === 'user' && c.current && ['CLUB_AFFILIATION', 'CLUB_ROLE', 'AGENCY_AFFILIATION', 'AGENCY_ROLE', 'GRASSROOTS_AFFILIATION'].includes(c.claimType) && open.includes(c.status)) once(`aff/${c.subjectId}/${c.organisationId}/${c.claimType}`, `one current affiliation per user, organisation and type: ${c.id}`);
-  }
-  for (const t of typed.verTokens) once(`token/${t.hash}`, `one token per hash: ${t.id}`);
-  for (const a of typed.verAdmins) if (a.status === 'active') once(`admin/${a.orgId}/${a.userId}/${a.level}`, `one active grant per organisation, person and level: ${a.id}`);
-  for (const t of typed.verRootTransfers) if (t.status === 'pending') once(`transfer/${t.orgId}`, `one pending root transfer per organisation: ${t.id}`);
-  for (const d of typed.verDisputes) if (d.status === 'open') once(`dispute/${d.claimId}`, `one open dispute per claim: ${d.id}`);
-  for (const d of typed.orgVerifiedDomains) once(`domain/${d.orgId}/${d.domain}`, `one entry per organisation and domain: ${d.orgId}/${d.domain}`);
-  for (const i of typed.verPlayerInvites) if ((i.status === 'accepted') !== (i.playerId !== null && i.acceptedAt !== null)) unique.push(`an accepted invitation names its player and time: ${i.id}`);
-  if (unique.length) throw refusal('VERIFICATION_UNIQUENESS', `${unique.length} rule(s) violated in ${label}: ${ids(unique)}; the write was rolled back and nothing was changed`, { rows: unique });
-}
-function typeCollections(supplied, label) {
-  const typed = {};
-  for (const name of VERIFICATION_COLLECTIONS) {
-    const list = supplied[name]; typed[name] = [];
-    if (list === undefined) continue;
-    if (!Array.isArray(list)) throw refusal('VERIFICATION_IMPORT_BLOCKED', `the ${name} collection of ${label} must be an array of entries (got ${describe(list)})`);
-    const seen = new Set();
-    list.forEach((raw, i) => {
-      const t = ENTITIES[name].type(raw, `${name} entry #${i}`);
-      if (!t.ok) throw refusal('VERIFICATION_IMPORT_BLOCKED', `${label}: ${t.reason}`);
-      const key = name === 'orgVerifiedDomains' ? `${t.record.orgId}/${t.record.domain}` : t.record.id;
-      if (seen.has(key)) throw refusal('VERIFICATION_IMPORT_BLOCKED', `${label}: ${name} entry #${i} duplicates the id of an earlier entry (${key})`);
-      seen.add(key); typed[name].push(t.record);
-    });
-  }
-  return typed;
-}
 export const verificationLive = (sqlite) => migrationApplied(sqlite, VERIFICATION_MIGRATION);
 function readAll(sqlite) {
   const st = statements(sqlite);
@@ -495,56 +437,11 @@ function readAll(sqlite) {
   }
   return out;
 }
-/** Insertion order for a whole rewrite: the parents before the rows that name them. */
-const WRITE_ORDER = ['verRootRequests', 'verEvidence', 'verClaims', 'verEvents', 'verTokens', 'verAdmins', 'verRootTransfers', 'verDisputes', 'verReferences', 'verPlayerInvites', 'verConflicts', 'verDomainRequests', 'orgVerifiedDomains'];
-const DELETE_ORDER = ['ver_events', 'ver_disputes', 'ver_references', 'ver_claim_evidence', 'ver_claim_codes', 'ver_claims', 'ver_evidence', 'ver_root_request_codes', 'ver_root_requests', 'ver_tokens', 'ver_admins', 'ver_root_transfers', 'ver_player_invites', 'ver_conflicts', 'ver_domain_request_codes', 'ver_domain_requests', 'org_verified_domains'];
 
-/**
- * Whole-snapshot access (readTableBacked / writeTableBacked). A supplied collection IS the whole final collection; an
- * omitted one is kept whole. Every record is typed (junk refused with ids) and every reference and uniqueness rule of
- * the FINAL combined state is named before the engine would; then the domain's tables are rewritten from that state.
- */
-export const VERIFICATION_SNAPSHOT = {
+/** The whole domain read back as plain records (`readAllRecords` in index.mjs: the test suites' read-back); null before its migration. */
+export const VERIFICATION_RECORDS = {
   names: VERIFICATION_COLLECTIONS,
   read(sqlite) { return verificationLive(sqlite) ? readAll(sqlite) : null; },
-  replace(sqlite, db, { label = 'the snapshot (verification)' } = {}) {
-    if (!verificationLive(sqlite)) return [];
-    const supplied = Object.fromEntries(VERIFICATION_COLLECTIONS.map((n) => [n, Object.hasOwn(db, n) ? db[n] : undefined]));
-    const written = VERIFICATION_COLLECTIONS.filter((n) => supplied[n] !== undefined);
-    if (!written.length) return [];
-    const typed = typeCollections(supplied, label);
-    const stored = readAll(sqlite);
-    const final = Object.fromEntries(VERIFICATION_COLLECTIONS.map((n) => [n, supplied[n] === undefined ? stored[n] : typed[n]]));
-    // a root application's evidence is the evidence that names it; a supplied evidenceIds list must agree
-    for (const r of final.verRootRequests) {
-      const named = final.verEvidence.filter((e) => e.meta.rootRequest === r.id).map((e) => e.id);
-      if (supplied.verRootRequests !== undefined && r.evidenceIds.length && JSON.stringify(r.evidenceIds) !== JSON.stringify(named)) throw refusal('VERIFICATION_IMPORT_BLOCKED', `${label}: verRootRequests ${r.id} lists evidence that does not name it (the evidence's meta.rootRequest is the link)`);
-    }
-    checkRecords(sqlite, final, label);
-    for (const t of DELETE_ORDER) sqlite.exec(`DELETE FROM ${t}`);
-    const st = statements(sqlite);
-    for (const name of WRITE_ORDER) {
-      if (name === 'verReferences') {
-        for (const r of final.verReferences) writeRecord(st, name, { ...r, supersedesId: null });
-        for (const r of final.verReferences) if (r.supersedesId) sqlite.prepare('UPDATE ver_references SET supersedes_id = ? WHERE id = ?').run(r.supersedesId, r.id);
-        continue;
-      }
-      for (const r of final[name]) writeRecord(st, name, r);
-    }
-    // evidence's claimIds: links the claims did not list are added after the claims' own (in the evidence's order)
-    for (const e of final.verEvidence) for (const c of e.claimIds) {
-      if (!final.verClaims.some((x) => x.id === c)) throw refusal('VERIFICATION_REFERENCE_MISSING', `${label}: ver_evidence ${e.id} claimIds → ver_claims ${c}`);
-      if (!sqlite.prepare('SELECT 1 FROM ver_claim_evidence WHERE claim_id = ? AND evidence_id = ?').get(c, e.id)) st.linkIns.run(c, st.linkNext.get(c).n, e.id);
-    }
-    return written;
-  },
-  assert(sqlite, { label = 'the snapshot (verification)' } = {}) {
-    if (!verificationLive(sqlite)) return;
-    for (const t of VERIFICATION_TABLES) {
-      const broken = sqlite.prepare(`PRAGMA foreign_key_check(${t})`).all();
-      if (broken.length) throw refusal('VERIFICATION_KEY_VIOLATION', `${label}: ${t} holds ${broken.length} row(s) whose reference is not there (first: rowid ${broken[0].rowid} → ${broken[0].parent}); the write was rolled back`);
-    }
-  },
 };
 const PLAYER_REFS_SQL = 'SELECT player_id AS pid FROM ver_references UNION ALL SELECT player_id FROM ver_player_invites WHERE player_id IS NOT NULL UNION ALL SELECT target_player_id FROM ver_player_invites WHERE target_player_id IS NOT NULL';
 const playerRefCount = (sqlite, cond) => sqlite.prepare(`SELECT count(*) AS n FROM (${PLAYER_REFS_SQL}) x WHERE ${cond}`).get().n;
@@ -760,7 +657,7 @@ export function createVerificationRepository({ sqlite, unit = null, now = Date.n
     },
     counts() { return Object.fromEntries(VERIFICATION_COLLECTIONS.map((n) => [n, counters[n].get().n])); },
     pending: () => 0,
-    exportAll() { return VERIFICATION_SNAPSHOT.read(sqlite); },
+    exportAll() { return VERIFICATION_RECORDS.read(sqlite); },
     log,
     now,
   };

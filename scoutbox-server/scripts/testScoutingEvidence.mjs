@@ -51,7 +51,7 @@ const affiliation = (over = {}) => ({
 const invite = (over = {}) => ({ id: 'sqi-1', orgId: ORG.id, orgName: ORG.name, playerId: 'pl-adult', playerName: 'Adult Signup', byUserId: SCOUT.userId, byName: SCOUT.name, note: null, status: 'pending_player', createdAt: NOW - 3000, respondedAt: null, ...over });
 
 function serverOpen(dir) {
-  const store = openStore(dir, { tableBacked: TABLE_BACKED });
+  const store = openStore(dir);
   const layer = attachDataLayer({ store, nextId, sessionTtlMs: TTL, now: () => NOW, warn: () => {} });
   return { store, repo: layer.scoutingEvidence, layer, unit: (w) => store.unitOfWork(w), close: () => store.sqlite.close() };
 }

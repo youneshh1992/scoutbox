@@ -31,7 +31,7 @@ const token = (over = {}) => ({ kind: 'player', refId: 'pl-adult', token: 'Expon
 
 function fixtureFile(dir, extra = {}) { writeFixture(dir, { ...FIXTURE(), orgs: ORGS(), users: USERS(), ...extra }, { now: NOW, idCounter: 1000 }); }
 function live(dir) {
-  const store = openStore(dir, { tableBacked: TABLE_BACKED });
+  const store = openStore(dir);
   const layer = attachDataLayer({ store, nextId, sessionTtlMs: TTL, now: () => NOW, warn: () => {} });
   return { store, layer, repo: layer.outboxPush, close: () => store.sqlite.close() };
 }

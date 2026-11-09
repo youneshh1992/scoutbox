@@ -7,7 +7,7 @@ import { openStore } from '../store.mjs';
 import { attachDataLayer, TABLE_BACKED } from '../repositories/index.mjs';
 
 const dir = process.argv[2];
-const store = openStore(dir, { tableBacked: TABLE_BACKED });
+const store = openStore(dir);
 const db = {};
 const layer = attachDataLayer({ db, store, nextId: (p) => `${p}-crash`, persist: () => {}, sessionTtlMs: 30 * 86_400_000 });
 store.unitOfWork(() => {

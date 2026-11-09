@@ -33,7 +33,7 @@ import { pageOf } from '../domains/platform/paging.mjs';
 
 export const CHANNELS_MIGRATION = '0012_channels';
 export const CHANNELS_TABLES = Object.freeze(['channels', 'messages', 'message_attachments']);
-/** The collection name the snapshot path uses. */
+/** The collection name (the whole-domain read). */
 export const CHANNELS_COLLECTION = 'channels';
 export const SENDER_KINDS = Object.freeze(['player', 'guardian', 'org_user']);
 export const COUNTERPARTIES = Object.freeze(['player', 'guardian']);
@@ -103,7 +103,6 @@ CREATE TABLE message_attachments (
 export const channelsLive = (sqlite) => migrationApplied(sqlite, CHANNELS_MIGRATION);
 const describe = (v) => (v === null ? 'null' : Array.isArray(v) ? 'an array' : typeof v === 'object' ? 'an object' : `a ${typeof v}`);
 const refusal = (code, message, extra = {}) => Object.assign(new Error(`${code}: ${message}`), { code, ...extra });
-const blocked = (detail, extra = {}) => refusal('CHANNELS_IMPORT_BLOCKED', `${detail}; nothing was written`, extra);
 const isPlainObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 const isInt = (v) => Number.isSafeInteger(v);
 const ids = (xs) => xs.slice(0, 20).join(', ') + (xs.length > 20 ? ', …' : '');
@@ -207,23 +206,6 @@ export const typeMessage = (raw, at = 'message') => { const r = attempt(() => ({
 /** One thread with its messages: `{ ok: true, row }` or `{ ok: false, reason }`. */
 export const typeChannel = (raw, at = 'channel') => attempt(() => ({ row: channelOf(raw, at) }));
 
-/** Type a whole snapshot collection (unique ids, one thread per request); throws CHANNELS_IMPORT_BLOCKED naming ids and fields. */
-export function validateChannelRows(rows, { label = 'channels' } = {}) {
-  if (!Array.isArray(rows)) throw blocked(`${label} must be an array of entries (got ${describe(rows)})`);
-  const out = []; const problems = []; const seenIds = new Set(); const seenRequests = new Map(); const seenMessages = new Set();
-  rows.forEach((raw, i) => {
-    const v = typeChannel(raw, `${label} entry #${i}`);
-    if (!v.ok) { problems.push(v.reason); return; }
-    if (seenIds.has(v.row.id)) { problems.push(`${label} entry #${i}: duplicates the id of an earlier entry (${v.row.id})`); return; }
-    if (seenRequests.has(v.row.requestId)) { problems.push(`${label} entry #${i}: a second thread for request ${v.row.requestId} (the first is ${seenRequests.get(v.row.requestId)}); a request opens one thread`); return; }
-    const dupMessage = v.row.messages.find((m) => seenMessages.has(m.id));
-    if (dupMessage) { problems.push(`${label} entry #${i}: message ${dupMessage.id} is also in an earlier thread`); return; }
-    seenIds.add(v.row.id); seenRequests.set(v.row.requestId, v.row.id); for (const m of v.row.messages) seenMessages.add(m.id);
-    out.push(v.row);
-  });
-  if (problems.length) throw blocked(`${problems.length} invalid entr${problems.length === 1 ? 'y' : 'ies'} — ${problems.slice(0, 20).join('; ')}${problems.length > 20 ? '; …' : ''}`, { problems });
-  return { rows: out };
-}
 
 // ------------------------------------------------------------------ rows ↔ the tables
 const CHANNEL_INSERT = 'INSERT INTO channels (id, request_id, player_id, player_name, org_id, org_name, org_verified, scout_name, scout_role, counterparty, guardian_id, created_at, last_activity_at, read_by_org_at, read_by_counterparty_at) VALUES (@id, @request_id, @player_id, @player_name, @org_id, @org_name, @org_verified, @scout_name, @scout_role, @counterparty, @guardian_id, @created_at, @last_activity_at, @read_by_org_at, @read_by_counterparty_at)';
@@ -282,39 +264,11 @@ function referenceMisses(sqlite, rows) {
   return misses;
 }
 
-/**
- * The FINAL-STATE check of a snapshot write (runs inside the caller's transaction, after the prunes): every thread
- * names an existing request, organisation and (when it names one) guardian. Requests, organisations and staff are
- * keys, so only the guardian can really be missing here; the codes name the thread and guardian ids.
- */
-export function assertChannelReferencesConsistent(sqlite, { label = 'the snapshot' } = {}) {
-  if (!channelsLive(sqlite)) return;
-  const rows = sqlite.prepare('SELECT id, request_id, org_id, guardian_id FROM channels ORDER BY seq').all().map((r) => ({ id: r.id, requestId: r.request_id, orgId: r.org_id, guardianId: r.guardian_id, messages: [] }));
-  if (!rows.length) return;
-  const [miss] = referenceMisses(sqlite, rows);
-  if (miss) throw refusal(miss[0], `${miss[2].length} thread(s) in ${label} name a ${miss[1]} row that does not exist (threads ${ids(miss[2])}; ${miss[1]} ${ids(miss[3])}); the write was rolled back and nothing was changed`, { channels: miss[2] });
-}
 
-/**
- * Whole-table access for the tools that treat the file as one snapshot (the persistence suites, fixtures). `read`
- * returns every thread in insertion order with its messages; `replace` types every entry (an unknown field or a
- * wrong-typed value refuses the whole write, naming ids and fields), checks the references against the tables as
- * they stand (the snapshot writes the requests, organisations, staff and guardians first) and rewrites the three
- * tables inside the caller's transaction. Both decline before the 0012 record.
- */
+/** The whole domain read back as plain records (`readAllRecords` in index.mjs: the test suites' read-back); null before its migration. */
 export const CHANNELS_TABLE = {
   name: CHANNELS_COLLECTION,
   read(sqlite) { return channelsLive(sqlite) ? readChannels(sqlite) : null; },
-  replace(sqlite, rows) {
-    if (!channelsLive(sqlite)) return false;
-    if (!sqlite.isTransaction) throw new Error('channels: replace() runs inside the caller\'s transaction');
-    const v = validateChannelRows(rows, { label: 'the channels snapshot collection' });
-    const [miss] = referenceMisses(sqlite, v.rows);
-    if (miss) throw blocked(`${miss[0]}: ${miss[2].length} thread(s) in the channels snapshot collection name a ${miss[1]} row that does not exist (threads ${ids(miss[2])})`, { code: miss[0] });
-    sqlite.exec('DELETE FROM channels;'); // the cascades take the messages and the attachments
-    for (const row of v.rows) insertChannel(sqlite, row);
-    return true;
-  },
 };
 
 // ------------------------------------------------------------------ the repository

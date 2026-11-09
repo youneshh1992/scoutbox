@@ -242,61 +242,10 @@ function readAll(sqlite) {
   for (const [name, e] of Object.entries(ENTITIES)) out[name] = sqlite.prepare(`SELECT * FROM ${e.table} ORDER BY rowid`).all().map((r) => decodeFlat(name, r));
   return out;
 }
-const TYPERS = { passportPrefs: typePrefs, ...Object.fromEntries(Object.entries(ENTITIES).map(([n, e]) => [n, e.type])) };
-/**
- * Whole-snapshot access (readTableBacked / writeTableBacked). A supplied collection IS the whole final collection; an
- * omitted one is kept whole. Every record is typed (junk refused with ids) and a confirmation naming a missing
- * organisation is named before the engine would; then the supplied collections' tables are rewritten.
- */
-export const PASSPORT_SNAPSHOT = {
+/** The whole domain read back as plain records (`readAllRecords` in index.mjs: the test suites' read-back); null before its migration. */
+export const PASSPORT_RECORDS = {
   names: PASSPORT_COLLECTIONS,
   read(sqlite) { return passportLive(sqlite) ? readAll(sqlite) : null; },
-  replace(sqlite, db, { label = 'the snapshot (passport)' } = {}) {
-    if (!passportLive(sqlite)) return [];
-    const written = PASSPORT_COLLECTIONS.filter((n) => Object.hasOwn(db, n) && db[n] !== undefined);
-    if (!written.length) return [];
-    const typed = {};
-    for (const name of written) {
-      const list = db[name];
-      if (!Array.isArray(list)) throw refusal('PASSPORT_IMPORT_BLOCKED', `the ${name} collection of ${label} must be an array of entries (got ${describe(list)})`);
-      const seen = new Set();
-      typed[name] = list.map((raw, i) => {
-        const t = TYPERS[name](raw, `${name} entry #${i}`);
-        if (!t.ok) throw refusal('PASSPORT_IMPORT_BLOCKED', `${label}: ${t.reason}`);
-        const key = name === 'passportPrefs' ? t.record.playerId : t.record.id;
-        if (seen.has(key)) throw refusal('PASSPORT_IMPORT_BLOCKED', `${label}: ${name} entry #${i} duplicates an earlier entry (${key})`);
-        seen.add(key);
-        if (name === 'passportPrefs' && t.record.updatedAt === null) throw refusal('PASSPORT_IMPORT_BLOCKED', `${label}: ${name} entry #${i} was never saved (updatedAt is required)`);
-        return t.record;
-      });
-    }
-    if (typed.passportAchievements) {
-      const orgs = new Set(sqlite.prepare('SELECT id FROM orgs').all().map((r) => r.id));
-      const missing = typed.passportAchievements.filter((a) => a.confirmation && !orgs.has(a.confirmation.orgId)).map((a) => `passport_achievements ${a.id} confirmation.orgId → orgs ${a.confirmation.orgId}`);
-      if (missing.length) throw refusal('PASSPORT_REFERENCE_MISSING', `${missing.length} reference(s) in ${label} name a row that is not there (${ids(missing)}); the write was rolled back and nothing was changed`, { rows: missing });
-    }
-    if (typed.passportShares && new Set(typed.passportShares.map((s) => s.tokenHash)).size !== typed.passportShares.length) throw refusal('PASSPORT_IMPORT_BLOCKED', `${label}: two passportShares carry the same token hash`);
-    if (typed.passportPrefs) {
-      sqlite.exec('DELETE FROM passport_prefs'); // the child rows cascade
-      const st = prefsStatements(sqlite);
-      for (const r of typed.passportPrefs) writePrefs(st, r);
-    }
-    for (const name of Object.keys(ENTITIES)) {
-      if (!typed[name]) continue;
-      const e = ENTITIES[name];
-      sqlite.exec(`DELETE FROM ${e.table}`);
-      const up = sqlite.prepare(upsertSql(e.table, e.spec));
-      for (const r of typed[name]) up.run(encodeFlat(name, r));
-    }
-    return written;
-  },
-  assert(sqlite, { label = 'the snapshot (passport)' } = {}) {
-    if (!passportLive(sqlite)) return;
-    for (const t of PASSPORT_TABLES) {
-      const broken = sqlite.prepare(`PRAGMA foreign_key_check(${t})`).all();
-      if (broken.length) throw refusal('PASSPORT_KEY_VIOLATION', `${label}: ${t} holds ${broken.length} row(s) whose reference is not there (first: rowid ${broken[0].rowid} → ${broken[0].parent}); the write was rolled back`);
-    }
-  },
 };
 const PLAYER_REFS_SQL = PASSPORT_COLLECTIONS.map((n) => (n === 'passportPrefs' ? 'SELECT player_id AS pid FROM passport_prefs' : `SELECT player_id FROM ${ENTITIES[n].table}`)).join(' UNION ALL ');
 const playerRefCount = (sqlite, cond) => sqlite.prepare(`SELECT count(*) AS n FROM (${PLAYER_REFS_SQL}) x WHERE ${cond}`).get().n;
@@ -424,7 +373,7 @@ export function createPassportRepository({ sqlite, unit = null, now = Date.now, 
     },
     counts() { return Object.fromEntries(PASSPORT_COLLECTIONS.map((n) => [n, counters[n].get().n])); },
     pending: () => 0,
-    exportAll() { return PASSPORT_SNAPSHOT.read(sqlite); },
+    exportAll() { return PASSPORT_RECORDS.read(sqlite); },
     log,
     now,
   };

@@ -11,7 +11,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import { runDataMigrations } from '../repositories/database.mjs';
-import { createSessionsRepository, validateSessionRow, SESSIONS_CUTOVER_MIGRATION } from '../repositories/sessions.mjs';
+import { createSessionsRepository, SESSIONS_CUTOVER_MIGRATION } from '../repositories/sessions.mjs';
 import { attachDataLayer, DATA_MIGRATIONS, TABLE_BACKED } from '../repositories/index.mjs';
 import { openStore } from '../store.mjs';
 import { writeFixture, readRecords } from './dataLayerFixture.mjs';
@@ -46,38 +46,13 @@ const seedUser = (s, id = 'usr-1', org = 'org-a') => { seedOrg(s, org); s.prepar
  */
 function bootWith(dir, db) {
   writeFixture(dir, db, { idCounter: 1000 });
-  const store = openStore(dir, { tableBacked: TABLE_BACKED });
+  const store = openStore(dir);
   return { store, layer: attachDataLayer({ store, nextId, sessionTtlMs: TTL }) };
 }
 /** Write a fixture media file into the data directory's storage, as an upload would. */
 const storeClip = (dir, id, bytes) => createStorage(dir).saveDataUrl(id, `data:video/webm;base64,${bytes.toString('base64')}`);
 
 const openRaw = (dir) => { const s = new DatabaseSync(path.join(dir, 'scoutbox.db')); s.exec('PRAGMA foreign_keys = ON;'); return s; };
-
-// ------------------------------------------------------------- validation
-test('validation: every unsupported shape is refused with a reason and nothing is coerced', () => {
-  const exists = (id) => id === 'usr-1';
-  const ok = validateSessionRow({ token: 't', sid: 's', kind: 'org', refId: 'org-a', userId: 'usr-1', createdAt: 5 }, { orgUserExists: exists });
-  assert.equal(ok.ok, true); assert.equal(ok.row.tokenHash, sha256('t')); assert.equal(ok.row.userId, 'usr-1');
-  const refused = (raw) => { const v = validateSessionRow(raw, { orgUserExists: exists }); assert.equal(v.ok, false, JSON.stringify(raw)); return v.reason; };
-  assert.equal(refused({ sid: 's', kind: 'player', refId: 'p', createdAt: 5 }), 'no token');
-  assert.equal(refused({ token: '', sid: 's', kind: 'player', refId: 'p', createdAt: 5 }), 'no token');
-  assert.match(refused({ token: 't', sid: 's', kind: 'admin', refId: 'p', createdAt: 5 }), /not a session kind/);
-  assert.equal(refused({ token: 't', sid: 's', kind: 'player', createdAt: 5 }), 'no refId');
-  assert.match(refused({ token: 't', sid: 's', kind: 'player', refId: 'p', createdAt: 'yesterday' }), /positive integer/);
-  assert.match(refused({ token: 't', sid: 's', kind: 'player', refId: 'p' }), /positive integer/, 'a missing creation time is unsupported, not coerced');
-  assert.match(refused({ token: 't', sid: 's', kind: 'player', refId: 'p', createdAt: 5.5 }), /positive integer/, 'a fractional time is not truncated');
-  assert.match(refused({ token: 't', sid: 's', kind: 'org', refId: 'org-a', createdAt: 5 }), /names no staff member/);
-  assert.match(refused({ token: 't', sid: 's', kind: 'org', refId: 'org-a', userId: 'usr-nope', createdAt: 5 }), /does not exist/);
-  assert.match(refused({ token: 't', sid: 's', kind: 'player', refId: 'p', userId: 'usr-1', createdAt: 5 }), /must not name a staff member/);
-  assert.match(refused({ token: 't', sid: 's', kind: 'player', refId: 'p', createdAt: 5, via: 'magic' }), /not supported/);
-  assert.match(refused({ token: 't', sid: 's', kind: 'player', refId: 'p', createdAt: 5, colour: 'red' }), /unknown field/);
-  assert.match(refused({ token: 't', sid: 42, kind: 'player', refId: 'p', createdAt: 5 }), /sid is not a string/);
-  const derived = validateSessionRow({ token: 't', kind: 'player', refId: 'p', createdAt: 5 }, { orgUserExists: exists });
-  assert.equal(derived.ok, true); assert.equal(derived.sidDerived, true); assert.equal(derived.row.sid, sha256('t').slice(0, 12));
-  const hashed = validateSessionRow({ tokenHash: sha256('t'), sid: 's', kind: 'player', refId: 'p', createdAt: 5 }, { orgUserExists: exists });
-  assert.equal(hashed.ok, true); assert.equal(hashed.row.tokenHash, sha256('t'));
-});
 
 // ------------------------------------------------------------- the migration
 test('migration 0003 on a new database: the sessions table starts empty, the lifetime is recorded, the repository attaches on the record, and a re-run is a no-op', () => {
@@ -199,7 +174,7 @@ test('[fixtures] a stored session is its hash, never the token; a plain-token fi
   assert.equal(written.find((x) => x.sid === a.session.sid).tokenHash, sha256(a.token), 'the stored hash is unchanged');
   assert.equal(JSON.stringify(written).includes('fixture-token'), false);
   // The server reads the stored rows and every token works.
-  store = openStore(dir, { tableBacked: TABLE_BACKED });
+  store = openStore(dir);
   const layer2 = attachDataLayer({ store, nextId, sessionTtlMs: TTL });
   assert.ok(layer2.sessions.byToken(a.token) && layer2.sessions.byToken(b.token) && layer2.sessions.byToken('fixture-token'));
   store.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
@@ -208,7 +183,7 @@ test('[fixtures] a stored session is its hash, never the token; a plain-token fi
 // ------------------------------------------------------------- concurrency
 await atest('busy timeout: a unit of work waits for a concurrent writer in another process instead of failing; without the pragma the same situation fails at once', async () => {
   const dir = tempDir('s2-busy');
-  const store = openStore(dir, { tableBacked: TABLE_BACKED });
+  const store = openStore(dir);
   const layer = attachDataLayer({ seed: { orgs: [ORG_A] }, store, nextId, sessionTtlMs: TTL });
   const holdMs = 1200;
   const holder = spawnChild(process.execPath, ['--input-type=module', '-e', `
@@ -432,7 +407,7 @@ await atest('server (review correction 2): player and org sessions survive the a
 test('without node:sqlite the store refuses to open with a compatibility error and touches nothing; the repositories refuse a missing connection', () => {
   const dir = tempDir('s2-nosqlite');
   const probe = execFileSync(process.execPath, ['--no-experimental-sqlite', '--input-type=module', '-e', `
-    try { const { openStore } = await import(${JSON.stringify(path.join(HERE, '..', 'store.mjs'))}); openStore(process.argv[1], { tableBacked: [] }); console.log('OPENED'); }
+    try { const { openStore } = await import(${JSON.stringify(path.join(HERE, '..', 'store.mjs'))}); openStore(process.argv[1]); console.log('OPENED'); }
     catch (err) { console.log('REFUSED ' + err.code + ' ' + err.message); }
   `, dir], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
   assert.match(probe, /^REFUSED SQLITE_REQUIRED .*node:sqlite/m, 'a clear compatibility error, not a silent fallback');

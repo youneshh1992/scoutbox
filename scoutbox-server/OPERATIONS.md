@@ -181,15 +181,13 @@ registration → listen.
 A migration's `up()` is its DDL (plus any table rebuild the step needs). It does not carry
 data over: there is no production data, and rollback means re-seed.
 
-The latest table migration is `0039_retire_blob`.
+The latest table migration is `0040_match_facts`.
 
-**Snapshot mode.** `openStore(dir)` without options is for tools and fixtures. It runs the
-table migrations when it opens the file, then reads and writes the whole database in the
-shape the server sees. A saved snapshot is never a first installation. A snapshot
-write is strict: a malformed collection, a collection with no table (`SNAPSHOT_COLLECTION_UNKNOWN`) or any invalid
-row rejects the whole save. An
-omitted collection leaves its table alone. An explicit `[]` empties it. Snapshot mode has
-no units of work.
+**Tools and test suites.** There is no whole-file load or save. Tools and suites open a directory the way the server
+does (`scripts/dataLayerFixture.mjs`: `openLayer` runs the migrations and attaches every repository) and write
+through the repositories: `writeFixture(dir, collections)` writes each record through its repository's own
+operation, in dependency order, in one unit of work, so a refused fixture writes nothing. `readRecords(dir)` reads
+every collection back on a read-only connection (`readAllRecords` in `repositories/index.mjs`).
 
 ## Backups and restore
 
@@ -197,7 +195,7 @@ These routes exist (`domains/enterprise/enterprise.mjs`). Admin routes need the 
 
 - `POST /admin/backup` writes `DATA_DIR/backups/<timestamp>/`, which contains:
   - `scoutbox.db`: a consistent copy of the database (`VACUUM INTO`, `store.copyTo`),
-    taken after a flush: every table and every remaining blob, with sessions and
+    taken as committed: every table, with sessions and
     one-time codes as hashes, as they are stored;
   - `media/`: media files, except files queued for removal (their queue entries are in
     the copy, and the restored server finishes the removal at boot);

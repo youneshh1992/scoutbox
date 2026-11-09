@@ -82,7 +82,7 @@ test('schema report: names tables and counts, never rows', () => {
 
 test('attachDataLayer: the staff are written through their repository; every table is live', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sb-layer-'));
-  const store = openStore(dir, { tableBacked: TABLE_BACKED });
+  const store = openStore(dir);
   // Staff are never seeded (S14a: there is no users array to import); they are written through the repository.
   const layer = attachDataLayer({ seed: { orgs: [ORG_O] }, store, nextId });
   assert.deepEqual(layer.boot.users, { engine: 'sqlite', rows: 0 });
@@ -99,7 +99,7 @@ test('attachDataLayer: the staff are written through their repository; every tab
 test('store: the tables read back as the records the server sees, a staff change written through the repository lands in the tables, and the next boot reads exactly that', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sb-records-'));
   // A server boot: the table exists and holds one row; there is no blob.
-  const server = openStore(dir, { tableBacked: TABLE_BACKED });
+  const server = openStore(dir);
   const PLAYER = { id: 'p', name: 'P', dob: '2001-01-01', country: 'GB', medical: { shared: false, records: [], conditionStatus: 'unknown' } };
   const first = attachDataLayer({ seed: { players: [PLAYER], guardians: [], orgs: [ORG_O] }, store: server, nextId });
   const usr1 = first.users.create({ orgId: 'o', name: 'A', role: 'Scout' });
@@ -123,7 +123,7 @@ test('store: the tables read back as the records the server sees, a staff change
     assert.deepEqual(L.sqlite.prepare('SELECT org_user_id, code_hash FROM org_user_recovery_codes').all().map((r) => ({ ...r })), [{ org_user_id: 'usr-2', code_hash: 'a'.repeat(64) }]);
   } finally { L.close(); }
   // And the next server boot reads exactly that.
-  const again = openStore(dir, { tableBacked: TABLE_BACKED });
+  const again = openStore(dir);
   const layer = attachDataLayer({ store: again, nextId });
   assert.deepEqual(layer.boot.users, { engine: 'sqlite', rows: 2 });
   assert.equal(layer.users.byId(usr1.id).role, 'Director');
@@ -140,7 +140,7 @@ test('store: a fixture written into a new directory is written into the tables, 
     assert.equal(hasBlobTable(s), false, 'no blob: every collection of the fixture has a table');
     assert.equal(s.prepare('SELECT COUNT(*) AS n FROM org_users').get().n, 1);
     s.close(); }
-  const server = openStore(dir, { tableBacked: TABLE_BACKED });
+  const server = openStore(dir);
   const layer = attachDataLayer({ store: server, nextId });
   assert.deepEqual(layer.boot.users, { engine: 'sqlite', rows: 1 });
   assert.equal(layer.users.byId('usr-1').name, 'A');

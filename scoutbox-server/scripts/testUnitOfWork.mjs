@@ -34,7 +34,7 @@ const fixtureSeed = () => ({ orgs: ORGS(), guardians: [], players: [{ id: 'pl-1'
 
 /** A first installation with the fixture seeded and one staff member; returns everything a test needs. */
 function boot(dir, seed = fixtureSeed()) {
-  const store = openStore(dir, { tableBacked: TABLE_BACKED });
+  const store = openStore(dir);
   const layer = attachDataLayer({ seed, store, nextId, sessionTtlMs: TTL });
   layer.users.create({ orgId: 'org-pro', name: 'Maria', role: 'Head of Recruitment' });
   const raw = (sql, ...p) => store.sqlite.prepare(sql).get(...p);
@@ -150,7 +150,7 @@ await test('unit of work: a process killed before COMMIT leaves the pre-operatio
   const r = spawnSync(process.execPath, [path.join(HERE, 'unitOfWorkCrashChild.mjs'), dir], { encoding: 'utf8', timeout: 30_000 });
   assert.equal(r.signal, 'SIGKILL', `the child must die by SIGKILL: status ${r.status} signal ${r.signal} ${r.stderr.slice(-300)}`);
   assert.match(r.stdout, /ABOUT_TO_CRASH/);
-  const again = openStore(dir, { tableBacked: TABLE_BACKED });
+  const again = openStore(dir);
   const layer2 = attachDataLayer({ store: again, nextId, sessionTtlMs: TTL });
   assert.equal(layer2.orgs.byId('org-crash'), null); assert.equal(layer2.orgs.count(), 3);
   assert.equal(layer2.players.byId('pl-1').city, 'Start');
@@ -309,7 +309,7 @@ await test('an organisation updated twice inside a unit: the second update sees 
   // An update from inside the same organisation's update is refused (§4.3).
   assert.throws(() => t.layer.orgs.update('org-pro', () => { t.layer.orgs.update('org-pro', (d) => { d.suspended = false; }); }), /already being updated/);
   t.store.sqlite.close();
-  const again = openStore(dir, { tableBacked: TABLE_BACKED });
+  const again = openStore(dir);
   const layer2 = attachDataLayer({ store: again, nextId, sessionTtlMs: TTL });
   const pro2 = layer2.orgs.byId('org-pro');
   assert.equal(pro2.name, 'Eastport FC (renamed)'); assert.equal(pro2.suspended, true);

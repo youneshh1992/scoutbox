@@ -33,10 +33,7 @@ import { transaction, migrationApplied, childRowsOf } from './database.mjs';
 import { deepFreeze } from './scoutingEvidence.mjs';
 import { text, int, num, bool, oneOf, group, tableDdl, bad, typeSpec, encode, decode, upsertSql, insertSql } from './fieldSpecs.mjs';
 import { parseStrictDateOnly } from '../temporal.mjs';
-import {
-  BRIEF_STATUSES, POSITIONS, POSITION_GROUP_OF, EVIDENCE_REQUIREMENTS, TRUST_BANDS, SECOND_LOOK_STATUSES, SECOND_LOOK_KINDS,
-  DISMISSAL_REASONS, NOBODY_MISSED_STATES, NM_DISMISSAL_REASONS, REASON_CHANGE_MAP,
-} from '../domains/discovery/shared.mjs';
+import { BRIEF_STATUSES, POSITIONS, POSITION_GROUP_OF, EVIDENCE_REQUIREMENTS, TRUST_BANDS, SECOND_LOOK_STATUSES, SECOND_LOOK_KINDS, DISMISSAL_REASONS, NOBODY_MISSED_STATES, NM_DISMISSAL_REASONS, REASON_CHANGE_MAP } from '../domains/discovery/shared.mjs';
 import { CRITERION_TYPES, CRITERION_CLASSES, criterionId, LIMITS as MATCH_LIMITS } from '../domains/discovery/matching/criteria.mjs';
 import { WATCHLIST_MODES, WATCHLIST_STATUSES, WATCHLIST_SOURCES, ENTRY_REASONS, EXIT_REASONS } from '../domains/discovery/matching/watchlists.mjs';
 
@@ -699,99 +696,10 @@ function readAll(sqlite) {
     watchlistHistory: all('watchlist_membership_events').map(decodeEvent),
   };
 }
-const snapshotWatchlist = (raw, at) => {
-  if (!isPlainObject(raw)) return { ok: false, reason: `${at} is not an object (${describe(raw)})` };
-  const { members = [], ...rest } = raw;
-  const t = typeWatchlist(rest, at); if (!t.ok) return t;
-  const m = typeMembers(members, labelOf(at, raw)); if (!m.ok) return m;
-  if (m.value.length && t.record.lastReconciledAt === null) return bad(labelOf(at, raw), 'members', 'is empty until the watchlist was reconciled');
-  return { ok: true, record: { ...t.record, members: m.value } };
-};
-const TYPERS = { recruitmentBriefs: typeBrief, nobodyMissedReviews: typeReview, secondLookItems: typeSecondLookItem, dynamicWatchlists: snapshotWatchlist, watchlistHistory: typeMembershipEvent };
-/** The references between a final state's records and to the other domains' rows, named before the engine would (ids only). */
-function crossCheck(sqlite, t) {
-  const out = [];
-  const by = (list) => new Map(list.map((x) => [x.id, x]));
-  const briefs = by(t.recruitmentBriefs); const watchlists = by(t.dynamicWatchlists);
-  const exists = (tbl, id) => !!sqlite.prepare(`SELECT 1 FROM ${tbl} WHERE id = ?`).get(id);
-  for (const r of t.nobodyMissedReviews) {
-    const b = briefs.get(r.briefId);
-    if (!b) out.push(`nobody_missed_reviews ${r.id} briefId → recruitment_briefs ${r.briefId}`);
-    else if (b.orgId !== r.orgId) out.push(`nobody_missed_reviews ${r.id} is not in its brief's organisation`);
-    if (r.roomId && !exists('recruitment_cases', r.roomId)) out.push(`nobody_missed_reviews ${r.id} roomId → recruitment_cases ${r.roomId}`);
-  }
-  const reviewKeys = t.nobodyMissedReviews.map((r) => `${r.orgId}:${r.briefId}:${r.playerId}`);
-  if (new Set(reviewKeys).size !== reviewKeys.length) out.push('two Nobody Missed reviews name the same organisation, brief and player');
-  for (const i of t.secondLookItems) {
-    if (!exists('recruitment_cases', i.roomId)) out.push(`second_look_items ${i.id} roomId → recruitment_cases ${i.roomId}`);
-    if (!exists('room_decisions', i.decisionId)) out.push(`second_look_items ${i.id} decisionId → room_decisions ${i.decisionId}`);
-  }
-  const itemKeys = t.secondLookItems.map((i) => `${i.orgId}:${i.roomId}:${i.decisionId}`);
-  if (new Set(itemKeys).size !== itemKeys.length) out.push('two Second Look items name the same organisation, room and decision');
-  for (const w of t.dynamicWatchlists) {
-    if (w.sourceType !== 'brief') continue;
-    const b = briefs.get(w.sourceId);
-    if (!b) out.push(`dynamic_watchlists ${w.id} sourceId → recruitment_briefs ${w.sourceId}`);
-    else if (b.orgId !== w.orgId) out.push(`dynamic_watchlists ${w.id} follows another organisation's brief`);
-  }
-  for (const e of t.watchlistHistory) {
-    const w = watchlists.get(e.watchlistId);
-    if (!w) out.push(`watchlist_membership_events ${e.id} watchlistId → dynamic_watchlists ${e.watchlistId}`);
-    else if (w.orgId !== e.orgId) out.push(`watchlist_membership_events ${e.id} is not in its watchlist's organisation`);
-  }
-  const fps = t.watchlistHistory.map((e) => e.fingerprint);
-  if (new Set(fps).size !== fps.length) out.push('two watchlist membership events carry the same fingerprint');
-  return out;
-}
-const DELETE_ORDER = ['watchlist_membership_events', 'dynamic_watchlists', 'second_look_items', 'nobody_missed_reviews', 'recruitment_briefs'];
-function writeFinal(sqlite, t) {
-  for (const table of DELETE_ORDER) sqlite.exec(`DELETE FROM ${table}`);
-  const st = statements(sqlite);
-  for (const b of t.recruitmentBriefs) writeBrief(st, b);
-  for (const r of t.nobodyMissedReviews) writeReview(st, r);
-  for (const i of t.secondLookItems) writeItem(st, i);
-  for (const w of t.dynamicWatchlists) { writeWatchlist(st, w); writeMembers(st, w.id, w.members); }
-  for (const e of t.watchlistHistory) st.event.run(encode(EVENT_SPEC, e));
-}
-/**
- * Whole-snapshot access (readTableBacked / writeTableBacked). A supplied collection IS the whole final collection; an
- * omitted one is kept whole. Every record is typed (junk refused with ids), the references named, and the domain's
- * tables rewritten together.
- */
-export const DISCOVERY_SNAPSHOT = {
+/** The whole domain read back as plain records (`readAllRecords` in index.mjs: the test suites' read-back); null before its migration. */
+export const DISCOVERY_RECORDS = {
   names: DISCOVERY_COLLECTIONS,
   read(sqlite) { return discoveryLive(sqlite) ? readAll(sqlite) : null; },
-  replace(sqlite, db, { label = 'the snapshot (discovery)' } = {}) {
-    if (!discoveryLive(sqlite)) return [];
-    const written = DISCOVERY_COLLECTIONS.filter((n) => Object.hasOwn(db, n) && db[n] !== undefined);
-    if (!written.length) return [];
-    const current = readAll(sqlite);
-    const typed = {};
-    for (const name of DISCOVERY_COLLECTIONS) {
-      if (!written.includes(name)) { typed[name] = current[name]; continue; }
-      const list = db[name];
-      if (!Array.isArray(list)) throw refusal('DISCOVERY_IMPORT_BLOCKED', `the ${name} collection of ${label} must be an array of entries (got ${describe(list)})`);
-      const seen = new Set();
-      typed[name] = list.map((raw, i) => {
-        const t = TYPERS[name](raw, `${name} entry #${i}`);
-        if (!t.ok) throw refusal('DISCOVERY_IMPORT_BLOCKED', `${label}: ${t.reason}`);
-        if (seen.has(t.record.id)) throw refusal('DISCOVERY_IMPORT_BLOCKED', `${label}: ${name} entry #${i} duplicates an earlier entry (${t.record.id})`);
-        seen.add(t.record.id);
-        return t.record;
-      });
-    }
-    const missing = crossCheck(sqlite, typed);
-    if (missing.length) throw refusal('DISCOVERY_REFERENCE_MISSING', `${missing.length} reference(s) in ${label} are not there (${ids(missing)}); the write was rolled back and nothing was changed`, { rows: missing });
-    writeFinal(sqlite, typed);
-    return written;
-  },
-  assert(sqlite, { label = 'the snapshot (discovery)' } = {}) {
-    if (!discoveryLive(sqlite)) return;
-    for (const t of DISCOVERY_TABLES) {
-      const broken = sqlite.prepare(`PRAGMA foreign_key_check(${t})`).all();
-      if (broken.length) throw refusal('DISCOVERY_KEY_VIOLATION', `${label}: ${t} holds ${broken.length} row(s) whose reference is not there (first: rowid ${broken[0].rowid} → ${broken[0].parent}); the write was rolled back`);
-    }
-  },
 };
 const PLAYER_REFS_SQL = 'SELECT player_id AS pid FROM nobody_missed_reviews UNION ALL SELECT player_id FROM second_look_items UNION ALL SELECT player_id FROM watchlist_members UNION ALL SELECT player_id FROM watchlist_membership_events';
 export const unresolvedPlayerReferences = (sqlite) => (discoveryLive(sqlite)
@@ -1051,7 +959,7 @@ export function createDiscoveryRepository({ sqlite, unit = null, now = Date.now,
     },
     counts() { return Object.fromEntries(DISCOVERY_COLLECTIONS.map((n) => [n, counters[n].get().n])); },
     pending: () => 0,
-    exportAll() { return DISCOVERY_SNAPSHOT.read(sqlite); },
+    exportAll() { return DISCOVERY_RECORDS.read(sqlite); },
     log,
     now,
   };

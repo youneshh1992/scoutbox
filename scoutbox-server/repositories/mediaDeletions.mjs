@@ -93,13 +93,6 @@ export function ownershipConflictError(conflicts, { label = 'the media-removal q
   return err;
 }
 
-/** Throw MEDIA_QUEUE_OWNERSHIP_CONFLICT when the stored queue conflicts with the live references as they stand NOW (inside the caller's transaction, so the refusal rolls the whole write back). No-op before migration 0006. */
-export function assertMediaQueueConsistent(sqlite, { label, records = [] } = {}) {
-  if (!tableExists(sqlite, 'media_deletions')) return [];
-  const conflicts = mediaQueueConflicts(sqlite, null, { records });
-  if (conflicts.length) throw ownershipConflictError(conflicts, { label });
-  return conflicts;
-}
 const MEDIA_ID = /^[a-z0-9-]+$/i;
 const ROW_FIELDS = ['media_id', 'player_id', 'queued_at', 'attempts', 'last_attempt_at', 'last_error'];
 
@@ -118,51 +111,14 @@ export function validateMediaDeletionRow(raw) {
   return { ok: true, row: { media_id, player_id, queued_at, attempts, last_attempt_at, last_error } };
 }
 
-/** Validate a whole exported queue; throws `MEDIA_QUEUE_IMPORT_BLOCKED` naming entries and reasons (ids only, never a file). */
-export function validateMediaDeletionRows(rows, { label = 'the mediaDeletions collection' } = {}) {
-  const blocked = (detail) => { const err = new Error(`MEDIA_QUEUE_IMPORT_BLOCKED: ${detail}; nothing was imported`); err.code = 'MEDIA_QUEUE_IMPORT_BLOCKED'; return err; };
-  if (!Array.isArray(rows)) throw blocked(`${label} must be an array of queue entries (got ${rows === null ? 'null' : typeof rows})`);
-  const out = []; const problems = []; const seen = new Set();
-  rows.forEach((raw, i) => {
-    const v = validateMediaDeletionRow(raw);
-    if (!v.ok) { problems.push(`entry #${i}: ${v.reason}`); return; }
-    if (seen.has(v.row.media_id)) { problems.push(`entry #${i}: duplicate media id`); return; }
-    seen.add(v.row.media_id); out.push(v.row);
-  });
-  if (problems.length) throw blocked(`${problems.length} invalid entr${problems.length === 1 ? 'y' : 'ies'} in ${label} — ${problems.slice(0, 20).join('; ')}${problems.length > 20 ? '; …' : ''}`);
-  return out;
-}
 
-/** Rewrite the table from validated rows, inside the caller's transaction. */
-export function writeMediaDeletionRows(sqlite, rows) {
-  sqlite.exec('DELETE FROM media_deletions');
-  const ins = sqlite.prepare('INSERT INTO media_deletions (media_id, player_id, queued_at, attempts, last_attempt_at, last_error) VALUES (@media_id, @player_id, @queued_at, @attempts, @last_attempt_at, @last_error)');
-  for (const r of rows) ins.run(r);
-  return rows.length;
-}
 
-/**
- * Whole-snapshot access for the tools (backups, restores, the persistence
- * suites): the queue as rows in their stored form. `read` returns null before
- * migration 0006 is recorded (the caller keeps whatever blob it holds);
- * `replace` returns false before it (the caller writes the blob, which the
- * migration imports on the next boot), otherwise validates every entry and
- * rewrites the table inside the caller's transaction — one invalid entry
- * refuses the whole write.
- */
+/** The whole domain read back as plain records (`readAllRecords` in index.mjs: the test suites' read-back); null before its migration. */
 export const MEDIA_DELETIONS_TABLE = {
   name: 'mediaDeletions',
   read(sqlite) {
     if (!migrationApplied(sqlite, MEDIA_DELETIONS_MIGRATION)) return null;
     return sqlite.prepare('SELECT media_id, player_id, queued_at, attempts, last_attempt_at, last_error FROM media_deletions ORDER BY queued_at, media_id').all().map((r) => ({ ...r }));
-  },
-  replace(sqlite, rows) {
-    if (!migrationApplied(sqlite, MEDIA_DELETIONS_MIGRATION)) return false;
-    if (!sqlite.isTransaction) throw new Error('media deletions: replace() runs inside the caller\'s transaction');
-    writeMediaDeletionRows(sqlite, validateMediaDeletionRows(rows));
-    // The FINAL state: the identity pair is written before the queue, so the players table is the snapshot's (or the retained one).
-    assertMediaQueueConsistent(sqlite, { label: 'the mediaDeletions collection' });
-    return true;
   },
 };
 

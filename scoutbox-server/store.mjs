@@ -8,21 +8,16 @@
 // throws a compatibility error (SQLITE_REQUIRED / NODE_UNSUPPORTED) before
 // touching the data directory, and server.mjs lets that error end the process.
 //
-// Two modes:
-//
-//   server mode   openStore(dir, { tableBacked: [...] }) — the running server. The repositories own their tables and
-//                 write their rows at once; the store gives them the unit of work.
-//   snapshot mode openStore(dir) — tools, fixtures and the persistence suites, which treat the file as one
-//                 snapshot. The file is brought up to the current table schema when it is opened; `load` reads every
-//                 table-backed collection from its table and `save` writes it into that table (validated: junk is
-//                 refused and nothing is written). A collection with no table is refused: there is nowhere to put it.
+// `openStore(dir)` opens the file; the data layer (repositories/index.mjs `attachDataLayer`) runs the table
+// migrations and attaches the repositories, which own their tables and write their rows at once. The store gives them
+// the unit of work. There is no whole-file load or save (S14 last): tools and test suites go through the repositories
+// too (scripts/dataLayerFixture.mjs).
 //
 // A backup is a copy of the database file (`copyTo`, VACUUM INTO); a restore
 // boots a new, empty DATA_DIR holding the copy.
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { readTableBacked, writeTableBacked, migrateForSnapshot, TABLE_BACKED } from './repositories/index.mjs';
 import { requireRuntime, CONTRACT } from './runtime.mjs';
 import { runBeforeCommit } from './repositories/database.mjs';
 
@@ -33,7 +28,7 @@ try {
   // Reported by openStore, which refuses to run without it.
 }
 
-export function openStore(dataDir, { tableBacked = null } = {}) {
+export function openStore(dataDir) {
   if (!DatabaseSync) {
     const err = new Error(`SQLITE_REQUIRED: ScoutBox needs the node:sqlite module (${CONTRACT}, enabled by default; this is ${process.version}${process.execArgv.some((a) => /no-experimental-sqlite/.test(a)) ? ', started with --no-experimental-sqlite' : ''}). There is no JSON fallback. The data directory was not touched.`);
     err.code = 'SQLITE_REQUIRED';
@@ -45,7 +40,6 @@ export function openStore(dataDir, { tableBacked = null } = {}) {
   // opened. Refused here with NODE_UNSUPPORTED and nothing touched.
   requireRuntime();
   fs.mkdirSync(dataDir, { recursive: true });
-  const serverMode = Array.isArray(tableBacked);
 
   const databaseFile = path.join(dataDir, 'scoutbox.db');
   // SQLite treats an empty file as a new database, so a backup emptied in
@@ -64,12 +58,8 @@ export function openStore(dataDir, { tableBacked = null } = {}) {
   // command's read-only open, a persistence suite) waits for a writer to
   // finish instead of failing with SQLITE_BUSY.
   sqlite.exec('PRAGMA busy_timeout = 5000;');
-  // Snapshot mode: the file is brought up to the current table schema first (see migrateForSnapshot). In server
-  // mode the data layer runs the migrations when it attaches.
-  if (!serverMode) migrateForSnapshot(sqlite);
-  const knownCollections = new Set(TABLE_BACKED);
 
-  // Server mode only: the unit of work (see `unitOfWork` below). While one is
+  // The unit of work (see `unitOfWork` below). While one is
   // open, repository row writes run inside the store's transaction, and side
   // effects registered with `afterCommit` wait until COMMIT returned.
   let unit = null; // { afterCommit: [], failure: null } while a unit of work is open
@@ -114,25 +104,6 @@ export function openStore(dataDir, { tableBacked = null } = {}) {
       strayAsyncWork.lastError = brief(err);
       console.error(`unit of work: asynchronous work that escaped a rolled-back unit rejected later (whatever it did ran outside any unit): ${strayAsyncWork.lastError.message}`);
     });
-  }
-
-  /** Snapshot mode: every collection into its table (a collection with no table is refused before anything is written), and the id counter. */
-  function writeSnapshot(snapshot) {
-    if (!snapshot || typeof snapshot !== 'object' || !snapshot.db || typeof snapshot.db !== 'object') throw new TypeError('a snapshot-mode save needs { db, idCounter? } with db an object of collections; nothing was written');
-    const unknown = Object.keys(snapshot.db ?? {}).filter((name) => snapshot.db[name] !== undefined && !knownCollections.has(name));
-    if (unknown.length) throw Object.assign(new Error(`SNAPSHOT_COLLECTION_UNKNOWN: ${unknown.join(', ')} ${unknown.length === 1 ? 'has' : 'have'} no table (the blob store is retired, S14a); the save was rolled back and nothing was written`), { code: 'SNAPSHOT_COLLECTION_UNKNOWN' });
-    // IMMEDIATE: a save is a write transaction and takes the write lock at BEGIN, through the busy handler (a deferred
-    // BEGIN that reads first would fail at once with SQLITE_BUSY_SNAPSHOT if another process committed in between).
-    sqlite.exec('BEGIN IMMEDIATE');
-    try {
-      writeTableBacked(sqlite, snapshot.db ?? {});
-      if (snapshot.idCounter !== undefined) sqlite.prepare("UPDATE counters SET value = MAX(value, ?) WHERE name = 'id'").run(Number(snapshot.idCounter) || 0);
-      runBeforeCommit(sqlite);
-      sqlite.exec('COMMIT');
-    } catch (err) {
-      if (sqlite.isTransaction) sqlite.exec('ROLLBACK');
-      throw err;
-    }
   }
 
   /**
@@ -209,7 +180,6 @@ export function openStore(dataDir, { tableBacked = null } = {}) {
   }
 
   function unitOfWork(work) {
-    if (!serverMode) throw new Error('unitOfWork is a server mode operation; a snapshot tool writes whole snapshots with save()');
     if (typeof work !== 'function') throw new TypeError('unitOfWork(work) needs a synchronous work function');
     if (unit) return runJoined(work); // nested: join the enclosing unit
     if (sqlite.isTransaction) throw new Error('a unit of work cannot start inside an open transaction');
@@ -217,7 +187,7 @@ export function openStore(dataDir, { tableBacked = null } = {}) {
     if (kind) throw asyncRefusal(kind, false); // before anything is captured or begun: nothing to undo
     // BEGIN first: if it fails, no unit was ever open, the work does not run and
     // the error propagates as it is (nothing to roll back or restore). IMMEDIATE,
-    // for the reason given in writeSnapshot(): a unit of work is a write transaction.
+    // because a unit of work is a write transaction: a deferred BEGIN whose first statements read holds a read snapshot, and if another connection commits in between, the later upgrade to a write fails at once with SQLITE_BUSY_SNAPSHOT, which the busy handler never retries.
     sqlite.exec('BEGIN IMMEDIATE');
     unit = { afterCommit: [], failure: null };
     let result;
@@ -240,12 +210,6 @@ export function openStore(dataDir, { tableBacked = null } = {}) {
   const store = {
     engine: 'sqlite',
     sqlite,
-    /** Snapshot mode: every table-backed collection, as plain arrays in the shape the server sees, and the id counter. */
-    load() {
-      if (serverMode) throw new Error('load is a snapshot mode operation; the server reads through its repositories');
-      const idCounter = Number(sqlite.prepare("SELECT value FROM counters WHERE name = 'id'").get()?.value) || 0;
-      return { db: readTableBacked(sqlite), idCounter };
-    },
     /**
      * Write a consistent copy of the whole database to `file` (VACUUM INTO): every
      * table, as committed. This is the backup format; a
@@ -271,11 +235,6 @@ export function openStore(dataDir, { tableBacked = null } = {}) {
       sqlite.exec('PRAGMA defer_foreign_keys = ON');
       sqlite.exec('CREATE TABLE fault_commit_parent (id TEXT PRIMARY KEY); CREATE TABLE fault_commit_child (parent_id TEXT NOT NULL REFERENCES fault_commit_parent(id))');
       sqlite.prepare('INSERT INTO fault_commit_child (parent_id) VALUES (?)').run('missing-on-purpose');
-    },
-    /** Snapshot mode: write `{ db, idCounter }` into the tables, in one transaction (junk is refused and nothing is written). */
-    save(snapshot) {
-      if (serverMode) throw new Error('save is a snapshot mode operation; the server writes through its repositories');
-      writeSnapshot(snapshot);
     },
     unitOfWork,
     /**

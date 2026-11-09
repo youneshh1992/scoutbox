@@ -58,7 +58,7 @@ const refusedSave = (tag, over, pattern) => {
   assert.equal(withRo(d, (s) => TABLES.concat(['recruitment_cases', 'recruitment_requests', 'trials']).reduce((n, t) => n + col(s, `SELECT count(*) FROM ${t}`), 0)), 0, `${tag}: nothing written`); rm(d);
 };
 function serverOpen(dir) {
-  const store = openStore(dir, { tableBacked: TABLE_BACKED });
+  const store = openStore(dir);
   const layer = attachDataLayer({ store, nextId, sessionTtlMs: TTL, now: () => NOW, warn: () => {} });
   return { store, layer, unit: (w) => store.unitOfWork(w), repo: layer.recruitmentContactsOffers, recruitment: layer.recruitment, close: () => store.sqlite.close() };
 }

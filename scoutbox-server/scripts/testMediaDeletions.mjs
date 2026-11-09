@@ -62,7 +62,7 @@ test('storage adapter: delete() returns the number of files removed, 0 for an ab
 
 test('transaction coupling: an entry queued inside a unit of work that rolls back is gone with everything else; one queued inside a unit that commits is processed only after COMMIT, and the row stays across a reopen while the file could not be removed', () => {
   const dir = tempDir('media-unit'); const storageDir = tempDir('media-unit-files'); const storage = createStorage(storageDir);
-  let store = openStore(dir, { tableBacked: TABLE_BACKED });
+  let store = openStore(dir);
   let layer = attachDataLayer({ seed: { orgs: [], players: [adult()], guardians: [] }, store, nextId, sessionTtlMs: TTL, now: () => NOW });
   storage.saveDataUrl('media-x', 'data:video/webm;base64,AAAA');
   // Rolled back: the queue entry and the player removal both go (S14a: the blob edit that went with them is gone).
@@ -77,7 +77,7 @@ test('transaction coupling: an entry queued inside a unit of work that rolls bac
   fs.rmSync(path.join(storageDir, 'media', 'media-x.webm')); fs.mkdirSync(path.join(storageDir, 'media', 'media-x.webm'));
   assert.deepEqual(layer.mediaDeletions.process(storage), { removed: 0, absent: 0, failed: 1, conflicts: 0 });
   store.sqlite.close();
-  store = openStore(dir, { tableBacked: TABLE_BACKED });
+  store = openStore(dir);
   layer = attachDataLayer({ store, nextId, sessionTtlMs: TTL, now: () => NOW });
   assert.equal(layer.mediaDeletions.isQueued('media-x'), true); assert.equal(layer.report().mediaDeletions.queued, 1);
   fs.rmdirSync(path.join(storageDir, 'media', 'media-x.webm'));
@@ -89,7 +89,7 @@ test('transaction coupling: an entry queued inside a unit of work that rolls bac
 test('the queue never imports from memory: a stale array handed in at boot is ignored and the table is untouched', () => {
   const dir = tempDir('media-boot'); savedFile(dir);
   { const L = openLayer(dir, { now: () => NOW }); L.unit(() => { L.layer.mediaDeletions.enqueue(['media-q'], { playerId: 'pl-gone', at: NOW }); L.layer.mediaDeletions.enqueue(['media-r'], { at: NOW + 1 }); }); L.close(); }
-  { const store = openStore(dir, { tableBacked: TABLE_BACKED });
+  { const store = openStore(dir);
     const layer = attachDataLayer({ seed: { players: [], guardians: [], mediaDeletions: [{ media_id: 'media-stale', queued_at: 1 }] }, store, nextId, sessionTtlMs: TTL, now: () => NOW });
     assert.equal(layer.mediaDeletions.isQueued('media-stale'), false, 'never imported');
     assert.deepEqual(layer.mediaDeletions.pending().map((r) => [r.media_id, r.player_id, r.queued_at, r.attempts]), [['media-q', 'pl-gone', NOW, 0], ['media-r', null, NOW + 1, 0]], 'the table is untouched');

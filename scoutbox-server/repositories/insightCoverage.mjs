@@ -434,75 +434,10 @@ function readAll(sqlite) {
     coverageAssignments: decodeAssignments(sqlite, all('coverage_assignments')),
   };
 }
-const TYPERS = { exposureEvents: typeExposure, reviewLater: typeReviewLater, evidenceSuggestions: typeSuggestion, calibrationSessions: typeSession, fixtures: typeFixture, coveragePlans: typePlan, coverageAssignments: typeAssignment };
-function crossCheck(sqlite, t) {
-  const out = [];
-  const dup = (list, key, what) => { const keys = list.map(key); if (new Set(keys).size !== keys.length) out.push(what); };
-  dup(t.exposureEvents, (e) => `${e.orgId}:${e.playerId}:${e.kind}:${e.day}`, 'two exposure events name the same organisation, player, kind and day');
-  dup(t.reviewLater, (r) => `${r.orgId}:${r.playerId}`, 'two review-later deferrals name the same organisation and player');
-  dup(t.evidenceSuggestions.filter((s) => OPEN_SUGGESTION_STATUSES.includes(s.status)), (s) => `${s.orgId}:${s.playerId}:${s.ruleId}`, 'two open evidence suggestions name the same organisation, player and rule');
-  const fixtures = new Map(t.fixtures.map((f) => [f.id, f]));
-  for (const a of t.coverageAssignments) {
-    if (a.fixture.kind !== 'own') continue;
-    const f = fixtures.get(a.fixture.id);
-    if (!f) out.push(`coverage_assignments ${a.id} fixture → fixtures ${a.fixture.id}`);
-    else if (f.orgId !== a.orgId) out.push(`coverage_assignments ${a.id} names another organisation's fixture`);
-  }
-  for (const s of t.calibrationSessions) {
-    for (const sub of s.submissions) {
-      const unknown = sub.ratings.filter((r) => !sqlite.prepare('SELECT 1 FROM assessment_template_attributes WHERE template_id = ? AND template_version = ? AND attr_id = ?').get(s.templateId, s.templateVersion, r.attrId));
-      if (unknown.length) out.push(`calibration_sessions ${s.id} rates attribute(s) its template does not have (${unknown.map((r) => r.attrId).join(', ')})`);
-    }
-  }
-  return out;
-}
-const DELETE_ORDER = ['coverage_assignments', 'coverage_plans', 'fixtures', 'calibration_sessions', 'evidence_suggestions', 'review_later', 'exposure_events'];
-function writeFinal(sqlite, t) {
-  for (const tbl of DELETE_ORDER) sqlite.exec(`DELETE FROM ${tbl}`);
-  const st = statements(sqlite);
-  for (const e of t.exposureEvents) st.exposure.run(encode(EXPOSURE_SPEC, e));
-  for (const r of t.reviewLater) st.reviewLater.run(encode(REVIEW_LATER_SPEC, r));
-  for (const s of t.evidenceSuggestions) writeSuggestion(st, s);
-  for (const s of t.calibrationSessions) writeSession(st, s);
-  for (const f of t.fixtures) st.fixture.run(encode(FIXTURE_SPEC, f));
-  for (const p of t.coveragePlans) st.plan.run(encode(PLAN_SPEC, p));
-  for (const a of t.coverageAssignments) writeAssignment(st, a);
-}
-/** Whole-snapshot access (readTableBacked / writeTableBacked): a supplied collection IS the whole final collection; an omitted one is kept. */
-export const INSIGHT_COVERAGE_SNAPSHOT = {
+/** The whole domain read back as plain records (`readAllRecords` in index.mjs: the test suites' read-back); null before its migration. */
+export const INSIGHT_COVERAGE_RECORDS = {
   names: INSIGHT_COVERAGE_COLLECTIONS,
   read(sqlite) { return insightCoverageLive(sqlite) ? readAll(sqlite) : null; },
-  replace(sqlite, db, { label = 'the snapshot (insight and coverage)' } = {}) {
-    if (!insightCoverageLive(sqlite)) return [];
-    const written = INSIGHT_COVERAGE_COLLECTIONS.filter((n) => Object.hasOwn(db, n) && db[n] !== undefined);
-    if (!written.length) return [];
-    const current = readAll(sqlite);
-    const typed = {};
-    for (const name of INSIGHT_COVERAGE_COLLECTIONS) {
-      if (!written.includes(name)) { typed[name] = current[name]; continue; }
-      const list = db[name];
-      if (!Array.isArray(list)) throw refusal('INSIGHT_IMPORT_BLOCKED', `the ${name} collection of ${label} must be an array of entries (got ${describe(list)})`);
-      const seen = new Set();
-      typed[name] = list.map((raw, i) => {
-        const t = TYPERS[name](raw, `${name} entry #${i}`);
-        if (!t.ok) throw refusal('INSIGHT_IMPORT_BLOCKED', `${label}: ${t.reason}`);
-        if (seen.has(t.record.id)) throw refusal('INSIGHT_IMPORT_BLOCKED', `${label}: ${name} entry #${i} duplicates an earlier entry (${t.record.id})`);
-        seen.add(t.record.id);
-        return t.record;
-      });
-    }
-    const missing = crossCheck(sqlite, typed);
-    if (missing.length) throw refusal('INSIGHT_REFERENCE_MISSING', `${missing.length} reference(s) in ${label} are not there (${ids(missing)}); the write was rolled back and nothing was changed`, { rows: missing });
-    writeFinal(sqlite, typed);
-    return written;
-  },
-  assert(sqlite, { label = 'the snapshot (insight and coverage)' } = {}) {
-    if (!insightCoverageLive(sqlite)) return;
-    for (const t of INSIGHT_COVERAGE_TABLES) {
-      const broken = sqlite.prepare(`PRAGMA foreign_key_check(${t})`).all();
-      if (broken.length) throw refusal('INSIGHT_KEY_VIOLATION', `${label}: ${t} holds ${broken.length} row(s) whose reference is not there (first: rowid ${broken[0].rowid} → ${broken[0].parent}); the write was rolled back`);
-    }
-  },
 };
 const PLAYER_REFS_SQL = 'SELECT player_id AS pid FROM exposure_events UNION ALL SELECT player_id FROM review_later UNION ALL SELECT player_id FROM evidence_suggestions UNION ALL SELECT player_id FROM coverage_assignment_targets';
 export const unresolvedPlayerReferences = (sqlite) => (insightCoverageLive(sqlite)
@@ -843,7 +778,7 @@ export function createInsightCoverageRepository({ sqlite, unit = null, now = Dat
     },
     counts() { return Object.fromEntries(INSIGHT_COVERAGE_COLLECTIONS.map((n) => [n, counters[n].get().n])); },
     pending: () => 0,
-    exportAll() { return INSIGHT_COVERAGE_SNAPSHOT.read(sqlite); },
+    exportAll() { return INSIGHT_COVERAGE_RECORDS.read(sqlite); },
     log,
     now,
   };

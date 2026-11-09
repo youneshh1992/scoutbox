@@ -29,14 +29,10 @@
  * for long. An issue replaces the owner's previous row (one live code per
  * organisation / per child, as the filter-then-push did).
  *
- * `pairing_codes.player_id` carries NO foreign key on purpose: the identity
- * snapshot rewrite (`IDENTITY_SNAPSHOT.replace`) deletes and reinserts every
- * player row, so a cascading reference would silently erase every pairing code
- * on a whole-snapshot save that omits the collection. Instead the deletion unit
- * revokes the child's codes explicitly (`revokePairingCodesFor`), every snapshot
- * write checks the FINAL state (a code whose player is not in the table refuses
- * the whole save, `PAIRING_CODE_PLAYER_MISSING`), and the migration refuses an
- * outstanding code for a player that does not exist. `email_challenges.org_id`
+ * `pairing_codes.player_id` carries NO foreign key on purpose: player ids carry
+ * no key (records outlive an account, migration.md §4.3). Instead the deletion unit
+ * revokes the child's codes explicitly (`revokePairingCodesFor`), and the migration
+ * refuses an outstanding code for a player that does not exist. `email_challenges.org_id`
  * does reference `orgs(id)` (organisations are upserted and pruned, never
  * rewritten whole; a pruned organisation takes its challenge with it).
  *
@@ -64,7 +60,7 @@
  * a malformed hash, a non-integer expiry, a negative or non-integer attempt
  * count, a missing owner, or that duplicates an owner or a hash, is refused
  * with the entry index and the reason (`ONE_TIME_CODES_IMPORT_BLOCKED`), and
- * the whole write — a snapshot save, the migration — is rolled back. Nothing is
+ * the migration is rolled back. Nothing is
  * coerced, reinterpreted or dropped silently. The one deliberate drop is the
  * migration's: entries already expired at cutover time are not imported, and
  * their count is recorded in `meta.oneTimeCodesCutover` and logged.
@@ -111,7 +107,6 @@ export function randomCode(length = CODE_LENGTH) {
 }
 export const codesLive = (sqlite) => migrationApplied(sqlite, ONE_TIME_CODES_MIGRATION);
 const describe = (v) => (v === null ? 'null' : Array.isArray(v) ? 'an array' : typeof v === 'object' ? 'an object' : `a ${typeof v}`);
-const blocked = (detail, extra = {}) => Object.assign(new Error(`ONE_TIME_CODES_IMPORT_BLOCKED: ${detail}; nothing was imported`), { code: 'ONE_TIME_CODES_IMPORT_BLOCKED', ...extra });
 
 // ------------------------------------------------------------------ validation (no coercion; every refusal names the reason)
 /**
@@ -134,33 +129,6 @@ function codeOf(raw) {
 }
 const expiryOf = (raw) => (Number.isSafeInteger(raw.expiresAt) && raw.expiresAt > 0 ? { expiresAt: raw.expiresAt } : { reason: 'expiresAt must be a positive integer timestamp' });
 
-const EMAIL_LEGACY_KEYS = ['orgId', 'email', 'code', 'expiresAt'];
-const EMAIL_STORED_KEYS = ['orgId', 'email', 'codeHash', 'expiresAt', 'attempts'];
-/** Validate one exported e-mail challenge: `{ ok: true, row, format }` or `{ ok: false, reason }`. */
-export function validateEmailChallengeRow(raw) {
-  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return { ok: false, reason: `not an object (${describe(raw)})` };
-  const c = codeOf(raw);
-  if (c.reason) return { ok: false, reason: c.reason };
-  const allowed = c.format === 'legacy' ? EMAIL_LEGACY_KEYS : EMAIL_STORED_KEYS;
-  const unknown = Object.keys(raw).filter((k) => !allowed.includes(k));
-  if (unknown.length) return { ok: false, reason: `unknown field(s) ${unknown.join(', ')} for the ${c.format} format` };
-  if (typeof raw.orgId !== 'string' || !raw.orgId) return { ok: false, reason: 'orgId must be a non-empty string' };
-  if (typeof raw.email !== 'string' || !raw.email) return { ok: false, reason: 'email must be a non-empty string' };
-  const e = expiryOf(raw);
-  if (e.reason) return { ok: false, reason: e.reason };
-  // Legacy entries never carried a count (every earlier build wrote none): a legacy challenge starts at 0.
-  // The stored format is this repository's own export, which always writes the count (review of e020aba,
-  // finding 2): it must be present, a safe integer, and below the limit — a challenge that reached the limit
-  // is cancelled (deleted), so an exhausted stored entry is refused, never imported as redeemable.
-  let attempts = 0;
-  if (c.format === 'stored') {
-    if (!Object.hasOwn(raw, 'attempts')) return { ok: false, reason: 'attempts is required in the stored format (an exported challenge always carries its count)' };
-    if (!Number.isSafeInteger(raw.attempts) || raw.attempts < 0) return { ok: false, reason: `attempts must be an integer from 0 to ${EMAIL_CHALLENGE_MAX_ATTEMPTS - 1} (got ${describe(raw.attempts)}${typeof raw.attempts === 'number' ? ` ${raw.attempts}` : ''})` };
-    if (raw.attempts >= EMAIL_CHALLENGE_MAX_ATTEMPTS) return { ok: false, reason: `attempts ${raw.attempts} reaches the limit of ${EMAIL_CHALLENGE_MAX_ATTEMPTS}: an exhausted challenge is cancelled, never stored or imported` };
-    attempts = raw.attempts;
-  }
-  return { ok: true, format: c.format, row: { orgId: raw.orgId, email: raw.email, codeHash: c.codeHash, expiresAt: e.expiresAt, attempts } };
-}
 
 const PAIRING_LEGACY_KEYS = ['code', 'playerId', 'expiresAt'];
 const PAIRING_STORED_KEYS = ['codeHash', 'playerId', 'expiresAt'];
@@ -178,87 +146,22 @@ export function validatePairingCodeRow(raw) {
   return { ok: true, format: c.format, row: { codeHash: c.codeHash, playerId: raw.playerId, expiresAt: e.expiresAt } };
 }
 
-/** Validate a whole exported collection; throws ONE_TIME_CODES_IMPORT_BLOCKED naming entries and reasons (never a code). Returns `{ rows, formats }`. */
-export function validateCodeRows(kind, rows, { label = `the ${kind} collection` } = {}) {
-  const one = kind === 'emailChallenges' ? validateEmailChallengeRow : validatePairingCodeRow;
-  const ownerKey = kind === 'emailChallenges' ? 'orgId' : 'playerId';
-  if (!Array.isArray(rows)) throw blocked(`${label} must be an array of entries (got ${describe(rows)})`);
-  const out = []; const problems = []; const owners = new Set(); const hashes = new Set(); const formats = { legacy: 0, stored: 0 };
-  rows.forEach((raw, i) => {
-    const v = one(raw);
-    if (!v.ok) { problems.push(`entry #${i}: ${v.reason}`); return; }
-    if (owners.has(v.row[ownerKey])) { problems.push(`entry #${i}: a second entry for ${ownerKey} ${v.row[ownerKey]} (one live code per owner)`); return; }
-    // A pairing code is looked up by its code alone (the primary key), so two entries with one code are ambiguous; two organisations may
-    // legitimately hold the same e-mail code by chance (each challenge is looked up by its organisation).
-    if (kind === 'pairingCodes' && hashes.has(v.row.codeHash)) { problems.push(`entry #${i}: duplicates the code of an earlier entry`); return; }
-    owners.add(v.row[ownerKey]); hashes.add(v.row.codeHash); formats[v.format] += 1; out.push(v.row);
-  });
-  if (problems.length) throw blocked(`${problems.length} invalid entr${problems.length === 1 ? 'y' : 'ies'} in ${label} — ${problems.slice(0, 20).join('; ')}${problems.length > 20 ? '; …' : ''}`, { problems });
-  return { rows: out, formats };
-}
 
-// ------------------------------------------------------------------ the final-state checks (inside the caller's transaction)
-const tableExists = (sqlite, name) => !!sqlite.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(name);
-/** Every stored pairing code must name a player that exists NOW; throws PAIRING_CODE_PLAYER_MISSING (ids only). No-op before the cutover. */
-export function assertPairingCodesConsistent(sqlite, { label = 'the pairing codes' } = {}) {
-  if (!tableExists(sqlite, 'pairing_codes') || !tableExists(sqlite, 'players')) return [];
-  const missing = sqlite.prepare('SELECT player_id FROM pairing_codes WHERE player_id NOT IN (SELECT id FROM players WHERE deleted_at IS NULL) ORDER BY player_id').all().map((r) => r.player_id); // S4b-R: a retained row is not a player
-  if (missing.length) throw Object.assign(new Error(`PAIRING_CODE_PLAYER_MISSING: ${missing.length} pairing code(s) in ${label} name a player that does not exist (${missing.slice(0, 20).join(', ')}${missing.length > 20 ? ', …' : ''}); the write was rolled back and nothing was changed — write the snapshot with its pairingCodes, or without the code`), { code: 'PAIRING_CODE_PLAYER_MISSING', players: missing });
-  return missing;
-}
 
-function writeEmailChallengeRows(sqlite, rows) {
-  sqlite.exec('DELETE FROM email_challenges');
-  const ins = sqlite.prepare('INSERT INTO email_challenges (org_id, email, code_hash, expires_at, attempts) VALUES (@orgId, @email, @codeHash, @expiresAt, @attempts)');
-  for (const r of rows) {
-    try { ins.run(r); } catch (err) {
-      if (/FOREIGN KEY/i.test(String(err?.message))) throw Object.assign(new Error(`EMAIL_CHALLENGE_ORG_MISSING: the e-mail challenge of organisation ${r.orgId} names an organisation that does not exist; the write was rolled back and nothing was changed`), { code: 'EMAIL_CHALLENGE_ORG_MISSING', orgId: r.orgId });
-      throw err;
-    }
-  }
-  return rows.length;
-}
-function writePairingCodeRows(sqlite, rows) {
-  sqlite.exec('DELETE FROM pairing_codes');
-  const ins = sqlite.prepare('INSERT INTO pairing_codes (code_hash, player_id, expires_at) VALUES (@codeHash, @playerId, @expiresAt)');
-  for (const r of rows) ins.run(r);
-  assertPairingCodesConsistent(sqlite, { label: 'the pairingCodes collection' });
-  return rows.length;
-}
 
 const EMAIL_SELECT = 'SELECT org_id, email, code_hash, expires_at, attempts FROM email_challenges';
 const PAIRING_SELECT = 'SELECT code_hash, player_id, expires_at FROM pairing_codes';
 const emailStored = (r) => ({ orgId: r.org_id, email: r.email, codeHash: r.code_hash, expiresAt: r.expires_at, attempts: r.attempts });
 const pairingStored = (r) => ({ codeHash: r.code_hash, playerId: r.player_id, expiresAt: r.expires_at });
 
-/**
- * Whole-table access for the tools that treat the file as one snapshot
- * (backups, restores, the persistence suites). Before the cutover record both
- * methods decline (`null` / `false`): the caller keeps the legacy blob, which
- * the migration imports on the next boot. Afterwards `read` returns the rows
- * in their stored form (`codeHash`, never a code) and `replace` validates every
- * entry (either format), rewrites the table inside the caller's transaction and
- * refuses the whole write on the first problem.
- */
+/** The whole domain read back as plain records (`readAllRecords` in index.mjs: the test suites' read-back); null before its migration. */
 export const EMAIL_CHALLENGES_TABLE = {
   name: 'emailChallenges',
   read(sqlite) { if (!codesLive(sqlite)) return null; return sqlite.prepare(`${EMAIL_SELECT} ORDER BY org_id`).all().map(emailStored); },
-  replace(sqlite, rows) {
-    if (!codesLive(sqlite)) return false;
-    if (!sqlite.isTransaction) throw new Error('email challenges: replace() runs inside the caller\'s transaction');
-    writeEmailChallengeRows(sqlite, validateCodeRows('emailChallenges', rows).rows);
-    return true;
-  },
 };
 export const PAIRING_CODES_TABLE = {
   name: 'pairingCodes',
   read(sqlite) { if (!codesLive(sqlite)) return null; return sqlite.prepare(`${PAIRING_SELECT} ORDER BY player_id`).all().map(pairingStored); },
-  replace(sqlite, rows) {
-    if (!codesLive(sqlite)) return false;
-    if (!sqlite.isTransaction) throw new Error('pairing codes: replace() runs inside the caller\'s transaction');
-    writePairingCodeRows(sqlite, validateCodeRows('pairingCodes', rows).rows);
-    return true;
-  },
 };
 
 // ------------------------------------------------------------------ the repository

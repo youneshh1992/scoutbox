@@ -42,11 +42,7 @@ import { quote } from './fieldSpecs.mjs';
 import { REPRESENTATION_STATUSES } from './complianceRecords.mjs';
 import { VERIFICATION_STATES, SCOPES } from '../domains/agents/core/shared.mjs';
 import { CONFLICT_OUTCOMES, CONTEXT_TYPES, PARTY_ROLES } from '../domains/agents/compliance/conflict.mjs';
-import {
-  TRANSACTION_STATUSES, LIVE_STATUSES, TERMINAL_STATUSES, RELEASING_PARTY_TYPES, DOCUMENT_TYPES, DOCUMENT_VISIBILITY, NOTE_VISIBILITY,
-  PENDING_REASONS, COMPLIANCE_GATES, STALENESS_REASONS, WITHDRAWN_REASONS, HOLD_REASON_CODES, CANCEL_REASON_CODES, CLOSE_REASON_CODES,
-  TRANSACTION_LIMITS,
-} from '../domains/agents/transactions/transaction.mjs';
+import { TRANSACTION_STATUSES, LIVE_STATUSES, TERMINAL_STATUSES, RELEASING_PARTY_TYPES, DOCUMENT_TYPES, DOCUMENT_VISIBILITY, NOTE_VISIBILITY, PENDING_REASONS, COMPLIANCE_GATES, STALENESS_REASONS, WITHDRAWN_REASONS, HOLD_REASON_CODES, CANCEL_REASON_CODES, CLOSE_REASON_CODES, TRANSACTION_LIMITS } from '../domains/agents/transactions/transaction.mjs';
 
 export const AGENT_TRANSACTIONS_MIGRATION = '0029_agent_transactions';
 export const AGENT_TRANSACTIONS_COLLECTIONS = Object.freeze(['agentTransactions', 'transactionRepresentations', 'transactionDocuments']);
@@ -576,7 +572,6 @@ export function typeDocument(raw, at = 'transactionDocuments') {
     };
   } catch (e) { if (e.code === 'AGENT_TRANSACTIONS_INPUT_INVALID') return { ok: false, reason: e.message.replace(/^[A-Z_]+: /, '') }; throw e; }
 }
-const okOr = (fn) => (raw, at) => { const out = fn(raw, at); return out && out.ok === false ? out : { ok: true, record: out }; };
 
 // ------------------------------------------------------------------ rows
 const TX_COLS = ['id', 'agency_org_id', 'agent_user_id', 'type', 'status', 'context_id', 'compliance_evaluation_id', 'compliance_gate', 'compliance_evaluated_at', 'compliance_pending_reason', 'compliance_verification_freshness', 'compliance_party_revision', 're_evaluation_pending', 'link_trial_id', 'link_opportunity_id', 'link_recruitment_case_id', 'hold_reason_code', 'hold_reason', 'held_at', 'cancel_reason_code', 'cancelled_at', 'close_reason_code', 'closed_at', 'archived_at', 'initiated_by_name', 'created_at', 'updated_at', 'create_key', 'create_fp', 'rev', 'rev_at', 'rev_by_label'];
@@ -757,77 +752,10 @@ function readAll(sqlite) {
     transactionDocuments: decodeDocuments(sqlite, sqlite.prepare('SELECT * FROM transaction_documents ORDER BY rowid').all()),
   };
 }
-const clearAll = (sqlite) => {
-  // The version chain names rows of its own table both ways (RESTRICT is checked row by row): the forward links go
-  // first, then the versions newest first, so no row goes while a later version still names it.
-  sqlite.exec('UPDATE transaction_documents SET superseded_by_id = NULL WHERE superseded_by_id IS NOT NULL');
-  const top = sqlite.prepare('SELECT MAX(version) AS v FROM transaction_documents').get().v ?? 0;
-  const del = sqlite.prepare('DELETE FROM transaction_documents WHERE version = ?');
-  for (let v = top; v >= 1; v -= 1) del.run(v);
-  sqlite.exec('DELETE FROM transaction_representations');
-  sqlite.exec('DELETE FROM agent_transactions');
-};
-/**
- * Whole-snapshot access (readTableBacked / writeTableBacked). A supplied collection IS the whole final collection; an
- * omitted one is kept whole. The rows name compliance contexts and evaluations, agreements, reviews, evidence and cases,
- * which the snapshot may rewrite: `stash` sets them aside first (read, then emptied), and `replace(…, { kept })` types
- * every record (junk refused with ids) and writes them back after those (the snapshot's, or the kept ones).
- */
-export const AGENT_TRANSACTIONS_SNAPSHOT = {
+/** The whole domain read back as plain records (`readAllRecords` in index.mjs: the test suites' read-back); null before its migration. */
+export const AGENT_TRANSACTIONS_RECORDS = {
   names: AGENT_TRANSACTIONS_COLLECTIONS,
   read(sqlite) { return agentTransactionsLive(sqlite) ? readAll(sqlite) : null; },
-  stash(sqlite) {
-    if (!agentTransactionsLive(sqlite)) return null;
-    const kept = readAll(sqlite);
-    clearAll(sqlite);
-    return kept;
-  },
-  replace(sqlite, db, { label = 'the snapshot (agent transactions)', kept = null } = {}) {
-    if (!agentTransactionsLive(sqlite)) return [];
-    const written = AGENT_TRANSACTIONS_COLLECTIONS.filter((n) => Object.hasOwn(db, n) && db[n] !== undefined);
-    if (!written.length && !kept) return [];
-    const blocked = (m) => refusal('AGENT_TRANSACTIONS_IMPORT_BLOCKED', `${label}: ${m}`);
-    const current = kept ?? readAll(sqlite);
-    const src = (n) => (written.includes(n) ? db[n] : current[n]);
-    const typedList = (n, typer) => {
-      const list = src(n);
-      if (!Array.isArray(list)) throw blocked(`the ${n} collection must be an array of entries (got ${describe(list)})`);
-      const seen = new Set();
-      return list.map((raw, i) => {
-        const t = typer(raw, `${n} entry #${i}`);
-        if (!t.ok) throw blocked(t.reason);
-        if (seen.has(t.record.id)) throw blocked(`${n} entry #${i} duplicates an earlier entry (${t.record.id})`);
-        seen.add(t.record.id);
-        return t.record;
-      });
-    };
-    const s = statements(sqlite);
-    try {
-      const txs = typedList('agentTransactions', okOr(typeTransaction));
-      const reps = typedList('transactionRepresentations', okOr(typeRepresentation));
-      const docs = typedList('transactionDocuments', okOr(typeDocument));
-      if (!kept) clearAll(sqlite);
-      for (const t of txs) writeTransaction(s, t);
-      for (const r of reps) writeRepresentation(s, r);
-      // The version chain names rows of its own table: every version in order (each after the one it supersedes), then
-      // the forward links.
-      for (const d of [...docs].sort((a, b) => a.version - b.version)) writeDocument(s, { ...d, supersededBy: null });
-      for (const d of docs) if (d.supersededBy) s.doc.run(docRowOf(d));
-    } catch (e) {
-      if (e.code === 'AGENT_TRANSACTIONS_INPUT_INVALID') throw blocked(e.message.replace(/^[A-Z_]+: /, ''));
-      if (/FOREIGN KEY/.test(String(e.message))) throw refusal('AGENT_TRANSACTIONS_REFERENCE_MISSING', `${label}: a record names a row that is not there (${e.message}); the write was rolled back and nothing was changed`);
-      if (/UNIQUE/.test(String(e.message))) throw refusal('AGENT_TRANSACTIONS_DUPLICATE', `${label}: two records claim what only one may (${e.message}); the write was rolled back and nothing was changed`);
-      throw e;
-    }
-    return written;
-  },
-  assert(sqlite, { label = 'the snapshot (agent transactions)' } = {}) {
-    if (!agentTransactionsLive(sqlite)) return;
-    for (const t of AGENT_TRANSACTIONS_TABLES) {
-      const broken = sqlite.prepare(`PRAGMA foreign_key_check(${t})`).all();
-      if (broken.length) throw refusal('AGENT_TRANSACTIONS_KEY_VIOLATION', `${label}: ${t} holds ${broken.length} row(s) whose reference is not there (first: rowid ${broken[0].rowid} → ${broken[0].parent}); the write was rolled back`);
-    }
-  },
 };
 export const unresolvedPlayerReferences = (sqlite) => (agentTransactionsLive(sqlite) ? { agentTransactions: sqlite.prepare("SELECT count(*) AS n FROM transaction_parties x WHERE subject_kind = 'player' AND NOT EXISTS (SELECT 1 FROM players p WHERE p.id = x.subject_id)").get().n } : null);
 
@@ -1099,7 +1027,7 @@ export function createAgentTransactionsRepository({ sqlite, unit = null, now = D
     },
     counts() { return Object.fromEntries(AGENT_TRANSACTIONS_COLLECTIONS.map((n) => [n, counters[n].get().n])); },
     pending: () => 0,
-    exportAll() { return AGENT_TRANSACTIONS_SNAPSHOT.read(sqlite); },
+    exportAll() { return AGENT_TRANSACTIONS_RECORDS.read(sqlite); },
     log,
     now,
   };

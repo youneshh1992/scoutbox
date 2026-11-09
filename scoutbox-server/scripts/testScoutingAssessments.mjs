@@ -51,7 +51,7 @@ const playlist = (over = {}) => ({ id: 'pls-1', orgId: ORG.id, name: 'Shot stopp
 const template = (over = {}) => ({ id: 'tpl-gk', positionGroup: 'GK', version: 2, createdAt: NOW - 2000, createdBy: SCOUT.name, attributes: [{ id: 'handling', label: 'Handling', anchors: { 3: 'Holds the routine ball' } }, { id: 'kicking', label: 'Kicking', anchors: {} }], ...over });
 
 function serverOpen(dir) {
-  const store = openStore(dir, { tableBacked: TABLE_BACKED });
+  const store = openStore(dir);
   const layer = attachDataLayer({ store, nextId, sessionTtlMs: TTL, now: () => NOW, warn: () => {} });
   return { store, repo: layer.scoutingAssessments, layer, unit: (w) => store.unitOfWork(w), close: () => store.sqlite.close() };
 }

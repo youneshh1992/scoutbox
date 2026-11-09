@@ -37,10 +37,7 @@ import { isPlainObject, describe, ids } from './recruitment.mjs';
 import { transaction, migrationApplied, childRowsOf } from './database.mjs';
 import { deepFreeze } from './scoutingEvidence.mjs';
 import { text, int, bool, oneOf, group, tableDdl, bad, typeSpec, encode, decode, upsertSql, quote } from './fieldSpecs.mjs';
-import {
-  VERIFICATION_STATES, FACETS, JURISDICTIONS, TIERS, AGREEMENT_STATUSES, SCOPES, MAX_TERM_MONTHS, DISCLOSURE_KEYS,
-  MAX_OPPORTUNITY_SHARES,
-} from '../domains/agents/core/shared.mjs';
+import { VERIFICATION_STATES, FACETS, JURISDICTIONS, TIERS, AGREEMENT_STATUSES, SCOPES, MAX_TERM_MONTHS, DISCLOSURE_KEYS, MAX_OPPORTUNITY_SHARES } from '../domains/agents/core/shared.mjs';
 
 export const AGENT_CORE_MIGRATION = '0026_agent_core';
 export const AGENT_CORE_COLLECTIONS = Object.freeze(['agentProfiles', 'agencyAffiliations', 'representationAgreements']);
@@ -126,10 +123,6 @@ const SHARE_SPEC = [
   text('note', 'note', L.shareNote, { nonEmpty: true }), int('sharedAt', 'shared_at', { req: true }),
   group('sharedBy', [oneOf('kind', 'shared_by_kind', ['org'], { req: true }), idf('userId', 'shared_by_user_id', req), text('name', 'shared_by_name', L.name)]),
   int('withdrawnAt', 'withdrawn_at'), int('rev', 'rev', { req: true }), int('revAt', 'rev_at', { req: true }),
-];
-const HISTORY_BASE = [
-  idf('id', 'id', req), int('at', 'at', { req: true }), oneOf('byKind', 'by_kind', AGENT_ACTOR_KINDS, { req: true }),
-  idf('byId', 'by_id', { nonEmpty: true }), text('byName', 'by_name', L.name), text('byRole', 'by_role', 60),
 ];
 
 // ------------------------------------------------------------------ DDL
@@ -718,65 +711,10 @@ function readAll(sqlite) {
     representationAgreements: decodeAgreements(sqlite, sqlite.prepare('SELECT * FROM representation_agreements ORDER BY rowid').all()),
   };
 }
-const TYPERS = { agentProfiles: typeAgentProfile, agencyAffiliations: typeAgencyAffiliation, representationAgreements: typeRepresentationAgreement };
-/**
- * Whole-snapshot access (readTableBacked / writeTableBacked). A supplied collection IS the whole final collection; an
- * omitted one is kept whole. Every record is typed (junk refused with ids) and a staff or agency reference that is not
- * there is named before the engine would; then the supplied collections' tables are rewritten.
- */
-export const AGENT_CORE_SNAPSHOT = {
+/** The whole domain read back as plain records (`readAllRecords` in index.mjs: the test suites' read-back); null before its migration. */
+export const AGENT_CORE_RECORDS = {
   names: AGENT_CORE_COLLECTIONS,
   read(sqlite) { return agentCoreLive(sqlite) ? readAll(sqlite) : null; },
-  replace(sqlite, db, { label = 'the snapshot (agent core)' } = {}) {
-    if (!agentCoreLive(sqlite)) return [];
-    const written = AGENT_CORE_COLLECTIONS.filter((n) => Object.hasOwn(db, n) && db[n] !== undefined);
-    if (!written.length) return [];
-    const typed = {};
-    for (const name of written) {
-      const list = db[name];
-      if (!Array.isArray(list)) throw refusal('AGENT_CORE_IMPORT_BLOCKED', `the ${name} collection of ${label} must be an array of entries (got ${describe(list)})`);
-      const seen = new Set();
-      typed[name] = list.map((raw, i) => {
-        const t = TYPERS[name](raw, `${name} entry #${i}`);
-        if (!t.ok) throw refusal('AGENT_CORE_IMPORT_BLOCKED', `${label}: ${t.reason}`);
-        if (seen.has(t.record.id)) throw refusal('AGENT_CORE_IMPORT_BLOCKED', `${label}: ${name} entry #${i} duplicates an earlier entry (${t.record.id})`);
-        seen.add(t.record.id);
-        return t.record;
-      });
-    }
-    const orgs = new Set(sqlite.prepare('SELECT id FROM orgs').all().map((r) => r.id));
-    const staff = new Set(sqlite.prepare('SELECT id FROM org_users').all().map((r) => r.id));
-    const missing = [
-      ...(typed.agentProfiles ?? []).flatMap((p) => [...(!staff.has(p.userId) ? [`agent_profiles ${p.id} userId → org_users ${p.userId}`] : []), ...(!orgs.has(p.agencyOrgId) ? [`agent_profiles ${p.id} agencyOrgId → orgs ${p.agencyOrgId}`] : [])]),
-      ...(typed.agencyAffiliations ?? []).flatMap((a) => [...(!staff.has(a.userId) ? [`agency_affiliations ${a.id} userId → org_users ${a.userId}`] : []), ...(!orgs.has(a.agencyOrgId) ? [`agency_affiliations ${a.id} agencyOrgId → orgs ${a.agencyOrgId}`] : [])]),
-      ...(typed.representationAgreements ?? []).flatMap((a) => [...(!staff.has(a.agentUserId) ? [`representation_agreements ${a.id} agentUserId → org_users ${a.agentUserId}`] : []), ...(!orgs.has(a.agencyOrgId) ? [`representation_agreements ${a.id} agencyOrgId → orgs ${a.agencyOrgId}`] : [])]),
-    ];
-    if (missing.length) throw refusal('AGENT_CORE_REFERENCE_MISSING', `${missing.length} reference(s) in ${label} name a row that is not there (${ids(missing)}); the write was rolled back and nothing was changed`, { rows: missing });
-    const st = statements(sqlite);
-    const histIds = new Set();
-    const noteHist = (list) => { for (const h of list) { if (histIds.has(h.id)) throw refusal('AGENT_CORE_IMPORT_BLOCKED', `${label}: two history entries share the id ${h.id}`); histIds.add(h.id); } };
-    if (typed.agentProfiles) {
-      if (new Set(typed.agentProfiles.map((p) => p.userId)).size !== typed.agentProfiles.length) throw refusal('AGENT_CORE_IMPORT_BLOCKED', `${label}: two agent profiles name one staff member`);
-      sqlite.exec('DELETE FROM agent_profiles');
-      for (const p of typed.agentProfiles) { noteHist(p.history); writeProfile(st, p); }
-    }
-    if (typed.agencyAffiliations) {
-      sqlite.exec('DELETE FROM agency_affiliations');
-      for (const a of typed.agencyAffiliations) { noteHist(a.history); writeAffiliation(st, a); }
-    }
-    if (typed.representationAgreements) {
-      sqlite.exec('DELETE FROM representation_agreements');
-      for (const a of typed.representationAgreements) { noteHist(a.history); writeAgreement(st, a, { isNew: true }); }
-    }
-    return written;
-  },
-  assert(sqlite, { label = 'the snapshot (agent core)' } = {}) {
-    if (!agentCoreLive(sqlite)) return;
-    for (const t of AGENT_CORE_TABLES) {
-      const broken = sqlite.prepare(`PRAGMA foreign_key_check(${t})`).all();
-      if (broken.length) throw refusal('AGENT_CORE_KEY_VIOLATION', `${label}: ${t} holds ${broken.length} row(s) whose reference is not there (first: rowid ${broken[0].rowid} → ${broken[0].parent}); the write was rolled back`);
-    }
-  },
 };
 const playerRefCount = (sqlite, cond) => sqlite.prepare(`SELECT count(*) AS n FROM representation_agreements x WHERE ${cond}`).get().n;
 export const unresolvedPlayerReferences = (sqlite) => (agentCoreLive(sqlite) ? { agentCore: playerRefCount(sqlite, 'NOT EXISTS (SELECT 1 FROM players p WHERE p.id = x.client_id)') } : null);
@@ -990,7 +928,7 @@ export function createAgentCoreRepository({ sqlite, unit = null, now = Date.now,
     },
     counts() { return Object.fromEntries(AGENT_CORE_COLLECTIONS.map((n) => [n, counters[n].get().n])); },
     pending: () => 0,
-    exportAll() { return AGENT_CORE_SNAPSHOT.read(sqlite); },
+    exportAll() { return AGENT_CORE_RECORDS.read(sqlite); },
     log,
     now,
   };

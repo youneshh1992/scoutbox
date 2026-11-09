@@ -5,7 +5,7 @@
  *   1. `orgs`: the typed table (repositories/orgs.mjs `ORGS_DDL`);
  *   2. (S14f: `org_users` is created in its final form by 0001 and no longer rebuilt here.)
  *   3. `meta.orgsInit` is `pending`: the data layer initialises the table from the seed once, on the first boot,
- *      and a snapshot save settles it (repositories/index.mjs `writeTableBacked`).
+ *      and the first installation's import settles it.
  * REGISTERED in DATA_MIGRATIONS.
  */
 import { ORGS_CUTOVER_MIGRATION, ORGS_INIT_META, ORGS_DDL } from '../orgs.mjs';

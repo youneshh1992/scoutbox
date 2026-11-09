@@ -422,7 +422,6 @@ function writeBatch(st, b) {
   }
   for (const h of b.history) st.history.run(historyRow(b.id, h));
 }
-const writeCreatedList = (st, b) => b.createdProspectIds.forEach((pid, i) => st.created.run(b.id, i, pid));
 function writeKey(st, k) { st.key.run(encode(KEY_SPEC, k)); k.scopes.forEach((s, i) => st.scope.run(k.id, i, s)); }
 function writeEndpoint(st, w) { st.endpoint.run(encode(ENDPOINT_SPEC, w)); w.events.forEach((e, i) => st.event.run(w.id, i, e)); }
 function writeDelivery(st, d, { attempts = true } = {}) {
@@ -504,90 +503,10 @@ function readAll(sqlite) {
     webhookDeliveries: decodeDeliveries(sqlite, all('webhook_deliveries')),
   };
 }
-const TYPERS = { importBatches: typeBatch, prospects: typeProspect, identityReviews: (raw, at) => { const t = typeReview(raw, at); return t.ok ? { ok: true, record: { ...t.record, claimed: t.claimed } } : t; }, apiKeys: typeApiKey, webhookEndpoints: typeEndpoint, webhookDeliveries: typeDelivery };
-function crossCheck(sqlite, t) {
-  const out = [];
-  const dup = (list, key, what) => { const keys = list.map(key); if (new Set(keys).size !== keys.length) out.push(what); };
-  dup(t.prospects.filter((p) => p.reversedAt === null), (p) => `${p.orgId}\u0000${p.provider}\u0000${p.externalId}`, 'two live prospects name the same organisation, provider and external id');
-  dup(t.apiKeys, (k) => k.keyHash, 'two API keys have the same hash');
-  dup(t.webhookDeliveries, (d) => d.eventId, 'two webhook deliveries carry the same event id');
-  const batches = new Map(t.importBatches.map((b) => [b.id, b]));
-  const prospects = new Map(t.prospects.map((p) => [p.id, p]));
-  const endpoints = new Map(t.webhookEndpoints.map((w) => [w.id, w]));
-  for (const p of t.prospects) {
-    const b = batches.get(p.batchId);
-    if (!b) out.push(`prospects ${p.id} batch → import_batches ${p.batchId}`);
-    else if (b.orgId !== p.orgId) out.push(`prospects ${p.id} names another organisation's batch`);
-  }
-  const listed = new Set();
-  for (const b of t.importBatches) {
-    for (const pid of b.createdProspectIds) {
-      if (listed.has(pid)) out.push(`import_batches ${b.id} lists prospect ${pid} another batch also lists`);
-      listed.add(pid);
-      if (prospects.get(pid)?.batchId !== b.id) out.push(`import_batches ${b.id} created prospect → prospects ${pid}`);
-    }
-  }
-  for (const r of t.identityReviews) {
-    const b = batches.get(r.batchId);
-    const row = b?.rows.find((x) => x.row === r.row);
-    if (!row) out.push(`identity_reviews ${r.id} row → import_batch_rows ${r.batchId}#${r.row}`);
-    else if (b.orgId !== r.orgId) out.push(`identity_reviews ${r.id} names another organisation's batch`);
-    else if (r.claimed !== undefined && !same(r.claimed, row.record)) out.push(`identity_reviews ${r.id} carries a record that is not its batch row's`);
-  }
-  for (const d of t.webhookDeliveries) {
-    const w = endpoints.get(d.endpointId);
-    if (!w) out.push(`webhook_deliveries ${d.id} endpoint → webhook_endpoints ${d.endpointId}`);
-    else if (w.orgId !== d.orgId) out.push(`webhook_deliveries ${d.id} names another organisation's endpoint`);
-  }
-  return out;
-}
-const DELETE_ORDER = ['webhook_deliveries', 'webhook_endpoints', 'api_keys', 'identity_reviews', 'import_batch_created_prospects', 'prospects', 'import_batches'];
-function writeFinal(sqlite, t) {
-  for (const tbl of DELETE_ORDER) sqlite.exec(`DELETE FROM ${tbl}`);
-  const st = statements(sqlite);
-  for (const b of t.importBatches) writeBatch(st, b);
-  for (const p of t.prospects) st.prospect.run(encode(PROSPECT_SPEC, p));
-  for (const b of t.importBatches) writeCreatedList(st, b);
-  for (const r of t.identityReviews) st.review.run(encode(REVIEW_SPEC, r));
-  for (const k of t.apiKeys) writeKey(st, k);
-  for (const w of t.webhookEndpoints) writeEndpoint(st, w);
-  for (const d of t.webhookDeliveries) writeDelivery(st, d);
-}
-/** Whole-snapshot access (readTableBacked / writeTableBacked): a supplied collection IS the whole final collection; an omitted one is kept. */
-export const INTEGRATIONS_SNAPSHOT = {
+/** The whole domain read back as plain records (`readAllRecords` in index.mjs: the test suites' read-back); null before its migration. */
+export const INTEGRATIONS_RECORDS = {
   names: INTEGRATIONS_COLLECTIONS,
   read(sqlite) { return integrationsLive(sqlite) ? readAll(sqlite) : null; },
-  replace(sqlite, db, { label = 'the snapshot (integrations)' } = {}) {
-    if (!integrationsLive(sqlite)) return [];
-    const written = INTEGRATIONS_COLLECTIONS.filter((n) => Object.hasOwn(db, n) && db[n] !== undefined);
-    if (!written.length) return [];
-    const current = readAll(sqlite);
-    const typed = {};
-    for (const name of INTEGRATIONS_COLLECTIONS) {
-      if (!written.includes(name)) { typed[name] = current[name]; continue; }
-      const list = db[name];
-      if (!Array.isArray(list)) throw refusal('INTEGRATIONS_IMPORT_BLOCKED', `the ${name} collection of ${label} must be an array of entries (got ${describe(list)})`);
-      const seen = new Set();
-      typed[name] = list.map((raw, i) => {
-        const t = TYPERS[name](raw, `${name} entry #${i}`);
-        if (!t.ok) throw refusal('INTEGRATIONS_IMPORT_BLOCKED', `${label}: ${t.reason}`);
-        if (seen.has(t.record.id)) throw refusal('INTEGRATIONS_IMPORT_BLOCKED', `${label}: ${name} entry #${i} duplicates an earlier entry (${t.record.id})`);
-        seen.add(t.record.id);
-        return t.record;
-      });
-    }
-    const missing = crossCheck(sqlite, typed);
-    if (missing.length) throw refusal('INTEGRATIONS_REFERENCE_MISSING', `${missing.length} reference(s) in ${label} are not there (${ids(missing)}); the write was rolled back and nothing was changed`, { rows: missing });
-    writeFinal(sqlite, typed);
-    return written;
-  },
-  assert(sqlite, { label = 'the snapshot (integrations)' } = {}) {
-    if (!integrationsLive(sqlite)) return;
-    for (const t of INTEGRATIONS_TABLES) {
-      const broken = sqlite.prepare(`PRAGMA foreign_key_check(${t})`).all();
-      if (broken.length) throw refusal('INTEGRATIONS_KEY_VIOLATION', `${label}: ${t} holds ${broken.length} row(s) whose reference is not there (first: rowid ${broken[0].rowid} → ${broken[0].parent}); the write was rolled back`);
-    }
-  },
 };
 const PLAYER_REFS_SQL = 'SELECT match_player_id AS pid FROM import_batch_rows WHERE match_player_id IS NOT NULL UNION ALL SELECT candidate_player_id FROM identity_reviews';
 export const unresolvedPlayerReferences = (sqlite) => (integrationsLive(sqlite)
@@ -846,7 +765,7 @@ export function createIntegrationsRepository({ sqlite, unit = null, now = Date.n
     },
     counts() { return Object.fromEntries(INTEGRATIONS_COLLECTIONS.map((n) => [n, counters[n].get().n])); },
     pending: () => 0,
-    exportAll() { return INTEGRATIONS_SNAPSHOT.read(sqlite); },
+    exportAll() { return INTEGRATIONS_RECORDS.read(sqlite); },
     log,
     now,
   };

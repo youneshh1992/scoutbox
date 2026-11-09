@@ -75,7 +75,6 @@ CREATE INDEX push_tokens_ref ON push_tokens (ref_kind, ref_id);`;
 
 export const outboxPushLive = (sqlite) => migrationApplied(sqlite, OUTBOX_PUSH_MIGRATION);
 const refusal = (code, message, extra = {}) => Object.assign(new Error(`${code}: ${message}`), { code, ...extra });
-const blocked = (detail, extra = {}) => refusal('OUTBOX_PUSH_IMPORT_BLOCKED', `${detail}; nothing was written`, extra);
 const describe = (v) => (v === null ? 'null' : Array.isArray(v) ? 'an array' : typeof v === 'object' ? 'an object' : `a ${typeof v}`);
 const isPlainObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 const isInt = (v) => Number.isSafeInteger(v);
@@ -153,39 +152,16 @@ const pushFromDb = (r) => Object.freeze({ id: r.id, ts: r.created_at, audience: 
 const tokenParams = (row) => ({ ref_kind: row.kind, ref_id: row.refId, token: row.token, registered_at: row.ts });
 const tokenFromDb = (r) => Object.freeze({ kind: r.ref_kind, refId: r.ref_id, token: r.token, ts: r.registered_at });
 
-/**
- * Whole-table access for snapshot mode (tools, fixtures, the persistence suites): one entry per collection. `read`
- * returns its records in insertion order; `replace` types every entry (an unknown field or a wrong-typed value
- * refuses the whole write, naming the entry) and rewrites the table inside the caller's transaction. Both decline
- * before the 0011 record.
- */
-const snapshotTable = (name, table, type, insert, fromDb, { unique }) => ({
+/** Whole-table reads (the test suites' read-back): one entry per collection, its records in insertion order; null before the 0011 record. */
+const recordsTable = (name, table, fromDb) => ({
   name,
   read(sqlite) { return outboxPushLive(sqlite) ? sqlite.prepare(`SELECT * FROM ${table} ORDER BY seq`).all().map(fromDb) : null; },
-  replace(sqlite, rows) {
-    if (!outboxPushLive(sqlite)) return false;
-    if (!sqlite.isTransaction) throw new Error(`${name}: replace() runs inside the caller's transaction`);
-    if (!Array.isArray(rows)) throw blocked(`the ${name} snapshot collection must be an array (got ${describe(rows)})`);
-    const typed = []; const seen = new Set(); const problems = [];
-    rows.forEach((raw, i) => {
-      const v = type(raw);
-      const key = v.ok ? unique(v.row) : null;
-      if (!v.ok) problems.push(`entry #${i}: ${v.reason}`);
-      else if (seen.has(key)) problems.push(`entry #${i}: duplicates an earlier entry's ${name === 'pushTokens' ? 'token' : `id ${key}`}`);
-      else { seen.add(key); typed.push(v); }
-    });
-    if (problems.length) throw blocked(`${problems.length} invalid entr${problems.length === 1 ? 'y' : 'ies'} in the ${name} snapshot collection — ${problems.slice(0, 20).join('; ')}`, { problems });
-    sqlite.exec(`DELETE FROM ${table};`);
-    const ins = sqlite.prepare(insert);
-    for (const v of typed) ins.run(v.source ? outboxParams(v.row, v.source) : table === 'push_log' ? pushParams(v.row) : tokenParams(v.row));
-    return true;
-  },
 });
-export const OUTBOX_TABLE = snapshotTable('outbox', 'outbox', typeOutbox, OUTBOX_INSERT, outboxFromDb, { unique: (r) => r.id });
-export const PUSH_LOG_TABLE = snapshotTable('pushLog', 'push_log', typePushLog, PUSH_INSERT, pushFromDb, { unique: (r) => r.id });
-export const PUSH_TOKENS_TABLE = snapshotTable('pushTokens', 'push_tokens', typePushToken, TOKEN_UPSERT, tokenFromDb, { unique: (r) => r.token });
-export const OUTBOX_PUSH_SNAPSHOT_TABLES = Object.freeze([OUTBOX_TABLE, PUSH_LOG_TABLE, PUSH_TOKENS_TABLE]);
-export const OUTBOX_PUSH_COLLECTIONS = Object.freeze(OUTBOX_PUSH_SNAPSHOT_TABLES.map((t) => t.name));
+export const OUTBOX_TABLE = recordsTable('outbox', 'outbox', outboxFromDb);
+export const PUSH_LOG_TABLE = recordsTable('pushLog', 'push_log', pushFromDb);
+export const PUSH_TOKENS_TABLE = recordsTable('pushTokens', 'push_tokens', tokenFromDb);
+export const OUTBOX_PUSH_RECORD_TABLES = Object.freeze([OUTBOX_TABLE, PUSH_LOG_TABLE, PUSH_TOKENS_TABLE]);
+export const OUTBOX_PUSH_COLLECTIONS = Object.freeze(OUTBOX_PUSH_RECORD_TABLES.map((t) => t.name));
 
 // ------------------------------------------------------------------ the repository
 /** `createOutboxPushRepository({ sqlite, unit, now, log })`: `{ outbox, pushLog, pushTokens }`, each with its writes and queries. */

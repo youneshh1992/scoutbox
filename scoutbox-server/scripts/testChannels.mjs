@@ -59,7 +59,7 @@ function fixtureFile(dir, { channels, requests = REQUESTS(), extra = {} } = {}) 
 }
 /** A live server-mode store with the data layer attached, as the server runs it. */
 function live(dir) {
-  const store = openStore(dir, { tableBacked: TABLE_BACKED });
+  const store = openStore(dir);
   const layer = attachDataLayer({ store, nextId, sessionTtlMs: TTL, now: () => NOW, warn: () => {} });
   return { store, layer, repo: layer.channels, close: () => store.sqlite.close() };
 }

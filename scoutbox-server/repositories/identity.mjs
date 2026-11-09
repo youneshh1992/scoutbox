@@ -42,18 +42,14 @@
  * its id is never created again. Not a retention policy.
  *
  * A first installation's players and guardians (the seed) are imported once by `initialize`, while
- * `meta.coreIdentityInit` is `pending` (set by the migration); a snapshot save settles it.
+ * `meta.coreIdentityInit` is `pending` (set by the migration); the first installation's import settles it.
  */
 import { transaction, migrationApplied } from './database.mjs';
 import { parseStrictDateOnly } from '../temporal.mjs';
 import { isAdult, ADULT_AGE, GRASSROOTS_RADIUS_KM, TRUST, computeTrustScore, trustScoreFromFacts, haversineKm } from '../domain.mjs';
 import { pageOf } from '../domains/platform/paging.mjs';
 import { boxAround } from './grassroots.mjs';
-import {
-  SUBRECORD_KEYS, SUBRECORD_SPECS, PLAYER_SUBRECORD_KEYS, PLAYER_COMPOSITE_SUBRECORDS, subrecordsLive, getSubrecords,
-  validateSubrecordArray, prepareSubrecordStatements, writeChildRows, writeArrayRows, deleteChildRows, readChildren,
-  readChildrenFor, countChildRows, itemRows, storedItem, PLAYER_SUBRECORDS_MIGRATION,
-} from './playerSubrecords.mjs';
+import { SUBRECORD_KEYS, SUBRECORD_SPECS, PLAYER_SUBRECORD_KEYS, subrecordsLive, getSubrecords, validateSubrecordArray, prepareSubrecordStatements, writeChildRows, writeArrayRows, deleteChildRows, readChildren, readChildrenFor, countChildRows, itemRows, storedItem, PLAYER_SUBRECORDS_MIGRATION } from './playerSubrecords.mjs';
 
 export const CORE_IDENTITY_LIVE_MIGRATION = '0005_core_identity_live';
 export const PLAYER_ERASURE_MIGRATION = '0014_player_erasure';
@@ -183,7 +179,6 @@ const optTextOk = (v, max) => v === null || textOk(v, max);
 const intIn = (v, [lo, hi]) => Number.isSafeInteger(v) && v >= lo && v <= hi;
 const clone = (v) => (v === null || typeof v !== 'object' ? v : JSON.parse(JSON.stringify(v)));
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
-const sqlReason = (err) => String(err?.message ?? err).replace(/^SQLITE_\w+:\s*/, '');
 const HHMM_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
 const pick = (o, keys) => Object.fromEntries(keys.map((k) => [k, o?.[k] === undefined ? null : o[k]]));
 const given = (raw) => Object.fromEntries(Object.entries(raw).filter(([, v]) => v !== undefined)); // an undefined field is an absent one
@@ -197,10 +192,6 @@ const STATS_COUNTS = Object.freeze(['appearances', 'goals', 'assists', 'cleanShe
 const PREFS_KEYS = Object.freeze(['quietStart', 'quietEnd', 'schoolHoursMute', 'timezone']);
 export const PLAYER_RECORD_KEYS = Object.freeze([...PLAYER_SCALAR_KEYS, 'location', 'stats', 'medical', 'notificationPrefs', 'programme', ...PLAYER_SUBRECORD_KEYS, 'trialReports']);
 const PLAYER_BOOLEANS = Object.freeze(['academyPlus', 'firstTeamSeeker', 'identityVerified']);
-/** The fields `update` may change (the lists have their own operations, the guardian link its link operations). */
-const PLAYER_EDITABLE = Object.freeze(['name', 'dob', 'country', 'city', 'position', 'foot', 'heightCm', 'weightKg', 'squadNumber', 'contractUntil',
-  'marketValueRange', 'agentName', 'academyPlus', 'firstTeamSeeker', 'availability', 'contractStatus', 'level', 'footballCategory',
-  'identityVerified', 'location', 'stats', 'medical', 'notificationPrefs', 'programme']);
 const PLAYER_DEFAULTS = Object.freeze({ city: null, position: null, foot: null, heightCm: null, weightKg: null, squadNumber: null, contractUntil: null,
   marketValueRange: null, agentName: null, academyPlus: false, firstTeamSeeker: false, availability: 'not_seeking', contractStatus: 'unknown',
   level: 'amateur', footballCategory: null, identityVerified: false, guardianId: null, createdAt: null, location: null, stats: null,
@@ -479,7 +470,7 @@ function lngRanges(box) {
 /**
  * `players.profile_signal`: the directory's sort figure, domain.mjs `trustScoreFromFacts` over the row's facts and its
  * list counts (attendance, clips, the trials' filed reports). Every write that can change a fact refreshes it in its own
- * transaction or unit: the player writes here, a trial write in the recruitment repository, a snapshot save at its end.
+ * transaction or unit: the player writes here, a trial write in the recruitment repository.
  * `ids` null refreshes every live player.
  */
 const signalSqlCache = new WeakMap();
@@ -529,7 +520,6 @@ export function retainedRowFor(rec) {
   return Object.assign(p, RETAINED_PLACEHOLDERS);
 }
 export const retainedRecordFromRow = (r) => ({ id: r.id, deletedAt: r.deleted_at, birthDate: r.birth_date, country: r.country });
-const retainedRefusal = (message) => refusal('PLAYER_ERASURE_IMPORT_BLOCKED', message);
 /** Problems of one retained record (field and reason; never a value): the shape is exactly the four keys. */
 export function validateRetainedRecord(rec, index = null) {
   const at = `playersRetained ${typeof rec?.id === 'string' && rec.id ? rec.id : `#${index}`}`;
@@ -543,20 +533,6 @@ export function validateRetainedRecord(rec, index = null) {
   if (unknown.length) problems.push(`unknown field(s) ${unknown.join(', ')} (a retained record carries exactly id, deletedAt, birthDate, country)`);
   return problems.map((m) => `${at}: ${m}`);
 }
-/** Validate a `playersRetained` collection against the live player ids; throws PLAYER_ERASURE_IMPORT_BLOCKED (ids and reasons only). */
-export function checkRetainedCollection(list, { liveIds = new Set(), label = 'playersRetained' } = {}) {
-  if (!Array.isArray(list)) throw retainedRefusal(`${label}: the playersRetained collection must be an array of retained records (got ${describe(list)}); nothing was written`);
-  const problems = []; const seen = new Set(); const records = [];
-  list.forEach((rec, i) => {
-    const p = validateRetainedRecord(rec, i); if (p.length) { problems.push(...p); return; }
-    if (seen.has(rec.id)) { problems.push(`playersRetained ${rec.id}: duplicate id`); return; }
-    seen.add(rec.id);
-    if (liveIds.has(rec.id)) { problems.push(`playersRetained ${rec.id}: the id is a live player; a retained record and an account never share an id`); return; }
-    records.push(Object.freeze({ id: rec.id, deletedAt: rec.deletedAt, birthDate: rec.birthDate, country: rec.country }));
-  });
-  if (problems.length) throw retainedRefusal(`${label}: ${problems.length} retained record(s) refused (${problems.slice(0, 20).join('; ')}${problems.length > 20 ? '; …' : ''}); nothing was written`);
-  return records;
-}
 /**
  * The retained records as a snapshot collection (null before migration 0014). `replace` may only ADD records: a stored
  * record that is not listed, or listed with a changed birth date, country or deletion instant, refuses the whole save
@@ -568,29 +544,6 @@ export const PLAYERS_RETAINED = {
   read(sqlite) {
     if (!this.cutOver(sqlite)) return null;
     return sqlite.prepare('SELECT id, deleted_at, birth_date, country FROM players WHERE deleted_at IS NOT NULL ORDER BY deleted_at, id').all().map(retainedRecordFromRow);
-  },
-  replace(sqlite, list) {
-    if (!this.cutOver(sqlite)) return false;
-    if (!sqlite.isTransaction) throw new Error('playersRetained: replace() runs inside the caller\'s transaction');
-    const liveIds = new Set(sqlite.prepare('SELECT id FROM players WHERE deleted_at IS NULL').all().map((r) => r.id));
-    const records = checkRetainedCollection(list, { liveIds, label: 'the snapshot' });
-    const stored = new Map(sqlite.prepare('SELECT id, deleted_at, birth_date, country FROM players WHERE deleted_at IS NOT NULL').all().map((r) => [r.id, retainedRecordFromRow(r)]));
-    const supplied = new Map(records.map((r) => [r.id, r]));
-    const missing = []; const amended = [];
-    for (const [id, rec] of stored) {
-      const g = supplied.get(id);
-      if (!g) { missing.push(id); continue; }
-      if (g.deletedAt !== rec.deletedAt || g.birthDate !== rec.birthDate || g.country !== rec.country) amended.push(id);
-    }
-    if (missing.length || amended.length) {
-      const parts = [];
-      if (missing.length) parts.push(`${missing.length} stored retained record(s) are not listed (${missing.slice(0, 20).join(', ')}${missing.length > 20 ? ', …' : ''})`);
-      if (amended.length) parts.push(`${amended.length} would be amended — the stored birth date, country or deletion instant differs from the listed one (${amended.slice(0, 20).join(', ')}${amended.length > 20 ? ', …' : ''})`);
-      throw Object.assign(new Error(`RETAINED_RECORD_PROTECTED: the snapshot's playersRetained collection — ${parts.join('; ')}; a retained deletion record is never removed or amended by a save (a supplied collection may only add records); the save was rolled back and nothing was written`), { code: 'RETAINED_RECORD_PROTECTED', missing, amended });
-    }
-    const ins = sqlite.prepare(P_INSERT);
-    for (const rec of records) if (!stored.has(rec.id)) ins.run(retainedRowFor(rec));
-    return true;
   },
 };
 const ERASE_COLUMNS = Object.freeze(P_COLS.filter((c) => !['id', 'birth_date', 'country'].includes(c)));
@@ -679,30 +632,11 @@ function readIdentitySnapshot(sqlite) {
   return { players, guardians };
 }
 
-/**
- * Whole-snapshot access for snapshot mode (tools, fixtures, the persistence suites). The two collections are coupled:
- * a snapshot carries both or neither. `replace` types the whole pair first (IDENTITY_IMPORT_BLOCKED, naming ids and
- * fields) and then rewrites the three tables; the retained rows stay as they are and their ids are refused as live
- * players.
- */
-export const IDENTITY_SNAPSHOT = {
+/** The whole domain read back as plain records (`readAllRecords` in index.mjs: the test suites' read-back); null before its migration. */
+export const IDENTITY_RECORDS = {
   names: IDENTITY_COLLECTIONS,
   cutOver,
   read(sqlite) { return cutOver(sqlite) ? readIdentitySnapshot(sqlite) : null; },
-  replace(sqlite, { players, guardians }, { now = Date.now() } = {}) {
-    if (!cutOver(sqlite)) return false;
-    if (!sqlite.isTransaction) throw new Error('identity snapshot: replace() runs inside the caller\'s transaction');
-    const retainedIds = new Set(sqlite.prepare('SELECT id FROM players WHERE deleted_at IS NOT NULL').all().map((r) => r.id));
-    const typed = typeIdentitySnapshot({ players, guardians }, { now, retainedIds });
-    sqlite.exec('DELETE FROM guardian_children');
-    sqlite.exec('DELETE FROM players WHERE deleted_at IS NULL'); // the lists cascade
-    sqlite.exec('UPDATE guardians SET co_guardian_of = NULL'); // RESTRICT is checked row by row
-    sqlite.exec('DELETE FROM guardians');
-    try { writeIdentity(sqlite, typed); } catch (err) { throw blocked(`the identity snapshot could not be stored (${sqlReason(err)})`); }
-    const broken = sqlite.prepare('PRAGMA foreign_key_check').all();
-    if (broken.length) throw new Error(`identity snapshot: foreign_key_check found ${broken.length} broken reference(s) after the write; the save was rolled back`);
-    return true;
-  },
 };
 
 // ------------------------------------------------------------------ the repositories

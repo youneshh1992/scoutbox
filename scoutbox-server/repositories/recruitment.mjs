@@ -13,8 +13,7 @@
  * EVERY FIELD IS A TYPED COLUMN with the vocabulary CHECKs of the domain rules (server.mjs issueRecruitmentRequest and
  * issueAcceptedTrial, domains/recruitment/lifecycle/trial.mjs, domains/recruitment/lifecycle/trialRoutes.mjs, domains/scouting/journeys.mjs). There is no `absent_keys_json`,
  * `offtype_json`, `extra_json` or `raw_json`. A record the columns cannot hold — an unknown field at any level
- * included — is REFUSED with its id, at a repository write (the unit rolls back) and at a snapshot write (the save
- * rolls back). An `undefined` field is an absent one (the JSON rule); an absent field reads back as null, an absent
+ * included — is REFUSED with its id, at a repository write (the unit rolls back). An `undefined` field is an absent one (the JSON rule); an absent field reads back as null, an absent
  * list as empty. A trial always reads back with its trial-day container, its five client-key lists and its reminder
  * map, so a reader never has to create them.
  *
@@ -25,8 +24,7 @@
  * once, joined into the open unit of work (store.unit) or in a transaction of its own.
  *
  * References. `org_id` → orgs, `user_id` → org_users and `case_id` (both tables) → recruitment_cases (RESTRICT).
- * `recruitment_requests.trial_id` → trials is DEFERRABLE INITIALLY DEFERRED (checked at COMMIT): a snapshot writes a
- * request before the trial it names. `trials.request_id` → recruitment_requests is immediate. Player ids: no key, tolerant and counted (Q7a).
+ * `recruitment_requests.trial_id` → trials is DEFERRABLE INITIALLY DEFERRED (checked at COMMIT): a request and the trial it names are written in one unit. `trials.request_id` → recruitment_requests is immediate. Player ids: no key, tolerant and counted (Q7a).
  * Guardian ids: no key (identity rewrites the guardians table), checked in code at every write (Q7c).
  *
  * Refusals name tables, fields and ids — never a name, a message, a note, an address or a phone number.
@@ -34,10 +32,7 @@
 import { pageOf } from '../domains/platform/paging.mjs';
 import { transaction, migrationApplied, newestHistory, childRowsOf } from './database.mjs';
 import { ORG_TYPES } from './orgs.mjs';
-import {
-  TRIAL_WORKFLOW_STATES, TRIAL_SESSION_KINDS, TRIAL_ATTENDANCE_STATES, TRIAL_ATTENDANCE_SOURCES, TRIAL_COMPLETION_STATES,
-  TRIAL_CANCEL_ACTORS, TRIAL_STATUSES, TRIAL_STAFF_CHECK_STATES, TRIAL_DAY_EVENT_KINDS, TRIAL_CONSENT_SCOPES, TRIAL_KEY_ACTS, TRIAL_LIMITS,
-} from '../domains/recruitment/lifecycle/trial.mjs';
+import { TRIAL_WORKFLOW_STATES, TRIAL_SESSION_KINDS, TRIAL_ATTENDANCE_STATES, TRIAL_ATTENDANCE_SOURCES, TRIAL_COMPLETION_STATES, TRIAL_CANCEL_ACTORS, TRIAL_STATUSES, TRIAL_STAFF_CHECK_STATES, TRIAL_DAY_EVENT_KINDS, TRIAL_CONSENT_SCOPES, TRIAL_KEY_ACTS, TRIAL_LIMITS } from '../domains/recruitment/lifecycle/trial.mjs';
 import { TRIAL_REPORT_FIELDS } from '../domain.mjs';
 import { refreshProfileSignals } from './identity.mjs';
 
@@ -752,8 +747,6 @@ function writeTrial(st, t) {
   t.day.checkins.forEach((c, i) => I.trial_day_checkins.run({ trial_id: t.id, position: i, player_id: c.playerId, at: c.at, by_user_id: c.byUserId, by_name: c.byName }));
   t.day.statusEvents.forEach((e, i) => I.trial_day_status_events.run({ trial_id: t.id, position: i, kind: e.kind, at: e.at, by_name: e.by, reason: e.reason, new_date: e.newDate }));
 }
-function deleteTrial(st, id) { for (const d of st.trialChildrenDel) d.run(id); st.trialDel.run(id); }
-function deleteRequest(st, id) { st.slotsDel.run(id); st.requestDel.run(id); }
 
 function decodeRequest(st, row) {
   const trialDetails = row.type !== 'trial' ? null : {
@@ -826,43 +819,11 @@ export function retainedPlayerReferences(sqlite) {
 /** Every guardian id a typed record names. */
 const guardianIdsOf = (name, r) => (name === 'requests' ? [r.guardianId, r.recipient?.guardianId ?? null] : [r.recipient?.guardianId ?? null]).filter((g) => g !== null);
 
-/** The pair the respond routes read both ways: a request's trial names it back. */
-function assertPairs(sqlite, label) {
-  const broken = sqlite.prepare('SELECT r.id AS request, r.trial_id AS trial FROM recruitment_requests r LEFT JOIN trials t ON t.id = r.trial_id WHERE r.trial_id IS NOT NULL AND (t.id IS NULL OR t.request_id <> r.id)').all();
-  if (broken.length) throw refusal('RECRUITMENT_PAIR_MISMATCH', `${label}: ${broken.length} request(s) name a trial that does not name them back (${ids(broken.map((x) => `${x.request} → ${x.trial}`))}); the write was rolled back`);
-}
-function assertKeys(sqlite, label) {
-  for (const t of RECRUITMENT_TABLES) {
-    const broken = sqlite.prepare(`PRAGMA foreign_key_check(${t})`).all();
-    if (!broken.length) continue;
-    const owner = t === 'recruitment_requests' || t === 'trials' ? 'id' : t === 'request_trial_slots' ? 'request_id' : 'trial_id';
-    const fks = sqlite.prepare(`PRAGMA foreign_key_list(${t})`).all();
-    const named = (r) => {
-      const cols = fks.filter((f) => f.id === r.fkid).map((f) => f.from);
-      const row = sqlite.prepare(`SELECT ${[owner, ...cols].join(', ')} FROM ${t} WHERE rowid = ?`).get(r.rowid) ?? {};
-      return `${row[owner] ?? `rowid ${r.rowid}`} → ${r.parent} ${cols.map((c) => row[c]).join('/')}`;
-    };
-    const code = broken.every((r) => r.parent === 'recruitment_cases') ? 'RECRUITMENT_CASE_MISSING' : 'RECRUITMENT_REFERENCE_MISSING';
-    throw refusal(code, `${label}: ${t} holds ${broken.length} row(s) naming a ${broken[0].parent} row that is not there (${ids(broken.map(named))}); the write was rolled back`);
-  }
-}
-/** Every guardian a request or a trial names exists (Q7c), whichever side the write changed. */
-function assertGuardians(sqlite, label) {
-  const rows = sqlite.prepare("SELECT 'recruitment_requests' AS t, id, guardian_id AS g FROM recruitment_requests WHERE guardian_id IS NOT NULL UNION ALL SELECT 'recruitment_requests', id, recipient_guardian_id FROM recruitment_requests WHERE recipient_guardian_id IS NOT NULL UNION ALL SELECT 'trials', id, recipient_guardian_id FROM trials WHERE recipient_guardian_id IS NOT NULL").all();
-  const st = statements(sqlite);
-  const missing = rows.filter((r) => !st.guardian.get(r.g));
-  if (missing.length) throw refusal('RECRUITMENT_GUARDIAN_MISSING', `${label}: ${missing.length} guardian reference(s) name no guardian (${ids(missing.map((r) => `${r.t} ${r.id} → guardians ${r.g}`))}); the write was rolled back`);
-}
-/** The final state of the recruitment graph, ids only: every key (the deferred case and trial keys named before COMMIT would refuse them anonymously), the request/trial pairs, the guardians. */
-export function assertRecruitmentConsistent(sqlite, { label = 'the snapshot' } = {}) {
-  if (!recruitmentLive(sqlite)) return;
-  assertKeys(sqlite, label); assertPairs(sqlite, label); assertGuardians(sqlite, label);
-}
 
-// ------------------------------------------------------------------ the snapshot path (tools, fixtures, the persistence suites)
+// ------------------------------------------------------------------ the whole-domain read
 const TYPERS = { requests: typeRequest, trials: typeTrial };
 const TABLE_OF = { requests: 'recruitment_requests', trials: 'trials' };
-export const RECRUITMENT_SNAPSHOT = {
+export const RECRUITMENT_RECORDS = {
   names: RECRUITMENT_COLLECTIONS,
   read(sqlite) { if (!recruitmentLive(sqlite)) return null; return { requests: readRequests(sqlite), trials: readTrials(sqlite) }; },
   /**
@@ -871,46 +832,10 @@ export const RECRUITMENT_SNAPSHOT = {
    * supplied list no longer carries are removed by `prune`, after the threads that may name them. Returns the names
    * written.
    */
-  replace(sqlite, db, { label = 'the snapshot' } = {}) {
-    if (!recruitmentLive(sqlite)) return [];
-    const typed = {}; const written = [];
-    for (const name of RECRUITMENT_COLLECTIONS) {
-      const value = db[name];
-      if (value === undefined) continue;
-      if (!Array.isArray(value)) throw refusal('RECRUITMENT_INPUT_INVALID', `the ${name} collection of ${label} must be an array of records (got ${describe(value)}); nothing was written`);
-      const seen = new Set(); const problems = [];
-      typed[name] = value.map((raw, i) => {
-        const t = TYPERS[name](raw, `${name} entry #${i}`);
-        if (!t.ok) { problems.push(t.reason); return null; }
-        if (seen.has(t.record.id)) problems.push(`${name} entry #${i} duplicates the id of an earlier entry (${t.record.id})`);
-        seen.add(t.record.id); return t.record;
-      });
-      // Every entry the typed tables cannot hold is named, not just the first.
-      if (problems.length) throw refusal('RECRUITMENT_INPUT_INVALID', `${label}: ${problems.length} ${name} entr${problems.length === 1 ? 'y' : 'ies'} refused (${problems.slice(0, 20).join('; ')}${problems.length > 20 ? '; …' : ''}); nothing was written`);
-      written.push(name);
-    }
-    const st = statements(sqlite);
-    if (typed.trials) { const keep = new Set(typed.trials.map((t) => t.id)); for (const id of st.ids('trials')) if (!keep.has(id)) deleteTrial(st, id); }
-    for (const q of typed.requests ?? []) writeRequest(st, q);
-    for (const t of typed.trials ?? []) writeTrial(st, t);
-    return written;
-  },
+
   /** The requests a supplied list no longer carries (their slots with them); a thread or a trial still naming one refuses the save by its key. */
-  prune(sqlite, { requests, label = 'the snapshot' }) {
-    if (!recruitmentLive(sqlite) || !Array.isArray(requests)) return;
-    const st = statements(sqlite); const keep = new Set(requests.filter(isPlainObject).map((r) => r.id));
-    const gone = st.ids('recruitment_requests').filter((id) => !keep.has(id));
-    if (!gone.length) return;
-    // A thread still naming a request this write removes: named with ids (the RESTRICT key would refuse it without them).
-    if (tableExists(sqlite, 'channels')) {
-      const goneSet = new Set(gone); const held = sqlite.prepare('SELECT id, request_id FROM channels ORDER BY seq').all().filter((c) => goneSet.has(c.request_id));
-      if (held.length) throw refusal('CHANNEL_REQUEST_MISSING', `${held.length} channel(s) in ${label} name a request that is not in the final requests collection (channels ${ids(held.map((c) => c.id))}; requests ${ids([...new Set(held.map((c) => c.request_id))])}); the write was rolled back and nothing was changed — remove the thread with its request, or keep the request`, { channels: held.map((c) => c.id) });
-    }
-    for (const id of gone) {
-      try { deleteRequest(st, id); } catch (e) { throw refusal('RECRUITMENT_REQUEST_STILL_REFERENCED', `${label}: request ${id} is no longer listed but a trial still names it (${e.message}); the write was rolled back`); }
-    }
-  },
-  assert(sqlite, { label = 'the snapshot' } = {}) { assertRecruitmentConsistent(sqlite, { label }); },
+
+
 };
 
 // ------------------------------------------------------------------ the repository (explicit writes; SQL reads)
@@ -1113,7 +1038,7 @@ export function createRecruitmentRepository({ sqlite, unit = null, now = Date.no
     },
     counts() { return { requests: counters.requests.get().n, trials: counters.trials.get().n, trialReports: counters.trialReports.get().n }; },
     pending: () => 0,
-    exportAll() { return RECRUITMENT_SNAPSHOT.read(sqlite); },
+    exportAll() { return RECRUITMENT_RECORDS.read(sqlite); },
     log,
     now,
   };

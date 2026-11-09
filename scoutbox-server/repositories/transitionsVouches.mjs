@@ -253,61 +253,10 @@ function readAll(sqlite) {
     vouches: sqlite.prepare('SELECT * FROM vouches ORDER BY rowid').all().map(decodeVouch),
   };
 }
-const TYPERS = { transitionCases: typeTransitionCase, vouches: typeVouch };
-/**
- * Whole-snapshot access (readTableBacked / writeTableBacked). A supplied collection IS the whole final collection; an
- * omitted one is kept whole. Every record is typed (junk refused with ids) and an organisation reference that is not
- * there is named before the engine would; then the supplied collections' tables are rewritten.
- */
-export const TRANSITIONS_SNAPSHOT = {
+/** The whole domain read back as plain records (`readAllRecords` in index.mjs: the test suites' read-back); null before its migration. */
+export const TRANSITIONS_RECORDS = {
   names: TRANSITIONS_COLLECTIONS,
   read(sqlite) { return transitionsLive(sqlite) ? readAll(sqlite) : null; },
-  replace(sqlite, db, { label = 'the snapshot (transitions and references)' } = {}) {
-    if (!transitionsLive(sqlite)) return [];
-    const written = TRANSITIONS_COLLECTIONS.filter((n) => Object.hasOwn(db, n) && db[n] !== undefined);
-    if (!written.length) return [];
-    const typed = {};
-    for (const name of written) {
-      const list = db[name];
-      if (!Array.isArray(list)) throw refusal('TRANSITIONS_IMPORT_BLOCKED', `the ${name} collection of ${label} must be an array of entries (got ${describe(list)})`);
-      const seen = new Set();
-      typed[name] = list.map((raw, i) => {
-        const t = TYPERS[name](raw, `${name} entry #${i}`);
-        if (!t.ok) throw refusal('TRANSITIONS_IMPORT_BLOCKED', `${label}: ${t.reason}`);
-        if (seen.has(t.record.id)) throw refusal('TRANSITIONS_IMPORT_BLOCKED', `${label}: ${name} entry #${i} duplicates an earlier entry (${t.record.id})`);
-        seen.add(t.record.id);
-        return t.record;
-      });
-    }
-    if (typed.transitionCases) {
-      const orgs = new Set(sqlite.prepare('SELECT id FROM orgs').all().map((r) => r.id));
-      const missing = typed.transitionCases.flatMap((c) => [
-        ...(c.placement && !orgs.has(c.placement.orgId) ? [`transition_cases ${c.id} placement.orgId → orgs ${c.placement.orgId}`] : []),
-        ...c.recipients.filter((r) => !orgs.has(r.orgId)).map((r) => `transition_case_recipients ${c.id} orgId → orgs ${r.orgId}`),
-      ]);
-      if (missing.length) throw refusal('TRANSITIONS_REFERENCE_MISSING', `${missing.length} reference(s) in ${label} name a row that is not there (${ids(missing)}); the write was rolled back and nothing was changed`, { rows: missing });
-      const histIds = typed.transitionCases.flatMap((c) => c.history.map((h) => h.id));
-      if (new Set(histIds).size !== histIds.length) throw refusal('TRANSITIONS_IMPORT_BLOCKED', `${label}: two transition history entries share an id`);
-      sqlite.exec('DELETE FROM transition_cases'); // the pack, grants and history cascade
-      const st = caseStatements(sqlite);
-      for (const c of typed.transitionCases) writeCase(st, c, { isNew: true });
-    }
-    if (typed.vouches) {
-      const hashes = typed.vouches.map((v) => v.codeHash).filter(Boolean);
-      if (new Set(hashes).size !== hashes.length) throw refusal('TRANSITIONS_IMPORT_BLOCKED', `${label}: two vouches carry the same code hash`);
-      sqlite.exec('DELETE FROM vouches');
-      const up = sqlite.prepare(upsertSql('vouches', VOUCH_SPEC));
-      for (const v of typed.vouches) up.run(encodeVouch(v));
-    }
-    return written;
-  },
-  assert(sqlite, { label = 'the snapshot (transitions and references)' } = {}) {
-    if (!transitionsLive(sqlite)) return;
-    for (const t of TRANSITIONS_TABLES) {
-      const broken = sqlite.prepare(`PRAGMA foreign_key_check(${t})`).all();
-      if (broken.length) throw refusal('TRANSITIONS_KEY_VIOLATION', `${label}: ${t} holds ${broken.length} row(s) whose reference is not there (first: rowid ${broken[0].rowid} → ${broken[0].parent}); the write was rolled back`);
-    }
-  },
 };
 const PLAYER_REFS_SQL = 'SELECT player_id AS pid FROM transition_cases UNION ALL SELECT player_id FROM vouches';
 const playerRefCount = (sqlite, cond) => sqlite.prepare(`SELECT count(*) AS n FROM (${PLAYER_REFS_SQL}) x WHERE ${cond}`).get().n;
@@ -439,7 +388,7 @@ export function createTransitionsVouchesRepository({ sqlite, unit = null, now = 
     },
     counts() { return Object.fromEntries(TRANSITIONS_COLLECTIONS.map((n) => [n, counters[n].get().n])); },
     pending: () => 0,
-    exportAll() { return TRANSITIONS_SNAPSHOT.read(sqlite); },
+    exportAll() { return TRANSITIONS_RECORDS.read(sqlite); },
     log,
     now,
   };

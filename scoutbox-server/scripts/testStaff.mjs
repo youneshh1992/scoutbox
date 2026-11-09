@@ -149,28 +149,22 @@ test('writes join the caller\'s transaction: a rollback leaves no staff row, cod
   assert.equal(users.count(), 1); assert.equal(users.mfaSecretOf(u.id), null); assert.equal(users.recoveryCodesLeft(u.id), 0);
 });
 
-test('snapshot path: a round trip keeps every field (the MFA secret and codes included); junk, an unknown field and a duplicate name are refused whole; a remover listed later is fine', () => {
+test('[records] a staff record reads back whole (the MFA secret and codes included); junk and a duplicate name are refused by create and nothing is written; a removal names its remover', () => {
   const s = fresh(); const users = repoOn(s);
   const lead = users.create({ orgId: 'org-a', name: 'Lead', role: 'Manager' });
   users.startMfa(lead.id, SECRET); users.enableMfa(lead.id, { at: NOW, recoveryHashes: [HASH('d')] });
-  const rows = USERS_TABLE.read(s);
-  assert.deepEqual(rows[0].mfa, { secretB32: SECRET, enabledAt: NOW, recoveryHashes: [HASH('d')] });
-  const removed = { id: 'usr-gone', orgId: 'org-a', name: 'Gone', role: 'Scout', createdAt: 1, removedAt: 2, removedById: 'usr-later' };
-  const later = { id: 'usr-later', orgId: 'org-a', name: 'Later', role: 'Manager', createdAt: 3 };
-  transaction(s, () => USERS_TABLE.replace(s, [...rows, removed, later]));
+  assert.deepEqual(USERS_TABLE.read(s)[0].mfa, { secretB32: SECRET, enabledAt: NOW, recoveryHashes: [HASH('d')] });
+  const later = users.create({ id: 'usr-later', orgId: 'org-a', name: 'Later', role: 'Manager', createdAt: 3 });
+  users.create({ id: 'usr-gone', orgId: 'org-a', name: 'Gone', role: 'Scout', createdAt: 1 });
+  users.update('usr-gone', (d) => { d.removedAt = 2; d.removedById = later.id; });
   assert.equal(users.byId('usr-gone').removedById, 'usr-later');
   assert.equal(users.byId('usr-later').deliveryPrefs.channels.email, true, 'an absent preference takes its default');
   const before = JSON.stringify(USERS_TABLE.read(s));
   for (const [bad, why] of [
-    [[...rows, { ...later, colour: 'red' }], /unknown field/],
-    [[...rows, { ...later, id: 'usr-twin', name: 'LEAD' }], /has the name of another staff account/],
-    [[...rows, { ...later, role: 7 }], /role must be text/],
-    [[...rows, { ...later, mfa: { secretB32: SECRET, enabledAt: null, recoveryHashes: [HASH('e')] } }], /recovery codes exist only once MFA is enabled/],
-  ]) assert.throws(() => transaction(s, () => USERS_TABLE.replace(s, bad)), (e) => e.code === 'ORG_USERS_IMPORT_BLOCKED' && why.test(e.message));
+    [{ orgId: 'org-a', name: 'LEAD', role: 'Scout' }, /STAFF_NAME_TAKEN/],
+    [{ orgId: 'org-a', name: 'Seven', role: 7 }, /role must be text/],
+  ]) assert.throws(() => users.create(bad), why);
   assert.equal(JSON.stringify(USERS_TABLE.read(s)), before, 'every refused write left the table as it was');
-  // A snapshot that no longer lists a staff member removes them (their sessions and codes cascade).
-  transaction(s, () => USERS_TABLE.replace(s, USERS_TABLE.read(s).filter((u) => u.id !== 'usr-gone')));
-  assert.equal(users.byId('usr-gone'), null);
 });
 
 test('cost: a staff write runs the same number of SQL statements with 20 and with 2,000 staff (no mirror, no whole-table pass)', () => {

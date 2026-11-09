@@ -282,7 +282,6 @@ export function typeVacancy(raw, at = 'vacancies') {
   return { ok: true, record: { id: raw.id, orgId: raw.orgId, roleId: orNull(raw.roleId), roleName: raw.roleName, window: orNull(raw.window), notes: orNull(raw.notes), status: raw.status, createdBy: raw.createdBy, createdAt: raw.createdAt, closedAt: orNull(raw.closedAt) } };
 }
 const TYPERS = { tacticalSetups: typeTacticalSetup, squadMembers: typeSquadMember, shadowPlayers: typeShadowPlayer, lookingFor: typeLookingFor, federationChecks: typeFederationCheck, vacancies: typeVacancy };
-const KEY_OF = { tacticalSetups: 'orgId', squadMembers: 'id', shadowPlayers: 'id', lookingFor: 'orgId', federationChecks: 'orgId', vacancies: 'id' };
 
 // ------------------------------------------------------------------ rows
 function statements(sqlite) {
@@ -340,7 +339,6 @@ const writeShadow = (st, s) => st.shadow.run({ id: s.id, org_id: s.orgId, player
 function writeLookingFor(st, l) { st.lookingForDel.run(l.orgId); l.positions.forEach((p, i) => st.lookingFor.run(l.orgId, i, p)); }
 const writeFederation = (st, f) => st.federation.run({ org_id: f.orgId, federation: f.federation, registration_id: f.registrationId, contact_email: f.contactEmail, status: f.status, submitted_at: f.submittedAt });
 const writeVacancy = (st, v) => st.vacancy.run({ id: v.id, org_id: v.orgId, role_id: v.roleId, role_name: v.roleName, window_name: v.window, notes: v.notes, status: v.status, created_by_name: v.createdBy, created_at: v.createdAt, closed_at: v.closedAt });
-const WRITERS = { tacticalSetups: writeSetup, squadMembers: writeSquad, shadowPlayers: writeShadow, lookingFor: writeLookingFor, federationChecks: writeFederation, vacancies: writeVacancy };
 
 function decodeSetup(st, row) {
   if (!row) return null;
@@ -361,43 +359,6 @@ const decodeShadow = (r) => ({ id: r.id, orgId: r.org_id, playerId: r.player_id,
 const decodeFederation = (r) => (r ? { orgId: r.org_id, federation: r.federation, registrationId: r.registration_id, contactEmail: r.contact_email, status: r.status, submittedAt: r.submitted_at } : null);
 const decodeVacancy = (r) => ({ id: r.id, orgId: r.org_id, roleId: r.role_id, roleName: r.role_name, window: r.window_name, notes: r.notes, status: r.status, createdBy: r.created_by_name, createdAt: r.created_at, closedAt: r.closed_at });
 
-// ------------------------------------------------------------------ the rules the code keeps, named with ids before the engine would
-function checkRecords(sqlite, typed, label) {
-  const problems = [];
-  const orgs = new Set(sqlite.prepare('SELECT id FROM orgs').all().map((r) => r.id));
-  const roleOrg = new Map();
-  for (const s of typed.tacticalSetups) for (const r of s.roles) {
-    if (roleOrg.has(r.id)) problems.push(`role ${r.id} is in two setups (${roleOrg.get(r.id)} and ${s.orgId})`);
-    roleOrg.set(r.id, s.orgId);
-  }
-  for (const name of CLUB_SETUP_COLLECTIONS) for (const rec of typed[name]) if (!orgs.has(rec.orgId)) problems.push(`${name} ${rec[KEY_OF[name]]} → orgs ${rec.orgId}`);
-  for (const name of ['shadowPlayers', 'vacancies']) for (const rec of typed[name]) {
-    if (rec.roleId && roleOrg.has(rec.roleId) && roleOrg.get(rec.roleId) !== rec.orgId) problems.push(`${name} ${rec.id} roleId ${rec.roleId} belongs to another organisation`);
-  }
-  if (problems.length) throw refusal('CLUB_SETUP_REFERENCE_MISSING', `${problems.length} reference(s) in ${label} are not valid (${ids(problems)}); the write was rolled back and nothing was changed`, { rows: problems });
-  const unique = []; const seen = new Map();
-  const once = (key, what) => { if (seen.has(key)) unique.push(`${what} (${seen.get(key)} and ${what})`); else seen.set(key, what); };
-  for (const m of typed.squadMembers) if (m.playerId) once(`squad/${m.orgId}/${m.playerId}`, `one squad row per organisation and player: ${m.id}`);
-  for (const s of typed.shadowPlayers) once(`shadow/${s.orgId}/${s.playerId}`, `one shadow entry per organisation and player: ${s.id}`);
-  if (unique.length) throw refusal('CLUB_SETUP_UNIQUENESS', `${unique.length} rule(s) violated in ${label}: ${ids(unique)}; the write was rolled back and nothing was changed`, { rows: unique });
-}
-function typeCollections(supplied, label) {
-  const typed = {};
-  for (const name of CLUB_SETUP_COLLECTIONS) {
-    const list = supplied[name]; typed[name] = [];
-    if (list === undefined) continue;
-    if (!Array.isArray(list)) throw refusal('CLUB_SETUP_IMPORT_BLOCKED', `the ${name} collection of ${label} must be an array of entries (got ${describe(list)})`);
-    const seen = new Set();
-    list.forEach((raw, i) => {
-      const t = TYPERS[name](raw, `${name} entry #${i}`);
-      if (!t.ok) throw refusal('CLUB_SETUP_IMPORT_BLOCKED', `${label}: ${t.reason}`);
-      const key = t.record[KEY_OF[name]];
-      if (seen.has(key)) throw refusal('CLUB_SETUP_IMPORT_BLOCKED', `${label}: ${name} entry #${i} duplicates the key of an earlier entry (${key})`);
-      seen.add(key); typed[name].push(t.record);
-    });
-  }
-  return typed;
-}
 export const clubSetupLive = (sqlite) => migrationApplied(sqlite, CLUB_SETUP_MIGRATION);
 const PLAYER_REFS_SQL = 'SELECT player_id AS pid FROM org_squad_members WHERE player_id IS NOT NULL UNION ALL SELECT player_id FROM org_shadow_players';
 export const unresolvedPlayerReferences = (sqlite) => (clubSetupLive(sqlite) ? { squad: sqlite.prepare(`SELECT count(*) AS n FROM (${PLAYER_REFS_SQL}) x WHERE NOT EXISTS (SELECT 1 FROM players p WHERE p.id = x.pid)`).get().n } : null);
@@ -415,51 +376,10 @@ function readAll(sqlite) {
   };
 }
 
-/**
- * Whole-snapshot access (readTableBacked / writeTableBacked). A supplied collection IS the whole final collection;
- * an omitted one is kept whole. Every record is typed (junk refused with ids) and every reference and uniqueness rule
- * of the FINAL combined state is named before the engine would. Written after the organisations are upserted and
- * before they are pruned.
- */
-export const CLUB_SETUP_SNAPSHOT = {
+/** The whole domain read back as plain records (`readAllRecords` in index.mjs: the test suites' read-back); null before its migration. */
+export const CLUB_SETUP_RECORDS = {
   names: CLUB_SETUP_COLLECTIONS,
   read(sqlite) { return clubSetupLive(sqlite) ? readAll(sqlite) : null; },
-  replace(sqlite, db, { label = 'the snapshot (club setup: tactical setups, squads, shadow lists, looking-for, federation checks, vacancies)' } = {}) {
-    if (!clubSetupLive(sqlite)) return [];
-    const supplied = Object.fromEntries(CLUB_SETUP_COLLECTIONS.map((n) => [n, Object.hasOwn(db, n) ? db[n] : undefined]));
-    const written = CLUB_SETUP_COLLECTIONS.filter((n) => supplied[n] !== undefined);
-    if (!written.length) return [];
-    const typed = typeCollections(supplied, label);
-    const stored = readAll(sqlite);
-    const final = Object.fromEntries(CLUB_SETUP_COLLECTIONS.map((n) => [n, supplied[n] === undefined ? stored[n] : typed[n]]));
-    checkRecords(sqlite, final, label);
-    const st = statements(sqlite);
-    if (supplied.tacticalSetups !== undefined) {
-      const keep = new Set(typed.tacticalSetups.map((s) => s.orgId));
-      // A setup the snapshot no longer lists goes with its roles, criteria and windows (CASCADE); what named a role keeps its row with role_id null.
-      for (const orgId of st.keys('org_tactical_setups', 'org_id').filter((k) => !keep.has(k))) st.setupDel.run(orgId);
-      for (const s of typed.tacticalSetups) writeSetup(st, s);
-    }
-    const plain = [['squadMembers', 'org_squad_members', 'id', st.squadDel], ['shadowPlayers', 'org_shadow_players', 'id', st.shadowDel], ['federationChecks', 'org_federation_checks', 'org_id', st.federationDel], ['vacancies', 'vacancies', 'id', st.vacancyDel]];
-    for (const [name, table, key, del] of plain) {
-      if (supplied[name] === undefined) continue;
-      const keep = new Set(typed[name].map((r) => r[KEY_OF[name]]));
-      for (const k of st.keys(table, key).filter((x) => !keep.has(x))) del.run(k);
-      for (const r of typed[name]) WRITERS[name](st, r);
-    }
-    if (supplied.lookingFor !== undefined) {
-      sqlite.prepare('DELETE FROM org_looking_for').run();
-      for (const l of typed.lookingFor) writeLookingFor(st, l);
-    }
-    return written;
-  },
-  assert(sqlite, { label = 'the snapshot (club setup)' } = {}) {
-    if (!clubSetupLive(sqlite)) return;
-    for (const t of CLUB_SETUP_TABLES) {
-      const broken = sqlite.prepare(`PRAGMA foreign_key_check(${t})`).all();
-      if (broken.length) throw refusal('CLUB_SETUP_KEY_VIOLATION', `${label}: ${t} holds ${broken.length} row(s) whose reference is not there (first: rowid ${broken[0].rowid} → ${broken[0].parent}); the write was rolled back`);
-    }
-  },
 };
 
 // ------------------------------------------------------------------ the repository
@@ -594,7 +514,7 @@ export function createClubSetupRepository({ sqlite, unit = null, now = Date.now,
     },
     counts() { return Object.fromEntries(CLUB_SETUP_TABLES.map((t) => [t, counters[t].get().n])); },
     pending: () => 0,
-    exportAll() { return CLUB_SETUP_SNAPSHOT.read(sqlite); },
+    exportAll() { return CLUB_SETUP_RECORDS.read(sqlite); },
     log,
     now,
   };

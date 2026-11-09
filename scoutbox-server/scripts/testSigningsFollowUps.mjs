@@ -62,7 +62,7 @@ const refusedSave = (tag, over, pattern) => {
   assert.equal(withRo(d, (s) => TABLES.concat(EARLIER).reduce((n, t) => n + col(s, `SELECT count(*) FROM ${t}`), 0)), 0, `${tag}: nothing written`); rm(d);
 };
 function serverOpen(dir, { warnings = [] } = {}) {
-  const store = openStore(dir, { tableBacked: TABLE_BACKED });
+  const store = openStore(dir);
   const layer = attachDataLayer({ store, nextId, sessionTtlMs: TTL, now: () => NOW, warn: (m) => warnings.push(m) });
   return { store, layer, warnings, unit: (w) => store.unitOfWork(w), repo: layer.signingsFollowUps, close: () => store.sqlite.close() };
 }

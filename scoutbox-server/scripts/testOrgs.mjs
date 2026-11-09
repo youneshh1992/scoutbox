@@ -133,8 +133,8 @@ test('migration 0004 on a new database: orgs is the typed table (no facet column
   assert.match(s.prepare("SELECT sql FROM sqlite_master WHERE name = 'sessions'").get().sql, /REFERENCES org_users\(id, org_id\)/, 'sessions references org_users');
   assert.equal(s.prepare("SELECT value FROM meta WHERE key = 'orgsInit'").get().value, 'pending', 'a new database is a first installation');
   assert.equal(s.prepare('PRAGMA foreign_keys').get().foreign_keys, 1, 'foreign keys are back on after the rebuild');
-  // The keys and checks are enforced.
-  transaction(s, () => ORGS_TABLE.replace(s, ORGS(), { now: AT }));
+  // The keys and checks are enforced: a first installation's organisations (the seed import) read back typed.
+  createOrgsRepository({ sqlite: s, nextId: (p) => `${p}-1`, now: () => AT }).initialize(ORGS());
   assert.deepEqual(ORGS_TABLE.read(s), ORGS().map((o) => ({ ...recordOf(o), password: o.password ?? null })), 'records read back typed, with their hash');
   assert.equal(s.prepare("SELECT level FROM orgs WHERE id = 'org-agency'").get().level, null, 'the nullable level is stored as NULL');
   assert.equal(s.prepare("SELECT password_hash FROM orgs WHERE id = 'org-pro'").get().password_hash, 'scrypt$00$11');
@@ -235,7 +235,7 @@ test('reads are SQL: the sign-in filters, a page by cursor, a name lookup, the g
 
 test('units of work: an organisation write joins the open unit — a failure later in it leaves no organisation row, and a read inside it sees its write', () => {
   const dir = tempDir('s14g-unit');
-  const store = openStore(dir, { tableBacked: TABLE_BACKED });
+  const store = openStore(dir);
   const layer = attachDataLayer({ seed: { orgs: ORGS(), guardians: [], players: [] }, store, nextId, sessionTtlMs: TTL });
   assert.throws(() => store.unitOfWork(() => {
     const o = layer.orgs.create({ name: 'Unit FC', type: 'club', plan: 'Pro' });
@@ -254,13 +254,13 @@ test('units of work: an organisation write joins the open unit — a failure lat
 test('initialisation is explicit state, never a row count — a genuine first installation initialises once, atomically, and retries after an interruption; an intentionally empty table stays empty; a later seed is ignored', () => {
   // (a) Through the data layer: a first installation imports the seed once; afterwards the table is authoritative.
   const dirB = tempDir('s3-c3b');
-  let store = openStore(dirB, { tableBacked: TABLE_BACKED });
+  let store = openStore(dirB);
   let layer = attachDataLayer({ seed: { orgs: ORGS(), guardians: [], players: [] }, store, nextId, sessionTtlMs: TTL });
   assert.deepEqual(layer.boot.orgs, { engine: 'sqlite', rows: 3, imported: 3 });
   assert.equal(layer.orgs.initState(), 'done');
   assert.ok(Number.isSafeInteger(layer.orgs.byId('org-pro').createdAt), 'the seed is stamped at its import');
   store.sqlite.close();
-  store = openStore(dirB, { tableBacked: TABLE_BACKED });
+  store = openStore(dirB);
   layer = attachDataLayer({ seed: { orgs: [...ORGS(), { id: 'org-late', name: 'Late', type: 'club', plan: 'Pro' }], guardians: [], players: [] }, store, nextId, sessionTtlMs: TTL });
   assert.deepEqual(layer.boot.orgs, { engine: 'sqlite', rows: 3, imported: 0 }, 'initialised once, then the table');
   assert.equal(layer.orgs.byId('org-late'), null);
@@ -302,7 +302,7 @@ test('initialise refuses a collection that is not an array — an object, null, 
     assert.equal(r.initState(), 'pending'); assert.equal(r.count(), 0);
     assert.equal(JSON.stringify(input ?? null), before, 'the input is untouched'); assert.equal(s.isTransaction, false);
   }
-  const dir = tempDir('s3-init-shape'); const store = openStore(dir, { tableBacked: TABLE_BACKED });
+  const dir = tempDir('s3-init-shape'); const store = openStore(dir);
   assert.throws(() => attachDataLayer({ seed: { orgs: { id: 'not-an-array' }, guardians: [], players: [] }, store, nextId, sessionTtlMs: TTL }), /organisations as an array/);
   assert.equal(store.sqlite.prepare("SELECT value FROM meta WHERE key = 'orgsInit'").get().value, 'pending');
   store.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
@@ -331,7 +331,7 @@ test('[fixtures] a fixture written into a new directory puts its organisations i
   // A valid addition commits.
   writeFixture(dir, { orgs: [{ id: 'org-tool', name: 'Tool FC', type: 'club', level: 'academy', plan: 'Academy' }] });
   // The server reads the result.
-  const store = openStore(dir, { tableBacked: TABLE_BACKED });
+  const store = openStore(dir);
   const layer = attachDataLayer({ store, nextId, sessionTtlMs: TTL });
   assert.deepEqual(layer.orgs.list().map((o) => o.id), ['org-pro', 'org-grass', 'org-agency', 'org-tool']); assert.equal(layer.orgs.passwordHashOf('org-pro'), 'scrypt$00$11');
   assert.ok(layer.sessions.byToken('legacy-maria-token') && layer.sessions.byToken('legacy-sam-token'), 'staff sessions survived every refused write');

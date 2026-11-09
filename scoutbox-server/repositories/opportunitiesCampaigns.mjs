@@ -502,7 +502,6 @@ export const blankPreferences = (playerId) => ({
   compensation: { maxFeeMinor: null, currency: 'GBP', expensesNeeded: false }, updatedAt: null,
 });
 const TYPERS = { opportunities: typeOpportunity, applications: typeApplication, campaigns: typeCampaign, campaignSubmissions: typeSubmission, playerPrefs: typePreferences };
-const KEY_OF = { opportunities: 'id', applications: 'id', campaigns: 'id', campaignSubmissions: 'id', playerPrefs: 'playerId' };
 
 // ------------------------------------------------------------------ rows
 function statements(sqlite) {
@@ -603,7 +602,6 @@ function writePreferences(st, p) {
   for (const [kind, list] of [['commitment', p.commitments], ['available', p.availableSlots]]) list.forEach((s, i) => st.prefSlot.run(p.playerId, kind, i, s.day, s.start, s.end, s.tz, s.label));
   for (const [kind, list] of [['environment', p.environment], ['accessibility', p.accessibility]]) list.forEach((t, i) => st.prefText.run(p.playerId, kind, i, t));
 }
-const WRITERS = { opportunities: writeOpportunity, applications: writeApplication, campaigns: writeCampaign, campaignSubmissions: writeSubmission, playerPrefs: writePreferences };
 
 /** Group child rows by their owner column, one query for the whole list. */
 const groupBy = (rows, key) => { const m = new Map(); for (const r of rows) { if (!m.has(r[key])) m.set(r[key], []); m.get(r[key]).push(r); } return m; };
@@ -674,51 +672,6 @@ function decodePreferences(st, r) {
   };
 }
 
-// ------------------------------------------------------------------ the rules the code keeps, named with ids before the engine would
-function checkRecords(sqlite, typed, label) {
-  const problems = [];
-  const has = (table) => { const s = new Set(sqlite.prepare(`SELECT id FROM ${table}`).all().map((r) => r.id)); return (id) => s.has(id); };
-  const org = has('orgs'); const staff = has('org_users');
-  const opps = new Map(typed.opportunities.map((o) => [o.id, o])); const camps = new Map(typed.campaigns.map((c) => [c.id, c]));
-  for (const name of ['opportunities', 'applications', 'campaigns', 'campaignSubmissions']) for (const r of typed[name]) if (!org(r.orgId)) problems.push(`${name} ${r.id} → orgs ${r.orgId}`);
-  for (const a of typed.applications) {
-    const o = opps.get(a.opportunityId);
-    if (!o) problems.push(`applications ${a.id} → opportunities ${a.opportunityId}`);
-    else if (o.orgId !== a.orgId) problems.push(`applications ${a.id} names organisation ${a.orgId}, its opportunity's is ${o.orgId}`);
-    if (a.outcome && !staff(a.outcome.byUserId)) problems.push(`applications ${a.id} outcome → org_users ${a.outcome.byUserId}`);
-  }
-  for (const s of typed.campaignSubmissions) {
-    const c = camps.get(s.campaignId);
-    if (!c) problems.push(`campaignSubmissions ${s.id} → campaigns ${s.campaignId}`);
-    else if (c.orgId !== s.orgId) problems.push(`campaignSubmissions ${s.id} names organisation ${s.orgId}, its campaign's is ${c.orgId}`);
-    for (const a of s.attempts) if (a.review && !staff(a.review.byUserId)) problems.push(`campaignSubmissions ${s.id} attempt ${a.id} review → org_users ${a.review.byUserId}`);
-  }
-  if (problems.length) throw refusal('OPPORTUNITIES_CAMPAIGNS_REFERENCE_MISSING', `${problems.length} reference(s) in ${label} are not valid (${ids(problems)}); the write was rolled back and nothing was changed`, { rows: problems });
-  const unique = []; const seen = new Map();
-  const once = (key, what) => { if (seen.has(key)) unique.push(`${what} (and ${seen.get(key)})`); else seen.set(key, what); };
-  for (const a of typed.applications) if (a.status !== 'withdrawn') once(`apl/${a.opportunityId}/${a.playerId}`, `one live application per opportunity and player: ${a.id}`);
-  for (const s of typed.campaignSubmissions) once(`csb/${s.campaignId}/${s.playerId}`, `one submission per campaign and player: ${s.id}`);
-  const attemptIds = new Set();
-  for (const s of typed.campaignSubmissions) for (const a of s.attempts) { if (attemptIds.has(a.id)) unique.push(`attempt ${a.id} is in two submissions`); attemptIds.add(a.id); }
-  if (unique.length) throw refusal('OPPORTUNITIES_CAMPAIGNS_UNIQUENESS', `${unique.length} rule(s) violated in ${label}: ${ids(unique)}; the write was rolled back and nothing was changed`, { rows: unique });
-}
-function typeCollections(supplied, label) {
-  const typed = {};
-  for (const name of OPPORTUNITIES_CAMPAIGNS_COLLECTIONS) {
-    const list = supplied[name]; typed[name] = [];
-    if (list === undefined) continue;
-    if (!Array.isArray(list)) throw refusal('OPPORTUNITIES_CAMPAIGNS_IMPORT_BLOCKED', `the ${name} collection of ${label} must be an array of entries (got ${describe(list)})`);
-    const seen = new Set();
-    list.forEach((raw, i) => {
-      const t = TYPERS[name](raw, `${name} entry #${i}`);
-      if (!t.ok) throw refusal('OPPORTUNITIES_CAMPAIGNS_IMPORT_BLOCKED', `${label}: ${t.reason}`);
-      const key = t.record[KEY_OF[name]];
-      if (seen.has(key)) throw refusal('OPPORTUNITIES_CAMPAIGNS_IMPORT_BLOCKED', `${label}: ${name} entry #${i} duplicates the key of an earlier entry (${key})`);
-      seen.add(key); typed[name].push(t.record);
-    });
-  }
-  return typed;
-}
 export const opportunitiesCampaignsLive = (sqlite) => migrationApplied(sqlite, OPPORTUNITIES_CAMPAIGNS_MIGRATION);
 const PLAYER_REFS_SQL = 'SELECT player_id AS pid FROM applications UNION ALL SELECT player_id FROM campaign_submissions UNION ALL SELECT player_id FROM player_prefs';
 export const unresolvedPlayerReferences = (sqlite) => (opportunitiesCampaignsLive(sqlite) ? { rows: sqlite.prepare(`SELECT count(*) AS n FROM (${PLAYER_REFS_SQL}) x WHERE NOT EXISTS (SELECT 1 FROM players p WHERE p.id = x.pid)`).get().n } : null);
@@ -736,46 +689,10 @@ function readAll(sqlite) {
   };
 }
 
-/**
- * Whole-snapshot access (readTableBacked / writeTableBacked). A supplied collection IS the whole final collection; an
- * omitted one is kept whole. Every record is typed (junk refused with ids) and every reference and uniqueness rule of
- * the FINAL combined state is named before the engine would. Written after the organisations and staff are upserted
- * and before they are pruned.
- */
-export const OPPORTUNITIES_CAMPAIGNS_SNAPSHOT = {
+/** The whole domain read back as plain records (`readAllRecords` in index.mjs: the test suites' read-back); null before its migration. */
+export const OPPORTUNITIES_CAMPAIGNS_RECORDS = {
   names: OPPORTUNITIES_CAMPAIGNS_COLLECTIONS,
   read(sqlite) { return opportunitiesCampaignsLive(sqlite) ? readAll(sqlite) : null; },
-  replace(sqlite, db, { label = 'the snapshot (opportunities, applications, campaigns, campaign submissions, player preferences)' } = {}) {
-    if (!opportunitiesCampaignsLive(sqlite)) return [];
-    const supplied = Object.fromEntries(OPPORTUNITIES_CAMPAIGNS_COLLECTIONS.map((n) => [n, Object.hasOwn(db, n) ? db[n] : undefined]));
-    const written = OPPORTUNITIES_CAMPAIGNS_COLLECTIONS.filter((n) => supplied[n] !== undefined);
-    if (!written.length) return [];
-    const typed = typeCollections(supplied, label);
-    const stored = readAll(sqlite);
-    const final = Object.fromEntries(OPPORTUNITIES_CAMPAIGNS_COLLECTIONS.map((n) => [n, supplied[n] === undefined ? stored[n] : typed[n]]));
-    checkRecords(sqlite, final, label);
-    const st = statements(sqlite);
-    // Dependants first: what is dropped goes children before parents (history is RESTRICT; the rest cascades).
-    const drop = (name, table, key, del) => {
-      if (supplied[name] === undefined) return;
-      const keep = new Set(typed[name].map((r) => r[KEY_OF[name]]));
-      for (const k of st.keys(table, key).filter((x) => !keep.has(x))) { if (name === 'applications') st.appHistDel.run(k); del.run(k); }
-    };
-    drop('applications', 'applications', 'id', st.appDel);
-    drop('campaignSubmissions', 'campaign_submissions', 'id', st.subDel);
-    drop('opportunities', 'opportunities', 'id', st.oppDel);
-    drop('campaigns', 'campaigns', 'id', st.campDel);
-    drop('playerPrefs', 'player_prefs', 'player_id', st.prefsDel);
-    for (const name of ['opportunities', 'campaigns', 'applications', 'campaignSubmissions', 'playerPrefs']) if (supplied[name] !== undefined) for (const r of typed[name]) WRITERS[name](st, r);
-    return written;
-  },
-  assert(sqlite, { label = 'the snapshot (opportunities and campaigns)' } = {}) {
-    if (!opportunitiesCampaignsLive(sqlite)) return;
-    for (const t of OPPORTUNITIES_CAMPAIGNS_TABLES) {
-      const broken = sqlite.prepare(`PRAGMA foreign_key_check(${t})`).all();
-      if (broken.length) throw refusal('OPPORTUNITIES_CAMPAIGNS_KEY_VIOLATION', `${label}: ${t} holds ${broken.length} row(s) whose reference is not there (first: rowid ${broken[0].rowid} → ${broken[0].parent}); the write was rolled back`);
-    }
-  },
 };
 
 // ------------------------------------------------------------------ the repository
@@ -948,7 +865,7 @@ export function createOpportunitiesCampaignsRepository({ sqlite, unit = null, no
     },
     counts() { return Object.fromEntries(OPPORTUNITIES_CAMPAIGNS_TABLES.map((t) => [t, counters[t].get().n])); },
     pending: () => 0,
-    exportAll() { return OPPORTUNITIES_CAMPAIGNS_SNAPSHOT.read(sqlite); },
+    exportAll() { return OPPORTUNITIES_CAMPAIGNS_RECORDS.read(sqlite); },
     log,
     now,
   };

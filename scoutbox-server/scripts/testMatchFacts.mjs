@@ -39,7 +39,7 @@ const PROTOCOLS = ['box_touch_60', 'sprint_20m'];
 
 /** A first installation through the real data layer, at a fixed clock. */
 function boot(dir = tempDir('mfacts')) {
-  const store = openStore(dir, { tableBacked: TABLE_BACKED });
+  const store = openStore(dir);
   const layer = attachDataLayer({ db: {}, seed: { orgs: ORGS(), players: clone(FIXTURE().players), guardians: clone(FIXTURE().guardians) }, store, nextId, sessionTtlMs: TTL, now: () => NOW, warn: () => {} });
   const q = (sql, ...a) => store.sqlite.prepare(sql).all(...a);
   const dirty = () => q('SELECT player_id FROM player_match_facts_dirty ORDER BY player_id').map((r) => r.player_id);

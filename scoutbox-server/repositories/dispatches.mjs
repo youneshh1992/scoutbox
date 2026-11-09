@@ -33,7 +33,7 @@ import { pageOf } from '../domains/platform/paging.mjs';
 
 export const DISPATCHES_MIGRATION = '0010_dispatches';
 export const DISPATCH_TABLES = Object.freeze(['dispatches', 'dispatch_attempts']);
-/** The collection name the snapshot path uses. */
+/** The collection name (the whole-domain read). */
 export const DISPATCHES_COLLECTION = 'dispatches';
 export const DISPATCH_CHANNELS = Object.freeze(['in_app', 'email']);
 export const DISPATCH_PROVIDERS = Object.freeze(['in_app', 'local-fake']);
@@ -92,7 +92,6 @@ CREATE TABLE dispatch_attempts (
 
 export const dispatchesLive = (sqlite) => migrationApplied(sqlite, DISPATCHES_MIGRATION);
 const refusal = (code, message, extra = {}) => Object.assign(new Error(`${code}: ${message}`), { code, ...extra });
-const blocked = (detail, extra = {}) => refusal('DISPATCHES_IMPORT_BLOCKED', `${detail}; nothing was written`, extra);
 const describe = (v) => (v === null ? 'null' : Array.isArray(v) ? 'an array' : typeof v === 'object' ? 'an object' : `a ${typeof v}`);
 const isPlainObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 const isInt = (v) => Number.isSafeInteger(v);
@@ -188,31 +187,10 @@ function insertDispatch(sqlite, row) {
 }
 const readAll = (sqlite) => decode(sqlite, sqlite.prepare('SELECT * FROM dispatches ORDER BY seq').all());
 
-/**
- * Whole-table access for snapshot mode (tools, fixtures, the persistence suites). `read` returns every dispatch in
- * insertion order with its attempts; `replace` types every entry (an unknown field or a wrong-typed value refuses
- * the whole write, naming the entry) and rewrites both tables inside the caller's transaction. Both decline before
- * the 0010 record.
- */
+/** The whole domain read back as plain records (`readAllRecords` in index.mjs: the test suites' read-back); null before its migration. */
 export const DISPATCHES_TABLE = {
   name: DISPATCHES_COLLECTION,
   read(sqlite) { return dispatchesLive(sqlite) ? readAll(sqlite) : null; },
-  replace(sqlite, rows) {
-    if (!dispatchesLive(sqlite)) return false;
-    if (!sqlite.isTransaction) throw new Error('dispatches: replace() runs inside the caller\'s transaction');
-    if (!Array.isArray(rows)) throw blocked(`the dispatches snapshot collection must be an array (got ${describe(rows)})`);
-    const typed = []; const ids = new Set(); const problems = [];
-    rows.forEach((raw, i) => {
-      const v = typeDispatch(raw);
-      if (!v.ok) problems.push(`entry #${i}: ${v.reason}`);
-      else if (ids.has(v.row.id)) problems.push(`entry #${i}: duplicates the id ${v.row.id}`);
-      else { ids.add(v.row.id); typed.push(v.row); }
-    });
-    if (problems.length) throw blocked(`${problems.length} invalid entr${problems.length === 1 ? 'y' : 'ies'} in the dispatches snapshot collection — ${problems.slice(0, 20).join('; ')}`, { problems });
-    sqlite.exec('DELETE FROM dispatches;'); // the attempts cascade
-    for (const row of typed) insertDispatch(sqlite, row);
-    return true;
-  },
 };
 
 // ------------------------------------------------------------------ the repository

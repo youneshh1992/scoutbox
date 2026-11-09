@@ -12,7 +12,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { transaction } from '../repositories/database.mjs';
 import { attachDataLayer, TABLE_BACKED } from '../repositories/index.mjs';
 import {
-  createOneTimeCodesRepository, hashCode, normaliseCode, validateCodeRows, validateEmailChallengeRow, assertPairingCodesConsistent, EMAIL_CHALLENGE_MAX_ATTEMPTS, EMAIL_CHALLENGE_TTL_MS, PAIRING_CODE_TTL_MS,
+  createOneTimeCodesRepository, hashCode, normaliseCode, EMAIL_CHALLENGE_MAX_ATTEMPTS, EMAIL_CHALLENGE_TTL_MS, PAIRING_CODE_TTL_MS,
   CODE_ALPHABET, randomCode,
 } from '../repositories/oneTimeCodes.mjs';
 import { openStore } from '../store.mjs';
@@ -37,20 +37,18 @@ const suspendedOf = (dir) => rowsOf(dir, 'orgs').find((o) => o.id === 'org-pro')
 const legacyChallenge = (over = {}) => ({ orgId: 'org-pro', email: 'recruitment@eastport.test', code: 'CHAL22', expiresAt: NOW + 20 * MIN, ...over });
 const legacyPairing = (over = {}) => ({ code: 'PAIR22', playerId: 'pl-child1', expiresAt: NOW + 10 * MIN, ...over });
 /**
- * The code fixtures' writers: the entries typed whole by the repository's own validation (either format: a legacy
- * plain code is hashed, the plain value stored nowhere), then planted as hashed rows (an issue operation mints its
- * own code, so a fixture's code cannot go through it). A challenge names an organisation (its key); a pairing code a
- * live player (PAIRING_CODE_PLAYER_MISSING).
+ * The code fixtures' writers: hashed rows planted directly (an issue operation mints its own code, so a fixture's code
+ * cannot go through it). A fixture may give the plain `code`; only its hash is stored. A challenge names an
+ * organisation (its key).
  */
 const CODE_WRITERS = {
   emailChallenges: (L, records) => {
     const ins = L.sqlite.prepare('INSERT INTO email_challenges (org_id, email, code_hash, expires_at, attempts) VALUES (@orgId, @email, @codeHash, @expiresAt, @attempts)');
-    for (const r of validateCodeRows('emailChallenges', records).rows) ins.run(r);
+    for (const { code, ...r } of records) ins.run({ attempts: 0, ...r, codeHash: r.codeHash ?? hashCode(code) });
   },
   pairingCodes: (L, records) => {
     const ins = L.sqlite.prepare('INSERT INTO pairing_codes (code_hash, player_id, expires_at) VALUES (@codeHash, @playerId, @expiresAt)');
-    for (const r of validateCodeRows('pairingCodes', records).rows) ins.run(r);
-    assertPairingCodesConsistent(L.sqlite, { label: 'the fixture' });
+    for (const { code, ...r } of records) ins.run({ ...r, codeHash: r.codeHash ?? hashCode(code) });
   },
 };
 const writeCodes = (dir, collections) => writeFixture(dir, collections, { now: NOW, writers: CODE_WRITERS });
@@ -75,39 +73,12 @@ const storedCodes = (dir) => ({
 });
 /** A live server-mode store with the data layer attached at `now`. */
 function live(dir, { now = () => NOW } = {}) {
-  const store = openStore(dir, { tableBacked: TABLE_BACKED });
+  const store = openStore(dir);
   const layer = attachDataLayer({ store, nextId, sessionTtlMs: TTL, now, warn: () => {} });
   return { store, layer, codes: layer.codes, close: () => store.sqlite.close() };
 }
 
 // ============================================================= a fixture refuses junk
-test('fixture refusals: an entry with both code and codeHash, with neither, an unknown field, a malformed hash, a non-integer expiry, negative attempts, a missing owner, a duplicate organisation or child, a duplicate code, a live challenge for an organisation that does not exist, a live code for a player that does not exist — each refuses the whole fixture (entry and reason, never a code) and writes nothing', () => {
-  const cases = [
-    ['both formats', { pairingCodes: [{ ...legacyPairing(), codeHash: hashCode('PAIR22') }] }, /entry #0: carries both code and codeHash/],
-    ['neither format', { pairingCodes: [{ playerId: 'pl-child1', expiresAt: NOW + MIN }] }, /entry #0: has neither code/],
-    ['an unknown field', { emailChallenges: [{ ...legacyChallenge(), attempts: 2 }] }, /unknown field\(s\) attempts for the legacy format/],
-    ['a malformed hash', { pairingCodes: [{ codeHash: 'ZZ', playerId: 'pl-child1', expiresAt: NOW + MIN }] }, /codeHash must be 64 lower-case hex/],
-    ['a non-integer expiry', { pairingCodes: [legacyPairing({ expiresAt: '2026-10-12' })] }, /expiresAt must be a positive integer/],
-    ['negative attempts', { emailChallenges: [{ orgId: 'org-pro', email: 'a@b.test', codeHash: hashCode('A'), expiresAt: NOW + MIN, attempts: -1 }] }, /attempts must be an integer from 0 to 9 \(got a number -1\)/],
-    ['a missing owner', { pairingCodes: [legacyPairing({ playerId: '' })] }, /playerId must be a non-empty string/],
-    ['a duplicate child', { pairingCodes: [legacyPairing(), legacyPairing({ code: 'OTHER2' })] }, /entry #1: a second entry for playerId pl-child1/],
-    ['a duplicate organisation', { emailChallenges: [legacyChallenge(), legacyChallenge({ code: 'NEWONE' })] }, /entry #1: a second entry for orgId org-pro/],
-    ['a duplicate code', { pairingCodes: [legacyPairing(), legacyPairing({ playerId: 'pl-child2', code: 'pair22' })] }, /entry #1: duplicates the code of an earlier entry/],
-    ['an unknown organisation', { emailChallenges: [legacyChallenge({ orgId: 'org-nowhere' })] }, /FOREIGN KEY constraint failed/],
-    ['an unknown player', { pairingCodes: [legacyPairing({ playerId: 'pl-nowhere' })] }, /PAIRING_CODE_PLAYER_MISSING.*pl-nowhere/],
-  ];
-  const dir = tempDir('otc-refuse'); s5File(dir);
-  const before = fileDump(dir);
-  for (const [label, collections, re] of cases) {
-    let err = null; try { writeCodes(dir, collections); } catch (e) { err = e; }
-    assert.ok(err, `${label}: must refuse`); assert.match(err.message, re, `${label}: ${err.message}`);
-    assert.doesNotMatch(err.message, /PAIR22|CHAL22|OTHER2|NEWONE/i, `${label}: the refusal never carries a code`);
-    assert.equal(fileDump(dir), before, `${label}: nothing written`);
-    for (const tb of ['email_challenges', 'pairing_codes']) assert.equal(rowsOf(dir, tb).length, 0, `${label}: nothing written to ${tb}`);
-  }
-  rm(dir);
-});
-
 // ============================================================= the repository
 test('repository: an issue returns the plain code once and stores its hash; a reissue replaces the previous code (one per organisation, one per child) and resets the attempts; expiry is judged on every read and the sweep removes dead rows; the views carry no code and no hash and refuse writes; codes are drawn from the documented alphabet', () => {
   const dir = tempDir('otc-repo'); s5File(dir);
@@ -356,7 +327,7 @@ test('player deletion revokes the pairing code inside the deletion unit: a failu
 });
 
 // ============================================================= the codes read back (backups, restores, persistence suites)
-test('read back: the tables hold the codes in their stored form (codeHash, never a code); a legacy plain-code entry in a fixture is hashed on the way in; a malformed stored entry, a second code for a child, a challenge for an unknown organisation or a code for a player that does not exist refuses the WHOLE fixture (nothing written)', () => {
+test('read back: the tables hold the codes in their stored form (codeHash, never a code); a plain-code entry in a fixture is hashed on the way in; a second code for a child or a challenge for an unknown organisation is refused by the table, and nothing changes', () => {
   const dir = tempDir('otc-read'); s5File(dir);
   { const s = openRaw(dir); const c = createOneTimeCodesRepository({ sqlite: s, now: () => NOW, newCode: () => 'LIVE22' }); c.issuePairingCode('pl-child1'); c.issueEmailChallenge('org-pro', 'x@eastport.test'); s.close(); }
   const back = storedCodes(dir);
@@ -371,11 +342,8 @@ test('read back: the tables hold the codes in their stored form (codeHash, never
     assert.throws(() => writeCodes(dir, collections), re, label);
     assert.equal(fileDump(dir), before, `${label}: nothing changed`);
   };
-  refused('a malformed stored hash', { pairingCodes: [{ codeHash: 'not-a-hash', playerId: 'pl-adult', expiresAt: NOW + MIN }] }, /ONE_TIME_CODES_IMPORT_BLOCKED.*codeHash must be 64/);
-  refused('both formats', { pairingCodes: [{ codeHash: hashCode('ANOTHR'), code: 'ANOTHR', playerId: 'pl-adult', expiresAt: NOW + MIN }] }, /carries both code and codeHash/);
   refused('a second code for a child', { pairingCodes: [{ codeHash: hashCode('ANOTHR'), playerId: 'pl-child1', expiresAt: NOW + MIN }] }, /UNIQUE constraint failed: pairing_codes\.player_id/);
   refused('a challenge for an unknown organisation', { emailChallenges: [{ orgId: 'org-nowhere', email: 'a@b.test', codeHash: hashCode('ORGX22'), expiresAt: NOW + MIN, attempts: 0 }] }, /FOREIGN KEY constraint failed/);
-  refused('a code for a player that does not exist', { pairingCodes: [{ codeHash: hashCode('GHOST2'), playerId: 'pl-ghost', expiresAt: NOW + MIN }] }, /PAIRING_CODE_PLAYER_MISSING.*pl-ghost/);
   rm(dir);
 });
 
@@ -384,7 +352,7 @@ test('boot: a stale code array handed in with the seed is never imported — the
   let L = live(dir);
   assert.deepEqual(L.codes.counts(), { emailChallenges: 0, pairingCodes: 2 });
   L.close();
-  const store = openStore(dir, { tableBacked: TABLE_BACKED });
+  const store = openStore(dir);
   // (S14a: server mode has nothing to load; the stale array is handed in as part of the seed, which an initialised file ignores.)
   const seed = { pairingCodes: [{ code: 'STALE2', playerId: 'pl-adult', expiresAt: NOW + 99 * MIN }] };
   const warnings = [];
@@ -405,7 +373,7 @@ test('collisions: two organisations may hold the same e-mail code by chance (eac
   const codes = createOneTimeCodesRepository({ sqlite: s, now: () => NOW, newCode: () => draws[n++] });
   codes.issueEmailChallenge('org-pro', 'a@eastport.test'); codes.issueEmailChallenge('org-two', 'b@two.test');
   assert.equal(codes.checkEmailChallenge('org-pro', 'SAME22').status, 'ok'); assert.equal(codes.checkEmailChallenge('org-two', 'SAME22').status, 'ok');
-  assert.equal(validateCodeRows('emailChallenges', codes.exportEmailChallenges()).rows.length, 2, 'the same code under two organisations is a valid export');
+  assert.equal(codes.exportEmailChallenges().length, 2, 'two challenges with the same code, one per organisation');
   const first = codes.issuePairingCode('pl-child1'); const secondCode = codes.issuePairingCode('pl-child2');
   assert.deepEqual([first.code, secondCode.code], ['SAME22', 'OTHER3'], 'the colliding draw was redrawn');
   assert.deepEqual([codes.peekPairingCode('SAME22'), codes.peekPairingCode('OTHER3')], [{ playerId: 'pl-child1' }, { playerId: 'pl-child2' }]);
@@ -415,44 +383,7 @@ test('collisions: two organisations may hold the same e-mail code by chance (eac
   s.close(); rm(dir);
 });
 
-test('validation is format-exact and never coerces: validateCodeRows reports the format counts and refuses an entry it would otherwise have to reinterpret', () => {
-  assert.deepEqual(validateCodeRows('pairingCodes', [legacyPairing(), { codeHash: hashCode('B'), playerId: 'pl-x', expiresAt: 5 }]).formats, { legacy: 1, stored: 1 });
-  assert.throws(() => validateCodeRows('pairingCodes', [legacyPairing({ code: 123456 })]), /code must be a non-empty string/);
-  assert.throws(() => validateCodeRows('pairingCodes', [legacyPairing({ code: '   ' })]), /code must be a non-empty string/);
-  assert.throws(() => validateCodeRows('emailChallenges', [legacyChallenge({ email: null })]), /email must be a non-empty string/);
-  assert.throws(() => validateCodeRows('emailChallenges', [null]), /entry #0: not an object/);
-  assert.throws(() => validateCodeRows('pairingCodes', [legacyPairing({ expiresAt: 1.5 })]), /expiresAt must be a positive integer/);
-});
-
 // ============================================================= review of e020aba
-test('stored attempts: a stored-format challenge must carry an explicit attempt count from 0 to 9 (missing, null, negative, fractional, nonnumeric, unsafe, at or above the limit are refused); a legacy challenge carries none and starts at 0; a fixture refuses such an entry whole (nothing written); a legitimate count is written and read back', () => {
-  const stored = (over = {}) => ({ orgId: 'org-pro', email: 'a@b.test', codeHash: hashCode('GOOD22'), expiresAt: NOW + MIN, attempts: 0, ...over });
-  const missing = stored(); delete missing.attempts;
-  for (const [label, entry, re] of [
-    ['missing', missing, /attempts is required in the stored format/],
-    ['null', stored({ attempts: null }), /attempts must be an integer from 0 to 9 \(got null\)/],
-    ['negative', stored({ attempts: -1 }), /attempts must be an integer from 0 to 9/],
-    ['fractional', stored({ attempts: 1.5 }), /attempts must be an integer from 0 to 9/],
-    ['nonnumeric', stored({ attempts: '3' }), /attempts must be an integer from 0 to 9 \(got a string\)/],
-    ['unsafe', stored({ attempts: 2 ** 53 }), /attempts must be an integer from 0 to 9/],
-    ['at the limit', stored({ attempts: EMAIL_CHALLENGE_MAX_ATTEMPTS }), /attempts 10 reaches the limit of 10/],
-    ['above the limit', stored({ attempts: 15 }), /attempts 15 reaches the limit of 10/],
-  ]) { const v = validateEmailChallengeRow(entry); assert.equal(v.ok, false, label); assert.match(v.reason, re, label); }
-  assert.equal(validateEmailChallengeRow(stored({ attempts: 9 })).row.attempts, 9, 'nine is a valid count');
-  assert.equal(validateEmailChallengeRow(legacyChallenge()).row.attempts, 0, 'a legacy entry starts at 0');
-  assert.match(validateEmailChallengeRow({ ...legacyChallenge(), attempts: 3 }).reason, /unknown field\(s\) attempts for the legacy format/, 'a legacy entry never carries a count');
-  // A fixture refuses such an entry whole: nothing written.
-  const dir = tempDir('otc-f2-fix'); s5File(dir);
-  const before = fileDump(dir);
-  for (const [label, entry] of [['missing', missing], ['exhausted', stored({ attempts: 10 })], ['nonnumeric', stored({ attempts: 'many' })]]) {
-    assert.throws(() => writeCodes(dir, { emailChallenges: [entry] }), /ONE_TIME_CODES_IMPORT_BLOCKED.*attempts/, label);
-    assert.equal(fileDump(dir), before, `${label}: nothing changed`);
-  }
-  writeCodes(dir, { emailChallenges: [stored({ attempts: 9 })] });
-  assert.equal(storedCodes(dir).emailChallenges[0].attempts, 9, 'a legitimate count is written and read back');
-  rm(dir);
-});
-
 test('runtime: an exhausted row that somehow exists (planted directly) is never redeemed — check answers none, consumption returns nothing and deletes nothing, a wrong code counts nothing, it is not outstanding, and the sweep removes it; at nine attempts the tenth wrong code cancels a valid challenge', () => {
   const dir = tempDir('otc-f2-rt'); s5File(dir);
   const s = openRaw(dir);

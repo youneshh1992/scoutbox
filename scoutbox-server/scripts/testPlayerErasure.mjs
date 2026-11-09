@@ -48,12 +48,12 @@ const RECORD = (id, deletedAt, birthDate, country) => ({ id, deletedAt, birthDat
 const FIXTURE = () => ({ players: [adult(), child('pl-child1', 'gd-primary', '2014-03-03'), seeded(), child('pl-child2', 'gd-primary', '2016-08-08')], guardians: [gPrimary(), gCo(), gSignup()] });
 const ORGS = () => [{ id: 'org-pro', name: 'Eastport FC', type: 'club', level: 'pro', plan: 'Pro', country: 'GB' }];
 function boot(dir, { players = [], guardians = [], warnings = [] } = {}) {
-  const store = openStore(dir, { tableBacked: TABLE_BACKED });
+  const store = openStore(dir);
   const layer = attachDataLayer({ seed: { orgs: ORGS(), players: clone(players), guardians: clone(guardians) }, store, nextId, sessionTtlMs: TTL, now: () => NOW, warn: (m) => warnings.push(m) });
   return wire({ store, layer, warnings });
 }
 function reopen(dir, { warnings = [] } = {}) {
-  const store = openStore(dir, { tableBacked: TABLE_BACKED });
+  const store = openStore(dir);
   const layer = attachDataLayer({ store, nextId, sessionTtlMs: TTL, now: () => NOW, warn: (m) => warnings.push(m) });
   return wire({ store, layer, warnings });
 }

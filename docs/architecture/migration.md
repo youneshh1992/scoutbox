@@ -84,11 +84,13 @@ takes the next free id; the placeholder ids in `sqlite-schema.md` mean nothing.
 | S14h | players and guardians become explicit writes and SQL reads; the tables re-typed (no `facets_json`, lengths, ranges and vocabularies CHECKed, keys inside the domain RESTRICT, one primary link per player; `coGuardians` worked out, the external id's copied claim a review key) | `0005`, `0007` (amended in place; `0002` no longer creates identity shadows) | `identity` | done |
 | S14i | the hot player reads in SQL: the directory, the Film Room, the fixture graph and a role's candidates page by cursor; the feed, similar players, the rotation and the benchmarks read light rows or a `GROUP BY`; the whole visibility rule in SQL; profile completeness a column (`players.profile_signal`) | `0005`, `0007` (amended in place) | `identity` | done |
 | S14j | matching, the watchlists and Nobody Missed in SQL: each player's facts projected into `player_match_facts`, kept by triggers on its inputs and re-derived before every COMMIT; the 2,000-player cap gone; the lists paged by cursor | `0040` | `matchFacts` | done |
-| S14 last | the save path, `db` and snapshot mode go (§4.6) | | | **next** |
+| S14 last | the save path, `db` and snapshot mode go (§4.6); the suites write and read through the repositories (`scripts/dataLayerFixture.mjs`) | | | done |
 
 Steps before S8 were staged (written at save) rather than explicit; S4a's identity writes are explicit since §4.3.1 (and
 its mirror gone since S14h), S6b's since S14b, S7d's since S14c, S7b's and S7c's since S14d, S7a's since S14e, S0's and
-S2's since S14f, S3's since S14g. No repository keeps a mirror any more.
+S2's since S14f, S3's since S14g. No repository keeps a mirror any more, and since S14 last there is no save step, no
+`db` object and no snapshot mode: every step of the migration is done. What still misses §2 is listed under
+"Deferred" in §4.3.
 
 ## 4. The order of work
 
@@ -109,8 +111,7 @@ and the DDL, so these cannot drift, and include a `date` type for football dates
 - **Units of work.** Every route that writes more than one row (including its notifications and ledger rows) runs in
   one unit. A refusal is thrown inside the unit, replacing hand-written undo code. Routes check every field before
   writing anything.
-- **Reads.** No mirror. The old `db.<collection>` name throws, naming the repository: don't delete it, or the `??= []`
-  lines and `Array.isArray` guards quietly see an empty collection. The repository answers indexed queries (`byId`,
+- **Reads.** No mirror and no `db` (S14 last). The repository answers indexed queries (`byId`,
   `forOrg`, `forPlayer`, counts…) with fresh deep-frozen records; a read inside a unit sees the unit's writes. Modules
   receive a per-domain reads object on their context (`recruitmentReads`, `scoutingReads`, `verificationReads`,
   `agentReads`, `complianceReads`, `transactionReads`, `developmentReads`, `boxCamReads`, `discoveryReads`, `insightReads`, `integrationReads`, `enterpriseReads`, `groupReads`, `grassrootsReads`, `safetyReads`; matching and Nobody Missed the `matchFacts` repository through `domains/discovery/matching/query.mjs`; S13e's few readers take the `operations` repository itself, the threads' the `channels` repository, the delivery centre the `dispatches` and `outboxPush` repositories, the feed and preferences the `notifications` repository, staff readers the `users` repository or `byId.user`, organisation readers the `orgs` repository or `byId.org`, and player and guardian readers the `players` and `guardians` repositories or `byId.player` / `byId.guardian`); pure projectors take `reads`. Sweeps are indexed predicates, admin figures are
@@ -133,8 +134,7 @@ and the DDL, so these cannot drift, and include a `date` type for football dates
   read from `session.org` explicitly (looking-for, the federation check). A whole-replace save of a list with
   dependants diffs by id, so kept rows keep their dependants.
 - **Seeded catalogues** (templates, policy versions) are inserted by the migration.
-- **Clean-up.** Nothing creates a collection in memory any more (S14a); a step deletes its domain's old names
-  from whatever still mentions them.
+- **Clean-up.** Nothing creates a collection in memory (S14a), and there is no `db` to hold one (S14 last).
 
 **Lessons.**
 
@@ -377,10 +377,17 @@ Split in parts, like S12 and S13.
   page by cursor (`{ items, nextCursor, total }`; Founder decision, 8 Nov: match everyone, but page the lists); an
   `offset` is refused (`400 PAGE_OFFSET_UNSUPPORTED`). The name order folds case and accents; a watchlist's
   "recent evidence" order is the newest evidence first (it was the id). The apps read the first page.
-- **S14 last: the save path goes.** `persist()`, `persistNow()`, the debounced save, the save hooks,
-  `repositories/memento.mjs`, `repositories/readonly.mjs` and `db` itself; then snapshot mode (`openStore(dir)`
-  with whole-file `load`/`save`) and every domain's `*_SNAPSHOT`, with the suites setting up their data through the
-  repositories or SQL. The migrations `0001`–`00NN` may be squashed into one baseline, if that helps.
+- **S14 last (done): the save path goes.** `persist()`, `persistNow()`, the debounced save and
+  `SCOUTBOX_SAVE_DEBOUNCE_MS`, the save hooks and the unit's participants (a unit is one transaction, the pre-commit
+  drain and `afterCommit`), `repositories/memento.mjs`, `repositories/readonly.mjs`, the one-time codes' last views,
+  and `db` itself (the projectors read only their `reads`). Snapshot mode is gone: `openStore(dir)` has one mode, there
+  is no whole-file `load`/`save`, and each domain's `*_SNAPSHOT` is a read-only `*_RECORDS` (`readAllRecords`). The
+  checks only the snapshot import ran went with it (the media queue's and the pairing codes' final state, the
+  request↔trial and contact↔request pairs, a contact's guardian, the import validators); the routes enforce each.
+  The suites set up their data through the repositories (`scripts/dataLayerFixture.mjs`: `writeFixture` writes each
+  record through its repository's own operation in one unit; `readRecords` reads everything back), and their junk
+  refusals are the create path's (`*_INPUT_INVALID`, a key refusal for a dangling reference). The migrations were
+  not squashed: their ids are cited throughout.
 
 ## 5. How to do a step
 
@@ -409,20 +416,20 @@ of a design note's content, though longer than necessary.
   records `(id, applied_at)` in `data_migrations`, and aborts the boot on failure. Under `foreignKeysOff`,
   `foreign_key_check` must be empty before commit. A domain is authoritative because its migration is recorded, never
   because a table exists.
-- **Boot.** `server.mjs` opens the store and runs `attachDataLayer({ db, seed: buildSeed(), … })`: the table
-  migrations, then every repository; a first installation imports the seed once. `db` receives a throwing name for
-  every retired collection (since S14h, every collection).
+- **Boot.** `server.mjs` opens the store and runs `attachDataLayer({ seed: buildSeed(), … })`: the table
+  migrations, then every repository; a first installation imports the seed once.
 - **Seed data.** `seed.mjs` fills only orgs, guardians and players. Other domains start empty and get rows through
-  routes. Tests write their setup through the repositories, SQL, or a snapshot-mode save (`openStore(dir).save(…)`),
-  using fixtures in the writers' shapes (e.g. `scripts/signingsFollowUpsTestFixtures.mjs`). They don't plant blob rows.
+  routes. Tests write their setup through the repositories (`writeFixture` / `saveFixture`, `openLayer` for a
+  repository operation) or, for a state no operation can write, SQL, using fixtures in the writers' shapes (e.g.
+  `scripts/signingsFollowUpsTestFixtures.mjs`). A new collection gets a writer in `scripts/dataLayerFixture.mjs`.
 - **Repository.** `create<Domain>Repository({ sqlite, unit, now, log })` prepares statements. `operation(fn)` joins
   the open unit of work or opens its own transaction. Each write types its input, writes rows, and returns the stored
   record. Callers get the repository from `server.mjs`.
 - **Units of work.** `store.unitOfWork(() => …)` is synchronous: one transaction, all or nothing; nested units join.
   Side effects (mail, push, live events) go through `store.afterCommit`. Provider calls happen before the unit.
-- **Snapshot path.** Each domain exports a `*_SNAPSHOT` (`read`, `write`, `assert` with `foreign_key_check`) and adds
-  its collections to `TABLE_BACKED` in `index.mjs`. Snapshot mode (tools, fixtures, the persistence suites) uses it,
-  refusing junk with the `*_IMPORT_BLOCKED` codes. Backups don't: a backup is a `VACUUM INTO` copy (`store.copyTo`).
+- **Read-back.** Each domain exports a `*_RECORDS` (`names`, `read`) and adds its collections to `TABLE_BACKED` in
+  `index.mjs`, so `readAllRecords` (the suites' `readRecords`) returns them. A backup is a `VACUUM INTO` copy
+  (`store.copyTo`).
 - **Reporting and tests.** Add a `/capabilities.dataLayer.domains` entry (`index.mjs`). Add `scripts/test<Domain>.mjs`
   to `SUITES` in `scripts/runTests.mjs` (`npm test` refuses to run while a `test*.mjs` suite is unlisted). Update
   `sql/*.sql` to match the real DDL (`testSchemaDdl.mjs`). Add new batteries to `BATTERIES` in `scripts/runE2E.mjs`

@@ -53,7 +53,7 @@ const matchday = (over = {}) => ({ id: 'md-1', orgId: MOSS, fixture: 'Wick v Rov
 const friendly = (over = {}) => ({ id: 'fr-1', orgId: MOSS, postedByUserId: STAFF.moss, ageGroup: 'u15', date: '2026-12-10', venue: 'Pitch 2', notes: '', responses: [], createdAt: NOW, ...over });
 
 function serverOpen(dir) {
-  const store = openStore(dir, { tableBacked: TABLE_BACKED });
+  const store = openStore(dir);
   const layer = attachDataLayer({ store, nextId, sessionTtlMs: TTL, now: () => NOW, warn: () => {} });
   return { store, repo: layer.grassroots, coverage: layer.insightCoverage, unit: (w) => store.unitOfWork(w), close: () => store.sqlite.close() };
 }

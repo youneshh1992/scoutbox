@@ -89,7 +89,6 @@ CREATE TABLE notification_pref_categories (
 
 export const notificationsLive = (sqlite) => migrationApplied(sqlite, NOTIFICATIONS_MIGRATION);
 const refusal = (code, message, extra = {}) => Object.assign(new Error(`${code}: ${message}`), { code, ...extra });
-const blocked = (detail, extra = {}) => refusal('NOTIFICATIONS_IMPORT_BLOCKED', `${detail}; nothing was written`, extra);
 const describe = (v) => (v === null ? 'null' : Array.isArray(v) ? 'an array' : typeof v === 'object' ? 'an object' : `a ${typeof v}`);
 const isPlainObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 const isInt = (v) => Number.isSafeInteger(v);
@@ -118,42 +117,6 @@ function contractOf(raw) {
   return { action: { deadline, ackedAt: null } };
 }
 
-const RECORD_KEYS = Object.freeze(['id', 'ts', 'audience', 'type', 'text', 'refId', 'read', 'repeatCount', 'groupKey', 'category', 'deferredPush', 'dispatchedAt', 'actionRequired']);
-/**
- * Type one whole record (the snapshot path): `{ ok: true, row }` or `{ ok: false, reason }`. An unknown field is
- * refused. Absent `read`, `repeatCount`, `category`, `deferredPush`, `dispatchedAt` take their defaults; a given
- * `groupKey` must be the worked-out one and a given `actionRequired.ackedBy` the audience's id (neither is stored).
- */
-export function typeNotification(raw) {
-  if (!isPlainObject(raw)) return { ok: false, reason: `not an object (${describe(raw)})` };
-  if (!text(raw.id, L.id)) return { ok: false, reason: `id must be text of 1 to ${L.id} characters` };
-  const at = `notification ${raw.id}`;
-  const unknown = unknownOf(raw, RECORD_KEYS);
-  if (unknown.length) return { ok: false, reason: `${at}: unknown field(s) ${unknown.join(', ')}` };
-  const r = { refId: null, read: false, repeatCount: 1, category: null, deferredPush: false, dispatchedAt: null, actionRequired: null, ...raw };
-  if (!isClock(r.ts)) return { ok: false, reason: `${at}: ts must be a non-negative integer timestamp` };
-  const a = audienceOf(r.audience); if (a.reason) return { ok: false, reason: `${at}: ${a.reason}` };
-  if (!text(r.type, L.type)) return { ok: false, reason: `${at}: type must be text of 1 to ${L.type} characters` };
-  if (!text(r.text, L.text)) return { ok: false, reason: `${at}: text must be text of 1 to ${L.text} characters` };
-  if (r.refId !== null && !text(r.refId, L.refId)) return { ok: false, reason: `${at}: refId must be text of 1 to ${L.refId} characters or null` };
-  if (typeof r.read !== 'boolean') return { ok: false, reason: `${at}: read must be a boolean` };
-  if (!isInt(r.repeatCount) || r.repeatCount < 1) return { ok: false, reason: `${at}: repeatCount must be an integer of at least 1` };
-  if (Object.hasOwn(r, 'groupKey') && r.groupKey !== groupKeyOf(r.type, r.refId)) return { ok: false, reason: `${at}: groupKey is worked out from the type and refId (${groupKeyOf(r.type, r.refId) === null ? 'null without a refId' : 'type:refId'})` };
-  if (r.category !== null && !isCategory(r.category)) return { ok: false, reason: `${at}: category must be a notification category or null` };
-  if (typeof r.deferredPush !== 'boolean') return { ok: false, reason: `${at}: deferredPush must be a boolean` };
-  if (r.dispatchedAt !== null && !isClock(r.dispatchedAt)) return { ok: false, reason: `${at}: dispatchedAt must be an integer timestamp or null` };
-  let action = null;
-  if (r.actionRequired !== null) {
-    const x = r.actionRequired;
-    if (!isPlainObject(x) || unknownOf(x, ['deadline', 'ackedAt', 'ackedBy']).length) return { ok: false, reason: `${at}: actionRequired must be { deadline, ackedAt, ackedBy } or null` };
-    const deadline = x.deadline ?? null; const ackedAt = x.ackedAt ?? null; const ackedBy = x.ackedBy ?? null;
-    if (deadline !== null && !isClock(deadline)) return { ok: false, reason: `${at}: actionRequired.deadline must be an integer timestamp or null` };
-    if (ackedAt !== null && !isClock(ackedAt)) return { ok: false, reason: `${at}: actionRequired.ackedAt must be an integer timestamp or null` };
-    if (ackedBy !== null && (ackedAt === null || ackedBy !== a.audience.id)) return { ok: false, reason: `${at}: actionRequired.ackedBy is the audience's id once acknowledged, null before` };
-    action = { deadline, ackedAt };
-  }
-  return { ok: true, row: { id: r.id, ts: r.ts, audience: a.audience, type: r.type, text: r.text, refId: r.refId, read: r.read, repeatCount: r.repeatCount, category: r.category, deferredPush: r.deferredPush, dispatchedAt: r.dispatchedAt, action } };
-}
 
 /** Type a category map (own keys, every key a category, every value a boolean): `{ categories }` or `{ reason }`. */
 function categoriesOf(raw, field = 'categories') {
@@ -165,19 +128,6 @@ function categoriesOf(raw, field = 'categories') {
     categories[k] = raw[k];
   }
   return { categories };
-}
-const PREF_KEYS = Object.freeze(['audienceKind', 'audienceId', 'categories', 'emailIntent', 'updatedAt']);
-/** Type one whole preference record (the snapshot path): `{ ok: true, row }` or `{ ok: false, reason }`. */
-export function typeNotificationPrefs(raw) {
-  if (!isPlainObject(raw)) return { ok: false, reason: `not an object (${describe(raw)})` };
-  const unknown = unknownOf(raw, PREF_KEYS);
-  if (unknown.length) return { ok: false, reason: `unknown field(s) ${unknown.join(', ')}` };
-  const a = audienceOf({ kind: raw.audienceKind, id: raw.audienceId }, 'audienceKind / audienceId'); if (a.reason) return { ok: false, reason: a.reason };
-  const c = categoriesOf(raw.categories ?? {}); if (c.reason) return { ok: false, reason: c.reason };
-  const emailIntent = raw.emailIntent ?? false;
-  if (typeof emailIntent !== 'boolean') return { ok: false, reason: 'emailIntent must be a boolean' };
-  if (!isClock(raw.updatedAt)) return { ok: false, reason: 'updatedAt must be an integer timestamp' };
-  return { ok: true, row: { audienceKind: a.audience.kind, audienceId: a.audience.id, categories: c.categories, emailIntent, updatedAt: raw.updatedAt } };
 }
 
 // ------------------------------------------------------------------ rows ↔ the tables
@@ -214,65 +164,15 @@ function readPrefs(sqlite) {
   for (const r of sqlite.prepare('SELECT audience_kind, audience_id, category, enabled FROM notification_pref_categories ORDER BY rowid').all()) by.get(`${r.audience_kind}\u0000${r.audience_id}`).categories[r.category] = r.enabled === 1;
   return out;
 }
-/** Type a whole snapshot collection, refusing it whole on the first problems (ids and reasons, never a text). */
-function typeAll(rows, typer, label, keyOf) {
-  if (!Array.isArray(rows)) throw blocked(`${label} must be an array of entries (got ${describe(rows)})`);
-  const out = []; const problems = []; const seen = new Set();
-  rows.forEach((raw, i) => {
-    const v = typer(raw);
-    if (!v.ok) { problems.push(`entry #${i}: ${v.reason}`); return; }
-    const key = keyOf(v.row);
-    if (seen.has(key)) { problems.push(`entry #${i}: duplicates an earlier entry (${key.replace('\u0000', ' ')})`); return; }
-    seen.add(key); out.push(v.row);
-  });
-  if (problems.length) throw blocked(`${problems.length} invalid entr${problems.length === 1 ? 'y' : 'ies'} in ${label} — ${problems.slice(0, 20).join('; ')}${problems.length > 20 ? '; …' : ''}`, { problems });
-  return out;
-}
-/** The staff a set of audiences names that `org_users` does not hold (named before the engine would). */
-function missingStaff(sqlite, ids) {
-  const has = sqlite.prepare('SELECT 1 FROM org_users WHERE id = ?');
-  return [...new Set(ids)].filter((id) => !has.get(id));
-}
 
-/**
- * Whole-table access for snapshot mode (tools, fixtures, the persistence suites). `read` returns every row in
- * insertion order; `replace` types every entry (an unknown field or a wrong-typed value refuses the whole write,
- * naming the entry) and rewrites the table inside the caller's transaction (array position → seq). Both decline
- * before the 0009 record. A staff audience must name an existing staff member (NOTIFICATIONS_STAFF_MISSING).
- */
+/** The whole domain read back as plain records (`readAllRecords` in index.mjs: the test suites' read-back); null before its migration. */
 export const NOTIFICATIONS_TABLE = {
   name: 'notifications',
   read(sqlite) { return notificationsLive(sqlite) ? readRows(sqlite) : null; },
-  replace(sqlite, rows) {
-    if (!notificationsLive(sqlite)) return false;
-    if (!sqlite.isTransaction) throw new Error('notifications: replace() runs inside the caller\'s transaction');
-    const typed = typeAll(rows, typeNotification, 'the notifications snapshot collection', (r) => r.id);
-    const missing = missingStaff(sqlite, typed.filter((r) => r.audience.kind === 'org_user').map((r) => r.audience.id));
-    if (missing.length) throw refusal('NOTIFICATIONS_STAFF_MISSING', `notifications name staff that org_users does not hold: ${missing.slice(0, 20).join(', ')}; nothing was written`, { ids: missing });
-    sqlite.exec('DELETE FROM notifications');
-    const ins = sqlite.prepare(INSERT);
-    for (const r of typed) ins.run(rowParams(r));
-    return true;
-  },
 };
 export const NOTIFICATION_PREFS_TABLE = {
   name: 'notificationPrefs',
   read(sqlite) { return notificationsLive(sqlite) ? readPrefs(sqlite) : null; },
-  replace(sqlite, rows) {
-    if (!notificationsLive(sqlite)) return false;
-    if (!sqlite.isTransaction) throw new Error('notification preferences: replace() runs inside the caller\'s transaction');
-    const typed = typeAll(rows, typeNotificationPrefs, 'the notificationPrefs snapshot collection', (p) => `${p.audienceKind}\u0000${p.audienceId}`);
-    const missing = missingStaff(sqlite, typed.filter((p) => p.audienceKind === 'org_user').map((p) => p.audienceId));
-    if (missing.length) throw refusal('NOTIFICATIONS_STAFF_MISSING', `notification preferences name staff that org_users does not hold: ${missing.slice(0, 20).join(', ')}; nothing was written`, { ids: missing });
-    sqlite.exec('DELETE FROM notification_prefs'); // the categories cascade
-    const parent = sqlite.prepare('INSERT INTO notification_prefs (audience_kind, audience_id, email_intent, updated_at) VALUES (?, ?, ?, ?)');
-    const cat = sqlite.prepare('INSERT INTO notification_pref_categories (audience_kind, audience_id, category, enabled) VALUES (?, ?, ?, ?)');
-    for (const p of typed) {
-      parent.run(p.audienceKind, p.audienceId, p.emailIntent ? 1 : 0, p.updatedAt);
-      for (const [k, v] of Object.entries(p.categories)) cat.run(p.audienceKind, p.audienceId, k, v ? 1 : 0);
-    }
-    return true;
-  },
 };
 
 // ------------------------------------------------------------------ the repository

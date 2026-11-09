@@ -139,7 +139,7 @@ const PORT = process.env.PORT || 4000;
 const DATA_DIR = process.env.DATA_DIR
   ? path.resolve(process.env.DATA_DIR)
   : path.join(path.dirname(fileURLToPath(import.meta.url)), 'data');
-const store = openStore(DATA_DIR, { tableBacked: TABLE_BACKED });
+const store = openStore(DATA_DIR);
 
 // Every write has committed by the time a handler returns (units of work are synchronous), so a shutdown only closes
 // the connection: the WAL is checkpointed and the exit code stays 0.

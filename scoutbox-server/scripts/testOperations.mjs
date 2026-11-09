@@ -21,7 +21,7 @@ import { NOW, TTL, tempDir, USERS, ORGS } from './coreIdentityTestFixtures.mjs';
 import { fixtureDb } from './recruitmentTestFixtures.mjs';
 import { legacySigning } from './signingsFollowUpsTestFixtures.mjs';
 import {
-  OPERATIONS_MIGRATION as MIGRATION, OPERATIONS_TABLES as TABLES, OPERATIONS_COLLECTIONS as COLLECTIONS, OPERATIONS_SINGLETONS as SINGLETONS,
+  OPERATIONS_MIGRATION as MIGRATION, OPERATIONS_TABLES as TABLES, OPERATIONS_COLLECTIONS as COLLECTIONS,
   typeUpload, typeSavedSearch, typeInvoice, typeReputation, FAIL_INJECT_CHANNELS,
 } from '../repositories/operations.mjs';
 import { readSearchFilters } from '../domains/discovery/savedSearches.mjs';
@@ -77,7 +77,7 @@ const WRITERS = {
 };
 const write = (dir, records) => writeFixture(dir, records, { now: NOW, writers: WRITERS });
 function serverOpen(dir) {
-  const store = openStore(dir, { tableBacked: TABLE_BACKED });
+  const store = openStore(dir);
   const layer = attachDataLayer({ store, nextId, sessionTtlMs: TTL, now: () => NOW, warn: () => {} });
   return { store, repo: layer.operations, unit: (w) => store.unitOfWork(w), close: () => store.sqlite.close() };
 }
@@ -269,7 +269,6 @@ test('[fixtures] a record written through the repository is typed, a missing ref
   assert.deepEqual(plain(back.invoices), [invoice()]);
   assert.deepEqual(plain(back.reputationSeed), [rep], 'a new database\'s fixture is its first installation');
   assert.deepEqual(back.deliveryCallbacksSeen, ['cb-a', 'cb-b']);
-  for (const n of SINGLETONS) assert.equal(Object.hasOwn(back, n), false, `${n} is a row, not a collection`);
   refused(() => write(dir, { invoices: [invoice({ id: 'inv-2', signingId: 'sign-none' })] }), /OPERATIONS_REFERENCE_MISSING.*sign-none/);
   refused(() => write(dir, { invoices: [{ ...invoice({ id: 'inv-3', signingId: 'sign-b' }), amount: 1500 }] }), /OPERATIONS_INPUT_INVALID.*does not store: amount/);
   refused(() => write(dir, { deliveryCallbacksSeen: [7] }), /OPERATIONS_INPUT_INVALID.*a callback id is 1 to/);

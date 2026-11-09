@@ -220,64 +220,10 @@ function readAll(sqlite) {
   const all = (t) => sqlite.prepare(`SELECT * FROM ${t} ORDER BY rowid`).all();
   return { groups: decodeGroups(sqlite, all('groups')), groupGrants: decodeGrants(sqlite, all('group_grants')) };
 }
-const TYPERS = { groups: typeGroup, groupGrants: typeGrant };
-function crossCheck(sqlite, t) {
-  const out = [];
-  const groupIds = new Set(t.groups.map((g) => g.id));
-  for (const gr of t.groupGrants) if (!groupIds.has(gr.groupId)) out.push(`group_grants ${gr.id} group → groups ${gr.groupId}`);
-  const org = sqlite.prepare('SELECT 1 FROM orgs WHERE id = ?');
-  const need = (what, id) => { if (!org.get(id)) out.push(`${what} → orgs ${id}`); };
-  for (const g of t.groups) {
-    for (const id of g.memberOrgIds) need(`groups ${g.id} member`, id);
-    for (const i of g.pendingInvites) { need(`groups ${g.id} invite`, i.orgId); need(`groups ${g.id} invite by`, i.invitedBy); }
-  }
-  for (const gr of t.groupGrants) { need(`group_grants ${gr.id} owner`, gr.fromOrgId); for (const id of gr.toOrgIds) need(`group_grants ${gr.id} recipient`, id); }
-  const programmeIds = t.groups.flatMap((g) => g.programmes.map((p) => p.id));
-  if (new Set(programmeIds).size !== programmeIds.length) out.push('two programmes have the same id');
-  return out;
-}
-const DELETE_ORDER = ['group_grant_recipients', 'group_grants', 'group_programmes', 'group_shared_templates', 'group_pending_invites', 'group_members', 'groups'];
-function writeFinal(sqlite, t) {
-  for (const tbl of DELETE_ORDER) sqlite.exec(`DELETE FROM ${tbl}`);
-  const st = statements(sqlite);
-  for (const g of t.groups) writeGroup(st, g);
-  for (const gr of t.groupGrants) writeGrant(st, gr);
-}
-/** Whole-snapshot access (readTableBacked / writeTableBacked): a supplied collection IS the whole final collection; an omitted one is kept. */
-export const GROUPS_SNAPSHOT = {
+/** The whole domain read back as plain records (`readAllRecords` in index.mjs: the test suites' read-back); null before its migration. */
+export const GROUPS_RECORDS = {
   names: GROUPS_COLLECTIONS,
   read(sqlite) { return groupsLive(sqlite) ? readAll(sqlite) : null; },
-  replace(sqlite, db, { label = 'the snapshot (groups)' } = {}) {
-    if (!groupsLive(sqlite)) return [];
-    const written = GROUPS_COLLECTIONS.filter((n) => Object.hasOwn(db, n) && db[n] !== undefined);
-    if (!written.length) return [];
-    const current = readAll(sqlite);
-    const typed = {};
-    for (const name of GROUPS_COLLECTIONS) {
-      if (!written.includes(name)) { typed[name] = current[name]; continue; }
-      const list = db[name];
-      if (!Array.isArray(list)) throw refusal('GROUPS_IMPORT_BLOCKED', `the ${name} collection of ${label} must be an array of entries (got ${describe(list)})`);
-      const seen = new Set();
-      typed[name] = list.map((raw, i) => {
-        const t = TYPERS[name](raw, `${name} entry #${i}`);
-        if (!t.ok) throw refusal('GROUPS_IMPORT_BLOCKED', `${label}: ${t.reason}`);
-        if (seen.has(t.record.id)) throw refusal('GROUPS_IMPORT_BLOCKED', `${label}: ${name} entry #${i} duplicates an earlier entry (${t.record.id})`);
-        seen.add(t.record.id);
-        return t.record;
-      });
-    }
-    const missing = crossCheck(sqlite, typed);
-    if (missing.length) throw refusal('GROUPS_REFERENCE_MISSING', `${missing.length} reference(s) in ${label} are not there (${ids(missing)}); the write was rolled back and nothing was changed`, { rows: missing });
-    writeFinal(sqlite, typed);
-    return written;
-  },
-  assert(sqlite, { label = 'the snapshot (groups)' } = {}) {
-    if (!groupsLive(sqlite)) return;
-    for (const t of GROUPS_TABLES) {
-      const broken = sqlite.prepare(`PRAGMA foreign_key_check(${t})`).all();
-      if (broken.length) throw refusal('GROUPS_KEY_VIOLATION', `${label}: ${t} holds ${broken.length} row(s) whose reference is not there (first: rowid ${broken[0].rowid} → ${broken[0].parent}); the write was rolled back`);
-    }
-  },
 };
 
 // ------------------------------------------------------------------ the repository
@@ -451,7 +397,7 @@ export function createGroupsRepository({ sqlite, unit = null, now = Date.now, lo
     },
     counts() { return Object.fromEntries(GROUPS_COLLECTIONS.map((n) => [n, counters[n].get().n])); },
     pending: () => 0,
-    exportAll() { return GROUPS_SNAPSHOT.read(sqlite); },
+    exportAll() { return GROUPS_RECORDS.read(sqlite); },
     log,
     now,
   };

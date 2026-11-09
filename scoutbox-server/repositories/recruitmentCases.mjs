@@ -17,7 +17,7 @@
  * EVERY FIELD IS A TYPED COLUMN with the vocabulary CHECKs of the domain rules (domains/recruitment/rooms/shared.mjs, domains/recruitment/lifecycle/decision.mjs,
  * m13/shared.mjs, m27/integration.mjs). There is no `absent_keys_json`, `offtype_json`, `extra_json` or `raw_json`.
  * A record the columns cannot hold — an unknown field at any level included — is REFUSED with its id, at a repository
- * write (the unit rolls back) and at a snapshot write (the save rolls back). An `undefined` field is an absent one;
+ * write (the unit rolls back). An `undefined` field is an absent one;
  * an absent field reads back as null, an absent list as empty. Two model changes: a case's history has ONE entry
  * shape (`{ id, at, byKind, byId, byName, action, detail }`), and a decision's `snapshot` is read from the
  * room_snapshots row it names (it is that row, never a second copy). The idempotency keys are columns of their owner
@@ -43,10 +43,7 @@
 import { transaction, migrationApplied, newestHistory, childRowsOf } from './database.mjs';
 import { pageOf } from '../domains/platform/paging.mjs';
 import { describe, isPlainObject, nonEmpty, ids } from './recruitment.mjs';
-import {
-  ROOM_STATUSES, ROOM_PRIORITIES, SOURCE_CONTEXTS, TASK_STATES, LINKED_RESOURCE_TYPES, EVIDENCE_REVIEW_STATES,
-  RECOMMENDATIONS, LIMITS, CASE_STAGES, CASE_PRIORITIES, CASE_DECISION_OUTCOMES, CASE_APPROVAL_STATES,
-} from '../domains/recruitment/rooms/shared.mjs';
+import { ROOM_STATUSES, ROOM_PRIORITIES, SOURCE_CONTEXTS, TASK_STATES, LINKED_RESOURCE_TYPES, EVIDENCE_REVIEW_STATES, RECOMMENDATIONS, LIMITS, CASE_STAGES, CASE_PRIORITIES, CASE_DECISION_OUTCOMES, CASE_APPROVAL_STATES } from '../domains/recruitment/rooms/shared.mjs';
 import { DECISION_OUTCOMES, DECISION_KINDS, DECISION_STATES, EVIDENCE_REF_KINDS, DECISION_LIMITS } from '../domains/recruitment/lifecycle/decision.mjs';
 import { CURRENCIES, BUDGET_LINE_KINDS, BUDGET_SCHEDULES } from '../m13/shared.mjs';
 import { HANDOFF_STATUSES } from '../m27/integration.mjs';
@@ -919,8 +916,6 @@ function writeRoomRow(st, name, r) {
   }
   st.ins.room_evidence_states.run(evidenceRow(r));
 }
-function deleteRoomRow(st, name, id) { const table = PARENT[name]; for (const [t] of ROOM_CHILDREN[table]) st.roomChildDel[t].run(id); st.del[table].run(id); }
-function deleteCase(st, id) { for (const t of CASE_CHILDREN) st.caseChildDel[t].run(id); st.del.recruitment_cases.run(id); }
 
 const historyOut = (h) => ({ id: h.id, at: h.at, byKind: h.by_kind, byId: h.by_id, byName: h.by_name, action: h.action, detail: h.detail_json !== null ? JSON.parse(h.detail_json) : h.detail_text });
 function decodeCase(st, row) {
@@ -1020,15 +1015,6 @@ function referenceProblems(st, name, r) {
   }
   return out;
 }
-/** Every table outside the case's own whose foreign key names recruitment_cases (requests, trials, contacts, offers, signings, the room rows). */
-function caseDependants(sqlite) {
-  const out = [];
-  for (const { name } of sqlite.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all()) {
-    if (CASE_TABLES.includes(name)) continue;
-    for (const fk of sqlite.prepare(`PRAGMA foreign_key_list(${name})`).all()) if (fk.table === 'recruitment_cases') out.push([name, fk.from]);
-  }
-  return out;
-}
 
 /** The counts of the admin report: rows naming a player that is not in the players table, and rows naming a retained record (Q8a: counted, never refused). */
 const PLAYER_COUNT_TABLES = { recruitmentCases: 'recruitment_cases', roomSnapshots: 'room_snapshots', roomDecisions: 'room_decisions', caseTransactionHandoffs: 'case_transaction_handoffs' };
@@ -1041,21 +1027,8 @@ export function retainedPlayerReferences(sqlite) {
   return Object.fromEntries(Object.entries(PLAYER_COUNT_TABLES).map(([k, t]) => [k, sqlite.prepare(`SELECT count(*) AS n FROM ${t} x WHERE EXISTS (SELECT 1 FROM players p WHERE p.id = x.player_id AND p.deleted_at IS NOT NULL)`).get().n]));
 }
 
-/** The final state of the case graph, ids only: the decision chain and snapshots inside their room, every key. */
-export function assertCasesConsistent(sqlite, { label = 'the snapshot' } = {}) {
-  if (!recruitmentCasesLive(sqlite)) return;
-  const rooms = new Map(sqlite.prepare('SELECT id, room_id FROM room_decisions').all().map((r) => [r.id, r.room_id]));
-  const snaps = new Map(sqlite.prepare('SELECT id, room_id FROM room_snapshots').all().map((r) => [r.id, r.room_id]));
-  const problems = [];
-  for (const r of sqlite.prepare('SELECT id, room_id, supersedes_id, superseded_by_id, snapshot_id FROM room_decisions').all()) {
-    problems.push(...decisionRefsProblems({ id: r.id, roomId: r.room_id, supersedes: r.supersedes_id, supersededById: r.superseded_by_id, snapshot: r.snapshot_id === null ? null : { snapshotId: r.snapshot_id } }, { decisionRoom: (x) => rooms.get(x), snapshotRoom: (x) => snaps.get(x) }));
-  }
-  if (problems.length) throw refusal('DECISION_CHAIN_BROKEN', `${label}: ${problems.length} decision reference(s) leave their room (${ids(problems)}); the write was rolled back`);
-  const broken = RECRUITMENT_CASES_TABLES.flatMap((t) => sqlite.prepare(`PRAGMA foreign_key_check(${t})`).all());
-  if (broken.length) throw refusal('RECRUITMENT_CASES_KEY_VIOLATION', `${label}: foreign_key_check found ${broken.length} broken reference(s) (first: ${broken[0].table} rowid ${broken[0].rowid} → ${broken[0].parent}); the write was rolled back`);
-}
 
-// ------------------------------------------------------------------ the snapshot path (tools, fixtures, the persistence suites)
+// ------------------------------------------------------------------ the whole-domain read
 /**
  * `begin` types the supplied collections (an omitted one is retained whole; an array is the whole final collection),
  * names every reference it can with ids against the FINAL state, and writes the cases (without their link rows) and
@@ -1063,70 +1036,9 @@ export function assertCasesConsistent(sqlite, { label = 'the snapshot' } = {}) {
  * `pruneCases` remove what a supplied collection no longer lists, room rows before their case and a case only when
  * nothing retained names it; `assert` checks the final state.
  */
-export const RECRUITMENT_CASES_SNAPSHOT = {
+export const RECRUITMENT_CASES_RECORDS = {
   names: RECRUITMENT_CASES_COLLECTIONS,
   read(sqlite) { if (!recruitmentCasesLive(sqlite)) return null; return Object.fromEntries(RECRUITMENT_CASES_COLLECTIONS.map((n) => [n, readAll(sqlite, n)])); },
-  begin(sqlite, db, { requests, trials, label = 'the snapshot' } = {}) {
-    if (!recruitmentCasesLive(sqlite)) return null;
-    const supplied = {};
-    for (const name of RECRUITMENT_CASES_COLLECTIONS) {
-      const value = Object.hasOwn(db, name) ? db[name] : undefined;
-      if (value === undefined) continue;
-      if (!Array.isArray(value)) throw refusal('RECRUITMENT_CASES_INPUT_INVALID', `the ${name} collection of ${label} must be an array of records (got ${describe(value)}); nothing was written`);
-      const seen = new Set(); const problems = [];
-      supplied[name] = value.map((raw, i) => {
-        const t = TYPERS[name](raw, `${name} entry #${i}`);
-        if (!t.ok) { problems.push(t.reason); return null; }
-        if (seen.has(t.record.id)) problems.push(`${name} entry #${i} duplicates the id of an earlier entry (${t.record.id})`);
-        seen.add(t.record.id); return t.record;
-      });
-      // Every entry the typed tables cannot hold is named, not just the first.
-      if (problems.length) throw refusal('RECRUITMENT_CASES_INPUT_INVALID', `${label}: ${problems.length} ${name} entr${problems.length === 1 ? 'y' : 'ies'} refused (${problems.slice(0, 20).join('; ')}${problems.length > 20 ? '; …' : ''}); nothing was written`);
-    }
-    const anyS8a = requests !== undefined || trials !== undefined;
-    if (!Object.keys(supplied).length && !anyS8a) return null;
-    const st = statements(sqlite);
-    const finalOf = (name) => supplied[name] ?? readAll(sqlite, name);
-    const caseIds = new Set(finalOf('recruitmentCases').map((c) => c.id));
-    const problems = [];
-    for (const name of ['roomComments', 'roomSnapshots', 'roomDecisions', 'roomEvidenceState']) for (const r of supplied[name] ?? []) if (!caseIds.has(r.roomId)) problems.push(`${PARENT[name]} ${r.id} → case ${r.roomId}`);
-    if (problems.length) throw refusal('ROOM_CASE_MISSING', `${label}: ${problems.length} room row(s) name a case that is not in the final recruitmentCases collection (${ids(problems)}); the write was rolled back and nothing was changed`);
-    // A case link names a final request or trial (the supplied S8a collections, the rows otherwise).
-    const reqIds = new Set(requests !== undefined ? requests.filter(isPlainObject).map((r) => r.id) : st.ids('recruitment_requests'));
-    const trialIds = new Set(trials !== undefined ? trials.filter(isPlainObject).map((t) => t.id) : st.ids('trials'));
-    for (const c of finalOf('recruitmentCases')) { for (const r of c.links.requestIds) if (!reqIds.has(r)) problems.push(`case ${c.id} links request ${r}`); for (const t of c.links.trialIds) if (!trialIds.has(t)) problems.push(`case ${c.id} links trial ${t}`); }
-    if (problems.length) throw refusal('CASE_LINK_DANGLING', `${label}: ${problems.length} case link(s) name a request or trial that is not in the final collections (${ids(problems)}); the write was rolled back and nothing was changed`);
-    // The decision chain and snapshots against the FINAL room rows.
-    const finalDecisions = finalOf('roomDecisions');
-    const snapshotRoom = new Map(finalOf('roomSnapshots').map((s) => [s.id, s.roomId]));
-    const decisionRoom = new Map(finalDecisions.map((d) => [d.id, d.roomId]));
-    for (const d of finalDecisions) problems.push(...decisionRefsProblems(d, { decisionRoom: (x) => decisionRoom.get(x), snapshotRoom: (x) => snapshotRoom.get(x) }));
-    if (problems.length) throw refusal('DECISION_CHAIN_BROKEN', `${label}: ${problems.length} decision reference(s) leave their room (${ids(problems)}); the write was rolled back and nothing was changed`);
-    for (const c of supplied.recruitmentCases ?? []) writeCase(st, c, { links: false });
-    for (const name of ['roomSnapshots', 'roomComments', 'roomDecisions', 'roomEvidenceState']) for (const r of supplied[name] ?? []) writeRoomRow(st, name, r);
-    const gone = Object.fromEntries(Object.keys(supplied).map((name) => { const keep = new Set(supplied[name].map((r) => r.id)); return [name, st.ids(PARENT[name]).filter((id) => !keep.has(id))]; }));
-    return { supplied, gone, written: Object.keys(supplied) };
-  },
-  links(sqlite, plan) { if (!plan) return; const st = statements(sqlite); for (const c of plan.supplied.recruitmentCases ?? []) writeCaseLinks(st, c); },
-  pruneRooms(sqlite, plan) {
-    if (!plan) return;
-    const st = statements(sqlite);
-    for (const name of ['roomEvidenceState', 'roomComments', 'roomDecisions', 'roomSnapshots']) for (const id of plan.gone[name] ?? []) {
-      try { deleteRoomRow(st, name, id); } catch (e) { throw refusal('ROOM_ROW_STILL_REFERENCED', `${PARENT[name]} ${id} is no longer listed but a retained row still names it (${e.message}); the write was rolled back`); }
-    }
-  },
-  pruneCases(sqlite, plan, { label = 'the snapshot' } = {}) {
-    if (!plan || !plan.gone.recruitmentCases?.length) return;
-    const st = statements(sqlite);
-    const departing = plan.gone.recruitmentCases;
-    const held = [];
-    for (const [table, col] of caseDependants(sqlite)) {
-      for (const r of sqlite.prepare(`SELECT ${col} AS c FROM ${table} WHERE ${col} IN (${departing.map(() => '?').join(', ')})`).all(...departing)) held.push(`${table} → case ${r.c}`);
-    }
-    if (held.length) throw refusal('CASE_STILL_REFERENCED', `${label}: ${held.length} retained row(s) name a case this write removes (${ids(held)}); the write was rolled back and nothing was changed — remove the rows with their case in the same snapshot, or keep the case`);
-    for (const id of departing) deleteCase(st, id);
-  },
-  assert(sqlite, { label } = {}) { assertCasesConsistent(sqlite, { label }); },
 };
 
 // ------------------------------------------------------------------ the repository (explicit writes; SQL reads)

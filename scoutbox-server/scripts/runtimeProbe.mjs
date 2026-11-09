@@ -14,7 +14,7 @@ let counter = 9000;
 const nextId = (p) => `${p}-${++counter}`;
 const out = { node: process.version, steps: [], ok: false };
 try {
-  const store = openStore(dir, { tableBacked: TABLE_BACKED });
+  const store = openStore(dir);
   out.steps.push('opened');
   const db = {};
   const seed = { orgs: [{ id: 'org-1', name: 'One FC', type: 'club', level: 'grassroots', plan: 'Grassroots' }], guardians: [], players: [{ id: 'pl-1', name: 'P', dob: '2001-01-01', country: 'GB' }] };
