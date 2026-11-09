@@ -779,7 +779,7 @@ export function orderNobodyMissed(items = [], sort = 'newest_evidence') {
   const by = {
     name: (a, b) => String(a.name).localeCompare(String(b.name)),
     distance: (a, b) => (a.distanceKm ?? Infinity) - (b.distanceKm ?? Infinity),
-    evidence_confidence: (a, b) => (BAND_RANK[b.trustBand] ?? -1) - (BAND_RANK[a.trustBand] ?? -1),
+    evidence_confidence: (a, b) => TRUST_BANDS.indexOf(b.trustBand) - TRUST_BANDS.indexOf(a.trustBand), // an unknown band (-1) last
     newest_evidence: (a, b) => (b.lastEvidenceAt ?? 0) - (a.lastEvidenceAt ?? 0),
     last_reviewed: (a, b) => (a.reviewedAt ?? 0) - (b.reviewedAt ?? 0),
   }[sort] ?? (() => 0);

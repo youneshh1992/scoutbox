@@ -27,7 +27,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildSeed } from './seed.mjs';
 import { openStore } from './store.mjs';
-import { attachDataLayer, TABLE_BACKED } from './repositories/index.mjs';
+import { attachDataLayer } from './repositories/index.mjs';
 import { STAFF_LIMITS } from './repositories/users.mjs';
 import { MESSAGE_LIMITS } from './repositories/channels.mjs';
 import { NOTIFICATION_LIMITS, feedItem } from './repositories/notifications.mjs';

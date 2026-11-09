@@ -310,6 +310,7 @@ section('U8 — deterministic matching and Evaluation Coverage');
 
   ok(NM_SORTS.length === 5 && !NM_SORTS.some((s) => /quality|best|rank|score/i.test(s)), 'no sort option is a quality ranking');
   ok(orderNobodyMissed([{ playerId: 'b', name: 'B' }, { playerId: 'a', name: 'A' }], 'name')[0].name === 'A', 'name ordering works');
+  ok(orderNobodyMissed([{ playerId: 'a', trustBand: 'limited_evidence' }, { playerId: 'c', trustBand: null }, { playerId: 'b', trustBand: 'strong_evidence' }], 'evidence_confidence').map((x) => x.playerId).join() === 'b,a,c', 'evidence-confidence ordering ranks the stronger band first and an unknown band last');
   ok(clampPage(1000) === LIMITS.maxPageSize, 'page sizes are clamped');
   neg(!('orgId' in (safeM18Projection({ orgId: 'o1', id: 'x' }) ?? {})), 'the safe projection strips the organisation id');
 }

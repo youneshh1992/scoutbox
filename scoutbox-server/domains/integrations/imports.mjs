@@ -456,10 +456,9 @@ export function registerImports(ctx) {
 
   async function webhookSweep() {
     const due = deliveries.due(Date.now()).filter((d) => !inFlight.has(d.id));
-    let staged = false;
     for (const d of due) {
       inFlight.add(d.id);
-      try { staged = (await deliverOne(d)) || staged; } finally { inFlight.delete(d.id); }
+      try { await deliverOne(d); } finally { inFlight.delete(d.id); }
     }
     return due.length;
   }
