@@ -52,7 +52,7 @@ export function registerOffers(rawCtx) {
   // a Room is.
   const ctx = { ...rawCtx, ...buildShared(rawCtx) };
   const {
-    db, guardians, orgRouter, playerRouter, guardianRouter, nextId, notify, broadcast, findPlayer, isBlocked,
+    guardians, orgRouter, playerRouter, guardianRouter, nextId, notify, broadcast, findPlayer, isBlocked,
     rateLimit, isLead, moderateOrRefuse, audit, orgCanSee, isAdult, storage,
     agent = null, integration = null, transactions = null, faults = null,
     // S8c: every Offer write is an explicit repository operation (offers.create / update) inside `unit`.

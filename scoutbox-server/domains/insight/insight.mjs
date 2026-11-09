@@ -36,7 +36,7 @@ export function boundGap(hit) {
 
 export function registerInsight(ctx) {
   const {
-    db, byId, players, orgRouter, playerRouter, nextId,
+    byId, players, orgRouter, playerRouter, nextId,
     notify, findPlayer, isAdult, orgCanSee, suppress,
     isLead, requireLead, playerViewForOrg, insightCoverage, unit,
   } = ctx;

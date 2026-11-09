@@ -24,7 +24,7 @@ const AFFILIATION_TYPE = (org) =>
 
 export function registerOrganisationVerification(ctx) {
   const {
-    db, byId, app, orgRouter, playerRouter, guardianRouter, nextId, persist, persistNow,
+    byId, app, orgRouter, playerRouter, guardianRouter, nextId,
     notify, mailer, verification, reads, unit, verEvent, createClaim, transition, addEvidence,
     storeEvidenceFile, requireVer, vmetric, publicProfileForUser, publicProfileForOrg,
     mintToken, effectiveStatus, orgCanAttest, verLevelFor,
@@ -142,7 +142,6 @@ export function registerOrganisationVerification(ctx) {
       if (claim.status === 'unverified') applyStatus(claim, 'collecting_evidence', req);
       return added;
     });
-    persist();
     res.status(201).json({ claim: subjectClaimView(reads.claims.byId(claim.id)), evidenceChecks: ev.checks });
   });
   function applyStatus(claim, to, req, opts = {}, patch = null) {
@@ -170,7 +169,6 @@ export function registerOrganisationVerification(ctx) {
       applyStatus(claim, 'pending', req);
       routeClaim(claim.id, req);
     });
-    persist();
     res.json({ claim: subjectClaimView(reads.claims.byId(claim.id)) });
   });
 
@@ -248,7 +246,6 @@ export function registerOrganisationVerification(ctx) {
       text: `Hi ${req.orgUser.name},\n\nYour ScoutBox work-email confirmation code is ${secret}\n\nEntering it proves control of this mailbox. It expires in 30 minutes and works once.\n\nIf you did not request this, ignore the email.`,
     });
     verEvent('email.challenge_sent', { subjectId: req.orgUser.id, orgId: req.org.id, after: { domain: dom } }, req);
-    persistNow();
     res.status(201).json({ sent: true, note: 'Enter the code from the mailbox. Codes are single-use and expire in 30 minutes.' });
   });
 
@@ -262,7 +259,6 @@ export function registerOrganisationVerification(ctx) {
       // count failures against open tokens for this user (risk signal)
       unit(() => { for (const t of reads.tokens.openFor(req.orgUser.id, 'work_email')) verification.tokens.update(t.id, (d) => { d.attemptsFailed += 1; }); });
       vmetric('emailChallengeFailures');
-      persist();
       return res.status(peek.error === 'TOKEN_EXPIRED' ? 410 : 401).json({ error: peek.error });
     }
     if (peek.token.subjectId !== req.orgUser.id) return res.status(403).json({ error: 'TOKEN_WRONG_ACCOUNT' });
@@ -295,7 +291,6 @@ export function registerOrganisationVerification(ctx) {
         }
       }
     });
-    persist();
     res.json({
       domainControl: 'passed', domainCoveredByOrg: covered,
       claims: open.map((c) => subjectClaimView(reads.claims.byId(c.id))),
@@ -327,7 +322,6 @@ export function registerOrganisationVerification(ctx) {
       return created;
     });
     vmetric('disputes');
-    persistNow();
     res.status(201).json({ dispute: d, note: 'The claim is flagged, its history is preserved, and Trust & Safety reviews the dispute. Disputed claims never silently disappear.' });
     return null;
   }
@@ -407,7 +401,6 @@ export function registerOrganisationVerification(ctx) {
     // §27 self-verification prohibition — server-side, always, with an event.
     if (claim.subjectId === req.orgUser.id) {
       verEvent('security.self_verification_blocked', { claimId: claim.id, subjectId: claim.subjectId, orgId: req.org.id, reason: 'reviewer attempted to decide own claim' }, req);
-      persistNow();
       return res.status(403).json({ error: 'SELF_VERIFICATION_FORBIDDEN', message: 'You cannot be the authoritative confirmer of your own claim. Another authorised administrator must decide it.' });
     }
     if (!['pending', 'automated_checks_passed'].includes(claim.status)) {
@@ -477,7 +470,6 @@ export function registerOrganisationVerification(ctx) {
       return res.status(400).json({ error: 'ACTION_UNKNOWN', message: 'Use confirm, correct_role, mark_former, reject or request_info.' });
     }
     ctx.ledgerAppend?.({ type: 'verification_decision', orgId: req.org.id, scoutName: req.orgUser.name, playerId: null, detail: { claimId: claim.id, action } });
-    persistNow();
     res.json({ decided: action, claims: targets.map((c) => subjectClaimView(reads.claims.byId(c.id))) });
   });
 
@@ -529,7 +521,6 @@ export function registerOrganisationVerification(ctx) {
       }
     });
     notify({ kind: 'org_user', id: req.params.userId }, 'verification', `${req.org.name} recorded you as departed. Your verified history stays on your profile; if this is wrong you can dispute it from Verification.`, claims[0].id);
-    persistNow();
     res.json({ closed: claims.length, note: 'Current badges end now; the historical verified period remains. The person can dispute this.' });
   });
 
@@ -571,7 +562,6 @@ export function registerOrganisationVerification(ctx) {
       const secret = mintToken({ purpose: 'domain_email', email: challengeEmail, orgId: req.org.id, refId: r.id });
       await mailer.send({ to: challengeEmail, subject: `Confirm ${domain} for ${req.org.name} on ScoutBox`, text: `Confirmation code for adding ${domain} as an official ${req.org.name} domain: ${secret}\n\nSingle use, expires in 30 minutes.` });
     }
-    persistNow();
     res.status(201).json({
       request: r,
       note: r.status === 'requires_human_review'
@@ -603,7 +593,6 @@ export function registerOrganisationVerification(ctx) {
       }, req);
       verEvent('organisation.domain_verified', { orgId: req.org.id, after: { domain: r.domain } }, req);
     });
-    persistNow();
     res.json({ domain: r.domain, status: 'verified' });
   });
 
@@ -617,7 +606,6 @@ export function registerOrganisationVerification(ctx) {
       verification.domains.remove(req.org.id, d.domain);
       verEvent('organisation.domain_removed', { orgId: req.org.id, before: { domain: d.domain } }, req);
     });
-    persistNow();
     res.json({ removed: d.domain });
   });
 
@@ -640,7 +628,6 @@ export function registerOrganisationVerification(ctx) {
     if (!requireVer(req, res, needsRoot ? 'verification_root_admin' : 'verification_admin', { root: needsRoot })) return;
     if (userId === req.orgUser.id) {
       verEvent('security.self_verification_blocked', { orgId: req.org.id, subjectId: userId, reason: 'self-promotion attempt' }, req);
-      persistNow();
       return res.status(403).json({ error: 'SELF_PROMOTION_FORBIDDEN', message: 'You cannot change your own verification authority.' });
     }
     const target = byId.user(userId, (u) => u.orgId === req.org.id && !u.removedAt);
@@ -655,7 +642,6 @@ export function registerOrganisationVerification(ctx) {
         verEvent('admin.invited', { orgId: req.org.id, subjectId: userId, after: { level, dualControl: 'pending' } }, req);
         return created;
       });
-      persistNow();
       return res.status(202).json({ transfer: t, note: 'Root authority changes need a second approval: another root administrator, or Trust & Safety.' });
     }
     if (reads.admins.activeFor(req.org.id, userId).some((a) => a.level === level)) {
@@ -667,7 +653,6 @@ export function registerOrganisationVerification(ctx) {
       return created;
     });
     notify({ kind: 'org_user', id: userId }, 'verification', `You now hold ${level.replace(/_/g, ' ')} authority for ${req.org.name}.`, a.id);
-    persistNow();
     res.status(201).json({ admin: a });
   });
 
@@ -690,7 +675,6 @@ export function registerOrganisationVerification(ctx) {
       verEvent('admin.accepted', { orgId: req.org.id, subjectId: t.toUserId, after: { level: 'verification_root_admin', dualControl: `approved by ${req.orgUser.id}` } }, req);
       return [tr, grant];
     });
-    persistNow();
     res.json({ transfer: approved, admin: a });
   });
 
@@ -711,7 +695,6 @@ export function registerOrganisationVerification(ctx) {
       verEvent('admin.revoked', { orgId: req.org.id, subjectId: a.userId, reason: String(req.body?.reason ?? 'revoked by organisation') }, req);
       return next;
     });
-    persistNow();
     res.json({ admin: revoked, note: 'Authority ends immediately. Claims this person previously approved keep their provenance and can be reviewed (Trust & Safety cascade tools).' });
   });
 
@@ -776,7 +759,6 @@ export function registerOrganisationVerification(ctx) {
       return created;
     });
     if (email) await mailer.send({ to: email, subject: `${req.org.name} invited you to ScoutBox`, text: `Hi ${inv.name},\n\n${req.orgUser.name} at ${req.org.name} invites you to join ScoutBox${inv.squad ? ` (${inv.squad})` : ''}.\n\nInvitation code: ${secret}\n\nJoining is your choice — an invitation gives the club no control over your profile. Under-18s join through a parent or guardian.` });
-    persistNow();
     res.status(201).json({ invite: inv, ...(email ? {} : { code: secret, note: 'No email supplied — hand the single-use code to the player (or their guardian) directly.' }) });
   });
   orgRouter.get('/verification/player-invites', (req, res) => {
@@ -813,7 +795,6 @@ export function registerOrganisationVerification(ctx) {
     //    exact child through their EXISTING guardian relationship may accept.
     if (out.token.subjectId && out.token.subjectId !== player.id) {
       verEvent('security.self_verification_blocked', { orgId: inv.orgId, subjectId: player.id, reason: 'invite recipient mismatch (identity-bound)', after: { invite: inv.id } });
-      persist();
       return res.status(403).json({ error: 'INVITE_RECIPIENT_MISMATCH', message: 'This invitation names a different recipient. Codes cannot be transferred.' });
     }
     // 2. Address-targeted invite: the accepting side must be associated with
@@ -838,7 +819,6 @@ export function registerOrganisationVerification(ctx) {
       notify({ kind: 'org_user', id: inv.byUserId }, 'verification', `${player.name} accepted your squad invitation${guardian ? ' (guardian-approved)' : ''}.`, inv.id);
       return next;
     });
-    persistNow();
     return res.json({ invite: accepted, note: 'Joining links nothing else: club visibility, contact and consent all still follow the standing safeguarding rules.' });
   }
 
@@ -883,7 +863,6 @@ export function registerOrganisationVerification(ctx) {
       else if (p.guardianId) notify({ kind: 'guardian', id: p.guardianId }, 'verification', `${req.orgUser.name} (verified at ${req.org.name}) added a structured reference for ${p.name}. You can review it in the app.`, created.id);
       return created;
     });
-    persistNow();
     res.status(201).json({ reference: ref });
   });
 
@@ -901,7 +880,6 @@ export function registerOrganisationVerification(ctx) {
       verEvent('claim.corrected', { orgId: req.org.id, subjectId: ref.playerId, before: { reference: ref.id, status: 'active' }, after: { status: 'withdrawn' }, reason: next.withdrawReason }, req);
       return next;
     });
-    persistNow();
     res.json({ reference: withdrawn, note: 'Withdrawal is an event — the original text and its provenance remain in the record.' });
   });
 
@@ -925,7 +903,6 @@ export function registerOrganisationVerification(ctx) {
       verEvent('claim.corrected', { orgId: req.org.id, subjectId: old.playerId, before: { reference: old.id }, after: { reference: created.id, version: created.version } }, req);
       return created;
     });
-    persistNow();
     res.json({ reference: next, superseded: old.id, note: 'Corrections create a new version — the original is never silently edited.' });
   });
 
@@ -1012,7 +989,6 @@ export function registerOrganisationVerification(ctx) {
     });
     await mailer.send({ to: r.workEmail, subject: `Verify your email for the ${r.orgName} ScoutBox application`, text: `Your ScoutBox organisation-application code is ${secret}\n\nSingle use, expires in 30 minutes.` });
     verEvent('review.requested', { orgId: null, subjectId: null, after: { rootRequest: r.id, checks } });
-    persistNow();
     res.status(201).json({
       requestId: r.id, applicantSecret, checks,
       note: 'Confirm the emailed code, add supporting evidence, then submit. Domain/email control is evidence of mailbox control — it does not by itself verify the organisation.',
@@ -1042,7 +1018,6 @@ export function registerOrganisationVerification(ctx) {
       verification.rootRequests.update(r.id, (d) => { d.emailProved = true; d.checks.evidenceCompleteness = 'email_proved'; });
       verEvent('email.challenge_passed', { after: { rootRequest: r.id } });
     });
-    persistNow();
     res.json({ emailProved: true });
   });
 
@@ -1068,7 +1043,6 @@ export function registerOrganisationVerification(ctx) {
       if (dup && !r.riskFlags.includes('DUPLICATE_EVIDENCE_HASH')) verification.rootRequests.update(r.id, (d) => { d.riskFlags.push('DUPLICATE_EVIDENCE_HASH'); });
       return added;
     });
-    persistNow();
     res.status(201).json({ evidence: { id: ev.id, checks: ev.checks } });
   });
 
@@ -1089,7 +1063,6 @@ export function registerOrganisationVerification(ctx) {
       verEvent('review.requested', { after: { rootRequest: r.id, reasons } });
     });
     vmetric('routedToHumanReview');
-    persistNow();
     res.json({
       status: 'requires_human_review', reasons,
       explanation: `ScoutBox has confirmed control of a ${domainOfEmail(r.workEmail)} mailbox, but an authorised organisation administrator has not yet been established — Trust & Safety reviews the application and the evidence before the first administrator is appointed.`,

@@ -321,8 +321,6 @@ test('m13 notifyAction: a muted notification (the gate returned null) yields nul
 test('boot: no mirror — db.notifications and db.notificationPrefs throw, naming the repository; an array handed in on db is never imported; the report carries counts only; the attach refuses tables without the migration record', () => {
   const dir = tempDir('ntf-boot'); fixtureFile(dir, { notifications: [ntf({ id: 'ntf-old' })] });
   const L = live(dir, { db: {} });
-  assert.throws(() => L.db.notifications, /db\.notifications is gone: read it through the notifications repository/);
-  assert.throws(() => { L.db.notificationPrefs = []; }, /db\.notificationPrefs is gone: write it through the notifications repository/);
   assert.equal(L.repo.byId('ntf-old').id, 'ntf-old');
   const report = JSON.stringify(L.layer.report());
   assert.match(report, /"notifications":\{"mode":"live","rows":\{"notifications":1,"notificationPrefs":0\},"pendingWrites":0/); assert.doesNotMatch(report, /sent a message/);

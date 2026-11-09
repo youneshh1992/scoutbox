@@ -63,7 +63,7 @@ import { COMBINE_PROTOCOLS } from './domains/development/boxcam/combineShared.mj
 import { registerSourceChanges } from './domains/platform/sourceChanges.mjs';
 import { audienceFor, EVENT_AUDIENCE } from './domains/platform/eventAudience.mjs';
 import { createRateLimiter, rateLimitedBody, RATE_LIMIT_POLICY } from './domains/platform/rateLimit.mjs';
-import { buildCapabilityReport, demoSeedEnabled, devLoginsEnabled, productionConfigProblems, saveDebounceMs } from './domains/platform/capabilities.mjs';
+import { buildCapabilityReport, demoSeedEnabled, devLoginsEnabled, productionConfigProblems } from './domains/platform/capabilities.mjs';
 import { isLeadRole } from './roles.mjs';
 import { parseTrustProxy } from './httpTrust.mjs';
 import { minimizePayload, assertEventRegistry, EVENT_NAMES } from './domains/platform/eventRegistry.mjs';
@@ -132,49 +132,25 @@ function dateOnlyOrRefuse(res, value, field) {
 }
 
 const PORT = process.env.PORT || 4000;
-// `db` holds the read-only views of the repositories that still keep a mirror (the staged ones, see
-// repositories/index.mjs) and a throwing name for every retired collection. It holds no data of its own.
-const db = {};
 
 // ------------------------------------------------------------- persistence
 // One SQLite file, data/scoutbox.db (store.mjs). DATA_DIR override keeps destructive tests on isolated throwaway
-// databases. The staged repositories' writes land at the next save, debounced and flushed on shutdown.
+// databases. Every write is a repository operation that commits at once (or with its unit of work).
 const DATA_DIR = process.env.DATA_DIR
   ? path.resolve(process.env.DATA_DIR)
   : path.join(path.dirname(fileURLToPath(import.meta.url)), 'data');
 const store = openStore(DATA_DIR, { tableBacked: TABLE_BACKED });
 
-let saveTimer = null;
-const SAVE_DEBOUNCE_MS = saveDebounceMs(); // 2000 ms; shorter only in a test environment (domains/platform/capabilities.mjs)
-function persist() {
-  if (saveTimer) return;
-  saveTimer = setTimeout(() => {
-    saveTimer = null;
-    try {
-      store.save();
-    } catch (err) {
-      console.error('save failed:', err.message);
-    }
-  }, SAVE_DEBOUNCE_MS);
-}
-
-function persistNow() {
-  if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
-  try {
-    store.save();
-  } catch (err) {
-    console.error('save failed:', err.message);
-  }
-}
-
+// Every write has committed by the time a handler returns (units of work are synchronous), so a shutdown only closes
+// the connection: the WAL is checkpointed and the exit code stays 0.
 for (const sig of ['SIGINT', 'SIGTERM']) {
-  process.on(sig, () => { persistNow(); process.exit(0); });
+  process.on(sig, () => { try { store.sqlite.close(); } catch { /* already closed */ } process.exit(0); });
 }
 
 // The data layer (repositories/): the table migrations, then every domain's repository. A first installation imports
 // the seed's organisations, players and guardians once. The id generator is passed lazily: it needs the counters table.
 const dataLayer = attachDataLayer({
-  db, seed: buildSeed({ demo: demoSeedEnabled() }), store,
+  seed: buildSeed({ demo: demoSeedEnabled() }), store,
   nextId: (prefix) => nextId(prefix),
   sessionTtlMs: (Number(process.env.SESSION_TTL_DAYS) > 0 ? Number(process.env.SESSION_TTL_DAYS) : 30) * 24 * 3600 * 1000,
   log: (m) => { if (process.env.M13_QUIET_LOGS !== '1') console.log(m); },
@@ -214,10 +190,9 @@ const byId = createLookups({ players, guardians, users, orgs });
 if (dataLayer.boot.identity.imported) console.log(`data layer: ${dataLayer.boot.identity.players} player(s) and ${dataLayer.boot.identity.guardians} guardian(s) initialised from the first installation's records`);
 
 /**
- * One UNIT OF WORK (store.unitOfWork): every repository row write, facet edit
- * and session change inside `work` commits or rolls back together, the
- * repositories' memory included; a side effect registered with store.afterCommit runs only
- * after COMMIT. `work` must be synchronous — prepare asynchronous things
+ * One UNIT OF WORK (store.unitOfWork): every repository row write inside `work`
+ * commits or rolls back together; a side effect registered with store.afterCommit
+ * runs only after COMMIT. `work` must be synchronous — prepare asynchronous things
  * before, publish after.
  */
 // Development-only failure seams inside units of work (the m182 fault layer's
@@ -344,13 +319,6 @@ app.use(express.json({ limit: '20mb' }));
 const faultLayer = createFaultLayer();
 faultLayer.install(app);
 seams.shouldFail = (step) => faultLayer.shouldFail(step); // always false in production (the layer is disabled there)
-// `internal:save.sqlite_commit`: the REAL COMMIT of the next ordinary snapshot
-// save fails (store.failCommitOfOpenTransaction), after every data-layer hook
-// flushed — the way a notification's save fails after its row was written and
-// before it is durable. A development seam like the unit's; registered after
-// the data layer's hooks so it runs last inside the save transaction. In
-// production the rule can never be set, so the hook is a no-op.
-store.setSaveHook({ flush() { if (seams.shouldFail('save.sqlite_commit')) store.failCommitOfOpenTransaction(); } });
 // M13: correlation ids, structured request logs (redacted), request metrics,
 // and the exposure-capture hook. Installed before every route on purpose.
 app.use(requestInstrumentation());
@@ -545,7 +513,6 @@ function broadcast(event, rawPayload = {}) {
   // published only once COMMIT returned, and never for a rolled-back operation.
   // (The registry check above still runs now, so a bad call site fails the unit.)
   if (store.inUnitOfWork?.()) { store.afterCommit(() => broadcast(event, rawPayload)); return; }
-  if (event !== 'typing') persist(); // every broadcast (bar ephemeral typing) follows a state change
   publishEvent(event, payload);
 }
 
@@ -620,7 +587,6 @@ app.get('/events', (req, res) => {
 // The id counter is a row of `counters` (repositories/counters.mjs), written through at every mint.
 const idCounter = createIdCounter({ sqlite: store.sqlite });
 const nextId = (prefix) => {
-  persist(); // any id mint means state changed somewhere: a staged repository's write lands at the next save
   return `${prefix}-${idCounter.next()}`;
 };
 
@@ -871,7 +837,6 @@ function notify(audience, type, text, refId = null, { actionRequired = null } = 
   if (existing) {
     const c = notifications.coalesce(existing.id, { at, actionRequired });
     announce();
-    persist(); // the staged organisations a caller edited alongside (until their facets are explicit)
     return c;
   }
 
@@ -890,7 +855,6 @@ function notify(audience, type, text, refId = null, { actionRequired = null } = 
   // becoming an unhandled rejection, and is never mistaken for a rollback.
   if (!n.deferredPush) store.afterCommit(() => pushSender.send(audience, 'ScoutBox', body));
   announce();
-  persist(); // the staged organisations a caller edited alongside (until their facets are explicit)
   return n;
 }
 
@@ -1859,7 +1823,6 @@ app.post('/auth/org/register-grassroots', (req, res) => {
     const admin = users.create({ orgId: created.id, name: scoutName.trim(), role: role?.trim() || 'Manager' });
     return { org: created, user: admin, token: createSession('org', created.id, { userId: admin.id }) };
   });
-  persist();
   broadcast('orgs');
   res.status(201).json({
     userId: user.id, role: user.role, org: { ...orgSafe(org), safeguardingCertified: safeguardingCertified(org) },
@@ -2195,8 +2158,6 @@ orgRouter.post('/players/:id/request', (req, res) => {
  * ledger entry, the same notifications, the same `inbox` ping. A second
  * writer would be a second Inbox by another name.
  *
- * `persist: false` lets a caller that is making several mutations in one
- * synchronous step write them all with ONE `persistNow()` afterwards.
  * `guardianId` lets a caller that has already resolved the guardian route
  * (M23 P3 validates the record, the child link and the verification gates)
  * name it; the legacy route keeps the player's own link.
@@ -2211,7 +2172,7 @@ orgRouter.post('/players/:id/request', (req, res) => {
 function issueRecruitmentRequest({
   org, orgUser, player, type, message = '', trialDetails = null,
   subject = null, contactId = null, guardianId = undefined, at = Date.now(), notice = null, workflow = null,
-}, { persist: persistAfter = true } = {}) {
+}) {
   const minor = !isAdult(player);
   const request = {
     id: nextId('req'),
@@ -2243,7 +2204,6 @@ function issueRecruitmentRequest({
     ...(workflow ? { caseId: workflow.caseId, trialId: null, recipient: workflow.recipient, keys: workflow.keys } : {}),
   };
   const stored = recruitment.requests.create(request); // S8a: a row of recruitment_requests, written now (inside the caller's unit when there is one)
-  if (persistAfter) persistNow();
   ledgerAppend({ type: `${type}_request${minor ? '_to_guardian' : ''}`, playerId: player.id, orgId: org.id, orgName: org.name, userId: orgUser.id, scoutName: orgUser.name });
   const kind = notice?.kind ?? 'request';
   if (minor) {
@@ -2892,7 +2852,6 @@ orgRouter.post('/open-trials/:id/registrations/:regId/outcome', (req, res) => {
     }
     return r;
   });
-  persist();
   broadcast('openTrials');
   res.json({ registration: registrationView(answered) });
 });
@@ -3019,7 +2978,6 @@ orgRouter.post('/matchday', (req, res) => {
     });
     ledgerAppend({ type: 'matchday_logged', playerId: null, orgId: req.org.id, orgName: req.org.name, userId: req.orgUser.id, scoutName: req.orgUser.name });
   });
-  persist();
   res.status(201).json({ credited: credited.length, matchdays: grassroots.matchdays.countForOrg(req.org.id) });
 });
 
@@ -3143,7 +3101,6 @@ orgRouter.post('/friendlies/:id/respond', (req, res) => {
     grassroots.friendlies.respond(friendly.id, { orgId: req.org.id, message: message ? message.trim().slice(0, GL.message) : '', respondedByUserId: req.orgUser.id, ts: Date.now() });
     notify({ kind: 'org_user', id: friendly.postedByUserId }, 'friendly', `${req.org.name} is up for your friendly on ${friendly.date}.`, friendly.id);
   });
-  persist();
   broadcast('friendlies');
   res.status(201).json({ responded: true });
 });
@@ -3638,7 +3595,6 @@ playerRouter.post('/location', (req, res) => {
     return res.status(400).json({ error: 'BAD_COORDINATES' });
   }
   players.update(req.player.id, (d) => { d.location = { lat, lng }; });
-  persist();
   broadcast('players', { playerId: req.player.id });
   res.json({ ok: true });
 });
@@ -3941,7 +3897,6 @@ playerRouter.post('/open-trials/:id/register', (req, res) => {
     ledgerAppend({ type: 'open_trial_registration', playerId: req.player.id, orgId: org.id, orgName: org.name, userId: trial.createdByUserId, scoutName: 'open day' });
     notify({ kind: 'org_user', id: trial.createdByUserId }, 'open_trial', `${req.player.name} registered for "${trial.title}".`, trial.id);
   });
-  persist();
   res.status(201).json({ registered: true });
 });
 
@@ -4143,7 +4098,6 @@ guardianRouter.post('/open-trials/:id/register', (req, res) => {
     notify({ kind: 'org_user', id: trial.createdByUserId }, 'open_trial', `${child.name} (via guardian) registered for "${trial.title}".`, trial.id);
     notify({ kind: 'player', id: child.id }, 'open_trial', `Your parent/guardian registered you for ${org.name}'s open day "${trial.title}" — good luck!`, trial.id);
   });
-  persist();
   res.status(201).json({ registered: true });
 });
 
@@ -4578,7 +4532,6 @@ adminRouter.post('/clubs/:id/credentials', (req, res) => {
     return res.status(400).json({ error: 'PASSWORD_TOO_SHORT', message: 'Club passwords need at least 8 characters.' });
   }
   orgs.setPasswordHash(org.id, hashPassword(String(password)));
-  persistNow();
   res.json({ ok: true, note: 'Credentials provisioned — the organisation signs in with this password from now on.' });
 });
 
@@ -4601,7 +4554,6 @@ adminRouter.post('/clubs/:id/verification', (req, res) => {
     m14Ctx?.syncLegacyOrgVerification?.(org, req.body);
     return byId.org(org.id);
   });
-  persist();
   broadcast('players'); // visibility rules may have changed
   res.json({ ...orgSafe(updated), safeguardingCertified: safeguardingCertified(updated) });
 });
@@ -4709,7 +4661,7 @@ app.get('/media/:id', (req, res) => {
 
 // ------------------------------------------------------------ Milestone 12
 // The M12 feature areas live in focused modules under m12/ — they receive the
-// shared context (db, routers, helpers) and register their own routes and
+// shared context (routers, helpers) and register their own routes and
 // migrations. Nothing here weakens an existing rule; every module re-uses
 // visibleToOrg / blocks / guardian routing at the API layer.
 function revokeOrgUserAccess(userId) {
@@ -4730,8 +4682,8 @@ function revokeOrgUserAccess(userId) {
 }
 
 registerM12({
-  db, byId, safetyReads, scoutingReads, verificationReads, agentReads, complianceReads, developmentReads, development, boxCamReads, discoveryReads, insightReads, grassrootsReads, recruitmentReads, users, orgs, players, guardians, unit, app, orgRouter, playerRouter, guardianRouter, adminRouter,
-  nextId, persist, persistNow, notify, ledgerAppend, broadcast, safetyAudit, recruitment, recruitmentCases, // S8a: requests and trials are explicit repository writes
+  byId, safetyReads, scoutingReads, verificationReads, agentReads, complianceReads, developmentReads, development, boxCamReads, discoveryReads, insightReads, grassrootsReads, recruitmentReads, users, orgs, players, guardians, unit, app, orgRouter, playerRouter, guardianRouter, adminRouter,
+  nextId, notify, ledgerAppend, broadcast, safetyAudit, recruitment, recruitmentCases, // S8a: requests and trials are explicit repository writes
   signingsFollowUps, // S8d: follow-ups and outcome reports are explicit repository writes
   scoutingEvidence, // S9a: evidence, coach affiliations and squad invitations are explicit repository writes
   scoutingAssessments, // S9b: templates, assessments, video segments and playlists are explicit repository writes
@@ -4749,8 +4701,8 @@ registerM12({
 // Same module pattern under m13/. registerM13 returns the enriched context so
 // the login path above can reach the MFA rate-limit guards.
 const m13Ctx = registerM13({
-  db, byId, safetyReads, scoutingReads, verificationReads, agentReads, complianceReads, developmentReads, development, boxCamReads, discoveryReads, insightReads, grassrootsReads, recruitmentReads, users, sessions, orgs, players, guardians, mediaDeletions, codes, notifications, dispatches, outbox, pushLog, pushTokens, channels, unit, app, orgRouter, playerRouter, guardianRouter, adminRouter,
-  nextId, persist, persistNow, notify, ledgerAppend, broadcast, safetyAudit, recruitment, recruitmentCases,
+  byId, safetyReads, scoutingReads, verificationReads, agentReads, complianceReads, developmentReads, development, boxCamReads, discoveryReads, insightReads, grassrootsReads, recruitmentReads, users, sessions, orgs, players, guardians, mediaDeletions, codes, notifications, dispatches, outbox, pushLog, pushTokens, channels, unit, app, orgRouter, playerRouter, guardianRouter, adminRouter,
+  nextId, notify, ledgerAppend, broadcast, safetyAudit, recruitment, recruitmentCases,
   opportunitiesCampaigns, // S9d: player suitability preferences and approved summaries are explicit repository writes
   transitionsVouches, // S10c: transition cases, their grants and history are explicit repository writes
   insightCoverage, // S12d: exposure, deferrals, evidence suggestions, calibration and coverage are explicit repository writes
@@ -4772,8 +4724,8 @@ const m13Ctx = registerM13({
 // keep claim provenance in sync.
 const m14Ctx = registerM14({
   verification, unit, // S10a: every verification record is an explicit repository write
-  db, byId, players, guardians, safetyReads, scoutingReads, verificationReads, agentReads, complianceReads, developmentReads, development, boxCamReads, discoveryReads, insightReads, grassrootsReads, users, orgs, app, orgRouter, playerRouter, guardianRouter, adminRouter,
-  nextId, persist, persistNow, notify, ledgerAppend, broadcast, safetyAudit,
+  byId, players, guardians, safetyReads, scoutingReads, verificationReads, agentReads, complianceReads, developmentReads, development, boxCamReads, discoveryReads, insightReads, grassrootsReads, users, orgs, app, orgRouter, playerRouter, guardianRouter, adminRouter,
+  nextId, notify, ledgerAppend, broadcast, safetyAudit,
   findPlayer, isBlocked, moderateOrRefuse, playerViewForOrg, sessionFor,
   storage, mailer, orgSafe, recordActivity, revokeOrgUserAccess,
   grassrootsOrgOnly, guardianManagedOnly, safeguardingCertified,
@@ -4791,7 +4743,7 @@ registerSourceChanges(srcCtx);
 // routers exist and before the milestone modules that emit notifications, so
 // the preference gate is in place for every notify() call that follows.
 m182Ctx = {
-  db, byId, players, guardians, safetyReads, scoutingReads, verificationReads, agentReads, complianceReads, developmentReads, development, boxCamReads, discoveryReads, insightReads, grassrootsReads, recruitmentReads, notifications, orgRouter, playerRouter, guardianRouter, persist, findPlayer,
+  byId, players, guardians, safetyReads, scoutingReads, verificationReads, agentReads, complianceReads, developmentReads, development, boxCamReads, discoveryReads, insightReads, grassrootsReads, recruitmentReads, notifications, orgRouter, playerRouter, guardianRouter, findPlayer,
   // The same standing-gate composition M12's shared helpers use.
   orgCanSee: (org, p) => !!p && visibleToOrg(p, org) && !isBlocked(p.id, org.id),
   requireLead: (req, res) => {
@@ -4813,8 +4765,8 @@ const rateLimit = createRateLimiter();
 // records. Registered after M14 so it can read verification stores; it
 // receives the same context and adds no new authorization surface.
 const m15Ctx = registerM15({
-  db, byId, players, guardians, safetyReads, scoutingReads, verificationReads, agentReads, complianceReads, developmentReads, development, boxCamReads, discoveryReads, insightReads, grassrootsReads, recruitmentReads, app, orgRouter, playerRouter, guardianRouter, adminRouter,
-  nextId, persist, persistNow, notify, ledgerAppend, broadcast, safetyAudit,
+  byId, players, guardians, safetyReads, scoutingReads, verificationReads, agentReads, complianceReads, developmentReads, development, boxCamReads, discoveryReads, insightReads, grassrootsReads, recruitmentReads, app, orgRouter, playerRouter, guardianRouter, adminRouter,
+  nextId, notify, ledgerAppend, broadcast, safetyAudit,
   findPlayer, isBlocked, moderateOrRefuse, playerViewForOrg,
   storage, m14: m14Ctx,
   recordSourceChange: srcCtx.recordSourceChange,
@@ -4822,8 +4774,8 @@ const m15Ctx = registerM15({
 });
 const m16Ctx = registerM16({
   rateLimit,
-  db, byId, players, guardians, safetyReads, scoutingReads, verificationReads, agentReads, complianceReads, developmentReads, development, boxCamReads, discoveryReads, insightReads, grassrootsReads, app, orgRouter, playerRouter, guardianRouter, adminRouter,
-  nextId, persist, persistNow, notify, ledgerAppend, broadcast, safetyAudit,
+  byId, players, guardians, safetyReads, scoutingReads, verificationReads, agentReads, complianceReads, developmentReads, development, boxCamReads, discoveryReads, insightReads, grassrootsReads, app, orgRouter, playerRouter, guardianRouter, adminRouter,
+  nextId, notify, ledgerAppend, broadcast, safetyAudit,
   findPlayer, isBlocked, moderateOrRefuse,
   players, unit, // S5: a Box Clip marks a media row through the repository, inside a unit with the session and the ledger
   boxCam, // S12b: every Box Cam, Combine and CV record is an explicit repository write
@@ -4834,8 +4786,8 @@ const m16Ctx = registerM16({
 // Registered last because it consumes all of them; it adds no storage and no
 // authorization surface (a Trust Score grants nothing).
 const m162Ctx = registerM162({
-  db, byId, players, guardians, safetyReads, scoutingReads, verificationReads, agentReads, complianceReads, developmentReads, development, boxCamReads, discoveryReads, insightReads, grassrootsReads, app, orgRouter, playerRouter, guardianRouter, adminRouter,
-  nextId, persist, persistNow, notify, ledgerAppend, broadcast, safetyAudit,
+  byId, players, guardians, safetyReads, scoutingReads, verificationReads, agentReads, complianceReads, developmentReads, development, boxCamReads, discoveryReads, insightReads, grassrootsReads, app, orgRouter, playerRouter, guardianRouter, adminRouter,
+  nextId, notify, ledgerAppend, broadcast, safetyAudit,
   findPlayer, isBlocked, moderateOrRefuse,
   assemblePassport: m15Ctx.assemblePassport,
   passportHistoryFor: m15Ctx.passportHistoryFor, // S14j: the trust band's history source reads the history alone
@@ -4850,8 +4802,8 @@ const m162Ctx = registerM162({
 const m17Ctx = registerM17({
   rateLimit,
   faults: faultLayer, // M23 P8.1 — the development fault seam inside the ONE lifecycle writer
-  db, byId, players, guardians, users, safetyReads, scoutingReads, verificationReads, agentReads, complianceReads, developmentReads, development, boxCamReads, discoveryReads, insightReads, grassrootsReads, recruitmentReads, app, orgRouter, playerRouter, guardianRouter, adminRouter,
-  nextId, persist, persistNow, notify, ledgerAppend, broadcast, safetyAudit, recruitmentCases, unit,
+  byId, players, guardians, users, safetyReads, scoutingReads, verificationReads, agentReads, complianceReads, developmentReads, development, boxCamReads, discoveryReads, insightReads, grassrootsReads, recruitmentReads, app, orgRouter, playerRouter, guardianRouter, adminRouter,
+  nextId, notify, ledgerAppend, broadcast, safetyAudit, recruitmentCases, unit,
   findPlayer, isBlocked, moderateOrRefuse, playerViewForOrg,
   storage, publishedVouchesFor, pathwayRecord, DRILLS, DATA_DIR,
   grassrootsOrgOnly, guardianManagedOnly, safeguardingCertified,
@@ -4883,11 +4835,11 @@ const m17Ctx = registerM17({
 // M18 registers no player, guardian or public route at all.
 const m18Ctx = registerM18({
   rateLimit,
-  db, byId, players, guardians, users, safetyReads, scoutingReads, verificationReads, agentReads, complianceReads, developmentReads, development, boxCamReads, discoveryReads, insightReads, grassrootsReads, recruitmentReads, app, orgRouter, playerRouter, guardianRouter, adminRouter,
+  byId, players, guardians, users, safetyReads, scoutingReads, verificationReads, agentReads, complianceReads, developmentReads, development, boxCamReads, discoveryReads, insightReads, grassrootsReads, recruitmentReads, app, orgRouter, playerRouter, guardianRouter, adminRouter,
   discovery, unit, // S12c: every brief, review, Second Look item and watchlist is an explicit repository write
   matchFacts, // S14j: matching and Nobody Missed are queries over the stored facts
   combineProtocolIds: () => COMBINE_PROTOCOLS.map((p) => p.id), // a brief's Combine protocols are refused unless known (S12c)
-  nextId, persist, persistNow, notify, ledgerAppend, broadcast, safetyAudit,
+  nextId, notify, ledgerAppend, broadcast, safetyAudit,
   findPlayer, isBlocked, moderateOrRefuse, playerViewForOrg,
   storage, sessionFor, mailer, orgSafe, recordActivity, revokeOrgUserAccess,
   grassrootsOrgOnly, guardianManagedOnly, safeguardingCertified,
@@ -4969,7 +4921,7 @@ void m21Ctx;
 // M23, because M17's own status route can name an evidence-bearing status. One
 // provider, reachable from every status path; a path with no provider fails
 // closed rather than assuming the requirement is met.
-const recruitmentEvidence = createEvidenceProvider(db, recruitmentReads);
+const recruitmentEvidence = createEvidenceProvider(recruitmentReads);
 m17Ctx.recruitmentEvidence = recruitmentEvidence;
 
 // ------------------------------------------ M23 P5.6E the integration seam holder

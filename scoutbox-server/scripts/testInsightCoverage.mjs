@@ -232,12 +232,11 @@ test('[coverage] an assignment keys its own fixture, keeps targets and warnings,
   s.close(); rm(dir);
 });
 
-test('[unit] a rolled-back unit leaves nothing, and the db.* names throw naming the repository', () => {
+test('[unit] a rolled-back unit leaves nothing', () => {
   const { dir, s } = seeded('s12d-unit');
   assert.throws(() => s.unit(() => { s.repo.fixtures.create(fixture()); s.repo.calibration.create(session()); throw new Error('boom'); }), /boom/);
   assert.equal(s.repo.reads.fixtures.byId('fix-1'), null); assert.equal(s.repo.reads.calibration.byId('cal-1'), null);
   assert.equal(typeof s.repo.reads.fixtures.create, 'undefined', 'the reads cannot write');
-  for (const n of COLLECTIONS) assert.throws(() => s.db[n], new RegExp(`db\\.${n} is gone: read it through the insightCoverage repository`));
   s.close(); rm(dir);
 });
 

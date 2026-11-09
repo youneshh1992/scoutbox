@@ -6,7 +6,7 @@
 // back whole, the derived parts (a calibration's required checks, the experimental note, default preferences) worked
 // out on read; recordBatch appends observations in order and closes the open pause; an update keeps the fields that
 // never change and only grows the integrity history; the queries answer what the routes need (the dispute queue pages);
-// a rolled-back unit leaves nothing; the db.* names throw; and the snapshot write types, names a missing reference and
+// a rolled-back unit leaves nothing; and the snapshot write types, names a missing reference and
 // reads back what it wrote. Temporary databases only; nothing touches DATA_DIR. Run with: npm test
 
 import assert from 'node:assert/strict';
@@ -235,9 +235,8 @@ test('[queries] the dispute queue pages oldest first; a rolled-back unit leaves 
   s.close(); rm(dir);
 });
 
-test('[layer] the db.* names throw, and the snapshot write types, names a missing reference and reads back what it wrote', () => {
+test('[layer] the snapshot write types, names a missing reference and reads back what it wrote', () => {
   const { s, dir } = seeded('s12b-snapshot');
-  for (const n of [...COLLECTIONS, 'boxSessionEvents']) assert.throws(() => s.db[n], /boxCam repository/, n);
   s.repo.sessions.recordBatch('boxs-1', { lastSeq: 1, observations: [{ kind: 'presence', fromMs: 0, toMs: 10, quality: 'good', atMs: null, confidence: null }] });
   s.close();
   const store = openStore(dir); // snapshot mode (tools, fixtures, the persistence batteries)

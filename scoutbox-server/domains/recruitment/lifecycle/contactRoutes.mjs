@@ -44,7 +44,7 @@ import {
 
 export function registerContact(ctx) {
   const {
-    db, guardians, orgRouter, nextId, notify, broadcast, findPlayer, isBlocked, isAdult,
+    guardians, orgRouter, nextId, notify, broadcast, findPlayer, isBlocked, isAdult,
     rateLimit, mailer, isLead, moderateOrRefuse, issueRecruitmentRequest,
     // S8c: the recruitment contacts/offers repository. Every write is an explicit operation inside `unit`.
     recruitmentContactsOffers, unit, afterCommit,
@@ -486,7 +486,7 @@ export function registerContact(ctx) {
         org: req.org, orgUser: req.orgUser, player, type: 'contact',
         message: c.body, subject: c.subject, contactId: c.id,
         guardianId: recipient.guardianId, at,
-      }, { persist: false });
+      });
       // The Contact is delivered BEFORE the case is asked to move: the evidence
       // provider reads this Contact as the evidence for `recordContact`.
       const delivered = contacts.update(c.id, (d) => {

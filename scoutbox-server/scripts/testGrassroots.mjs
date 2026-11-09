@@ -6,7 +6,7 @@
 // past and unanswered, and deleting it stamps it (it leaves every list, the row and a coverage assignment's key stay);
 // a deleted player's registrations lose the name and keep the id; match days and the organisation's open days page
 // newest first; the friendlies board pages by date with the radius box and an exact filter, and takes one response per
-// club; a rolled-back unit leaves nothing; the db.* names throw; and the snapshot write types, names a missing
+// club; a rolled-back unit leaves nothing; and the snapshot write types, names a missing
 // reference, refuses to drop an event an assignment names, and reads back what it wrote. Temporary databases only.
 // Run with: npm test
 
@@ -179,13 +179,12 @@ test('[friendlies] the board pages by date inside the radius; one response per c
 });
 
 // ------------------------------------------------------------- units
-test('[unit] a rolled-back unit leaves nothing, and the db.* names throw naming the repository', () => {
+test('[unit] a rolled-back unit leaves nothing', () => {
   const { dir, s } = seeded('s13d-unit');
   assert.throws(() => s.unit(() => { s.repo.openTrials.create(trial()); s.repo.openTrials.register('open-1', reg()); throw new Error('boom'); }), /boom/);
   assert.equal(s.repo.reads.openTrials.byId('open-1'), null);
   for (const w of ['create', 'remove', 'register', 'resolve', 'redactPlayer']) assert.equal(typeof s.repo.reads.openTrials[w], 'undefined', `the reads cannot ${w}`);
   assert.equal(typeof s.repo.reads.friendlies.respond, 'undefined');
-  for (const n of COLLECTIONS) assert.throws(() => s.db[n], new RegExp(`db\\.${n} is gone: read it through the grassroots repository`));
   s.close(); rm(dir);
 });
 

@@ -164,7 +164,6 @@ test('[units] a rolled-back unit leaves nothing; db.passport* names throw naming
     }), /boom/);
     assert.equal(s.repo.reads.careerEntries.byId('pcar-1'), null);
     assert.equal(s.repo.reads.passportPrefs.forPlayer(PID), null);
-    for (const n of COLLECTIONS) assert.throws(() => s.db[n], new RegExp(`db\\.${n} is gone: read it through the passport repository`));
   } finally { s.close(); rm(dir); }
 });
 

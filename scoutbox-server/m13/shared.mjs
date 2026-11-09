@@ -129,7 +129,7 @@ export function webhookUrlProblem(rawUrl) {
 
 // ---------------------------------------------------------------- helpers
 export function buildSharedM13(ctx) {
-  const { db, nextId } = ctx;
+  const { nextId } = ctx;
 
   // ----- small-group suppression (shared by F4/F8): never show n<3.
   const SUPPRESS_MIN = 3;

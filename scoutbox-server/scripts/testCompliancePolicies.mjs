@@ -5,7 +5,7 @@
 // engine does not read or of the wrong type, a bad day, an override naming a jurisdiction twice, a publication by one
 // person); a reviewer is created and revoked once, and their identity never changes; a version is proposed, published
 // once by a different reviewer and never changes after; `supersedes` names an existing version of the same
-// jurisdiction; the published set is re-read when it changes (and after a rolled-back unit); the db.* names throw; and
+// jurisdiction; the published set is re-read when it changes (and after a rolled-back unit); and
 // the snapshot write types every record and reads back what it wrote. Temporary databases only; nothing touches
 // DATA_DIR. Run with: npm test
 
@@ -179,7 +179,7 @@ test('[policies] a version is proposed, published once by a different reviewer, 
   } finally { s.close(); rm(dir); }
 });
 
-test('[units] a rolled-back unit leaves nothing (and the published set follows the rollback); the db.* names throw', () => {
+test('[units] a rolled-back unit leaves nothing (and the published set follows the rollback)', () => {
   const dir = tempDir('s11b1-units'); saveFixture(dir);
   const s = serverOpen(dir);
   const { reviewers: R, policies: P } = s.repo;
@@ -195,7 +195,6 @@ test('[units] a rolled-back unit leaves nothing (and the published set follows t
     }), /boom/);
     assert.equal(P.byId('jp-eng-2027-1').status, 'proposed'); assert.equal(R.byId('tsr-c'), null);
     assert.deepEqual(P.published().map((x) => x.id), before, 'after the rollback the published set is the stored one');
-    for (const n of COLLECTIONS) assert.throws(() => s.db[n], /read it through the compliancePolicies repository/);
   } finally { s.close(); rm(dir); }
 });
 

@@ -289,11 +289,10 @@ test('[watchlists] a reconciliation replaces the membership, appends only unseen
 });
 
 // ------------------------------------------------------------- units, the db.* names, the snapshot path
-test('[unit] a rolled-back unit leaves nothing, and the db.* names throw naming the repository', () => {
+test('[unit] a rolled-back unit leaves nothing', () => {
   const { dir, s } = seeded('s12c-unit');
   assert.throws(() => s.unit(() => { s.repo.briefs.create(brief()); s.repo.watchlists.create(watchlist()); throw new Error('boom'); }), /boom/);
   assert.equal(s.repo.reads.briefs.byId('brf-1'), null); assert.equal(s.repo.reads.watchlists.byId('wl-1'), null);
-  for (const n of COLLECTIONS) assert.throws(() => s.db[n], new RegExp(`db\\.${n} is gone: read it through the discovery repository`));
   s.close(); rm(dir);
 });
 

@@ -36,20 +36,6 @@ export const demoSeedEnabled = (env = process.env) => (
 
 const isSet = (v) => v != null && String(v).trim() !== '';
 
-/**
- * The delay of the debounced snapshot save (`persist()` in server.mjs): 2000 ms.
- * SCOUTBOX_SAVE_DEBOUNCE_MS shortens it for the test suites, which otherwise
- * spend most of their time waiting for that save to come and go. Outside
- * production only, as a whole number from 10 to 2000; anything else is the
- * normal delay (and a configuration problem, below).
- */
-export const SAVE_DEBOUNCE_DEFAULT_MS = 2000;
-const parseSaveDebounce = (v) => (/^\d+$/.test(String(v).trim()) && Number(v) >= 10 && Number(v) <= SAVE_DEBOUNCE_DEFAULT_MS ? Number(v) : null);
-export const saveDebounceMs = (env = process.env) => (
-  env.NODE_ENV !== 'production' && isSet(env.SCOUTBOX_SAVE_DEBOUNCE_MS)
-    ? parseSaveDebounce(env.SCOUTBOX_SAVE_DEBOUNCE_MS) ?? SAVE_DEBOUNCE_DEFAULT_MS
-    : SAVE_DEBOUNCE_DEFAULT_MS
-);
 /** The mail adapter sends through SendGrid when this holds; otherwise it writes the local outbox. */
 export const liveMailConfigured = (env = process.env) => isSet(env.SENDGRID_API_KEY);
 /** The push adapter sends through Expo when this holds; otherwise it writes the local push log. */
@@ -218,20 +204,6 @@ export function productionConfigProblems({ env = process.env, trustWeightsTotal 
     problems.push({
       code: 'SEED_DEMO_INVALID',
       message: 'SCOUTBOX_SEED_DEMO must be 1 (load the demo world on first boot) or 0 (start empty).',
-      fatal: true,
-    });
-  }
-  // The save delay is a test instrument: production always saves on the normal debounce.
-  if (production && flagged(env.SCOUTBOX_SAVE_DEBOUNCE_MS)) {
-    problems.push({
-      code: 'SAVE_DEBOUNCE_IN_PRODUCTION',
-      message: 'SCOUTBOX_SAVE_DEBOUNCE_MS is set. It shortens the save delay for the test suites and is never honoured in production.',
-      fatal: true,
-    });
-  } else if (flagged(env.SCOUTBOX_SAVE_DEBOUNCE_MS) && parseSaveDebounce(env.SCOUTBOX_SAVE_DEBOUNCE_MS) === null) {
-    problems.push({
-      code: 'SAVE_DEBOUNCE_INVALID',
-      message: `SCOUTBOX_SAVE_DEBOUNCE_MS must be a whole number of milliseconds from 10 to ${SAVE_DEBOUNCE_DEFAULT_MS}; the normal ${SAVE_DEBOUNCE_DEFAULT_MS} ms delay is used.`,
       fatal: true,
     });
   }

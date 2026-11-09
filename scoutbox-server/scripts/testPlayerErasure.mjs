@@ -59,7 +59,6 @@ function reopen(dir, { warnings = [] } = {}) {
   return wire({ store, layer, db, warnings });
 }
 function wire({ store, layer, db, warnings }) {
-  store.save();
   const raw = (sql, ...p) => { const r = store.sqlite.prepare(sql).get(...p); return r ? { ...r } : r; };
   const all = (sql, ...p) => store.sqlite.prepare(sql).all(...p).map((r) => ({ ...r }));
   const row = (id) => raw('SELECT * FROM players WHERE id = ?', id);
@@ -67,7 +66,7 @@ function wire({ store, layer, db, warnings }) {
   const childRows = (id) => OWNED_TABLES.reduce((n, t) => n + raw(`SELECT COUNT(*) AS n FROM ${t} WHERE player_id = ?`, id).n, 0);
   const links = (id) => all('SELECT guardian_id, player_id, role FROM guardian_children WHERE player_id = ? ORDER BY rowid', id);
   return { store, layer, db, warnings, players: layer.identity.players, guardians: layer.identity.guardians, codes: layer.codes, sessions: layer.sessions, mediaDeletions: layer.mediaDeletions,
-    save: () => store.save(), raw, all, row, childRows, links, fileDump: () => dump(store.sqlite),
+    raw, all, row, childRows, links, fileDump: () => dump(store.sqlite),
     unit: (fn) => store.unitOfWork(fn), close: () => store.sqlite.close() };
 }
 
@@ -133,7 +132,7 @@ test('snapshots: an unchanged save keeps the retained rows byte-identical — an
   const expected = JSON.stringify([RETAINED_ROW('pl-seeded', NOW, '2004-03-14', 'GB'), RETAINED_ROW('pl-child2', NOW + 1, '2016-08-08', 'GB')]);
   const rowsT = () => JSON.stringify(t.all('SELECT * FROM players WHERE deleted_at IS NOT NULL ORDER BY rowid'));
   assert.equal(rowsT(), expected);
-  t.save(); assert.equal(rowsT(), expected, 'an ordinary server-mode save: kept'); t.close();
+  assert.equal(rowsT(), expected, 'an ordinary server-mode save: kept'); t.close();
   const S = snapshotStore(dir);
   const rows = () => JSON.stringify(S.all('SELECT * FROM players WHERE deleted_at IS NOT NULL ORDER BY rowid'));
   const live = () => JSON.stringify(S.all('SELECT id FROM players WHERE deleted_at IS NULL ORDER BY rowid'));
@@ -177,7 +176,7 @@ test('snapshots: an unchanged save keeps the retained rows byte-identical — an
 
 test('snapshot contract: stored retained records are PROTECTED — a supplied playersRetained collection may only add records; an empty collection, a subset, or a record whose birth date, country or deletion instant differs from the stored one refuses the WHOLE save atomically with ids only (an accompanying change to another collection is rolled back too, no transaction stays open, the tool\'s loaded view is untouched); the two-save sequence prune-then-recreate is refused at both steps and the id stays retained; a direct live-id collision is refused as before; a superset that adds a new record is accepted with every stored record byte-identical; unchanged, repeated and omitted saves stay positive controls', () => {
   const dir = tempDir('erase-protected'); const t = boot(dir, FIXTURE());
-  t.players.erase('pl-seeded', { at: NOW }); t.unit(() => t.players.erase('pl-child2', { at: NOW + 1 })); t.save(); t.close();
+  t.players.erase('pl-seeded', { at: NOW }); t.unit(() => t.players.erase('pl-child2', { at: NOW + 1 })); t.close();
   const S = snapshotStore(dir);
   const expected = JSON.stringify([RETAINED_ROW('pl-seeded', NOW, '2004-03-14', 'GB'), RETAINED_ROW('pl-child2', NOW + 1, '2016-08-08', 'GB')]);
   const rows = () => JSON.stringify(S.all('SELECT * FROM players WHERE deleted_at IS NOT NULL ORDER BY rowid'));
@@ -222,7 +221,6 @@ test('unit of work: an erase inside a unit that fails after every write — and 
   const code = t.codes.issuePairingCode('pl-child1');
   assert.ok(code?.code, 'a pairing code was issued');
   t.layer.safetyAudit.ledger.append({ id: 'led-erase', ts: NOW, type: 'view', playerId: 'pl-child1', orgId: 'org-pro', orgName: 'Eastport FC', userId: null, scoutName: 'Maria' }); // no staff row in this fixture: the staff key is RESTRICT (S14b)
-  t.save();
   const ledgerBefore = JSON.stringify(t.all('SELECT * FROM ledger ORDER BY seq'));
   const view = t.players.byId('pl-child1'); const kids = t.guardians.byId('gd-primary').childIds;
   const sessionsBefore = t.raw("SELECT COUNT(*) AS n FROM sessions WHERE kind = 'player' AND ref_id = 'pl-child1'").n; assert.equal(sessionsBefore, 1);
@@ -255,7 +253,7 @@ test('unit of work: an erase inside a unit that fails after every write — and 
   assert.equal(t.raw("SELECT COUNT(*) AS n FROM sessions WHERE kind = 'player' AND ref_id = 'pl-child1'").n, 0); assert.equal(t.raw("SELECT COUNT(*) AS n FROM pairing_codes WHERE player_id = 'pl-child1'").n, 0); assert.equal(t.raw('SELECT COUNT(*) AS n FROM media_deletions').n, 1);
   assert.equal(t.players.byId('pl-child1'), null); assert.deepEqual([...t.guardians.byId('gd-primary').childIds], ['pl-child2']); assert.equal(t.players.retainedCount(), 1);
   assert.throws(() => t.unit(() => t.players.erase('pl-child1', { at: NOW })), /retained/);
-  t.save(); assert.equal(JSON.stringify(t.all('SELECT * FROM ledger ORDER BY seq')), ledgerBefore, 'the ledger row naming the deleted child is exactly as it was');
+  assert.equal(JSON.stringify(t.all('SELECT * FROM ledger ORDER BY seq')), ledgerBefore, 'the ledger row naming the deleted child is exactly as it was');
   assert.equal(t.raw("SELECT city FROM players WHERE id = 'pl-seeded'").city, 'Northgate', 'the unrelated earlier write is in the row');
   t.close(); fs.rmSync(dir, { recursive: true, force: true });
 });

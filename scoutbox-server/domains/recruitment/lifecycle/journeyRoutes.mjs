@@ -23,7 +23,7 @@ import { currentSigningForOffer } from './journeyModel.mjs';
 import { playerJourneyReads } from './journeyReads.mjs';
 
 export function registerJourneyRoutes(ctx) {
-  const { db, recruitmentReads, scoutingReads, safetyReads, playerRouter, guardianRouter, orgRouter, agent = null, integration = null, findPlayer, guardianOwnsChild } = ctx;
+  const { recruitmentReads, scoutingReads, safetyReads, playerRouter, guardianRouter, orgRouter, agent = null, integration = null, findPlayer, guardianOwnsChild } = ctx;
   if (!recruitmentReads?.contacts || !recruitmentReads?.offers || !recruitmentReads?.signings || !recruitmentReads?.signingPackages) throw new TypeError('registerJourneyRoutes needs recruitmentReads (contacts, offers, signings, signingPackages) from the data layer');
   const evidence = () => ctx.recruitmentEvidenceProvider ?? undefined;
   const orgOf = (orgId) => ctx.byId.org(orgId);
@@ -39,7 +39,7 @@ export function registerJourneyRoutes(ctx) {
     const reads = { ...playerJourneyReads(recruitmentReads, playerId, cases.filter((k) => k.room)), assessments: scoutingReads.assessments, blocks: safetyReads.blocks, player: (id) => ctx.byId.player(id) };
     for (const k of cases) {
       if (!k.room) continue;
-      const out = buildRecruitmentJourney(db, k.id, viewer, { now: at, evidence: evidence(), reads });
+      const out = buildRecruitmentJourney(k.id, viewer, { now: at, evidence: evidence(), reads });
       if (!out.ok) continue; // nothing crossed the share boundary: the case does not exist for them
       items.push({ club: clubOf(k.orgId), shared: out.shared, journey: out.journey });
     }
@@ -92,7 +92,7 @@ export function registerJourneyRoutes(ctx) {
     const reads = { ...playerJourneyReads(recruitmentReads, a.clientId, cases.filter((k) => k.room)), assessments: scoutingReads.assessments, blocks: safetyReads.blocks, player: (id) => ctx.byId.player(id) };
     for (const k of cases) {
       if (!k.room) continue;
-      const out = buildRecruitmentJourney(db, k.id, { kind: 'agent', authorized: true, playerId: a.clientId, userId: req.orgUser.id, grants: g.grants }, { now: at, evidence: evidence(), reads });
+      const out = buildRecruitmentJourney(k.id, { kind: 'agent', authorized: true, playerId: a.clientId, userId: req.orgUser.id, grants: g.grants }, { now: at, evidence: evidence(), reads });
       if (!out.ok) continue;
       // A club that shared nothing with this agent is not a club the agent learns about.
       if (out.journey.stage === 'none' && out.journey.timeline.length === 0) continue;

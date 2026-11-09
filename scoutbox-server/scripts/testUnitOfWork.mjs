@@ -1,12 +1,8 @@
-// The store's unit of work: the transaction foundation S4a needs. An explicit
-// unit of work makes repository row writes commit or roll back TOGETHER, and a
-// failure restores the database AND memory (the staged participants' records,
-// held references, repository views) to their pre-operation state. Since S14a
-// there is no blob and no store memento: each participant restores itself (the
-// memento module keeps its direct tests). Since S14g the organisations are
-// explicit (no mirror), so the players (still staged) are the participant whose
-// held records are checked. Retrying means re-running the whole operation; a
-// later ordinary save never completes a fragment of a failed one.
+// The store's unit of work: an explicit unit makes repository row writes commit
+// or roll back TOGETHER. No repository keeps records in memory (S14 last: no
+// save path, no participants), so a failure leaves the database as it was and
+// every read after it sees the committed rows. Retrying means re-running the
+// whole operation.
 // Everything runs on throwaway databases with synthetic fixtures. Run with: npm test
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
@@ -17,8 +13,6 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { openStore } from '../store.mjs';
 import { attachDataLayer, TABLE_BACKED } from '../repositories/index.mjs';
-import { captureGraph, restoreGraph } from '../repositories/memento.mjs';
-import { readonlyView } from '../repositories/readonly.mjs';
 import { hasBlobTable } from './coreIdentityTestFixtures.mjs';
 
 let passed = 0;
@@ -44,7 +38,6 @@ function boot(dir, seed = fixtureSeed()) {
   const db = {};
   const layer = attachDataLayer({ db, seed, store, nextId, persist: () => {}, sessionTtlMs: TTL });
   layer.users.create({ orgId: 'org-pro', name: 'Maria', role: 'Head of Recruitment' });
-  store.save();
   const raw = (sql, ...p) => store.sqlite.prepare(sql).get(...p);
   return { store, layer, db, raw, unit: (fn) => store.unitOfWork(fn) };
 }
@@ -101,21 +94,6 @@ const prepare = (t) => {
   return { p1: t.layer.players.byId('pl-1') };
 };
 
-// ------------------------------------------------------------- the memento itself
-await test('memento: every reachable object and array is restored in place, by identity — added keys removed, removed keys back, nested arrays truncated, views and frozen leaves untouched', () => {
-  const inner = { n: 1, list: [1, 2] };
-  const view = readonlyView({ v: 1 }, 'x');
-  const frozen = Object.freeze({ f: 1 });
-  const root = { a: 1, inner, arr: [inner, { k: 'v' }], view, frozen };
-  const arr = root.arr; const second = arr[1];
-  const m = captureGraph([root]);
-  root.a = 2; root.added = true; delete root.inner; inner.n = 9; inner.list.push(3); arr.push({ extra: true }); arr.splice(0, 1); second.k = 'changed'; second.more = 1;
-  restoreGraph(m);
-  assert.equal(root.a, 1); assert.equal('added' in root, false); assert.equal(root.inner, inner); assert.equal(inner.n, 1); assert.deepEqual(inner.list, [1, 2]);
-  assert.equal(root.arr, arr); assert.equal(arr.length, 2); assert.equal(arr[0], inner); assert.equal(arr[1], second); assert.equal(second.k, 'v'); assert.equal('more' in second, false);
-  assert.equal(root.view, view); assert.equal(root.frozen, frozen); assert.equal(m.has(view), false, 'views are not walked'); assert.equal(m.has(frozen), false);
-});
-
 // ------------------------------------------------------------- success
 await test('unit of work: a row insert, a row update, a staged player write and a session commit together in one transaction; after-commit callbacks run once, after COMMIT', () => {
   const dir = tempDir('uow-ok'); const t = boot(dir);
@@ -133,7 +111,7 @@ await test('unit of work: a row insert, a row update, a staged player write and 
 });
 
 // ------------------------------------------------------------- failure after the writes
-await test('unit of work: a failure after the writes rolls the database back and every read after it sees the committed rows; an unrelated earlier write survives; an ordinary save persists no fragment; an explicit retry persists everything', () => {
+await test('unit of work: a failure after the writes rolls the database back and every read after it sees the committed rows; an unrelated earlier write survives; an explicit retry persists everything', () => {
   const dir = tempDir('uow-fail'); const t = boot(dir);
   const refs = prepare(t);
   let err = null;
@@ -142,9 +120,6 @@ await test('unit of work: a failure after the writes rolls the database back and
   assert.equal(t.store.sqlite.isTransaction, false);
   assertDatabaseUntouched(t);
   assertMemoryRestored(t, refs);
-  // An ORDINARY save now: nothing of the failed operation lands.
-  t.store.save();
-  assertDatabaseUntouched(t);
   // Explicit retry of the WHOLE operation.
   const { token } = operation(t);
   assertOperationPersisted(t, token);
@@ -186,24 +161,8 @@ await test('unit of work: a process killed before COMMIT leaves the pre-operatio
   again.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
 });
 
-// ------------------------------------------------------------- an ordinary save has nothing of the organisations to stage
-await test('ordinary saves: an organisation write is in its row when the call returns (S14g: no staged facet), so a FAILED ordinary save neither loses nor delays it', () => {
-  const dir = tempDir('uow-s3'); const t = boot(dir);
-  t.layer.orgs.update('org-pro', (d) => { d.name = 'Eastport FC (renamed)'; });
-  // Rewritten in S14a (the save failed on an unserialisable blob) and S14g (a facet edit stayed pending): the save's COMMIT fails once.
-  const exec = t.store.sqlite.exec.bind(t.store.sqlite);
-  let explode = true;
-  t.store.sqlite.exec = (sql) => { if (explode && sql === 'COMMIT') { explode = false; throw new Error('disk full at commit'); } return exec(sql); };
-  assert.throws(() => t.store.save(), /disk full at commit/);
-  t.store.sqlite.exec = exec;
-  assert.equal(t.raw("SELECT name FROM orgs WHERE id = 'org-pro'").name, 'Eastport FC (renamed)', 'the write committed when it was made');
-  t.store.save();
-  assert.equal(t.layer.orgs.byId('org-pro').name, 'Eastport FC (renamed)');
-  t.store.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
-});
-
 // ------------------------------------------------------------- nesting, saves inside, async, participants
-await test('unit of work: a nested unit joins the enclosing one (an inner failure rolls everything back); a save() inside a unit is absorbed into its commit; asynchronous work is refused and rolled back; a unit cannot start inside a foreign transaction', () => {
+await test('unit of work: a nested unit joins the enclosing one (an inner failure rolls everything back); several writes inside a unit are one transaction; asynchronous work is refused and rolled back; a unit cannot start inside a foreign transaction', () => {
   const dir = tempDir('uow-nest'); const t = boot(dir);
   const p1 = t.layer.players.byId('pl-1');
   // Nested join: the inner failure undoes the outer insert too.
@@ -217,9 +176,8 @@ await test('unit of work: a nested unit joins the enclosing one (an inner failur
   assert.match(err.message, /inner failed/); assert.equal(err.unitOfWork, 'rolled_back');
   assert.equal(t.layer.orgs.byId('org-outer'), null); assert.equal(p1.city, 'Start');
   assert.equal(t.raw("SELECT COUNT(*) AS n FROM orgs WHERE id = 'org-outer'").n, 0);
-  // save() inside a unit does not open a second transaction; what the unit wrote lands with it.
-  // (Rewritten in S14a: the save revision and the absorbed blob are gone; the BEGINs are counted instead.)
-  assert.equal(begins(t, () => t.unit(() => { t.layer.players.update('pl-1', (d) => { d.city = 'Absorbed'; }); t.store.save(); t.layer.orgs.create({ id: 'org-abs', name: 'Abs', type: 'club', plan: 'Pro' }); })), 1, 'exactly one transaction');
+  // Several writes in a unit are one transaction; what the unit wrote lands with it.
+  assert.equal(begins(t, () => t.unit(() => { t.layer.players.update('pl-1', (d) => { d.city = 'Absorbed'; }); t.layer.orgs.create({ id: 'org-abs', name: 'Abs', type: 'club', plan: 'Pro' }); })), 1, 'exactly one transaction');
   assert.equal(t.raw("SELECT city FROM players WHERE id = 'pl-1'").city, 'Absorbed'); assert.equal(t.raw("SELECT COUNT(*) AS n FROM orgs WHERE id = 'org-abs'").n, 1);
   // Asynchronous work: a SQLite transaction must never span an await.
   err = null;
@@ -273,15 +231,6 @@ await test('unit of work: snapshot mode refuses it (a tool writes whole snapshot
   tool.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
 });
 
-await test('unit of work: capturing the memento of a synthetic snapshot is bounded in time', () => {
-  const players = Array.from({ length: 1000 }, (_, i) => ({ id: `pl-${i}`, name: `P${i}`, media: [{ id: `m-${i}`, tags: { pace: 1 } }], attendance: [{ id: `a-${i}`, gps: { lat: 1, lng: 2 } }], stats: { goals: i } }));
-  const db = { players, notes: Array.from({ length: 2000 }, (_, i) => ({ id: `v-${i}`, history: ['a', 'b'] })) };
-  const t0 = performance.now(); const m = captureGraph([db]); const captured = performance.now() - t0;
-  const t1 = performance.now(); restoreGraph(m); const restored = performance.now() - t1;
-  console.log(`    (memento of 1,000 players + 2,000 notes: capture ${captured.toFixed(1)} ms, restore ${restored.toFixed(1)} ms, ${m.size} objects)`);
-  assert.ok(captured < 2000 && restored < 2000);
-});
-
 // ------------------------------------------------------------- review corrections (independent review of the first foundation commit)
 const tick = () => new Promise((resolve) => setImmediate(resolve));
 /** Collect unhandled rejections while `fn` runs (plus two turns of the event loop), so an unobserved promise is a test failure rather than a process crash. */
@@ -293,7 +242,7 @@ async function withUnhandled(fn) {
   return seen;
 }
 
-await test('a failure at BEGIN leaves no unit open — the work never runs, no transaction is left behind, ordinary saves and later units work; a failing cleanup step (a participant whose restore throws) is reported and still clears the unit', () => {
+await test('a failure at BEGIN leaves no unit open — the work never runs, no transaction is left behind, later writes and units work; a failing ROLLBACK is reported and still clears the unit', () => {
   const dir = tempDir('uow-begin'); const t = boot(dir);
   const exec = t.store.sqlite.exec.bind(t.store.sqlite);
   let failBegin = true; let invoked = 0;
@@ -303,32 +252,25 @@ await test('a failure at BEGIN leaves no unit open — the work never runs, no t
   assert.equal(t.store.inUnitOfWork(), false, 'no fictitious unit remains active');
   assert.equal(t.store.unit.active(), false); assert.equal(t.store.sqlite.isTransaction, false);
   t.layer.players.update('pl-1', (d) => { d.city = 'Ordinary edit'; });
-  t.store.save();
   assert.equal(t.raw("SELECT city FROM players WHERE id = 'pl-1'").city, 'Ordinary edit', 'a later write is real, not absorbed by a phantom unit');
   t.unit(() => { t.layer.orgs.create({ id: 'org-after-begin', name: 'After', type: 'club', plan: 'Pro' }); });
   assert.equal(t.raw("SELECT COUNT(*) AS n FROM orgs WHERE id = 'org-after-begin'").n, 1, 'a later unit works');
-  t.store.sqlite.exec = exec;
-  // Cleanup errors: a participant whose restoreState throws must not leave the flag stuck or the transaction open.
-  let restoreCalls = 0;
-  t.store.setSaveHook({ flush() {}, snapshotState: () => 'state', restoreState() { restoreCalls += 1; throw new Error('restore exploded'); } });
+  // A ROLLBACK that fails: reported on the error and in the state, and the unit is still closed.
+  let failRollback = true;
+  t.store.sqlite.exec = (sql) => { if (sql === 'ROLLBACK' && failRollback) { failRollback = false; throw new Error('rollback exploded'); } return exec(sql); };
   let err = null;
-  try { t.unit(() => { t.layer.orgs.update('org-grass', (d) => { d.suspended = true; }); t.layer.players.update('pl-1', (d) => { d.city = 'Doomed'; }); throw new Error('operation failed'); }); } catch (e) { err = e; }
-  assert.match(err.message, /operation failed/, 'the caller sees the operation failure');
-  assert.equal(err.unitOfWork, 'rolled_back'); assert.equal(restoreCalls, 1);
-  assert.ok(Array.isArray(err.unitOfWorkCleanup) && /restore exploded/.test(err.unitOfWorkCleanup.join(' ')), 'the cleanup failure is attached to the error');
+  try { t.unit(() => { t.layer.orgs.update('org-grass', (d) => { d.suspended = true; }); throw new Error('operation failed'); }); } catch (e) { err = e; }
+  assert.match(err.message, /operation failed/, 'the caller sees the operation failure'); assert.equal(err.unitOfWork, 'rolled_back');
+  assert.ok(Array.isArray(err.unitOfWorkCleanup) && /rollback exploded/.test(err.unitOfWorkCleanup.join(' ')), 'the cleanup failure is attached to the error');
   assert.equal(t.store.inUnitOfWork(), false, 'the unit is closed even though cleanup failed');
-  assert.equal(t.store.sqlite.isTransaction, false);
-  // Rewritten in S14a (the store memento restored a blob) and S14g (the organisations participant restored itself): the
-  // players participant, registered before the failing one, still restores its record.
-  assert.equal(t.layer.players.byId('pl-1').city, 'Ordinary edit', 'the earlier participant still restored its record'); assert.equal(t.layer.orgs.byId('org-grass').suspended, false);
-  assert.ok(t.store.unitOfWorkState().restoreFailures >= 1);
-  t.store.save();
-  assert.equal(t.raw("SELECT city FROM players WHERE id = 'pl-1'").city, 'Ordinary edit');
-  assert.equal(t.raw("SELECT suspended FROM orgs WHERE id = 'org-grass'").suspended, 0);
+  assert.ok(t.store.unitOfWorkState().cleanupFailures >= 1);
+  t.store.sqlite.exec = exec;
+  if (t.store.sqlite.isTransaction) t.store.sqlite.exec('ROLLBACK');
+  assert.equal(t.layer.orgs.byId('org-grass').suspended, false);
   t.store.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
 });
 
-await test('a nested (joined) unit that fails poisons the whole unit even when its caller catches the error — nothing commits, nothing is published, memory is restored, a later ordinary save persists no fragment', () => {
+await test('a nested (joined) unit that fails poisons the whole unit even when its caller catches the error — nothing commits, nothing is published', () => {
   const dir = tempDir('uow-swallow'); const t = boot(dir);
   const p1 = t.layer.players.byId('pl-1');
   let events = 0; let outer = null; let innerSeen = null; let continued = false;
@@ -356,7 +298,6 @@ await test('a nested (joined) unit that fails poisons the whole unit even when i
   assert.equal(t.raw("SELECT COUNT(*) AS n FROM orgs WHERE id = 'org-inner'").n, 0);
   assert.equal(events, 0, 'no after-commit callback of a failed unit runs');
   assert.equal(t.layer.orgs.byId('org-pro').suspended, false); assert.equal(t.layer.orgs.byId('org-inner'), null); assert.equal(p1.city, 'Start');
-  t.store.save();
   assert.equal(t.raw("SELECT city FROM players WHERE id = 'pl-1'").city, 'Start'); assert.equal(t.raw("SELECT suspended FROM orgs WHERE id = 'org-pro'").suspended, 0);
   // The same operation, retried without the failure, commits whole.
   t.unit(() => { t.layer.orgs.update('org-pro', (d) => { d.suspended = true; }); t.unit(() => { t.layer.orgs.create({ id: 'org-inner', name: 'Inner', type: 'club', plan: 'Pro' }); }); t.store.afterCommit(() => { events += 1; }); });
@@ -399,7 +340,6 @@ await test('an async function is refused BEFORE it is invoked (top-level and nes
     try { t.unit(() => { t.layer.orgs.create({ id: 'org-outer2', name: 'O', type: 'club', plan: 'Pro' }); try { t.unit(async () => { invoked += 1; }); } catch { /* swallowed */ } }); } catch (e) { err = e; }
     assert.ok(err && err.unitOfWork === 'rolled_back'); assert.equal(invoked, 0); assert.equal(t.layer.orgs.byId('org-outer2'), null);
     await tick(); await tick();
-    t.store.save();
     assert.equal(t.raw("SELECT suspended FROM orgs WHERE id = 'org-pro'").suspended, 0);
     assert.equal(t.raw("SELECT COUNT(*) AS n FROM orgs WHERE id = 'org-outer2'").n, 0);
     // An UNEXPECTED thenable: a plain function that returns a promise cannot be told apart before it runs.
@@ -493,7 +433,7 @@ await test('participant API: store.unit.join runs an operation inside the open u
   t.store.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
 });
 
-test('cost (migration.md §4.3.1): a player write — standalone, inside a unit of work with an organisation update, and the ordinary save after it — runs exactly as many SQL statements with 2,000 players as with 20, and a rolled-back unit leaves the row as it was', () => {
+test('cost (migration.md §4.3.1): a player write — standalone and inside a unit of work with an organisation update — runs exactly as many SQL statements with 2,000 players as with 20, and a rolled-back unit leaves the row as it was', () => {
   // Every statement the process runs is counted: StatementSync run / get / all / iterate and DatabaseSync exec.
   const counted = { on: false, n: 0 };
   const restore = [];
@@ -513,7 +453,6 @@ test('cost (migration.md §4.3.1): a player write — standalone, inside a unit 
       counted.n = 0; counted.on = true;
       players.update('pl-7', (d) => { d.city = 'Standalone'; });
       t.unit(() => { players.update('pl-7', (d) => { d.city = 'In a unit'; }); t.layer.orgs.update('org-pro', (d) => { d.suspended = true; }); }); // (S14a: the blob edit that stood here is gone)
-      t.store.save();
       counted.on = false;
       const statements = counted.n;
       // A unit that fails after the write: the row is unchanged (S14h: there is no memory to restore; a held record is a frozen copy).

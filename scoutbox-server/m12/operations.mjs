@@ -22,7 +22,7 @@ const MILESTONES = { '3m': 91, '6m': 182, '12m': 365 };
 
 export function registerOperations(ctx) {
   const {
-    db, byId, nextId, persist, persistNow, notify, ledgerAppend, broadcast, findPlayer,
+    byId, nextId, notify, ledgerAppend, broadcast, findPlayer,
     orgRouter, playerRouter, guardianRouter, adminRouter,
     guardianOwnsChild, orgCanSee, moderateOrRefuse,
     storage, sessionFor, isBlocked, DATA_DIR, players, users, unit, signingsFollowUps, recruitment,
@@ -299,7 +299,6 @@ export function registerOperations(ctx) {
     // F12A: abandoned upload sessions cleaned after 24 h (domains/media/uploads.mjs).
     if (ctx.sweepUploads(now)) changed = true;
 
-    if (changed) persistNow();
   }
 
   // T&S ops tools: run the scheduler now, and adjust a follow-up's due date

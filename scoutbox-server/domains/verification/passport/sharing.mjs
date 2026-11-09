@@ -19,7 +19,7 @@ const DAYS = PASSPORT_LIMITS.shareDays;
 export function registerPassportSharing(ctx) {
   const {
     app, playerRouter, guardianRouter, orgRouter, adminRouter,
-    nextId, persistNow, notify, ledgerAppend, findPlayer, isBlocked, vmetric,
+    nextId, notify, ledgerAppend, findPlayer, isBlocked, vmetric,
     buildFootballPassport, passport, unit,
   } = ctx;
   const shares = ctx.verificationReads.shares; // S10b: the share links are read through SQL
@@ -48,7 +48,6 @@ export function registerPassportSharing(ctx) {
       return created;
     });
     vmetric('share_created');
-    persistNow();
     // The secret exists ONLY in this response — QR codes should encode
     // exactly this URL and nothing else.
     return res.status(201).json({
@@ -91,7 +90,6 @@ export function registerPassportSharing(ctx) {
       return r;
     });
     vmetric('share_revoked');
-    persistNow();
     res.json({ share: shareView(revoked), note: 'Revocation is immediate — the next request with this link fails.' });
   }
   playerRouter.post('/football-passport/shares/:id/revoke', (req, res) => {

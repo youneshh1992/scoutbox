@@ -188,7 +188,7 @@ test('snapshot mode: load exposes hashed rows, save writes them back unchanged, 
   const dir = tempDir('s2-snap');
   let { store, layer } = bootWith(dir, { orgs: [ORG_A], guardians: [], players: [], sessions: [], users: [{ id: 'usr-1', orgId: 'org-a', name: 'Staff', role: 'Scout', createdAt: 1 }] });
   const a = layer.sessions.create('player', 'pl-1'), b = layer.sessions.create('org', 'org-a', { userId: 'usr-1' });
-  store.save(); store.sqlite.close();
+  store.sqlite.close();
   const tool = openStore(dir);
   const snap = tool.load();
   assert.equal(snap.db.sessions.length, 2);
@@ -214,7 +214,7 @@ test('snapshot mode: an invalid or conflicting session row rejects the whole sav
   const dir = tempDir('s2-snap-reject');
   let { store, layer } = bootWith(dir, { orgs: [ORG_A], guardians: [], players: [PLAYER_1('Original')], sessions: [], users: [{ id: 'usr-1', orgId: 'org-a', name: 'A', role: 'Scout', createdAt: 1 }, { id: 'usr-2', orgId: 'org-a', name: 'B', role: 'Scout', createdAt: 1 }] });
   const a = layer.sessions.create('player', 'pl-1'), b = layer.sessions.create('org', 'org-a', { userId: 'usr-2' });
-  store.save(); store.sqlite.close();
+  store.sqlite.close();
   const tool = openStore(dir);
   const before = tool.load();
   const beforeDump = dump(tool.sqlite);
@@ -267,7 +267,7 @@ test('snapshot mode: writing the users collection back does not cascade-delete v
   const db = { orgs: [ORG_A], guardians: [], players: [], sessions: [], users: [{ id: 'usr-1', orgId: 'org-a', name: 'A', role: 'Scout', createdAt: 1 }, { id: 'usr-2', orgId: 'org-a', name: 'B', role: 'Scout', createdAt: 1 }] };
   let { store, layer } = bootWith(dir, db);
   const s1 = layer.sessions.create('org', 'org-a', { userId: 'usr-1' }), s2 = layer.sessions.create('org', 'org-a', { userId: 'usr-2' });
-  store.save(); store.sqlite.close();
+  store.sqlite.close();
   // A tool writes a snapshot that carries users but no sessions key at all.
   const tool = openStore(dir);
   tool.save({ idCounter: 1000, db: { orgs: [ORG_A], players: [], guardians: [], users: [...db.users].map((u) => ({ ...u })) } });
@@ -288,7 +288,6 @@ await atest('busy timeout: a unit of work waits for a concurrent writer in anoth
   const store = openStore(dir, { tableBacked: TABLE_BACKED });
   const db = {};
   const layer = attachDataLayer({ db, seed: { orgs: [ORG_A] }, store, nextId, persist: () => {}, sessionTtlMs: TTL });
-  store.save();
   const holdMs = 1200;
   const holder = spawnChild(process.execPath, ['--input-type=module', '-e', `
     import { DatabaseSync } from 'node:sqlite';
@@ -512,7 +511,7 @@ test('snapshot mode: a table-backed collection that is not an array is refused w
   const dir = tempDir('s2-shape');
   let { store, layer } = bootWith(dir, { orgs: [ORG_A], guardians: [], players: [PLAYER_1('Original')], sessions: [], users: [{ id: 'usr-1', orgId: 'org-a', name: 'A', role: 'Scout', createdAt: 1 }] });
   const a = layer.sessions.create('player', 'pl-1');
-  store.save(); store.sqlite.close();
+  store.sqlite.close();
   const tool = openStore(dir);
   const before = tool.load();
   const beforeDump = dump(tool.sqlite);

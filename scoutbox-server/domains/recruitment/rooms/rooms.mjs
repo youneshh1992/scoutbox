@@ -37,7 +37,7 @@ import { readPage, sendPageError } from '../../platform/paging.mjs';
 import { isAbsent, parseStrictDateOnly } from '../../../temporal.mjs';
 export function registerRooms(ctx) {
   const {
-    db, byId, users, orgRouter, adminRouter, nextId, persistNow, notify, ledgerAppend, broadcast,
+    byId, users, orgRouter, adminRouter, nextId, notify, ledgerAppend, broadcast,
     findPlayer, moderateOrRefuse, playerViewForOrg, orgCanSee, isLead, audit, vmetric,
     faults = null,
     recruitmentCases, unit, dueAtOrRefuse, // S8b: every case and room write is an explicit repository operation, inside `unit` when it touches more than one row
@@ -603,7 +603,6 @@ export function registerRooms(ctx) {
     const { room, adopted } = unit(() => openRoom({ req, player: p, sourceContext: normaliseSourceContext(sourceContext), sourceRef: null, priority: ROOM_PRIORITIES.includes(priority) ? priority : 'normal', restricted: !!restricted, vacancyId: vacancyId ?? null, withSourceRef: false }));
     vmetric('recruitment_room_created');
     ledgerAppend?.({ type: 'recruitment_room_created', playerId: p.id, orgId: req.org.id, orgName: req.org.name, userId: req.orgUser.id, scoutName: req.orgUser.name });
-    persistNow();
     res.status(201).json({ room: buildRecruitmentRoom(room, req), adoptedExistingCase: adopted });
   });
 
@@ -674,7 +673,6 @@ export function registerRooms(ctx) {
       d.room.updatedAt = now();
       if (workflowFields) bumpRev(d.room, { by: req.orgUser, at: d.room.updatedAt });
     });
-    persistNow();
     res.json({ room: buildRecruitmentRoom(fresh, req) });
   });
 
@@ -770,7 +768,6 @@ export function registerRooms(ctx) {
         notify({ kind: 'org_user', id: u.id }, 'recruitment_room', `Recruitment Room — ${fresh.playerName ?? 'a removed player'}: ${ROOM_STATUS_LABELS[to]}.`, fresh.id);
       }
     }
-    persistNow();
     res.json({ room: buildRecruitmentRoom(fresh, req), snapshot });
   });
 
@@ -824,7 +821,6 @@ export function registerRooms(ctx) {
     });
     vmetric('recruitment_room_reopened');
     broadcast?.('recruitment_case_moved', { orgId: room.orgId, roomId: room.id, from, to });
-    persistNow();
     return { ok: true, room: buildRecruitmentRoom(fresh, req), from, to };
   };
   ctx.findRoomForRequest = findRoom;
@@ -899,7 +895,6 @@ export function registerRooms(ctx) {
     const { room } = unit(() => openRoom({ req, player, sourceContext: normaliseSourceContext(sourceContext), sourceRef }));
     vmetric('recruitment_room_created');
     ledgerAppend?.({ type: 'recruitment_room_created', playerId: player.id, orgId: req.org.id, orgName: req.org.name, userId: req.orgUser.id, scoutName: req.orgUser.name });
-    persistNow();
     return { ok: true, roomId: room.id, existed: false, room: buildRecruitmentRoom(room, req) };
   };
 
@@ -1005,7 +1000,6 @@ export function registerRooms(ctx) {
       if (uid === req.orgUser.id) continue;
       notify({ kind: 'org_user', id: uid }, 'recruitment_room', `${req.orgUser.name} mentioned you in the Recruitment Room for ${room.playerName ?? 'a removed player'}.`, room.id);
     }
-    persistNow();
     res.status(201).json({ comment: commentView(saved, { orgId: req.org.id }) });
   });
 
@@ -1024,7 +1018,6 @@ export function registerRooms(ctx) {
       touch(room, (d) => activity(d, req, 'room_comment_edited', { commentId: c.id }));
       return row;
     });
-    persistNow();
     res.json({ comment: commentView(saved, { orgId: req.org.id }) });
   });
 
@@ -1042,7 +1035,6 @@ export function registerRooms(ctx) {
       touch(room, (d) => activity(d, req, 'room_comment_deleted', { commentId: c.id }));
       return row;
     });
-    persistNow();
     res.json({ comment: commentView(saved, { orgId: req.org.id }) });
   });
 
@@ -1087,7 +1079,6 @@ export function registerRooms(ctx) {
     if (assignee && assignee.id !== req.orgUser.id) {
       notify({ kind: 'org_user', id: assignee.id }, 'recruitment_room', `${req.orgUser.name} assigned you a task in the Recruitment Room for ${room.playerName ?? 'a removed player'}: ${title}`, room.id);
     }
-    persistNow();
     res.status(201).json({ task: taskView(t) });
   });
 
@@ -1124,7 +1115,6 @@ export function registerRooms(ctx) {
       d.room.updatedAt = now();
       activity(d, req, 'room_task_updated', { taskId: t.id, status: task.status });
     });
-    persistNow();
     res.json({ task: taskView(fresh.tasks.find((x) => x.id === t.id)) });
   });
 
@@ -1201,7 +1191,6 @@ export function registerRooms(ctx) {
       const after = touch(room, (c) => { c.room.updatedAt = now(); bumpRev(c.room, { by: req.orgUser, at: c.room.updatedAt }); });
       return { snapshot: snap, d: row, fresh: after };
     });
-    persistNow();
     res.status(201).json({ decision: decisionView(d), snapshot, rev: fresh.room.rev });
   });
 
@@ -1241,7 +1230,6 @@ export function registerRooms(ctx) {
       touch(room, (d) => { activity(d, req, 'room_evidence_reviewed', { evidenceId: evidence.id, state }); d.room.updatedAt = now(); });
       return saved;
     });
-    persistNow();
     res.json({ review: { evidenceId: evidence.id, state: row.state, note: row.note, by: row.byName, at: row.at }, note: 'Internal review state only — the evidence record itself is unchanged.' });
   });
 
@@ -1265,7 +1253,6 @@ export function registerRooms(ctx) {
     });
     vmetric('room_assessment_assigned');
     if (u.id !== req.orgUser.id) notify({ kind: 'org_user', id: u.id }, 'recruitment_room', `${req.orgUser.name} assigned you a ${kind.toLowerCase()} assessment for ${room.playerName ?? 'a removed player'}.`, room.id);
-    persistNow();
     res.status(201).json({ assignment: a });
   });
 
@@ -1290,7 +1277,6 @@ export function registerRooms(ctx) {
     });
     if (!out.ok) return res.status(out.status).json({ error: out.error, ...(out.message ? { message: out.message } : {}), ...(out.detail ?? {}) });
     vmetric('room_evidence_requested');
-    persistNow();
     res.status(201).json({ suggestion: out.suggestion, routedTo: out.routedTo, note: 'Routed through the standing evidence-request rules, including guardian routing for under-18s.' });
   });
 
@@ -1330,7 +1316,6 @@ export function registerRooms(ctx) {
     });
     if (!out.created.length) return res.status(409).json({ error: 'NOT_VISIBLE', skipped: out.skipped });
     vmetric('room_combine_requested');
-    persistNow();
     res.status(201).json({ request: ctx.combineRequestView?.(out.created[0]) ?? out.created[0] });
   });
 
@@ -1364,7 +1349,6 @@ export function registerRooms(ctx) {
       d.room.updatedAt = now();
     });
     if (t) vmetric('room_trial_requested');
-    persistNow();
     res.json({ links: fresh.links });
   });
 

@@ -49,7 +49,7 @@ export function lookupCredential({ providerId, identifier, holderName }) {
 
 export function registerVerificationReview(ctx) {
   const {
-    db, byId, users, orgs, orgRouter, adminRouter, nextId, persist, persistNow, notify,
+    byId, users, orgs, orgRouter, adminRouter, nextId, notify,
     verification, reads, unit, verEvent, createClaim, transition, addEvidence, storeEvidenceFile,
     effectiveStatus, vmetric, requireVer, hasVerLevel,
   } = ctx;
@@ -136,7 +136,6 @@ export function registerVerificationReview(ctx) {
       }
       return created;
     });
-    persistNow();
     res.status(201).json({
       claim: { id: claim.id, status: claim.status, display: claim.metadata.display },
       note: 'An uploaded credential is a document, not a verified licence. Submit it to run the registry check (where a register is configured) or route it to review.',
@@ -164,7 +163,6 @@ export function registerVerificationReview(ctx) {
       const registry = { provider: providerId, state: lookup.state, checkedAt: Date.now() };
       const routed = transition(claim, 'requires_human_review', { actorKind: 'system', reason: 'no authoritative register available' }, req, (d) => { d.metadata.registry = registry; addReasons('NO_AUTHORITATIVE_SOURCE', 'DOCUMENT_AUTHENTICITY_UNCONFIRMED')(d); });
       vmetric('routedToHumanReview');
-      persistNow();
       return res.json({
         claim: view(),
         provider: { id: providerId, state: lookup.state },
@@ -184,7 +182,6 @@ export function registerVerificationReview(ctx) {
         const registry = { provider: providerId, result: 'unreadable_record', checkedAt: Date.now(), reference: rec.identifier };
         transition(claim, 'requires_human_review', { actorKind: 'system', reason: 'registry record carried an unreadable expiry' }, req, (d) => { d.metadata.registry = registry; addReasons('REGISTRY_RECORD_UNREADABLE')(d); });
         vmetric('routedToHumanReview');
-        persistNow();
         return res.json({ claim: view(), provider: { id: providerId, result: 'unreadable_record' }, note: 'The register matched but its expiry date could not be read. Nothing is verified from a record that cannot be dated; a reviewer decides.' });
       }
       const err = allOrNothing(() => {
@@ -201,20 +198,17 @@ export function registerVerificationReview(ctx) {
         }) ?? transition(claim, 'verified', { actorKind: 'system', method: 'authoritative_registry', eventType: 'claim.verified' }, req);
       });
       if (err) return res.status(409).json({ error: err });
-      persistNow();
       return res.json({ claim: view(), provider: { id: providerId, result: 'match' } });
     }
     if (lookup.result === 'ambiguous') {
       transition(claim, 'requires_human_review', { actorKind: 'system', reason: 'registry returned an ambiguous match' }, req, addReasons('REGISTRY_AMBIGUOUS_MATCH'));
       vmetric('routedToHumanReview');
-      persistNow();
       return res.json({ claim: view(), provider: { id: providerId, result: 'ambiguous' }, note: 'The register returned more than one plausible record — a human resolves ambiguity, never a guess.' });
     }
     // no_match: absence of a record VERIFIES NOTHING and PROVES NOTHING.
     const registry = { provider: providerId, result: 'no_match', checkedAt: Date.now() };
     transition(claim, 'requires_human_review', { actorKind: 'system', reason: 'registry found no matching record' }, req, (d) => { d.metadata.registry = registry; addReasons('DOCUMENT_AUTHENTICITY_UNCONFIRMED')(d); });
     vmetric('routedToHumanReview');
-    persistNow();
     res.json({ claim: view(), provider: { id: providerId, result: 'no_match' }, note: 'No register record matched. The credential stays unverified; a reviewer can examine the evidence.' });
   });
 
@@ -331,7 +325,6 @@ export function registerVerificationReview(ctx) {
     });
     if (err) return res.status(409).json({ error: err });
     if (c.subjectType === 'user') notify({ kind: 'org_user', id: c.subjectId }, 'verification', `Trust & Safety approved your ${c.claimType.replace(/_/g, ' ').toLowerCase()} verification. ✓`, c.id);
-    persistNow();
     res.json({ claim: claimById(c.id) });
   });
 
@@ -348,7 +341,6 @@ export function registerVerificationReview(ctx) {
     });
     if (err) return res.status(409).json({ error: err });
     if (c.subjectType === 'user') notify({ kind: 'org_user', id: c.subjectId }, 'verification', `Trust & Safety declined a verification request: ${String(req.body.reason).slice(0, 140)}`, c.id);
-    persistNow();
     res.json({ claim: claimById(c.id) });
   });
 
@@ -359,7 +351,6 @@ export function registerVerificationReview(ctx) {
     const err = adminTransition(c, 'collecting_evidence', req, { reason: reasonText(req) });
     if (err) return res.status(409).json({ error: err });
     if (c.subjectType === 'user') notify({ kind: 'org_user', id: c.subjectId }, 'verification', `Trust & Safety needs more evidence: ${String(req.body.reason).slice(0, 140)}`, c.id);
-    persistNow();
     res.json({ claim: claimById(c.id) });
   });
 
@@ -371,7 +362,6 @@ export function registerVerificationReview(ctx) {
       const err = adminTransition(c, target, req, { reason: reasonText(req), eventType: `claim.${target}` });
       if (err) return res.status(409).json({ error: err });
       if (c.subjectType === 'user') notify({ kind: 'org_user', id: c.subjectId }, 'verification', `A verification claim was ${target} by Trust & Safety: ${String(req.body.reason).slice(0, 140)}. You can dispute this.`, c.id);
-      persistNow();
       res.json({ claim: claimById(c.id), note: 'Effective badges change immediately; the historical audit trail is preserved.' });
     });
   }
@@ -383,7 +373,6 @@ export function registerVerificationReview(ctx) {
     if (!['suspended', 'revoked', 'disputed'].includes(c.status)) return res.status(409).json({ error: 'NOT_REINSTATABLE' });
     const err = adminTransition(c, 'verified', req, { method: c.verificationMethod, reason: reasonText(req), eventType: 'claim.reinstated' });
     if (err) return res.status(409).json({ error: err });
-    persistNow();
     res.json({ claim: claimById(c.id) });
   });
 
@@ -496,7 +485,6 @@ export function registerVerificationReview(ctx) {
       ctx.ledgerAppend?.({ type: 'verification_root_approved', orgId: org.id, playerId: null, detail: { request: r.id } });
       return { approved: decided };
     });
-    persistNow();
     res.json({
       request: { ...approved, applicantSecretHash: undefined }, orgId: org.id, rootAdminUserId: user.id, identityLink,
       note: 'The organisation is verified and its first root administrator is established. Staff verification is now self-service through the club. Sign-in credentials are provisioned separately (POST /admin/clubs/:id/credentials).',
@@ -514,7 +502,6 @@ export function registerVerificationReview(ctx) {
       verEvent('review.rejected', { after: { rootRequest: r.id }, reason: next.decisionReason, actorKind: 'trust_safety', actorId: rev.id, actorName: rev.name, attribution: rev.attribution }, req);
       return next;
     });
-    persistNow();
     res.json({ request: { ...rejected, applicantSecretHash: undefined } });
   });
 
@@ -539,7 +526,6 @@ export function registerVerificationReview(ctx) {
       });
     });
     notify({ kind: 'org_user', id: user.id }, 'verification', `Trust & Safety appointed you root verification administrator for ${org.name}.`, org.id);
-    persistNow();
     res.status(201).json({ orgId: org.id, rootAdminUserId: user.id });
   });
 
@@ -572,7 +558,6 @@ export function registerVerificationReview(ctx) {
         d.decidedAt = Date.now(); d.decidedBy = rev.name; d.decidedById = rev.id;
       });
     });
-    persistNow();
     res.json({ request: decided });
   });
 
@@ -627,7 +612,6 @@ export function registerVerificationReview(ctx) {
     }); } catch (e) { if (e.resolveError) { refusedWith = e.resolveError; return null; } throw e; } })();
     if (refusedWith) return res.status(409).json({ error: refusedWith });
     if (resolved.byKind === 'org_user') notify({ kind: 'org_user', id: resolved.byId }, 'verification', `Your verification dispute was resolved: ${resolved.resolution.slice(0, 140)}`, resolved.claimId);
-    persistNow();
     res.json({ dispute: resolved, claim: c ? claimById(c.id) : null });
   });
 
@@ -655,7 +639,6 @@ export function registerVerificationReview(ctx) {
         }
       }
     });
-    persistNow();
     res.json({ affected: affected.length, flagged, suspended });
   });
 
@@ -672,7 +655,6 @@ export function registerVerificationReview(ctx) {
       }
       verEvent('claim.revoked', { orgId: org.id, reason: reasonText(req), actorKind: 'trust_safety', after: { organisation: 'revoked' } });
     });
-    persistNow();
     res.json({ orgId: org.id, status: ctx.orgVerificationStatus(orgOf(org.id)), note: 'Staff claims verified through this organisation stop displaying (engine re-checks at read time); their audit history is preserved.' });
   });
 
@@ -719,7 +701,6 @@ export function registerVerificationReview(ctx) {
       });
       changed++;
     }
-    if (changed) persist();
     return changed;
   };
 }

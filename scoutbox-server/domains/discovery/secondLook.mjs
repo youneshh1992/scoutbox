@@ -2,7 +2,7 @@
 //
 // The engine in shared.mjs decides WHAT counts as a material change and
 // whether it relates to the reason a club gave. This file's only jobs are to
-// gather the raw facts from canonical stores, persist the workflow state a
+// gather the raw facts from canonical stores the workflow state a
 // recruiter creates, and serve it back — organisation-private, on the existing
 // authenticated router, never to a player.
 //

@@ -51,7 +51,7 @@ export function computeScenarioTotals(scenario) {
 
 export function registerBudgets(ctx) {
   const {
-    orgRouter, nextId, persistNow, histAppend, isLead, requireLead, canViewFinance,
+    orgRouter, nextId, histAppend, isLead, requireLead, canViewFinance,
     validAmountMinor, CURRENCIES,
     recruitmentCases, // S8b: a budget change is one explicit write of its case (cases.update)
   } = ctx;
@@ -115,7 +115,6 @@ export function registerBudgets(ctx) {
       d.budget.scenarios.push(s);
       histAppend(d, 'org_user', req.orgUser.id, req.orgUser.name, 'budget_scenario_created', { scenarioId: s.id });
     });
-    persistNow();
     res.status(201).json({ scenario: s, totals: computeScenarioTotals(s), honest: 'All figures are user-entered. ScoutBox never invents market values, resale projections or “expected returns”, and a scenario is planning support — not legal or financial approval.' });
   });
 
@@ -147,7 +146,6 @@ export function registerBudgets(ctx) {
       histAppend(d, 'org_user', req.orgUser.id, req.orgUser.name, 'budget_scenario_edited', { scenarioId: s.id, version: s.version });
     });
     const s = fresh.budget.scenarios.find((x) => x.id === req.params.sid);
-    persistNow();
     res.json({ scenario: s, totals: computeScenarioTotals(s) });
   });
 
@@ -161,7 +159,6 @@ export function registerBudgets(ctx) {
       histAppend(d, 'org_user', req.orgUser.id, req.orgUser.name, 'budget_scenario_approved', { scenarioId: sc.id, version: sc.version });
     });
     const s = fresh.budget.scenarios.find((x) => x.id === req.params.sid);
-    persistNow();
     res.json({ scenario: s, note: 'Internal planning approval by a named lead for THIS version. It is not legal, regulatory or financial-services approval.' });
   });
 
@@ -175,7 +172,6 @@ export function registerBudgets(ctx) {
     const fresh = cases.update(c.id, (d) => {
       d.budget.scenarios.find((x) => x.id === s.id).actuals.push({ id: nextId('act'), lineId, amountMinor, at: Date.now(), recordedBy: req.orgUser.name });
     });
-    persistNow();
     res.json({ actuals: fresh.budget.scenarios.find((x) => x.id === s.id).actuals });
   });
 }

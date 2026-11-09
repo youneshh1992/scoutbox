@@ -93,7 +93,7 @@ function signingSupports(signing, kase, packages = null) {
  * creates, mutates or caches, so asking the same question twice cannot change
  * the answer.
  */
-export function createEvidenceProvider(db, reads = {}) {
+export function createEvidenceProvider(reads = {}) {
   return {
     /**
      * @returns {{satisfied: boolean, reason?: string, sourceType?: string, sourceId?: string}}

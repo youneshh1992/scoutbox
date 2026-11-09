@@ -27,8 +27,8 @@ const BOX_DRILLS_BY_ID = new Map(BOX_DRILLS.map((d) => [d.id, d]));
 
 export function registerPassportCore(ctx) {
   const {
-    db, byId, playerRouter, guardianRouter, orgRouter, adminRouter,
-    nextId, persist, persistNow, notify, ledgerAppend, findPlayer, isBlocked,
+    byId, playerRouter, guardianRouter, orgRouter, adminRouter,
+    nextId, notify, ledgerAppend, findPlayer, isBlocked,
     moderateOrRefuse, vmetric, passport, unit,
   } = ctx;
   const vreads = ctx.verificationReads;
@@ -422,7 +422,6 @@ export function registerPassportCore(ctx) {
       }
       return p;
     });
-    persistNow();
     return saved;
   }
 
@@ -454,7 +453,6 @@ export function registerPassportCore(ctx) {
       id: nextId('pcar'), playerId: player.id, orgName, role, from, to, note,
       submittedBy, createdAt: Date.now(), withdrawnAt: null,
     });
-    persistNow();
     return e;
   }
   playerRouter.post('/football-passport/career', (req, res) => {
@@ -472,7 +470,6 @@ export function registerPassportCore(ctx) {
     const found = vreads.careerEntries.byId(req.params.id);
     if (!found || found.playerId !== req.player.id) return res.status(404).json({ error: 'ENTRY_NOT_FOUND' });
     const e = passport.careerEntries.update(found.id, (d) => { d.withdrawnAt = Date.now(); });
-    persistNow();
     res.json({ entry: entryView(e), note: 'Self-submitted entries can be withdrawn; confirmed records cannot (request a correction instead).' });
   });
 
@@ -497,7 +494,6 @@ export function registerPassportCore(ctx) {
     const a = passport.achievements.create({
       id: nextId('pach'), playerId: player.id, title, orgName, when, submittedBy, confirmation: null, createdAt: Date.now(), withdrawnAt: null,
     });
-    persistNow();
     res.status(201).json({ achievement: achievementRecordView(a), provenance: submittedBy === 'guardian' ? 'guardian_submitted' : 'player_submitted' });
   }
   playerRouter.post('/football-passport/achievements/:id/withdraw', (req, res) => {
@@ -505,7 +501,6 @@ export function registerPassportCore(ctx) {
     if (!a || a.playerId !== req.player.id) return res.status(404).json({ error: 'ACHIEVEMENT_NOT_FOUND' });
     if (a.confirmation) return res.status(403).json({ error: 'CONFIRMED_RECORD', message: 'A confirmed achievement is part of the record — request a correction instead of deleting it.' });
     const done = passport.achievements.update(a.id, (d) => { d.withdrawnAt = Date.now(); });
-    persistNow();
     res.json({ achievement: achievementRecordView(done) });
   });
   // Club confirmation upgrades provenance WITHOUT rewriting the original.
@@ -526,7 +521,6 @@ export function registerPassportCore(ctx) {
       return c;
     });
     vmetric('achievement_confirmed');
-    persistNow();
     res.json({ achievement: achievementRecordView(done) });
   });
 
@@ -545,7 +539,6 @@ export function registerPassportCore(ctx) {
       by: { ...by, name: by.name ? String(by.name).slice(0, L.name) : null }, status: 'open', resolution: null, createdAt: Date.now(),
     });
     vmetric('correction_filed');
-    persistNow();
     res.status(201).json({ correction: correctionView(c), note: 'Authoritative records are never silently edited — Trust & Safety reviews correction requests, and verification claims can additionally be disputed through the existing verification flow.' });
   }
   playerRouter.post('/football-passport/corrections', (req, res) => fileCorrection(res, req.player, req.body ?? {}, { kind: 'player', id: req.player.id, name: req.player.name }));
@@ -581,7 +574,6 @@ export function registerPassportCore(ctx) {
       notify(target, 'passport', `Trust & Safety resolved your Passport correction request: ${resolution}.`, c.id);
       return r;
     });
-    persistNow();
     res.json({ correction: correctionView(done) });
   });
 

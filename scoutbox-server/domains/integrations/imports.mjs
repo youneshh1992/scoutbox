@@ -44,7 +44,7 @@ export function parseCsv(text) {
 
 export function registerImports(ctx) {
   const {
-    db, byId, orgRouter, adminRouter, app, nextId, persistNow,
+    byId, orgRouter, adminRouter, app, nextId,
     requireLead, orgCanSee, webhookUrlProblem,
     signBody, findPlayer, players, unit, safetyAudit, integrations,
   } = ctx;
@@ -461,7 +461,6 @@ export function registerImports(ctx) {
       inFlight.add(d.id);
       try { staged = (await deliverOne(d)) || staged; } finally { inFlight.delete(d.id); }
     }
-    if (staged) persistNow();
     return due.length;
   }
   ctx.webhookSweep = webhookSweep;

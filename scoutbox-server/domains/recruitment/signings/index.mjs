@@ -33,7 +33,7 @@
  * repository (`sp` = signingPackages: insert / patch / patchRevision / addRevision / setDocument / setParty / addKey /
  * addHistory / redactPlayer; `signings.record`) that writes its rows at once inside the route's unit of work and
  * returns the fresh record, which the route then uses; an in-place edit of a record throws. Nothing is fingerprinted at
- * save time; `persistNow()` only carries the blobs the route touched beside the rows (the case audit is an explicit S8b write in the same unit).
+ * save time (the case audit is an explicit S8b write in the same unit).
  */
 
 import { PLANS } from '../../../catalogue.mjs';
@@ -64,7 +64,7 @@ const TEST_CLOCK = process.env.SCOUTBOX_TEST_CLOCK === '1';
 export function registerSigning(rawCtx) {
   const ctx = { ...rawCtx, ...buildShared(rawCtx) };
   const {
-    db, orgRouter, playerRouter, guardianRouter, adminRouter, nextId, persistNow, notify, broadcast, findPlayer, isBlocked,
+    orgRouter, playerRouter, guardianRouter, adminRouter, nextId, notify, broadcast, findPlayer, isBlocked,
     rateLimit, isLead, audit, orgCanSee, storage, ledgerAppend, billing = null, refreshJourneyBadges = null, isAdult = null,
     agent = null, integration = null, evidence = null, faults = null,
     // S4a: the player's level / contractStatus / availability are columns written through the identity repository;

@@ -203,11 +203,11 @@ await test('[compat] a REAL adult account deletion retains every audit row that 
   for (const n of COLLECTIONS) assert.equal(JSON.stringify(after[n]), JSON.stringify(before[n]), `${n}: every row exactly as before the deletion (the id now resolves to nothing)`);
   assert.equal((await S.j('GET', `/org/players/${pid}`, undefined, maria)).status, 404);
   assert.ok((await adminReports(S)).some((r) => r.targetPlayerId === pid), 'the admin still lists the report about the deleted person');
-  // An unchanged save succeeds (the backup flushes) and the backup carries the rows.
+  // The backup carries the rows.
   const bk = await S.j('POST', '/admin/backup', {}, null, A); assert.equal(bk.status, 201, `an unchanged save after the deletion succeeds: ${bk.text}`);
   for (const n of COLLECTIONS) assert.equal(JSON.stringify(stored(bk.body.dir, n)), JSON.stringify(after[n]), `the backup's ${n} equals the stored rows`);
   const unknown = await S.j('POST', '/org/report', { targetKind: 'player', targetPlayerId: 'pl-never-existed', reason: 'Synthetic report naming an unknown player.' }, maria); assert.equal(unknown.status, 201, 'a report naming an unknown player stays accepted');
-  const logIdle = S.log().length; await sleep(2600); assert.doesNotMatch(S.log().slice(logIdle), /save failed/, 'the debounced save after the report did not fail'); assert.ok(stored(dir, 'reports').some((r) => r.targetPlayerId === 'pl-never-existed'), 'and landed');
+  assert.ok(stored(dir, 'reports').some((r) => r.targetPlayerId === 'pl-never-existed'), 'and is committed at the response');
   await S.stop();
   // A restore into a new directory.
   const restored = tempDir('s6b-restored'); fs.cpSync(bk.body.dir, restored, { recursive: true });

@@ -177,6 +177,8 @@ export function arrayReads(db) {
   if (Array.isArray(db?.roomEvidenceState)) out.evidenceStates = roomRowQueries(db.roomEvidenceState);
   if (Array.isArray(db?.evidence)) out.evidence = evidenceQueries(db.evidence);
   if (Array.isArray(db?.assessments)) out.assessments = assessmentQueries(db.assessments);
+  if (Array.isArray(db?.players)) out.player = (id) => db.players.find((x) => x?.id === id) ?? null;
+  if (Array.isArray(db?.blocks)) out.blocks = { has: (playerId, orgId) => db.blocks.some((b) => b && b.playerId === playerId && b.orgId === orgId) };
   if (Array.isArray(db?.boxSessions) || Array.isArray(db?.combineAttempts)) out.boxCam = boxCamQueries(db.boxSessions ?? [], db.combineAttempts ?? []);
   return out;
 }
@@ -201,10 +203,10 @@ function boxCamQueries(sessions, attempts) {
 }
 
 /** `buildRecruitmentJourney` over a plain database: `opts.reads` defaults to the database's own arrays. */
-export const buildRecruitmentJourney = (db, caseId, viewer, opts = {}) => journey(db, caseId, viewer, { reads: arrayReads(db), ...opts });
+export const buildRecruitmentJourney = (db, caseId, viewer, opts = {}) => journey(caseId, viewer, { reads: arrayReads(db), ...opts });
 
 /** `createEvidenceProvider` over a plain database: `reads` defaults to the database's own arrays. */
-export const createEvidenceProvider = (db, reads = arrayReads(db)) => provider(db, reads);
+export const createEvidenceProvider = (db, reads = arrayReads(db)) => provider(reads);
 
 /** `buildReportingContext` over a plain database: `reads` defaults to the database's own arrays. */
 export const buildReportingContext = (args) => reportingContext({ reads: arrayReads(args?.db), ...args });

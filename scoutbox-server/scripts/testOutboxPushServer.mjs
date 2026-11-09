@@ -25,15 +25,13 @@ const SERVER = path.join(HERE, '..', 'server.mjs');
 const rm = (...dirs) => { for (const d of dirs) fs.rmSync(d, { recursive: true, force: true }); };
 const A = { 'x-admin-key': 'scoutbox-admin' };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-/** The staged repositories (organisations, notifications…) still save on a debounce; a shortened one keeps the suite quick. */
-const SAVE_MS = 300;
 const until = async (check, ms = 10_000, step = 40) => { const t0 = Date.now(); for (;;) { const v = await check(); if (v) return v; if (Date.now() - t0 > ms) return null; await sleep(step); } };
 const PLACEHOLDER = '[code withheld — delivered to the recipient only]';
 
 async function boot(dir, env = {}, server = SERVER) {
   const port = await freePort();
   return new Promise((resolve, reject) => {
-    const childEnv = { ...process.env, PORT: String(port), DATA_DIR: dir, M13_QUIET_LOGS: '1', M13_FAST_RETRY: '1', SCOUTBOX_SAVE_DEBOUNCE_MS: String(SAVE_MS), ...env };
+    const childEnv = { ...process.env, PORT: String(port), DATA_DIR: dir, M13_QUIET_LOGS: '1', M13_FAST_RETRY: '1', ...env };
     const proc = spawnChild(process.execPath, [server], { env: childEnv, stdio: ['ignore', 'pipe', 'pipe'] });
    
     let log = '';
@@ -48,8 +46,7 @@ async function boot(dir, env = {}, server = SERVER) {
       const text = await r.text(); let parsed = null; try { parsed = JSON.parse(text); } catch { /* no body */ }
       return { status: r.status, body: parsed, text };
     };
-    const saveMs = Number(childEnv.SCOUTBOX_SAVE_DEBOUNCE_MS) || 2000;
-    const S = { proc, port, dir, saveMs, log: () => log, j, raw, stop: () => new Promise((res) => { proc.on('exit', () => res()); proc.kill('SIGTERM'); }), kill: () => new Promise((res) => { proc.on('exit', () => res()); proc.kill('SIGKILL'); }) };
+    const S = { proc, port, dir, log: () => log, j, raw, stop: () => new Promise((res) => { proc.on('exit', () => res()); proc.kill('SIGTERM'); }), kill: () => new Promise((res) => { proc.on('exit', () => res()); proc.kill('SIGKILL'); }) };
     proc.stdout.on('data', (d) => { log += d; if (/listening on/.test(log)) resolve(S); });
     proc.stderr.on('data', (d) => { log += d; });
     proc.on('exit', (code, signal) => reject(Object.assign(new Error(`server exited ${code} (${signal}): ${log.slice(-1500)}`), { code, log })));

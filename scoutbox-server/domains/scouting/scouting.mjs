@@ -24,7 +24,7 @@ const REF_FIELDS = Object.freeze(['segmentId', 'trialSessionId', 'boxSessionId',
 const nonEmptyText = (v) => typeof v === 'string' && v.trim().length > 0;
 export function registerScouting(ctx) {
   const {
-    db, byId, players, scoutingReads, users, nextId, persistNow, notify, ledgerAppend, broadcast, findPlayer,
+    byId, players, scoutingReads, users, nextId, notify, ledgerAppend, broadcast, findPlayer,
     orgRouter, playerRouter, guardianRouter,
     orgCanSee, paginate, audit, isLead, requireLead, moderateOrRefuse, isAdult,
     playerViewForOrg, revokeOrgUserAccess, guardianOwnsChild,
@@ -79,7 +79,6 @@ export function registerScouting(ctx) {
       id: `tpl-${positionGroup.toLowerCase()}`, positionGroup, version: (prev?.version ?? 0) + 1,
       createdAt: Date.now(), createdBy: storedName(req.orgUser.name), attributes: attrs,
     });
-    persistNow();
     res.status(201).json({ template: t });
   });
 
@@ -219,7 +218,6 @@ export function registerScouting(ctx) {
     };
     audit(draft, 'org', req.orgUser.id, storedName(req.orgUser.name), 'created');
     const a = assessments.create(draft);
-    persistNow();
     res.status(201).json({ assessment: assessmentView(a) });
   });
 
@@ -310,7 +308,6 @@ export function registerScouting(ctx) {
       if (nextContext) d.context = nextContext;
       if (nextRecommendation) d.recommendation = nextRecommendation;
     });
-    persistNow();
     res.json({ assessment: assessmentView(next) });
   });
 
@@ -327,7 +324,6 @@ export function registerScouting(ctx) {
       ledgerAppend({ type: 'assessment_submitted', playerId: a.playerId, orgId: req.org.id, orgName: req.org.name, userId: req.orgUser.id, scoutName: req.orgUser.name });
       return done;
     });
-    persistNow();
     // M23 P8 — an open Room re-reads on this (org-private, ids only): a
     // colleague's submitted assessment changes the case's next action, and
     // nothing else told the Room. The subject is not named on the stream.
@@ -347,7 +343,6 @@ export function registerScouting(ctx) {
       d.reviewNote = note;
       audit(d, 'org', req.orgUser.id, storedName(req.orgUser.name), 'reviewed');
     });
-    persistNow();
     res.json({ assessment: assessmentView(next) });
   });
 
@@ -407,7 +402,6 @@ export function registerScouting(ctx) {
       }
       return done;
     });
-    persistNow();
     broadcast('feedback', { playerId: a.playerId });
     res.json({ published: next.publishedFeedback });
   });
@@ -460,7 +454,6 @@ export function registerScouting(ctx) {
       drawing: drawing ?? null, // simple overlay shapes, stored as data
       createdAt: Date.now(),
     });
-    persistNow();
     res.status(201).json({ segment: segmentView(seg) });
   });
 
@@ -488,7 +481,6 @@ export function registerScouting(ctx) {
     const name = (raw ?? '').trim();
     if (!name) return res.status(400).json({ error: 'NAME_REQUIRED' });
     const pl = playlists.create({ id: nextId('pls'), orgId: req.org.id, name: name.slice(0, A_LIMITS.playlistName), createdBy: { userId: req.orgUser.id, name: storedName(req.orgUser.name) }, segmentIds: [], createdAt: Date.now() });
-    persistNow();
     res.status(201).json({ playlist: pl });
   });
 
@@ -500,7 +492,6 @@ export function registerScouting(ctx) {
     const seg = segFound && segFound.orgId === req.org.id ? segFound : null;
     if (!seg) return res.status(404).json({ error: 'SEGMENT_NOT_FOUND' });
     const next = pl.segmentIds.includes(seg.id) ? pl : playlists.update(pl.id, (d) => { d.segmentIds.push(seg.id); });
-    persistNow();
     res.json({ playlist: next });
   });
 
@@ -551,7 +542,6 @@ export function registerScouting(ctx) {
     };
     audit(draft, 'org', req.orgUser.id, req.orgUser.name, 'created', draft.stage);
     const c = cases.create(draft);
-    persistNow();
     res.status(201).json({ case: caseView(c) });
   });
 
@@ -578,7 +568,6 @@ export function registerScouting(ctx) {
     const asg = { id: nextId('asg'), userId: u.id, name: u.name, task: String(req.body?.task ?? 'Scout this player').slice(0, 200), dueAt, status: 'open', createdAt: Date.now() };
     cases.update(c.id, (d) => { d.assignments.push(asg); audit(d, 'org', req.orgUser.id, req.orgUser.name, 'assigned', `${u.name}: ${asg.task}`); });
     notify({ kind: 'org_user', id: u.id }, 'case', `📌 ${req.orgUser.name} assigned you: ${asg.task} (${c.playerName}).`, c.id);
-    persistNow();
     res.status(201).json({ assignment: asg });
   });
 
@@ -594,7 +583,6 @@ export function registerScouting(ctx) {
     const t = { id: nextId('tsk'), title: String(req.body?.title ?? '').slice(0, 200), dueAt, assigneeUserId: assigneeRaw, status: 'open', createdAt: Date.now() };
     if (!t.title) return res.status(400).json({ error: 'TITLE_REQUIRED' });
     cases.update(c.id, (d) => { d.tasks.push(t); });
-    persistNow();
     res.status(201).json({ task: t });
   });
 
@@ -608,7 +596,6 @@ export function registerScouting(ctx) {
       t.completedAt = Date.now();
       t.completedBy = req.orgUser.name;
     });
-    persistNow();
     res.json({ task: fresh.tasks.find((x) => x.id === req.params.tid) });
   });
 
@@ -646,7 +633,6 @@ export function registerScouting(ctx) {
       audit(d, 'org', req.orgUser.id, req.orgUser.name, 'stage', `${d.stage} → ${stage}${reason ? `: ${reason}` : ''}`);
       d.stage = stage;
     });
-    persistNow();
     res.json({ case: caseView(fresh) });
   });
 
@@ -663,7 +649,6 @@ export function registerScouting(ctx) {
     if (needsApproval) {
       const appr = { id: nextId('apr'), decision: { outcome, reasons: String(reasons).slice(0, 500) }, requestedBy: { userId: req.orgUser.id, name: req.orgUser.name }, status: 'pending', requestedAt: Date.now(), resolvedBy: null };
       cases.update(c.id, (d) => { d.approvals.push(appr); audit(d, 'org', req.orgUser.id, req.orgUser.name, 'approval_requested', outcome); });
-      persistNow();
       return res.status(202).json({ approval: appr, note: 'A sign decision needs a recruitment lead’s approval.' });
     }
     const fresh = cases.update(c.id, (d) => {
@@ -674,7 +659,6 @@ export function registerScouting(ctx) {
       if (!d.room) d.stage = 'decision';
       audit(d, 'org', req.orgUser.id, req.orgUser.name, 'decision', outcome);
     });
-    persistNow();
     res.json({ case: caseView(fresh) });
   });
 
@@ -696,7 +680,6 @@ export function registerScouting(ctx) {
       audit(d, 'org', req.orgUser.id, req.orgUser.name, approve ? 'approved' : 'rejected', a.decision.outcome);
     });
     notify({ kind: 'org_user', id: appr.requestedBy.userId }, 'case', `${approve ? '✅ approved' : '❌ rejected'}: your ${appr.decision.outcome} decision on ${c.playerName}.`, c.id);
-    persistNow();
     res.json({ case: caseView(fresh) });
   });
 
@@ -717,7 +700,6 @@ export function registerScouting(ctx) {
       if (signingId) d.links.signingId = signingId;
       audit(d, 'org', req.orgUser.id, req.orgUser.name, 'linked', JSON.stringify({ requestId, trialId, signingId }));
     });
-    persistNow();
     res.json({ case: caseView(fresh) });
   });
 

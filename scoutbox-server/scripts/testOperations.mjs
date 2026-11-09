@@ -8,7 +8,7 @@
 // candidates are prefiltered by position, foot, country and availability and skip removed staff; an invoice is one per
 // signing, stored in minor units, and pages newest first; callback ids are remembered once and the oldest 1,000 go past
 // 5,000; injected failures are added and used up one at a time; the demo reputation rows are imported once with a first
-// installation's seed and never otherwise; a rolled-back unit leaves nothing; the db.* names throw; the snapshot write
+// installation's seed and never otherwise; a rolled-back unit leaves nothing; the snapshot write
 // types, names a missing reference and reads back what it wrote; and the plans the orgs table accepts are exactly the
 // catalogue's. Temporary databases only. Run with: npm test
 
@@ -218,7 +218,6 @@ test('[reputation] the demo rows are imported once with a first installation\'s 
   const fresh = tempDir('s13e-rep-fresh');
   const first = serverOpen(fresh, { orgs: [], users: [], reputationSeed: rows });
   assert.deepEqual(plain(first.repo.reputationSeed.all()), rows, 'a first installation imports its seed');
-  assert.throws(() => first.db.reputationSeed, /db\.reputationSeed is gone/);
   first.close();
   const again = serverOpen(fresh, { reputationSeed: [{ ...rows[0], scoutName: 'Someone Else' }] });
   assert.deepEqual(plain(again.repo.reputationSeed.all()), rows, 'a later boot never imports from memory');
@@ -229,7 +228,7 @@ test('[reputation] the demo rows are imported once with a first installation\'s 
 });
 
 // ------------------------------------------------------------- units
-test('[unit] a rolled-back unit leaves nothing, the reads cannot write, and the db.* names throw naming the repository', () => {
+test('[unit] a rolled-back unit leaves nothing, the reads cannot write', () => {
   const { dir, s } = seeded('s13e-unit');
   assert.throws(() => s.unit(() => { s.repo.savedSearches.create(search()); s.repo.invoices.issue(invoice()); s.repo.delivery.inject('email', 1); throw new Error('boom'); }), /boom/);
   assert.equal(s.repo.reads.savedSearches.byId('ss-1'), null);
@@ -238,7 +237,6 @@ test('[unit] a rolled-back unit leaves nothing, the reads cannot write, and the 
   for (const [ns, w] of [['uploads', 'open'], ['uploads', 'removeForPlayer'], ['savedSearches', 'create'], ['invoices', 'issue'], ['delivery', 'markSeen'], ['delivery', 'consumeInjectedFailure']]) {
     assert.equal(typeof s.repo.reads[ns][w], 'undefined', `the reads cannot ${ns}.${w}`);
   }
-  for (const n of [...COLLECTIONS, ...SINGLETONS]) assert.throws(() => s.db[n], new RegExp(`db\\.${n} is gone: read it through the operations repository`));
   s.close(); rm(dir);
 });
 

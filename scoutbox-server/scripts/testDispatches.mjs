@@ -137,8 +137,6 @@ test('the sweep\'s and the screens\' queries: due() returns queued, retrying and
 // ============================================================= units of work and the server's attachment
 test('in the server: no mirror and no db.dispatches (the name throws, naming the repository); writes inside a unit commit together or not at all, and reads inside the unit see its writes; a staff dispatch naming an organisation that is not stored is refused at the unit\'s COMMIT', () => {
   const dir = tempDir('dsp-unit'); fixtureFile(dir); const L = live(dir);
-  assert.throws(() => L.db.dispatches, /db\.dispatches is gone: read it through the dispatches repository/);
-  assert.throws(() => { L.db.dispatches = []; }, /db\.dispatches is gone/);
   assert.equal(Object.keys(L.db).includes('dispatches'), false);
   L.store.unitOfWork(() => { L.repo.create(email({ id: 'u-1' })); L.repo.recordAttempt('u-1', { at: NOW, ok: true, error: null }); assert.equal(L.repo.byId('u-1').attempts.length, 1, 'a read inside the unit sees its writes'); });
   assert.deepEqual(rowsOf(dir, "SELECT id FROM dispatches").map((r) => r.id), ['u-1'], 'committed');

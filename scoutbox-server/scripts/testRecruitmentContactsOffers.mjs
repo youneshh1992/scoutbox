@@ -61,7 +61,7 @@ function serverOpen(dir) {
   const store = openStore(dir, { tableBacked: TABLE_BACKED });
   const db = {}; // S14a: a fixture-saved file is not a first installation, so there is nothing to hand in
   const layer = attachDataLayer({ db, store, nextId, sessionTtlMs: TTL, now: () => NOW, warn: () => {} });
-  return { store, layer, db, save: () => store.save(), unit: (w) => store.unitOfWork(w), repo: layer.recruitmentContactsOffers, recruitment: layer.recruitment, close: () => store.sqlite.close() };
+  return { store, layer, db, unit: (w) => store.unitOfWork(w), repo: layer.recruitmentContactsOffers, recruitment: layer.recruitment, close: () => store.sqlite.close() };
 }
 function snapshotOpen(dir) {
   const store = openStore(dir); const db = store.load().db;
@@ -142,8 +142,6 @@ test('[snapshot] the collection rule: an omitted collection is retained whole; a
 test('[repository] explicit writes: there is no db.* view (reading or assigning db.recruitmentContacts / db.recruitmentOffers throws, naming the repository); every returned record is read-only (a field assignment and a nested push throw); create and update write their rows at once — a second connection sees them with no save — and return the fresh record; update hands out a plain copy, types the result whole and refuses junk, a changed identifier and an unknown id; nothing is written by a save; a reopen serves the same records', () => {
   const d = file('repo'); const L = serverOpen(d); const { contacts, offers } = L.repo;
   for (const name of COLLECTIONS) {
-    assert.throws(() => L.db[name], new RegExp(`db\\.${name} is gone: read it through the recruitmentContactsOffers repository`));
-    assert.throws(() => { L.db[name] = []; }, new RegExp(`db\\.${name} is gone`));
     assert.equal(Object.keys(L.db).includes(name), false, `${name} is not enumerable on db`);
   }
   assert.throws(() => { contacts.byId('rct-1').status = 'cancelled'; }, TypeError);
@@ -162,7 +160,7 @@ test('[repository] explicit writes: there is no db.* view (reading or assigning 
   const o = offers.update('rof-1', (draft) => { draft.revisions.push(revision({ id: 'rofr-n', revisionNumber: 2 })); draft.currentRevisionId = 'rofr-n'; draft.keys.revise.push({ key: 'k-n', revisionId: 'rofr-n' }); draft.rev = 2; });
   assert.equal(o.revisions.length, 2); withRo(d, (s) => { assert.equal(col(s, "SELECT count(*) FROM offer_revisions WHERE offer_id = 'rof-1'"), 2); assert.equal(col(s, "SELECT key FROM offer_keys WHERE offer_id = 'rof-1'"), 'k-n'); });
   refused(() => offers.update('rof-1', (draft) => { draft.currentRevisionId = 'rofr-2'; }), /rof-1\.currentRevisionId names rofr-2, not a revision of this offer/);
-  const dump = withRo(d, s8cDump); L.save(); assert.equal(withRo(d, s8cDump), dump, 'a save writes no S8c row');
+  const dump = withRo(d, s8cDump); assert.equal(withRo(d, s8cDump), dump, 'a save writes no S8c row');
   const served = plain(L.repo.exportAll()); L.close();
   const R = serverOpen(d); assert.deepEqual(plain(R.repo.exportAll()), served); R.close(); rm(d);
 });

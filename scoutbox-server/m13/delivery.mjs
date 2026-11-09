@@ -25,7 +25,7 @@ const RANK = { queued: 0, held_quiet_hours: 0, accepted: 1, delivered: 2, opened
 export function registerDelivery(ctx) {
   const {
     byId, users, notifications, dispatches, outbox, safetyAudit, unit, app, orgRouter, playerRouter, guardianRouter, adminRouter,
-    nextId, persist, persistNow, notify, findPlayer, isAdult,
+    nextId, notify, findPlayer, isAdult,
     signBody, timingSafeEq, operations,
   } = ctx;
   if (!notifications) throw new TypeError('registerDelivery needs the notifications repository (ctx.notifications)');
@@ -176,7 +176,6 @@ export function registerDelivery(ctx) {
   function notifyAction(audience, type, text, refId, deadlineMs) {
     const n = notify(audience, type, text, refId, { actionRequired: { deadline: deadlineMs ?? null } });
     if (!n) return null;
-    persist();
     return n;
   }
   ctx.notifyAction = notifyAction;

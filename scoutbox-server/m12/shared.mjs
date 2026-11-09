@@ -5,7 +5,7 @@ import { isLeadUser } from '../roles.mjs';
 
 // ---------------------------------------------------------------- helpers
 export function buildShared(ctx) {
-  const { db, nextId } = ctx;
+  const { nextId } = ctx;
 
   // Lead = the privileged org role tier for approvals, staff management and
   // restricted cases. Rule-based on the stated role (documented, not hidden);

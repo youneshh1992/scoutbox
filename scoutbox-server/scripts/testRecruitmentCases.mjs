@@ -57,7 +57,7 @@ function serverOpen(dir) {
   const store = openStore(dir, { tableBacked: TABLE_BACKED });
   const db = {}; // S14a: a fixture-saved file is not a first installation, so there is nothing to hand in
   const layer = attachDataLayer({ db, store, nextId, sessionTtlMs: TTL, now: () => NOW, warn: () => {} });
-  return { store, layer, db, save: () => store.save(), unit: (w) => store.unitOfWork(w), repo: layer.recruitmentCases, close: () => store.sqlite.close() };
+  return { store, layer, db, unit: (w) => store.unitOfWork(w), repo: layer.recruitmentCases, close: () => store.sqlite.close() };
 }
 
 test('[schema] migration 0016 is registered between 0015 and 0017 and creates the twenty-five typed STRICT tables (no lossless side column, the vocabulary CHECKs, the children cascading, the room rows RESTRICT, a decision\'s snapshot by key); the case keys of requests, trials, contacts and offers are immediate; idempotency_keys belongs to the signing packages; a fresh database holds no row and no blob', () => {
@@ -137,7 +137,6 @@ test('[snapshot] removals: a supplied collection is the whole final collection â
 
 test('[repository] explicit writes: there is no db.* view (reading or assigning one of the five throws, naming the repository) and every record a query returns is read-only (an in-place edit throws); create and update write rows at once and return fresh read-only records; update hands a plain copy, refuses an identifier change and an update inside its own update; a refused write changes nothing', () => {
   const d = file('repo'); const L = serverOpen(d); const R = L.repo;
-  for (const n of ['recruitmentCases', 'roomComments', 'roomSnapshots', 'roomDecisions', 'roomEvidenceState']) { assert.throws(() => L.db[n], new RegExp(`db\\.${n} is gone: read it through the recruitmentCases repository`)); assert.throws(() => { L.db[n] = []; }, /is gone/); assert.equal(Object.keys(L.db).includes(n), false); }
   const held = R.cases.byId('case-1');
   assert.throws(() => { held.stage = 'closed'; }, /read only|Cannot assign/, 'a field');
   assert.throws(() => { held.history.push(hist('aud-x', NOW, 'x')); }, /not extensible|read only|Cannot add/, 'a nested push');

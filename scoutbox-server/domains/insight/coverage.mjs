@@ -23,7 +23,7 @@ const optText = (v, max) => (absent(v) ? null : typeof v !== 'string' ? undefine
 
 export function registerCoverage(ctx) {
   const {
-    db, byId, orgRouter, nextId, notify, findPlayer, orgCanSee, isLead, requireLead, haversineKm,
+    byId, orgRouter, nextId, notify, findPlayer, orgCanSee, isLead, requireLead, haversineKm,
     validAmountMinor, CURRENCIES, insightCoverage, unit,
   } = ctx;
   if (!insightCoverage || typeof unit !== 'function') throw new TypeError('registerCoverage needs the insight and coverage repository and the unit of work');

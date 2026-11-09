@@ -194,7 +194,6 @@ test('units of work: a write joins the open unit, a read inside it sees the writ
   assert.deepEqual([L.repo.blocks.has('pl-adult', 'org-pro'), L.repo.counts().ledger], [false, 0], 'both rolled back');
   L.store.unitOfWork(() => { L.repo.blocks.add(block()); L.repo.ledger.append(led({ type: 'org_blocked_by_player' })); });
   assert.deepEqual([L.repo.blocks.has('pl-adult', 'org-pro'), L.repo.counts().ledger], [true, 1], 'committed together');
-  for (const n of AUDIT_COLLECTIONS) assert.throws(() => L.db[n], new RegExp(`db\\.${n} is gone: read it through the safetyAudit repository`));
   assert.equal(L.layer.report().domains.safetyAudit.pendingWrites, 0);
   L.close(); rm(dir);
 });

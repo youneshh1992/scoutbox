@@ -37,7 +37,7 @@ import {
 
 export function registerDecision(ctx) {
   const {
-    db, orgRouter, nextId, persistNow, notify, broadcast, findPlayer, isBlocked,
+    orgRouter, nextId, notify, broadcast, findPlayer, isBlocked,
     rateLimit, isLead, moderateOrRefuse, audit, testProviderEnabled = false,
     recruitmentCases, unit, // S8b: drafts, formal rows and the case move are explicit repository writes, one unit per act
     recruitmentReads, scoutingReads, // §4.3 step 2: the trials (and, since S9a, the evidence) are read through SQL
@@ -148,7 +148,7 @@ export function registerDecision(ctx) {
     return { ok: true, outcome, reasonCodes: reasons.codes, note: note.text, refShapes: shapes.refs, provided: { outcome: b.outcome !== undefined, reasonCodes: b.reasonCodes !== undefined, note: b.note !== undefined, evidenceRefs: b.evidenceRefs !== undefined } };
   }
 
-  const resolveRefs = (refs, kase) => resolveEvidenceRefs(refs, { db, reads, kase, testProviderEnabled, providers: PROVIDERS });
+  const resolveRefs = (refs, kase) => resolveEvidenceRefs(refs, { reads, kase, testProviderEnabled, providers: PROVIDERS });
 
   // ---------------------------------------------------------------- read
 
@@ -177,7 +177,7 @@ export function registerDecision(ctx) {
       omitted,
       duplicateHeads,
       assessments: summary,
-      evidence: evidenceCandidates({ db, reads, kase, assessmentsVisible: visible, trialEvidenceViews: ctx.trialEvidenceViews ?? null, providers: PROVIDERS, testProviderEnabled }),
+      evidence: evidenceCandidates({ reads, kase, assessmentsVisible: visible, trialEvidenceViews: ctx.trialEvidenceViews ?? null, providers: PROVIDERS, testProviderEnabled }),
       requirements: decisionRequirements({
         role, canFinalize, status: kase.room?.status ?? null,
         submittedAssessments: summary.submitted, completedTrials,
@@ -234,7 +234,6 @@ export function registerDecision(ctx) {
       d.decisionDraft = draft;
       audit(d, 'org', req.orgUser.id, req.orgUser.name, 'room_decision_drafted', { draftId: draft.id, outcome: content.outcome, note: !!content.note });
     });
-    persistNow();
     res.status(201).json({ draft: draftView(fresh.decisionDraft) });
   });
 
@@ -267,7 +266,6 @@ export function registerDecision(ctx) {
       x.rev = (Number.isInteger(x.rev) ? x.rev : 1) + 1;
       x.revAt = at;
     });
-    persistNow();
     res.json({ draft: draftView(fresh.decisionDraft) });
   });
 
@@ -282,7 +280,6 @@ export function registerDecision(ctx) {
       d.decisionDraft = null;
       audit(d, 'org', req.orgUser.id, req.orgUser.name, 'room_decision_draft_discarded', { draftId: dr.id, outcome: dr.outcome ?? null });
     });
-    persistNow();
     res.json({ draft: null, discarded: { id: dr.id } });
   });
 
@@ -413,7 +410,6 @@ export function registerDecision(ctx) {
         if (!(e instanceof LifecycleRefused)) throw e;
       }
       if (refused) return err(res, 'DECISION_LIFECYCLE_CONFLICT', `The case at "${ROOM_STATUS_LABELS[from] ?? from}" cannot take the step this decision asks for (${map.action}). ${refused.message ?? ''}`.trim(), { lifecycle: refused.error, allowed: refused.allowed ?? [], current: { status: from } });
-      persistNow();
 
       // Literal names (PRE-M24 PM-15): the M18.2 source scan only sees call
       // sites with a literal event name, and EMITTED_EVENTS must match it. With a

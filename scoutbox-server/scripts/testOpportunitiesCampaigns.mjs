@@ -91,7 +91,6 @@ test('[schema] 0022 is registered after 0021 and creates the fifteen STRICT tabl
   const dir = saveFixture(tempDir('s9d-schema'));
   const o = serverOpen(dir);
   try {
-    for (const n of COLLECTIONS) { assert.throws(() => o.db[n], /opportunitiesCampaigns repository/, `db.${n} read`); assert.throws(() => { o.db[n] = []; }, /opportunitiesCampaigns repository/, `db.${n} write`); }
     assert.deepEqual(Object.values(o.repo.counts()).reduce((a, b) => a + b, 0), 0);
   } finally { o.close(); rm(dir); }
 });

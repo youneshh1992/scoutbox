@@ -53,7 +53,7 @@ import {
 
 export function registerTrial(ctx) {
   const {
-    db, guardians, orgRouter, playerRouter, guardianRouter, nextId, persistNow, notify, broadcast, findPlayer, isBlocked, isAdult,
+    guardians, orgRouter, playerRouter, guardianRouter, nextId, notify, broadcast, findPlayer, isBlocked, isAdult,
     rateLimit, isLead, moderateOrRefuse, issueRecruitmentRequest, audit, orgCanSee, guardianManagedOnly,
     combineOrgMaySeeResults, testProviderEnabled = false, recruitment, unit,
     recruitmentReads, // §4.3 step 2: the cases are read through SQL
@@ -398,7 +398,7 @@ export function registerTrial(ctx) {
       guardianId: recipient.guardianId, at,
       // S8a: the case link, the recipient snapshot and the client key are part of the one create.
       workflow: { caseId: room.id, recipient, keys: { invite: key.key ? { key: key.key, fp } : null } },
-    }, { persist: false });
+    });
     cases.update(room.id, (d) => {
       if (!d.links.requestIds.includes(request.id)) d.links.requestIds.push(request.id);
       audit(d, 'org', req.orgUser.id, req.orgUser.name, 'room_trial_invited', { requestId: request.id, recipientType: recipient.type, slotCount: inv.slots.length });

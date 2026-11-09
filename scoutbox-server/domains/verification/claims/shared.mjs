@@ -392,7 +392,7 @@ const CLAIM_BADGE_KIND = {
   AGENCY_AFFILIATION: 'affiliation', AGENCY_ROLE: 'role',
   GRASSROOTS_AFFILIATION: 'affiliation', FEDERATION_AFFILIATION: 'affiliation',
 };
-export function toPublicVerificationProfile({ subjectType, subjectId, claims, orgsById = new Map(), db = null, subjectRemoved = false, now = Date.now() }) {
+export function toPublicVerificationProfile({ subjectType, subjectId, claims, orgsById = new Map(), subjectRemoved = false, now = Date.now() }) {
   const badges = [];
   let identity = null;
   for (const claim of claims) {

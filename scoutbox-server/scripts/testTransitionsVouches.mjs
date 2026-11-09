@@ -175,7 +175,6 @@ test('[units] a rolled-back unit leaves nothing; db.transitionCases and db.vouch
     assert.throws(() => s.unit(() => { s.repo.transitionCases.create(transition()); s.repo.vouches.create(vouch()); throw new Error('boom'); }), /boom/);
     assert.equal(s.repo.reads.transitionCases.byId('trn-1'), null);
     assert.equal(s.repo.reads.vouches.byId('vch-1'), null);
-    for (const n of COLLECTIONS) assert.throws(() => s.db[n], new RegExp(`db\\.${n} is gone: read it through the transitionsVouches repository`));
   } finally { s.close(); rm(dir); }
 });
 

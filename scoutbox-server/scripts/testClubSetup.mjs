@@ -2,7 +2,7 @@
 // tactical setup (roles, criteria, windows), the squad, the shadow list, looking-for, the federation-route request and
 // vacancies. What this suite proves: the migration creates the nine typed tables, empty, and removes the four retired
 // facets from orgs.facets_json; the organisation record refuses them (reading, writing, a record carrying one) and
-// db.vacancies throws; the typers refuse junk with the field named; a tactical re-save diffs roles by id (a kept role
+// the typers refuse junk with the field named; a tactical re-save diffs roles by id (a kept role
 // keeps its vacancies and shadow entries, a dropped one leaves them with no role); a role of another club is refused;
 // the squad and shadow uniqueness rules hold and the two lists are separate; a rolled-back unit leaves nothing; the
 // vacancy list pages by cursor; and the snapshot write types, names missing references and uniqueness with ids, and
@@ -107,7 +107,7 @@ test('[typing] junk is refused with the field named: criteria, roles, windows, s
 });
 
 // ------------------------------------------------------------- the organisation record
-test('[orgs] an organisation carries no retired facet, a record carrying one is refused naming its repository, and db.vacancies throws', () => {
+test('[orgs] an organisation carries no retired facet, a record carrying one is refused naming its repository', () => {
   const dir = saveFixture(tempDir('s9c-orgs'));
   const o = serverOpen(dir);
   try {
@@ -117,7 +117,6 @@ test('[orgs] an organisation carries no retired facet, a record carrying one is 
       refused(() => o.layer.orgs.update(ORG.id, (d) => { d[k] = []; }), /no longer an organisation field: write it through the clubSetup repository/, `writing org.${k}`);
     }
     refused(() => o.layer.orgs.create({ ...OTHER, squad: [] }), /squad is no longer an organisation field/);
-    refused(() => o.db.vacancies, /clubSetup repository/);
     refused(() => openStore(tempDir('s9c-orgs-snap')).save({ savedAt: NOW, idCounter: 1000, db: fixtureDb({ orgs: [{ id: ORG.id, name: ORG.name, type: 'club', level: 'pro', plan: 'Pro', lookingFor: ['ST'] }] }) }), /lookingFor is no longer an organisation field/);
   } finally { o.close(); rm(dir); }
 });

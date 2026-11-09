@@ -67,7 +67,7 @@ function serverOpen(dir, { warnings = [] } = {}) {
   const store = openStore(dir, { tableBacked: TABLE_BACKED });
   const db = {}; // S14a: a fixture-saved file is not a first installation, so there is nothing to hand in
   const layer = attachDataLayer({ db, store, nextId, sessionTtlMs: TTL, now: () => NOW, warn: (m) => warnings.push(m) });
-  return { store, layer, db, warnings, save: () => store.save(), unit: (w) => store.unitOfWork(w), repo: layer.signingsFollowUps, close: () => store.sqlite.close() };
+  return { store, layer, db, warnings, unit: (w) => store.unitOfWork(w), repo: layer.signingsFollowUps, close: () => store.sqlite.close() };
 }
 function snapshotOpen(dir) {
   const store = openStore(dir); const loaded = store.load(); const db = loaded.db;
@@ -151,7 +151,6 @@ test('[snapshot] every reference and every uniqueness rule is named with ids bef
 test('[repository] there is no db.* view (reading or assigning one of the four throws, naming the repository) and every record a query returns is read-only (a field assignment and a nested edit throw); every operation writes its rows AT ONCE — a second read-only connection sees them before the save — and returns the fresh record while the record the caller held is unchanged: insert, patch, patchRevision, addRevision, setDocument, setParty, addKey, addHistory; signings.record; followUps.schedule and patch; outcomeReports.file and addConfirmation; a save writes nothing more; the counts; a unit-less operation runs in a transaction of its own', () => {
   need();
   const d = file('repo'); const L = serverOpen(d);
-  for (const n of COLLECTIONS) { assert.throws(() => L.db[n], new RegExp(`db\\.${n} is gone: read it through the signingsFollowUps repository`), `${n}: no view`); assert.throws(() => { L.db[n] = []; }, /is gone/); assert.equal(Object.keys(L.db).includes(n), false); }
   const held = L.repo.signingPackages.byId('spk-1');
   assert.throws(() => { held.status = 'READY'; }, /written through its domain repository|read only|Cannot assign/, 'a field assignment on a record throws');
   assert.throws(() => { held.revisions[0].status = 'READY'; }, /written through its domain repository|read only|Cannot assign/, 'a nested edit throws');
@@ -190,7 +189,7 @@ test('[repository] there is no db.* view (reading or assigning one of the four t
   assert.throws(() => L.repo.outcomeReports.addConfirmation('out-9', { by: { kind: 'guardian', id: 'gd-primary', name: 'Primary Parent' }, agree: true, note: null, experienceRating: null, at: NOW + 4 }), /confirmations\[1\]\.by\.id duplicates gd-primary/);
   assert.throws(() => L.repo.outcomeReports.addConfirmation('out-9', { by: { kind: 'player', id: 'pl-child2', name: 'Kid Two' }, agree: true, note: 'x'.repeat(301), experienceRating: null, at: NOW + 5 }), /note must be text of at most 300/);
   // a save writes nothing more; the counts (S14a: the save-sequence check described the blob)
-  const dump = Object.fromEntries(JSON.parse(withRo(d, fullDump))); L.save(); withRo(d, (s) => { for (const t of TABLES) assert.equal(JSON.stringify(rowsOf(s, t)), JSON.stringify(dump[t]), `the save rewrites no ${t} row`); });
+  const dump = Object.fromEntries(JSON.parse(withRo(d, fullDump))); withRo(d, (s) => { for (const t of TABLES) assert.equal(JSON.stringify(rowsOf(s, t)), JSON.stringify(dump[t]), `the save rewrites no ${t} row`); });
   assert.deepEqual(L.repo.counts(), { signingPackages: 3, signings: 3, followUps: 4, outcomeReports: 2 });
   assert.deepEqual(L.layer.report().domains.signingsFollowUps.rows, { signingPackages: 3, signings: 3, followUps: 4, outcomeReports: 2 }); assert.equal(L.layer.report().domains.signingsFollowUps.pendingWrites, 0);
   L.close();

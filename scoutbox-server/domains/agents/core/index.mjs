@@ -42,7 +42,7 @@ import {
 export function registerAgent(rawCtx) {
   const ctx = { ...rawCtx, ...buildShared(rawCtx) };
   const {
-    db, byId, players, users, notifications, orgRouter, playerRouter, adminRouter, nextId, notify, broadcast,
+    byId, players, users, notifications, orgRouter, playerRouter, adminRouter, nextId, notify, broadcast,
     findPlayer, isBlocked, playerViewForOrg, orgSafe, revokeOrgUserAccess, rateLimit, isAdult,
     orgCanSee, checkEligibility, distanceBand, moderateOrRefuse, verificationProvider, agentCore, unit, log = console,
   } = ctx;

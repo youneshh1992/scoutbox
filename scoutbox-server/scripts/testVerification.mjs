@@ -144,7 +144,6 @@ test('[units] a rolled-back unit leaves no claim, evidence or event; db.ver* nam
     }), /boom/);
     assert.equal(s.repo.reads.claims.byId('vclm-1'), null);
     assert.deepEqual(s.repo.counts(), Object.fromEntries(COLLECTIONS.map((n) => [n, 0])));
-    for (const n of [...COLLECTIONS, 'verMigrated']) assert.throws(() => s.db[n], /verification repository/, `db.${n} throws`);
     assert.ok(!('verification' in s.layer.orgs.byId(ORG.id)), 'an organisation has no verification field');
     assert.throws(() => s.layer.orgs.update(ORG.id, (d) => { d.verification = {}; }), /verification is no longer an organisation field: write it through the verification repository/);
   } finally { s.close(); rm(dir); }

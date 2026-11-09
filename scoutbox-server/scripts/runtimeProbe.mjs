@@ -19,8 +19,6 @@ try {
   const db = {};
   const seed = { orgs: [{ id: 'org-1', name: 'One FC', type: 'club', level: 'grassroots', plan: 'Grassroots' }], guardians: [], players: [{ id: 'pl-1', name: 'P', dob: '2001-01-01', country: 'GB' }] };
   const layer = attachDataLayer({ db, seed, store, nextId, persist: () => {}, sessionTtlMs: 30 * 86_400_000 });
-  store.save();
-  out.steps.push('saved');
   // A unit of work that fails after its write rolls the write back; the retry commits it. (Rewritten in S14a, where
   // the failure was an unserialisable blob, and S14g, where it was a failing save after an organisation facet edit.)
   try { store.unitOfWork(() => { layer.orgs.update('org-1', (d) => { d.suspended = true; }); throw new Error('injected failure after the write'); }); out.steps.push('failed-save-did-not-throw'); } catch (err) { out.steps.push(`failed-save-threw: ${String(err.message).slice(0, 60)}`); }

@@ -88,7 +88,7 @@ const projectDecision = (d) => ({
 });
 
 export function buildReportingContext({
-  db, reads = {}, org, window: w, now = Date.now(), orgCanSee, findPlayer, filters = {},
+  reads = {}, org, window: w, now = Date.now(), orgCanSee, findPlayer, filters = {},
 }) {
   const orgId = org.id;
 

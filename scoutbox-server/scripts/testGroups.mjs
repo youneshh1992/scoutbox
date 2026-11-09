@@ -162,13 +162,12 @@ test('[departure] a grant ends only when its owner shares no group with any reci
 });
 
 // ------------------------------------------------------------- units, retirement, snapshot
-test('[unit] a rolled-back unit leaves nothing, and the db.* names throw naming the repository', () => {
+test('[unit] a rolled-back unit leaves nothing', () => {
   const { dir, s } = seeded('s13c-unit');
   assert.throws(() => s.unit(() => { s.repo.groups.create(group()); s.repo.groups.invite('grp-1', { orgId: B, invitedBy: A, at: NOW }); throw new Error('boom'); }), /boom/);
   assert.equal(s.repo.reads.groups.byId('grp-1'), null);
   assert.equal(typeof s.repo.reads.groups.create, 'undefined', 'the reads cannot write');
   assert.equal(typeof s.repo.reads.grants.endUnshared, 'undefined', 'the reads cannot write');
-  for (const n of COLLECTIONS) assert.throws(() => s.db[n], new RegExp(`db\\.${n} is gone: read it through the groups repository`));
   s.close(); rm(dir);
 });
 

@@ -10,7 +10,6 @@ import os from 'node:os';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { runDataMigrations, transaction, dataSchemaReport } from '../repositories/database.mjs';
-import { readonlyView } from '../repositories/readonly.mjs';
 import { attachDataLayer, DATA_MIGRATIONS, TABLE_BACKED } from '../repositories/index.mjs';
 import { RECRUITMENT_TABLES } from '../repositories/recruitment.mjs';
 import { RECRUITMENT_CASES_TABLES } from '../repositories/recruitmentCases.mjs';
@@ -78,28 +77,9 @@ test('schema report: names tables and counts, never rows', () => {
   assert.throws(() => dataSchemaReport(null, DATA_MIGRATIONS), /needs a SQLite connection/);
 });
 
-// --------------------------------------------------------- read-only views
-test('views: reads work as before; every write throws and names the repository', () => {
-  const target = { id: 'u1', name: 'A', mfa: { recoveryHashes: ['h'] } };
-  const rows = [target];
-  const view = readonlyView(rows, 'a staff record');
-  assert.equal(view.length, 1);
-  assert.equal(view.find((u) => u.id === 'u1').name, 'A');
-  assert.equal(JSON.stringify(view), JSON.stringify(rows));
-  assert.ok(Array.isArray(view));
-  assert.deepEqual({ ...view[0] }, target);
-  assert.throws(() => { view[0].name = 'B'; }, /staff record.*repositories/);
-  assert.throws(() => { view[0].mfa.recoveryHashes.splice(0, 1); }, /repositories/);
-  assert.throws(() => { view[0].mfa.enabledAt = 1; }, /repositories/);
-  assert.throws(() => { view.push({ id: 'u2' }); }, /repositories/);
-  assert.throws(() => { delete view[0].name; }, /repositories/);
-  assert.equal(target.name, 'A', 'the target is untouched');
-  assert.equal(readonlyView(target), readonlyView(target), 'one view per target');
-});
-
 // The staff repository's own checks are in scripts/testStaff.mjs (S14f).
 
-test('attachDataLayer: db.users, db.sessions (S14f), db.players and db.guardians (S14h) are gone and name their repository; the staff are written through it', () => {
+test('attachDataLayer: the staff are written through their repository; every table is live', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sb-layer-'));
   const store = openStore(dir, { tableBacked: TABLE_BACKED });
   const db = {};
@@ -107,9 +87,6 @@ test('attachDataLayer: db.users, db.sessions (S14f), db.players and db.guardians
   const layer = attachDataLayer({ db, seed: { orgs: [ORG_O] }, store, nextId, persist: () => {} });
   assert.deepEqual(layer.boot.users, { engine: 'sqlite', rows: 0 });
   layer.users.create({ orgId: 'o', name: 'A', role: 'Scout' });
-  assert.throws(() => db.users, /db\.users is gone: read it through the users repository/);
-  assert.throws(() => db.sessions, /db\.sessions is gone: read it through the sessions repository/);
-  assert.throws(() => { db.users = []; }, TypeError);
   assert.equal(layer.users.count(), 1);
   assert.equal(layer.report().domains.users.rows, 1);
   // Every core identity table is live (S0–S4a) and the media-deletion queue exists; there is no shadow to report.
@@ -117,11 +94,6 @@ test('attachDataLayer: db.users, db.sessions (S14f), db.players and db.guardians
   assert.equal('shadow' in layer.report(), false, 'the projection is retired');
   assert.deepEqual(layer.report().identity, { initState: 'done' });
   assert.deepEqual(layer.report().mediaDeletions, { queued: 0, conflicts: 0 });
-  // S14h: players and guardians have no view either; their old names throw and name the repository.
-  for (const name of ['players', 'guardians']) {
-    assert.throws(() => { db[name] = []; }, TypeError, `${name} cannot be replaced`);
-    assert.throws(() => db[name], new RegExp(`db\\.${name} is gone: read it through the ${name} \\(identity\\) repository`), `db.${name} throws`);
-  }
   store.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
 });
 test('store: a snapshot that carries players without guardians, or a collection with no table, is refused and nothing is written; server mode neither loads nor writes snapshots', () => {
@@ -137,7 +109,6 @@ test('store: a snapshot that carries players without guardians, or a collection 
   store.sqlite.close();
   store = openStore(dir, { tableBacked: TABLE_BACKED });
   attachDataLayer({ db: {}, store, nextId, persist: () => {} });
-  store.save();
   assert.equal(store.sqlite.prepare('SELECT COUNT(*) AS n FROM players').get().n, 0, 'a server-mode save leaves the tables to their repositories');
   assert.throws(() => store.load(), /snapshot mode operation/);
   store.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
@@ -150,7 +121,6 @@ test('store (snapshot mode): load merges table-backed collections in from their 
   const db = {};
   const first = attachDataLayer({ db, seed: { players: [PLAYER], guardians: [], orgs: [ORG_O] }, store: server, nextId, persist: () => {} });
   const usr1 = first.users.create({ orgId: 'o', name: 'A', role: 'Scout' });
-  server.save();
   server.sqlite.close();
   // A tool reading the file as one snapshot sees the staff rows as before, and the players from their table (S4a).
   const tool = openStore(dir);

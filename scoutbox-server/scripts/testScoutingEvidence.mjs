@@ -122,7 +122,6 @@ test('[repository] create/update write rows at once and return fresh, deep-froze
   assert.deepEqual(repo.squadInvites.forPlayers(['pl-adult'], 'pending_player').map((i) => i.id), ['sqi-2']);
   assert.equal(repo.squadInvites.pendingFor(ORG.id, 'pl-adult').id, 'sqi-2');
   // the old names throw, naming the repository
-  for (const n of COLLECTIONS) assert.throws(() => o.db[n], new RegExp(`db\\.${n} is gone: read it through the scoutingEvidence repository`));
   assert.deepEqual(o.layer.report().domains.scoutingEvidence.rows, { evidence: 1, coachAffiliations: 0, squadInvites: 2 });
   o.close(); rm(dir);
 });

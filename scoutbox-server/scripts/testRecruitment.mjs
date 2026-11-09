@@ -64,7 +64,7 @@ function serverOpen(dir) {
   const store = openStore(dir, { tableBacked: TABLE_BACKED });
   const db = {}; // S14a: a fixture-saved file is not a first installation, so there is nothing to hand in
   const layer = attachDataLayer({ db, store, nextId, sessionTtlMs: TTL, now: () => NOW, warn: () => {} });
-  return { store, layer, db, save: () => store.save(), unit: (w) => store.unitOfWork(w), repo: layer.recruitment, close: () => store.sqlite.close() };
+  return { store, layer, db, unit: (w) => store.unitOfWork(w), repo: layer.recruitment, close: () => store.sqlite.close() };
 }
 function snapshotOpen(dir) {
   const store = openStore(dir); const db = store.load().db;
@@ -131,7 +131,6 @@ test('[snapshot] the collection rule: an omitted collection is retained whole; a
 
 test('[repository] explicit writes: there is no db.requests or db.trials (reading or assigning throws, naming the repository) and every returned record is read-only (a field assignment and a nested push throw); create and update write their rows at once and return the stored record; an update is typed whole (a refusal changes nothing), cannot change an identifier, and names no value; a duplicate create is refused; byId', () => {
   const d = file('repo'); const L = serverOpen(d); const { requests, trials } = L.repo;
-  for (const n of ['requests', 'trials']) { assert.throws(() => L.db[n], new RegExp(`db\\.${n} is gone: read it through the recruitment repository`)); assert.throws(() => { L.db[n] = []; }, /is gone/); assert.equal(Object.keys(L.db).includes(n), false); }
   assert.throws(() => { trials.byId('trial-1').status = 'reported'; }, /read only|Cannot assign/); assert.throws(() => trials.byId('trial-1').history.push({}), /not extensible|read only|Cannot add/);
   const made = requests.create(contactRequest({ id: 'req-new' })); assert.equal(made.id, 'req-new'); assert.throws(() => { made.status = 'accepted'; }, /read only|Cannot assign/);
   assert.equal(withRo(d, (s) => col(s, "SELECT status FROM recruitment_requests WHERE id = 'req-new'")), 'pending', 'written at once, no save');

@@ -31,7 +31,7 @@ export function registerM23(rawCtx) {
   // The established seam: isLead, orgCanSee, audit and paginate come from one
   // place rather than being re-derived per milestone.
   const ctx = { ...rawCtx, ...buildShared(rawCtx) };
-  const { db, recruitmentReads, scoutingReads, orgRouter, persistNow, isLead } = ctx;
+  const { recruitmentReads, scoutingReads, orgRouter, isLead } = ctx;
   // The journey reads the club's assessments too (S9b: scoutingReads).
   if (!ctx.safetyReads?.blocks) throw new TypeError('the lifecycle routes need safetyReads (the safety repository\'s queries)');
   const journeyReads = { ...recruitmentReads, ...scoutingReads, blocks: ctx.safetyReads.blocks, player: (id) => ctx.byId.player(id) };
@@ -68,7 +68,7 @@ export function registerM23(rawCtx) {
     const room = ctx.findRoomForRequest(req, res);
     if (!room) return undefined;
 
-    const out = buildRecruitmentJourney(db, room.id, {
+    const out = buildRecruitmentJourney(room.id, {
       kind: req.org.level === 'grassroots' ? 'grassroots_staff' : 'org_staff',
       orgId: req.org.id,
       userId: req.orgUser.id,
@@ -158,7 +158,6 @@ export function registerM23(rawCtx) {
       statusDetail: { lifecycleAction: action, clientKey, policyVersion: RECRUITMENT_LIFECYCLE_POLICY_VERSION },
     });
 
-    persistNow();
     return res.json({ ok: true, action, from, to, ...revMeta(fresh.room) });
   });
 

@@ -1,8 +1,7 @@
 /**
  * One-time codes — migration plan step S6a (docs/architecture/s6-readiness-review.md §5–§6).
  *
- * Owns two tables and the read-only views `db.emailChallenges` and
- * `db.pairingCodes` (hash-free):
+ * Owns two tables:
  *
  *   email_challenges  the club e-mail-domain verification code
  *                     (POST /org/verification/email → …/confirm): one row per
@@ -71,7 +70,6 @@
  * their count is recorded in `meta.oneTimeCodesCutover` and logged.
  */
 import crypto from 'node:crypto';
-import { readonlyView, markView } from './readonly.mjs';
 import { migrationApplied, transaction } from './database.mjs';
 
 export const ONE_TIME_CODES_MIGRATION = '0008_one_time_codes';
@@ -292,7 +290,6 @@ export function createOneTimeCodesRepository({ sqlite, now = Date.now, newCode =
   const stmt = {
     cutover: sqlite.prepare('SELECT 1 FROM data_migrations WHERE id = ?'),
     emailByOrg: sqlite.prepare(`${EMAIL_SELECT} WHERE org_id = ?`),
-    emailAll: sqlite.prepare(`${EMAIL_SELECT} ORDER BY org_id`),
     emailUpsert: sqlite.prepare('INSERT INTO email_challenges (org_id, email, code_hash, expires_at, attempts) VALUES (?, ?, ?, ?, 0) ON CONFLICT(org_id) DO UPDATE SET email = excluded.email, code_hash = excluded.code_hash, expires_at = excluded.expires_at, attempts = 0'),
     emailFail: sqlite.prepare('UPDATE email_challenges SET attempts = attempts + 1 WHERE org_id = ? RETURNING attempts'),
     emailDelete: sqlite.prepare('DELETE FROM email_challenges WHERE org_id = ?'),
@@ -302,7 +299,6 @@ export function createOneTimeCodesRepository({ sqlite, now = Date.now, newCode =
     emailCount: sqlite.prepare('SELECT COUNT(*) AS n FROM email_challenges'),
     emailLive: sqlite.prepare('SELECT COUNT(*) AS n FROM email_challenges WHERE expires_at > ? AND attempts < ?'),
     pairByHash: sqlite.prepare(`${PAIRING_SELECT} WHERE code_hash = ?`),
-    pairAll: sqlite.prepare(`${PAIRING_SELECT} ORDER BY player_id`),
     pairDeleteFor: sqlite.prepare('DELETE FROM pairing_codes WHERE player_id = ?'),
     pairInsert: sqlite.prepare('INSERT INTO pairing_codes (code_hash, player_id, expires_at) VALUES (?, ?, ?)'),
     pairConsume: sqlite.prepare('DELETE FROM pairing_codes WHERE code_hash = ? AND expires_at > ?'),
@@ -320,18 +316,7 @@ export function createOneTimeCodesRepository({ sqlite, now = Date.now, newCode =
   /** Redeemable: present, unexpired, and below the attempt limit (an exhausted row that somehow exists is never redeemed). */
   const liveChallenge = (r, at) => !!r && r.expires_at > at && r.attempts < EMAIL_CHALLENGE_MAX_ATTEMPTS;
 
-  // The hash-free views: rows read from the table on each access (a tool serialising after close keeps the last rows).
-  const mkView = (all, project, label) => {
-    const mirror = [];
-    const refresh = () => { let rows; try { rows = all.all(); } catch { return; } mirror.length = 0; for (const r of rows) mirror.push(project(r)); };
-    return markView(new Proxy(readonlyView(mirror, label), { get(target, prop, receiver) { refresh(); return Reflect.get(target, prop, receiver); } }));
-  };
-  const emailChallengesView = mkView(stmt.emailAll, (r) => ({ orgId: r.org_id, email: r.email, expiresAt: r.expires_at, attempts: r.attempts }), 'an e-mail challenge');
-  const pairingCodesView = mkView(stmt.pairAll, (r) => ({ playerId: r.player_id, expiresAt: r.expires_at }), 'a pairing code');
-
   const repo = {
-    emailChallengesView,
-    pairingCodesView,
     emailChallengeTtlMs: EMAIL_CHALLENGE_TTL_MS,
     pairingCodeTtlMs: PAIRING_CODE_TTL_MS,
     maxEmailAttempts: EMAIL_CHALLENGE_MAX_ATTEMPTS,

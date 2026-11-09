@@ -221,7 +221,7 @@ test('[hub] list candidates, counts, the open-plan count, the duplicate create a
 });
 
 // ------------------------------------------------------------- drill reviews, units, db.*
-test('[drills] a review is recorded (a second replaces the first) and read back; a rolled-back unit leaves nothing; the db.* names throw', () => {
+test('[drills] a review is recorded (a second replaces the first) and read back; a rolled-back unit leaves nothing', () => {
   const dir = tempDir('s12a-unit'); saveFixture(dir);
   const s = serverOpen(dir);
   try {
@@ -232,7 +232,6 @@ test('[drills] a review is recorded (a second replaces the first) and read back;
     assert.throws(() => s.unit(() => { s.repo.objectives.create(objective()); s.repo.plans.create(plan()); throw new Error('boom'); }), /boom/);
     assert.equal(s.repo.reads.objectives.byId('obj-1'), null);
     assert.equal(s.repo.reads.plans.byId('devplan-1'), null);
-    for (const n of COLLECTIONS) assert.throws(() => s.db[n], new RegExp(`db\\.${n} is gone: read it through the development repository`));
   } finally { s.close(); rm(dir); }
 });
 

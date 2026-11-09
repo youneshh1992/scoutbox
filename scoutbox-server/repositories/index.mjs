@@ -448,37 +448,27 @@ export function migrateForSnapshot(sqlite, { now = Date.now() } = {}) {
   return runDataMigrations(sqlite, DATA_MIGRATIONS, { now });
 }
 
-/**
- * §4.3 step 2: a collection whose reads moved to SQL has no `db.<name>`. Reading or assigning it throws, naming the
- * repository, so a reader that was missed fails loudly instead of seeing (or `??=`-creating) an empty list. Not
- * enumerable, so a walk over `db` (a snapshot, the memento) never meets it.
- */
 const schemaVersionOf = (sqlite) => Number(sqlite.prepare('SELECT MAX(id) AS id FROM data_migrations').get()?.id?.slice(0, 4)) || 0;
 
-function retireCollection(db, name, repository) {
-  Object.defineProperty(db, name, { get() { throw new TypeError(`db.${name} is gone: read it through the ${repository} repository`); }, set() { throw new TypeError(`db.${name} is gone: write it through the ${repository} repository`); }, configurable: false, enumerable: false });
-}
 
 /**
  * Attach every domain repository to the store's database: run the table migrations, then create the repositories.
  * `seed` is a first installation's records (`orgs`, `players`, `guardians`, `reputationSeed`; buildSeed() in
  * seed.mjs, or a fixture), imported once while the organisations and the identity pair are still `pending`, and
- * ignored on every later boot. `db` receives the read-only views of the repositories that still keep a mirror, and a
- * throwing name for every retired collection.
+ * ignored on every later boot.
  */
-export function attachDataLayer({ db, seed = {}, store, nextId, sessionTtlMs, now = Date.now, log = () => {}, warn = (m) => console.warn(m) }) {
+export function attachDataLayer({ seed = {}, store, nextId, sessionTtlMs, now = Date.now, log = () => {}, warn = (m) => console.warn(m) }) {
   const sqlite = store?.sqlite ?? null;
   if (!sqlite) throw new TypeError('the data layer needs a store with a SQLite connection (node:sqlite); there is no in-memory or JSON fallback');
   const migrations = runDataMigrations(sqlite, DATA_MIGRATIONS, { now: now(), log, context: { sessionTtlMs } });
 
-  // Every repository writes its rows at once and reads through SQL; a retired collection's old `db.<name>` throws.
+  // Every repository writes its rows at once and reads through SQL.
   // The organisations attach first: org_users, and most tables after them, reference orgs.
-  // S14g: the organisations are explicit, with no mirror; their old collection name throws.
+  // S14g: the organisations are explicit.
   const orgs = createOrgsRepository({ sqlite, nextId, log, now, unit: store.unit });
   const orgsBoot = orgs.initState() === 'pending' ? orgs.initialize(seed.orgs ?? []) : orgs.attach();
-  retireCollection(db, 'orgs', 'orgs');
 
-  // S14h: players and guardians are explicit, with no mirror; their old collection names throw. Their trial reports
+  // S14h: players and guardians are explicit. Their trial reports
   // come from the recruitment repository, attached below (a first installation's seed carries none).
   let recruitment = null;
   /** A collection the caller handed in before its table took over (the seed's or a fixture's plain array), or []. */
@@ -488,160 +478,78 @@ export function attachDataLayer({ db, seed = {}, store, nextId, sessionTtlMs, no
   const identityBoot = identityWasPending
     ? identity.initialize({ players: seed.players ?? [], guardians: seed.guardians ?? [] }, { now: now() })
     : identity.attach();
-  retireCollection(db, 'players', 'players (identity)');
-  retireCollection(db, 'guardians', 'guardians (identity)');
 
-  // S14f: staff and sessions are explicit, with no mirror; their old collection names throw.
+  // S14f: staff and sessions are explicit.
   const users = createUsersRepository({ sqlite, nextId, log, now, unit: store.unit });
   const usersBoot = users.attach();
-  retireCollection(db, 'users', 'users');
 
   const sessions = createSessionsRepository({ sqlite, sessionTtlMs, log });
   const sessionsBoot = sessions.attach();
-  retireCollection(db, 'sessions', 'sessions');
 
   const mediaDeletions = createMediaDeletionsQueue({ sqlite, log, warn, now });
 
   const codes = createOneTimeCodesRepository({ sqlite, log, now, unit: store.unit });
   const codesBoot = codes.attach({ at: now() });
-  for (const [name, view] of [[EMAIL_CHALLENGES_TABLE.name, codes.emailChallengesView], [PAIRING_CODES_TABLE.name, codes.pairingCodesView]]) {
-    Object.defineProperty(db, name, { value: view, writable: false, configurable: false, enumerable: true });
-  }
 
-  // S14e: explicit, no mirror; its old collection names throw.
+  // S14e: explicit, no mirror.
   const notifications = createNotificationsRepository({ sqlite, log, now, nextId, unit: store.unit });
   const notificationsBoot = notifications.attach();
-  for (const name of [NOTIFICATIONS_TABLE.name, NOTIFICATION_PREFS_TABLE.name]) retireCollection(db, name, 'notifications');
 
-  // S14d: explicit, no mirror; their old collection names throw.
+  // S14d: explicit, no mirror.
   const dispatches = createDispatchesRepository({ sqlite, log, now, unit: store.unit });
   const dispatchesBoot = dispatches.attach();
-  retireCollection(db, DISPATCHES_TABLE.name, 'dispatches');
   const outboxPush = createOutboxPushRepository({ sqlite, log, now, unit: store.unit });
   const outboxPushBoot = outboxPush.attach();
-  for (const name of OUTBOX_PUSH_COLLECTIONS) retireCollection(db, name, 'outboxPush');
 
-  // The explicit repositories, in dependency order. Each retires its old collection names on `db`.
+  // The explicit repositories, in dependency order.
   const recruitmentContactsOffers = createRecruitmentContactsOffersRepository({ sqlite, log, now, unit: store.unit });
   const recruitmentContactsOffersBoot = recruitmentContactsOffers.attach();
   const recruitmentCases = createRecruitmentCasesRepository({ sqlite, log, now, unit: store.unit });
   const recruitmentCasesBoot = recruitmentCases.attach();
   recruitment = createRecruitmentRepository({ sqlite, log, now, unit: store.unit });
   const recruitmentBoot = recruitment.attach();
-  for (const name of RECRUITMENT_CASES_COLLECTIONS) {
-    retireCollection(db, name, 'recruitmentCases');
-  }
-  for (const name of RECRUITMENT_CONTACTS_OFFERS_COLLECTIONS) {
-    retireCollection(db, name, 'recruitmentContactsOffers');
-  }
   const signingsFollowUps = createSigningsFollowUpsRepository({ sqlite, log, now, unit: store.unit });
   const signingsFollowUpsBoot = signingsFollowUps.attach();
-  for (const name of SIGNINGS_FOLLOWUPS_COLLECTIONS) {
-    retireCollection(db, name, 'signingsFollowUps');
-  }
   const scoutingEvidence = createScoutingEvidenceRepository({ sqlite, log, now, unit: store.unit });
   const scoutingEvidenceBoot = scoutingEvidence.attach();
-  for (const name of SCOUTING_EVIDENCE_COLLECTIONS) {
-    retireCollection(db, name, 'scoutingEvidence');
-  }
   const scoutingAssessments = createScoutingAssessmentsRepository({ sqlite, log, now, unit: store.unit });
   const scoutingAssessmentsBoot = scoutingAssessments.attach();
-  for (const name of SCOUTING_ASSESSMENTS_COLLECTIONS) {
-    retireCollection(db, name, 'scoutingAssessments');
-  }
   const clubSetup = createClubSetupRepository({ sqlite, log, now, unit: store.unit });
   const clubSetupBoot = clubSetup.attach();
-  for (const name of CLUB_SETUP_COLLECTIONS) {
-    retireCollection(db, name, 'clubSetup');
-  }
   const opportunitiesCampaigns = createOpportunitiesCampaignsRepository({ sqlite, log, now, unit: store.unit });
   const opportunitiesCampaignsBoot = opportunitiesCampaigns.attach();
-  for (const name of OPPORTUNITIES_CAMPAIGNS_COLLECTIONS) {
-    retireCollection(db, name, 'opportunitiesCampaigns');
-  }
   const verification = createVerificationRepository({ sqlite, log, now, unit: store.unit });
   const verificationBoot = verification.attach();
-  for (const name of [...VERIFICATION_COLLECTIONS, ...VERIFICATION_RETIRED]) {
-    retireCollection(db, name, 'verification');
-  }
   const passport = createPassportRepository({ sqlite, log, now, unit: store.unit });
   const passportBoot = passport.attach();
-  for (const name of PASSPORT_COLLECTIONS) {
-    retireCollection(db, name, 'passport');
-  }
   const transitionsVouches = createTransitionsVouchesRepository({ sqlite, log, now, unit: store.unit });
   const transitionsVouchesBoot = transitionsVouches.attach();
-  for (const name of TRANSITIONS_COLLECTIONS) {
-    retireCollection(db, name, 'transitionsVouches');
-  }
   const compliancePolicies = createCompliancePoliciesRepository({ sqlite, log, now, unit: store.unit });
   const compliancePoliciesBoot = compliancePolicies.attach();
-  for (const name of COMPLIANCE_POLICIES_COLLECTIONS) {
-    retireCollection(db, name, 'compliancePolicies');
-  }
   const agentCore = createAgentCoreRepository({ sqlite, log, now, unit: store.unit, policyVersionKnown: (id) => compliancePolicies.policies.exists(id) });
   const agentCoreBoot = agentCore.attach();
-  for (const name of AGENT_CORE_COLLECTIONS) {
-    retireCollection(db, name, 'agentCore');
-  }
   const complianceRecords = createComplianceRecordsRepository({ sqlite, log, now, unit: store.unit });
   const complianceRecordsBoot = complianceRecords.attach();
-  for (const name of COMPLIANCE_RECORDS_COLLECTIONS) {
-    retireCollection(db, name, 'complianceRecords');
-  }
   const agentTransactions = createAgentTransactionsRepository({ sqlite, log, now, unit: store.unit });
   const agentTransactionsBoot = agentTransactions.attach();
-  for (const name of AGENT_TRANSACTIONS_COLLECTIONS) {
-    retireCollection(db, name, 'agentTransactions');
-  }
   const development = createDevelopmentRepository({ sqlite, log, now, unit: store.unit });
   const developmentBoot = development.attach();
-  for (const name of DEVELOPMENT_COLLECTIONS) {
-    retireCollection(db, name, 'development');
-  }
   const boxCam = createBoxCamRepository({ sqlite, log, now, unit: store.unit });
   const boxCamBoot = boxCam.attach();
-  for (const name of [...BOX_CAM_COLLECTIONS, ...BOX_CAM_RETIRED]) {
-    retireCollection(db, name, 'boxCam');
-  }
   const discovery = createDiscoveryRepository({ sqlite, log, now, unit: store.unit });
   const discoveryBoot = discovery.attach();
-  for (const name of DISCOVERY_COLLECTIONS) {
-    retireCollection(db, name, 'discovery');
-  }
   const insightCoverage = createInsightCoverageRepository({ sqlite, log, now, unit: store.unit });
   const insightCoverageBoot = insightCoverage.attach();
-  for (const name of INSIGHT_COVERAGE_COLLECTIONS) {
-    retireCollection(db, name, 'insightCoverage');
-  }
   const integrations = createIntegrationsRepository({ sqlite, log, now, unit: store.unit });
   const integrationsBoot = integrations.attach();
-  for (const name of INTEGRATIONS_COLLECTIONS) {
-    retireCollection(db, name, 'integrations');
-  }
   const enterprise = createEnterpriseRepository({ sqlite, log, now, unit: store.unit });
   const enterpriseBoot = enterprise.attach();
-  for (const name of ENTERPRISE_COLLECTIONS) {
-    retireCollection(db, name, 'enterprise');
-  }
   const groups = createGroupsRepository({ sqlite, log, now, unit: store.unit });
   const groupsBoot = groups.attach();
-  for (const name of GROUPS_COLLECTIONS) {
-    retireCollection(db, name, 'groups');
-  }
   const grassroots = createGrassrootsRepository({ sqlite, log, now, unit: store.unit });
   const grassrootsBoot = grassroots.attach();
-  for (const name of GRASSROOTS_COLLECTIONS) {
-    retireCollection(db, name, 'grassroots');
-  }
   const operations = createOperationsRepository({ sqlite, log, now, unit: store.unit });
   const operationsBoot = operations.attach({ seedReputation: identityWasPending ? handedIn('reputationSeed') : [] });
-  for (const name of [...OPERATIONS_COLLECTIONS, ...OPERATIONS_SINGLETONS]) {
-    retireCollection(db, name, 'operations');
-  }
-  for (const name of ['requests', 'trials']) {
-    retireCollection(db, name, 'recruitment');
-  }
 
   // S14j: the match facts are derived (kept by triggers on their inputs, re-derived before COMMIT by the builder the
   // discovery domain registers); they have no collection and are never in a snapshot.
@@ -649,13 +557,9 @@ export function attachDataLayer({ db, seed = {}, store, nextId, sessionTtlMs, no
 
   const channels = createChannelsRepository({ sqlite, log, now, unit: store.unit });
   const channelsBoot = channels.attach();
-  retireCollection(db, CHANNELS_TABLE.name, 'channels');
 
   const safetyAudit = createSafetyAuditRepository({ sqlite, log, now, unit: store.unit });
   const safetyAuditBoot = safetyAudit.attach();
-  for (const name of AUDIT_COLLECTIONS) {
-    retireCollection(db, name, 'safetyAudit');
-  }
 
   return {
     matchFacts,

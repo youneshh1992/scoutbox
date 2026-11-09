@@ -237,7 +237,6 @@ test('units of work: an organisation write joins the open unit — a failure lat
   const store = openStore(dir, { tableBacked: TABLE_BACKED });
   const db = {};
   const layer = attachDataLayer({ db, seed: { orgs: ORGS(), guardians: [], players: [] }, store, nextId, persist: () => {}, sessionTtlMs: TTL });
-  assert.throws(() => db.orgs, /db\.orgs is gone: read it through the orgs repository/); assert.throws(() => { db.orgs = []; }, /write it through the orgs repository/);
   assert.ok(!Object.keys(db).includes('orgs'), 'not enumerable');
   assert.throws(() => store.unitOfWork(() => {
     const o = layer.orgs.create({ name: 'Unit FC', type: 'club', plan: 'Pro' });

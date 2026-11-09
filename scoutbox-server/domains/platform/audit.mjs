@@ -89,7 +89,7 @@ function safeDetail(action, detail) {
 }
 
 export function registerAudit(ctx) {
-  const { db, recruitmentReads, orgRouter, requireLead, findPlayer, orgCanSee } = ctx;
+  const { recruitmentReads, orgRouter, requireLead, findPlayer, orgCanSee } = ctx;
   if (typeof recruitmentReads?.contacts?.forOrg !== 'function') throw new TypeError('registerAudit needs recruitmentReads (contacts) from the data layer');
   if (typeof ctx.discoveryReads?.briefs?.historyFeed !== 'function') throw new TypeError('registerAudit needs discoveryReads (briefs, watchlists) from the data layer');
 

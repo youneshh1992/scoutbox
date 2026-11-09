@@ -51,7 +51,7 @@ import {
 
 export function registerIntegration(ctx) {
   const {
-    db, byId, orgRouter, playerRouter, nextId, persistNow, notify, broadcast,
+    byId, orgRouter, playerRouter, nextId, notify, broadcast,
     findPlayer, isAdult, isBlocked, orgCanSee, checkEligibility, distanceBand,
     agent, compliance, rateLimit,
     agentCore, unit, // S11a: an opportunity share is a row of its agreement, written by agreements.update in a unit
@@ -712,7 +712,6 @@ export function registerIntegration(ctx) {
       d.transactionHandoff = h;
       handoffHistory(d, at, 'transaction_handoff_invited', h.invitedBy, { handoffId: h.id, represented: h.representedAtInvitation });
     });
-    persistNow();
     broadcast('transaction_handoff_invited', { orgId: kase.orgId, roomId: kase.id, handoffId: h.id });
     // The agent hears, because they are the one who can open the workspace. The
     // player hears too, because a club has moved from thinking to acting about
@@ -751,7 +750,6 @@ export function registerIntegration(ctx) {
       x.revAt = at;
       handoffHistory(d, at, 'transaction_handoff_withdrawn', { userId: req.orgUser.id, name: req.orgUser.name }, { handoffId: h.id });
     });
-    persistNow();
     broadcast('transaction_handoff_withdrawn', { orgId: kase.orgId, roomId: kase.id, handoffId: h.id });
     if (h.invitedAgentUserId) {
       notify({ kind: 'org_user', id: h.invitedAgentUserId }, 'representation_transaction',

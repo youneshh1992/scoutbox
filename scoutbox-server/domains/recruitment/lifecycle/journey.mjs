@@ -100,10 +100,9 @@ const TRIAL_TIMELINE_ACTIONS = new Set([
 ]);
 
 /**
- * @param {object} db
  * @param {string} caseId
  * @param {object} viewer  { kind, orgId?, userId?, role?, playerId?, guardianId?, authorized? }
- * @param {object} opts    { now?, evidence?, historyLimit?, historyCursor? }
+ * @param {object} opts    { now?, evidence?, historyLimit?, historyCursor?, reads }
  *
  * No visibility callback is taken, and none is needed. This projection carries
  * the club's own record of its own process — decisions it wrote, statuses it
@@ -136,7 +135,7 @@ function ownedByAnotherCase(rec, kase, { caseId = null, at = null }) {
 const trialCaseOf = (rec, trialId) => (typeof trialId === 'string' ? rec.trialById(trialId)?.caseId ?? null : null);
 const contactCaseOf = (rec, contactId) => (typeof contactId === 'string' ? rec.contactById(contactId)?.caseId ?? null : null);
 
-export function buildRecruitmentJourney(db, caseId, viewer, opts = {}) {
+export function buildRecruitmentJourney(caseId, viewer, opts = {}) {
   const {
     now = Date.now(),
     evidence = NULL_EVIDENCE_PROVIDER,
@@ -144,21 +143,13 @@ export function buildRecruitmentJourney(db, caseId, viewer, opts = {}) {
     historyCursor = 0,
     reads = {},
   } = opts;
-  // S14h: the player through the identity repository (`reads.player`, every route passes it); a pure caller may hand
-  // a `players` list on `db` instead.
-  const handed = db ? Object.getOwnPropertyDescriptor(db, 'players')?.value : undefined; // a plain list only (a retired name's getter is never called)
-  const playerOf = typeof reads.player === 'function' ? reads.player : (id) => (Array.isArray(handed) ? handed.find((x) => x?.id === id) ?? null : null);
+  // The player through the identity repository (`reads.player`, every route passes it).
+  const playerOf = typeof reads.player === 'function' ? reads.player : () => null;
 
-  // ---- §26 — infrastructure before data.
-  //
-  // A required collection that is ABSENT and one that is present but is not a
-  // list are the same class of problem: the database is not in a shape this
-  // build can read. Checking only for `undefined` let `null` — the shape a
-  // half-finished migration leaves behind — through the gate to throw a
-  // TypeError deeper in, where it reads as a bug in the projector rather than
-  // as the broken infrastructure it is. Both are reported, named separately so
-  // the log says which happened.
-  const missing = JOURNEY_REQUIRED_STORES.filter((k) => db?.[k] === undefined);
+  // ---- §26 — infrastructure before data: a query object a route forgot to pass is broken composition, reported by
+  // the store it stands for, never answered as an empty history. (`malformed` stays in the answer: nothing is a plain
+  // list any more, so it is always empty.)
+  const missing = [];
   if (typeof reads.cases?.byId !== 'function' || typeof reads.cases?.forOrgPlayer !== 'function') missing.push('recruitmentCases');
   if (typeof reads.decisions?.forRoom !== 'function') missing.push('roomDecisions');
   if (typeof reads.contacts?.forCase !== 'function' || typeof reads.contacts?.byId !== 'function') missing.push('recruitmentContacts');
@@ -166,14 +157,13 @@ export function buildRecruitmentJourney(db, caseId, viewer, opts = {}) {
   if (typeof reads.requests?.forOrgPlayer !== 'function' || typeof reads.requests?.forCase !== 'function') missing.push('requests');
   if (typeof reads.trials?.forOrgPlayer !== 'function' || typeof reads.trials?.forCase !== 'function' || typeof reads.trials?.byId !== 'function') missing.push('trials');
   if (typeof reads.assessments?.forOrgPlayer !== 'function') missing.push('assessments');
-  const malformed = JOURNEY_REQUIRED_STORES.filter((k) => db?.[k] !== undefined && !Array.isArray(db[k]));
-  if (missing.length || malformed.length) {
+  if (missing.length) {
     return {
       ok: false,
       error: 'JOURNEY_STORE_MISSING',
       message: 'The recruitment journey cannot be built: a required collection is absent or is not a list.',
       missing,
-      malformed,
+      malformed: [],
     };
   }
 
@@ -231,7 +221,7 @@ export function buildRecruitmentJourney(db, caseId, viewer, opts = {}) {
   // Offer arrive in later phases — so the honest answer to every player and
   // guardian is the same one they would get for a case that was never opened.
   if (viewer.kind === 'player_self' || viewer.kind === 'guardian') {
-    const shared = sharedRecordsFor(db, rec, kase, viewer, now);
+    const shared = sharedRecordsFor(rec, kase, viewer, now);
     if (shared.length === 0) {
       return { ok: false, error: 'CASE_NOT_FOUND', message: 'No such recruitment case.' };
     }
@@ -245,7 +235,7 @@ export function buildRecruitmentJourney(db, caseId, viewer, opts = {}) {
       // records that reached them, the one thing they could do now, the ids
       // of their current records, and the milestones they were party to.
       // No case id, no lifecycle state, no priority, no decision, no note.
-      journey: playerJourneyFor(db, rec, kase, viewer, shared, now),
+      journey: playerJourneyFor(rec, kase, viewer, shared, now),
       policyVersion: RECRUITMENT_LIFECYCLE_POLICY_VERSION,
       generatedAt: now,
     };
@@ -262,7 +252,7 @@ export function buildRecruitmentJourney(db, caseId, viewer, opts = {}) {
     if (viewer.authorized !== true || viewer.playerId !== kase.playerId) {
       return { ok: false, error: 'CASE_NOT_FOUND', message: 'No such recruitment case.' };
     }
-    return agentJourneyFor(db, rec, kase, viewer, now);
+    return agentJourneyFor(rec, kase, viewer, now);
   }
 
   // A history that is not a list cannot be read, and must not be reported as
@@ -385,17 +375,16 @@ export function buildRecruitmentJourney(db, caseId, viewer, opts = {}) {
   const corruptRecords = offersCorrupt + packagesCorrupt + trialsCorrupt + contactsOmitted;
   // P8.1 (D-P81-15): this case's assessments — never the ended case's (a Trial of another case, or written while another case was open).
   const allAssessments = rec.assessments.filter((a) => !ownedByAnotherCase(rec, kase, { caseId: trialCaseOf(rec, a.context?.trialId), at: a.createdAt }));
-  const journeyBlock = journeyFor(db, rec, kase, {
+  const journeyBlock = journeyFor(rec, kase, {
     playerOf,
     status, role, now,
-    // `reads.blocks` (the safety repository's queries) in the server; a fixture may plant `db.blocks`.
-    blocked: reads.blocks ? reads.blocks.has(kase.playerId, kase.orgId) : (db.blocks ?? []).some((b) => b && b.playerId === kase.playerId && b.orgId === kase.orgId),
+    blocked: !!reads.blocks?.has(kase.playerId, kase.orgId), // the safety repository's queries
     contacts: rec.contacts.filter((c) => c && c.caseId === kase.id && c.orgId === kase.orgId && contactIntegrity(c, { orgId: kase.orgId, caseId: kase.id }).length === 0),
     trials: trialRows, trialRequests: trialInvitations, assessments: allAssessments,
     decisions: rec.decisions.filter((d) => d?.roomId === kase.id && d.orgId === kase.orgId),
     offers: offerRows, packages: soundPackages, signingRow: signing,
     corruptRecords,
-    foreign: foreignReferences(db, rec, kase),
+    foreign: foreignReferences(rec, kase),
     domainProblems: [
       ...offerRows.flatMap((o) => offerCaseConsistency(o, kase, now).filter((c) => offerCaseCorrupt([c]))),
       ...soundPackages.flatMap((p) => signingConsistency(p, { offer: offerRows.find((o) => o.id === p.offerId) ?? null, kase, rows: [rec.signingForPackage(p.id)].filter(Boolean), player: playerOf(kase.playerId) }, now).filter((c) => signingCorrupt([c]))),
@@ -485,7 +474,7 @@ export function buildRecruitmentJourney(db, caseId, viewer, opts = {}) {
  * Inbox. It deliberately contains no case id, no stage, no room, no decision
  * and no count of anything internal.
  */
-function sharedRecordsFor(db, rec, kase, viewer, now = Date.now()) {
+function sharedRecordsFor(rec, kase, viewer, now = Date.now()) {
   const mine = (r) => {
     if (r?.orgId !== kase.orgId || r.playerId !== kase.playerId) return false;
     if (ownedByAnotherCase(rec, kase, { caseId: r.caseId ?? contactCaseOf(rec, r.contactId), at: r.createdAt })) return false; // P8.1 (D-P81-15): the ended case's request is its own line
@@ -568,7 +557,7 @@ function supportingSigningRow(rec, kase, packageRows) {
 }
 
 /** Records that name this case but another player or club: reported, never used. */
-function foreignReferences(db, rec, kase) {
+function foreignReferences(rec, kase) {
   const out = new Set();
   const check = (rows, orgKey = 'orgId') => {
     for (const r of rows ?? []) {
@@ -587,7 +576,7 @@ function foreignReferences(db, rec, kase) {
  * stages with their basis, the current resource of each kind, ONE next
  * action for this viewer, and the validator's verdict. Reads; never writes.
  */
-function journeyFor(db, rec, kase, f) {
+function journeyFor(rec, kase, f) {
   const contact = currentContactForCase(f.contacts);
   const trial = currentTrialForCase(f.trials);
   const trialRequest = (f.trialRequests ?? []).filter((r) => r?.status === 'pending' && !r.subjectRemovedAt).sort((a, b) => (Number(b.createdAt) || 0) - (Number(a.createdAt) || 0))[0] ?? null;
@@ -636,7 +625,7 @@ function journeyFor(db, rec, kase, f) {
  * ids, the milestones they were party to. No case id, no lifecycle word
  * (except `signed`, which is theirs), no priority, no decision, no note.
  */
-function playerJourneyFor(db, rec, kase, viewer, shared, now) {
+function playerJourneyFor(rec, kase, viewer, shared, now) {
   const audience = viewer.kind === 'guardian' ? 'guardian' : 'player';
   const requests = shared.filter((s) => s.kind === 'contact_request');
   const contactReqs = requests.filter((r) => r.type === 'contact');
@@ -682,7 +671,7 @@ function playerJourneyFor(db, rec, kase, viewer, shared, now) {
  * `signings`). Ungranted kinds read as absent, not as refused, so the
  * projection itself does not disclose what it is hiding.
  */
-function agentJourneyFor(db, rec, kase, viewer, now) {
+function agentJourneyFor(rec, kase, viewer, now) {
   const grants = new Set(viewer.grants ?? []);
   // Only the records the client's own act routed or shared to THIS agent: a
   // contact whose routing snapshot names them, an Offer the client shared

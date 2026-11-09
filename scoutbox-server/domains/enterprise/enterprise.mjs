@@ -66,7 +66,7 @@ export function requestInstrumentation() {
 
 export function registerEnterprise(ctx) {
   const {
-    db, byId, users, sessions, orgs, mediaDeletions, codes, notifications, dispatches, outbox, pushLog, pushTokens, channels, safetyAudit, recruitment, recruitmentCases, players, app, orgRouter, adminRouter, nextId, persist, persistNow, notify,
+    byId, users, sessions, orgs, mediaDeletions, codes, notifications, dispatches, outbox, pushLog, pushTokens, channels, safetyAudit, recruitment, recruitmentCases, players, app, orgRouter, adminRouter, nextId, notify,
     mailer, requireLead, isLead, paginate, histAppend, timingSafeEq, signBody,
     storage, DATA_DIR, backupDatabase, unit, enterprise, enterpriseReads, schemaVersion,
   } = ctx;
@@ -110,7 +110,6 @@ export function registerEnterprise(ctx) {
     // A rejected send (a refused record, a failed provider call) is observed here: logged by id, never an unhandled
     // rejection ending the process; the invite stands as it always did (review of 40aa05c, F2).
     mailer.send({ to: email, subject: `${req.org.name} invited you to ScoutBox`, text: `Hi ${inv.name},\n\n${req.orgUser.name} invited you to join ${req.org.name} on ScoutBox as ${inv.role}.\n\nAccept with invite code: ${code}\n\nThe code expires in 7 days.` }).catch((err) => console.error(`staff invite ${inv.id}: the mail was not recorded or sent (${err?.code ?? err?.message ?? err})`));
-    persistNow();
     res.status(201).json({ invite: inviteView(inv), note: 'The invite code went to their email (dev outbox in this environment).' });
   });
 
@@ -244,7 +243,6 @@ export function registerEnterprise(ctx) {
     if (!requireLead(req, res)) return;
     if (typeof req.body?.mfaRequiredForLeads !== 'boolean') return res.status(400).json({ error: 'FIELD_INVALID', field: 'mfaRequiredForLeads', message: 'mfaRequiredForLeads must be true or false.' });
     const updated = orgs.update(req.org.id, (d) => { d.mfaRequiredForLeads = req.body.mfaRequiredForLeads; });
-    persistNow();
     res.json({ mfaRequiredForLeads: updated.mfaRequiredForLeads, note: 'Enforced at login: leads without MFA are asked to set it up before privileged actions.' });
   });
 
@@ -500,7 +498,6 @@ export function registerEnterprise(ctx) {
     //    directory into a NEW, empty DATA_DIR and boot". Flushed first, so the
     //    copy holds every pending edit and the media queue is judged against
     //    every live reference.
-    persistNow();
     // The ownership invariant (review of 4ef9345): a queued removal that names a
     // clip a live player still carries is a conflict to resolve, not a file to
     // leave out of the backup as if it had been backed up. Refused before any
@@ -601,7 +598,6 @@ export function registerEnterprise(ctx) {
   app.get('/readyz', (_req, res) => {
     // Ready = the database writable (the staged repositories flush) + data loaded.
     try {
-      persistNow();
       res.json({ ready: true, players: players.count() });
     } catch (err) {
       res.status(503).json({ ready: false, error: err.message });

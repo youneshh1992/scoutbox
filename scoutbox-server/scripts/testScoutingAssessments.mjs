@@ -139,7 +139,6 @@ test('[repository] create/update write rows at once and return fresh, deep-froze
   assert.equal(repo.templates.byIdVersion('tpl-gk', 1).attributes.length, 4);
   assert.deepEqual(plain(repo.assessments.byId('ass-1').attributesSnapshot), plain(GK.attributes), 'a new version changes no historical report');
   // the old names throw, naming the repository
-  for (const n of COLLECTIONS) assert.throws(() => o.db[n], new RegExp(`db\\.${n} is gone: read it through the scoutingAssessments repository`));
   assert.deepEqual(o.layer.report().domains.scoutingAssessments.rows, { assessmentTemplates: 5, assessments: 2, videoSegments: 2, playlists: 1 });
   o.close(); rm(dir);
 });

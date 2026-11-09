@@ -35,7 +35,7 @@ export const storedName = (name, max = LIMITS.name) => (name === undefined || na
 
 export function registerPassport(ctx) {
   const {
-    db, byId, nextId, persist, persistNow, notify, ledgerAppend, broadcast, findPlayer,
+    byId, nextId, notify, ledgerAppend, broadcast, findPlayer,
     orgRouter, playerRouter, guardianRouter, adminRouter,
     orgCanSee, paginate, audit, guardianOwnsChild, freshness, activeAffiliation,
     moderateOrRefuse, isAdult, scoutingReads, scoutingEvidence, unit,
@@ -188,7 +188,6 @@ export function registerPassport(ctx) {
     });
     auditDraft(draft, sourceKind, sourceId, sourceName, 'created', tier);
     const rec = scoutingEvidence.evidence.create(draft);
-    persistNow();
     broadcast('evidence', { playerId: player.id });
     res.status(201).json({ evidence: evidenceView(rec) });
   }
@@ -240,7 +239,6 @@ export function registerPassport(ctx) {
       scoutingEvidence.evidence.update(orig.id, (o) => { o.supersededBy = created.id; auditDraft(o, actor.kind, actor.id, actor.name, 'superseded', reason); });
       return created;
     });
-    persistNow();
     broadcast('evidence', { playerId: orig.playerId });
     res.status(201).json({ evidence: evidenceView(rec), superseded: orig.id });
   }
@@ -250,7 +248,6 @@ export function registerPassport(ctx) {
     if (!moderateOrRefuse(res, reason, { kind: 'evidence_dispute', playerId: rec.playerId })) return;
     const d = { id: nextId('dsp'), at: Date.now(), by: { kind: actor.kind, id: actor.id, name: storedName(actor.name) }, reason, status: 'open', resolution: null };
     scoutingEvidence.evidence.update(rec.id, (e) => { e.disputes.push(d); auditDraft(e, actor.kind, actor.id, actor.name, 'disputed', d.reason); });
-    persistNow();
     res.status(201).json({ dispute: d });
   }
 
@@ -312,7 +309,6 @@ export function registerPassport(ctx) {
       if (p.guardianId) notify({ kind: 'guardian', id: p.guardianId }, 'evidence', `${req.org.name} corroborated "${rec.label}" on ${p.name}'s evidence passport.`, rec.id);
       return next;
     });
-    persistNow();
     broadcast('evidence', { playerId: p.id });
     res.json({ evidence: evidenceView(fresh) });
   });
@@ -351,7 +347,6 @@ export function registerPassport(ctx) {
       notify({ kind: 'player', id: rec.playerId }, 'evidence', `Trust & Safety resolved a dispute on "${rec.label}": ${resolution}.`, rec.id);
       return next;
     });
-    persistNow();
     res.json({ dispute: fresh.disputes.find((x) => x.id === d.id), evidence: evidenceView(fresh) });
   });
 
@@ -395,7 +390,6 @@ export function registerPassport(ctx) {
     auditDraft(draft, 'org', req.org.id, req.orgUser.name, 'confirmed', draft.role);
     const a = scoutingEvidence.coachAffiliations.create(draft);
     ledgerAppend({ type: 'coach_affiliation_confirmed', orgId: req.org.id, orgName: req.org.name, userId: req.orgUser.id, scoutName: req.orgUser.name });
-    persistNow();
     res.status(201).json({ affiliation: affiliationView(a) });
   });
 
@@ -410,7 +404,6 @@ export function registerPassport(ctx) {
       x.to = new Date().toISOString().slice(0, 10);
       auditDraft(x, 'org', req.org.id, req.orgUser.name, status, reason);
     });
-    persistNow();
     res.json({ affiliation: affiliationView(fresh), note: 'Historical references stay attributed; current coach privileges are removed immediately.' });
   }
   orgRouter.post('/coaches/:id/end', (req, res) => closeAffiliation(req, res, 'ended'));
@@ -456,7 +449,6 @@ export function registerPassport(ctx) {
       else notify({ kind: 'player', id: p.id }, 'squad_invite', `${req.org.name} invites you to join their squad list.`, created.id);
       return created;
     });
-    persistNow();
     res.status(201).json({ invite });
   });
   // The answer, the squad row (S9c: a row of org_squad_members) and the notification commit together.
@@ -475,7 +467,6 @@ export function registerPassport(ctx) {
       }
       return next;
     });
-    persistNow();
     res.json({ invite: fresh });
   }
 

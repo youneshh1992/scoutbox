@@ -8,7 +8,7 @@
 // names an evaluation of its own context; a withdrawn binding is final and one binding per (role, agent) is live; a
 // document version is superseded once; the lists page newest first by cursor and the agent's counts are SQL; the
 // duplicate rule's candidates are indexed; an account deletion keeps ids and loses the person; a rolled-back unit
-// leaves nothing; the db.* names throw; and the snapshot write types every record, keeps the omitted collections,
+// leaves nothing; and the snapshot write types every record, keeps the omitted collections,
 // refuses a row naming a missing context and reads back what it wrote. Temporary databases only. Run with: npm test
 
 import assert from 'node:assert/strict';
@@ -239,13 +239,12 @@ test('[account deletion] a transaction keeps its ids, roles, states and times an
   } finally { s.close(); rm(dir); }
 });
 
-test('[units] a rolled-back unit leaves nothing; the db.* names throw', () => {
+test('[units] a rolled-back unit leaves nothing', () => {
   const dir = tempDir('s11c-units'); saveFixture(dir);
   const s = serverOpen(dir);
   try {
     refused(() => s.unit(() => { s.withContext(); s.repo.transactions.create(transaction()); s.repo.representations.create(rep()); throw new Error('boom'); }), /boom/);
     assert.equal(s.repo.transactions.byId('atx-1'), null); assert.equal(s.repo.representations.byId('txr-1'), null);
-    for (const n of COLLECTIONS) assert.throws(() => s.db[n], /read it through the agentTransactions repository/);
   } finally { s.close(); rm(dir); }
 });
 

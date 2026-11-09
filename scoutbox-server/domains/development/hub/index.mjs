@@ -62,7 +62,7 @@ export const M21_STORES = Object.freeze([
 
 export function registerDevelopment(ctx) {
   const {
-    db, byId, users, nextId, notify, broadcast, findPlayer, orgCanSee, isLead,
+    byId, users, nextId, notify, broadcast, findPlayer, orgCanSee, isLead,
     orgRouter, playerRouter, guardianRouter, audit, isAdult, unit,
     recruitmentReads, scoutingReads, // §4.3 step 2: the trials (and, since S9a, the evidence) are read through SQL
     development, developmentReads, // S12a: the Hub's own records
@@ -210,7 +210,7 @@ export function registerDevelopment(ctx) {
   };
 
   const project = (bundle, viewer) => buildDevelopmentPlan({
-    db, reads, planId: bundle.plan.id, player: bundle.player, viewer, access: bundle.access,
+    reads, planId: bundle.plan.id, player: bundle.player, viewer, access: bundle.access,
     orgCanSee, now: now(), collected: bundle,
   });
 
@@ -404,10 +404,10 @@ export function registerDevelopment(ctx) {
         ...reads.trials.forPlayer(player.id).map((t) => ({ sourceType: 'trial_report', sourceId: t.id })),
       ];
       const items = candidates
-        .map((c) => ({ ...c, ...validateEvidenceLink({ ...c, db, reads, player: subject, viewer, orgCanSee, now: now() }) }))
+        .map((c) => ({ ...c, ...validateEvidenceLink({ ...c, reads, player: subject, viewer, orgCanSee, now: now() }) }))
         .filter((c) => !c.error)
         .map((c) => {
-          const r = resolveEvidenceLink(c, { db, reads, player: subject, viewer, orgCanSee, now: now() });
+          const r = resolveEvidenceLink(c, { reads, player: subject, viewer, orgCanSee, now: now() });
           return {
             sourceType: c.sourceType, sourceId: c.sourceId,
             sourceLabel: r.sourceLabel, title: r.title ?? r.sourceLabel,
@@ -950,7 +950,7 @@ export function registerDevelopment(ctx) {
 
       const parsed = validateEvidenceLink({
         sourceType: req.body?.sourceType, sourceId: req.body?.sourceId,
-        db, reads, player, viewer, orgCanSee, now: now(),
+        reads, player, viewer, orgCanSee, now: now(),
       });
       if (parsed.error) return res.status(parsed.error === 'EVIDENCE_NOT_FOUND' ? 404 : 400).json(parsed);
 

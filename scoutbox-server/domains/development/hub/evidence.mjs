@@ -95,7 +95,7 @@ function viewerMaySeePlayer(viewer, player, { orgCanSee }) {
  * a caller distinguish "no such id" from "not yours", which is an enumeration
  * oracle over another club's evidence.
  */
-export function resolveEvidenceLink(link, { db, reads = {}, player, viewer, orgCanSee, now = Date.now() }) {
+export function resolveEvidenceLink(link, { reads = {}, player, viewer, orgCanSee, now = Date.now() }) {
   if (!EVIDENCE_SOURCES.includes(link.sourceType)) return unavailable(link, 'evidence_not_found');
   if (!viewerMaySeePlayer(viewer, player, { orgCanSee })) return unavailable(link, 'evidence_not_visible');
 
@@ -233,7 +233,7 @@ function resolveTrialReport(link, { reads, player, viewer }) {
  * to unavailable at read time, because one guard is never enough for the rule
  * that keeps players' records apart.
  */
-export function validateEvidenceLink({ sourceType, sourceId, db, reads = {}, player, viewer, orgCanSee, now = Date.now() }) {
+export function validateEvidenceLink({ sourceType, sourceId, reads = {}, player, viewer, orgCanSee, now = Date.now() }) {
   if (!EVIDENCE_SOURCES.includes(String(sourceType))) {
     return { error: 'EVIDENCE_SOURCE_UNKNOWN', allowed: EVIDENCE_SOURCES, detail: `Unknown evidence source "${sourceType}".` };
   }
@@ -244,12 +244,12 @@ export function validateEvidenceLink({ sourceType, sourceId, db, reads = {}, pla
   // Does the record exist AND belong to this player? Both questions get the
   // same answer, so a caller cannot use the difference to discover that an id
   // exists on somebody else.
-  const owned = recordBelongsToPlayer({ db, reads, sourceType, sourceId, playerId: player.id });
+  const owned = recordBelongsToPlayer({ reads, sourceType, sourceId, playerId: player.id });
   if (!owned) {
     return { error: 'EVIDENCE_NOT_FOUND', detail: 'That evidence does not exist for this player.' };
   }
 
-  const probe = resolveEvidenceLink({ sourceType, sourceId }, { db, reads, player, viewer, orgCanSee, now });
+  const probe = resolveEvidenceLink({ sourceType, sourceId }, { reads, player, viewer, orgCanSee, now });
   if (!probe.available && probe.reason === 'evidence_not_visible') {
     return { error: 'EVIDENCE_NOT_FOUND', detail: 'That evidence does not exist for this player.' };
   }
@@ -263,7 +263,7 @@ export function validateEvidenceLink({ sourceType, sourceId, db, reads = {}, pla
 }
 
 /** Ownership, per store. One place, so no source can be added without answering it. */
-export function recordBelongsToPlayer({ db, reads = {}, sourceType, sourceId, playerId }) {
+export function recordBelongsToPlayer({ reads = {}, sourceType, sourceId, playerId }) {
   const find = (list) => (list ?? []).find((x) => x.id === sourceId && x.playerId === playerId) ?? null;
   switch (sourceType) {
     case 'passport_evidence': { const e = reads.evidence?.byId(sourceId) ?? null; return e && e.playerId === playerId ? e : null; }

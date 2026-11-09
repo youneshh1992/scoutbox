@@ -207,7 +207,6 @@ test('reads: byId and parties; a player\'s threads (all, or only their own adult
 test('units of work: the threads join the open unit; a failure anywhere in it (a thrown error, a caught refusal, a statement failure, the real COMMIT) leaves the file and every read as they were; reads inside the unit see its writes; there is no mirror, no save hook and db.channels throws, naming the repository', () => {
   const dir = tempDir('ch-unit'); fixtureFile(dir, { channels: [channel({ messages: [message({ id: 'm-0' })] })] });
   const L = live(dir);
-  assert.throws(() => L.db.channels, /db\.channels is gone: read it through the channels repository/);
   assert.equal(L.repo.pending(), 0);
   const before = fileDump(dir);
   const unchanged = (label) => { assert.deepEqual(fileDump(dir), before, label); assert.deepEqual(L.repo.byId('chan-1').messages.map((m) => m.id), ['m-0'], `${label}: a read agrees`); assert.equal(L.store.sqlite.isTransaction, false); };

@@ -101,10 +101,9 @@ test('repository: an issue returns the plain code once and stores its hash; a re
   const p1 = codes.issuePairingCode('pl-child1'); const p2 = codes.issuePairingCode('pl-child1');
   assert.equal(codes.peekPairingCode(p1.code), null, 'the reissued child code replaced the first'); assert.deepEqual(codes.peekPairingCode(p2.code), { playerId: 'pl-child1' });
   assert.equal(s.prepare('SELECT COUNT(*) AS n FROM pairing_codes').get().n, 1);
-  // The views: hash-free and read-only.
-  assert.deepEqual(JSON.parse(JSON.stringify(codes.pairingCodesView)), [{ playerId: 'pl-child1', expiresAt: NOW + PAIRING_CODE_TTL_MS }]);
-  assert.doesNotMatch(JSON.stringify([codes.pairingCodesView, codes.emailChallengesView]), /[0-9a-f]{64}|CCCCCC|BBBBBB/);
-  assert.throws(() => codes.pairingCodesView.push({}), /written through its domain repository/);
+  // No plain code is stored: only its hash.
+  assert.deepEqual(s.prepare('SELECT player_id, expires_at FROM pairing_codes').all().map((r) => ({ ...r })), [{ player_id: 'pl-child1', expires_at: NOW + PAIRING_CODE_TTL_MS }]);
+  assert.doesNotMatch(JSON.stringify([...s.prepare('SELECT * FROM pairing_codes').all(), ...s.prepare('SELECT * FROM email_challenges').all()]), /CCCCCC|BBBBBB|AAAAAA/);
   // Expiry: judged on read, then swept.
   t = NOW + PAIRING_CODE_TTL_MS;
   assert.equal(codes.peekPairingCode(p2.code), null, 'expired at exactly expires_at'); assert.equal(codes.consumePairingCode(p2.code), null);
@@ -198,7 +197,6 @@ test('a caught repository failure cannot commit partial work: the pairing reissu
   const dir = tempDir('otc-joined-pair'); s5File(dir);
   const L = live(dir);
   const first = L.codes.issuePairingCode('pl-child1');
-  L.store.save();
   const before = durable(dir);
   assert.equal(before.codes.length, 1);
   L.store.sqlite.exec("CREATE TEMP TRIGGER t_pair_insert BEFORE INSERT ON pairing_codes BEGIN SELECT RAISE(ABORT, 'injected pairing insert failure'); END");
@@ -229,7 +227,6 @@ test('e-mail side, a multi-statement operation that already wrote: the tenth wro
   const L = live(dir);
   const { code } = L.codes.issueEmailChallenge('org-pro', 'x@eastport.test');
   for (let i = 1; i < EMAIL_CHALLENGE_MAX_ATTEMPTS; i++) L.codes.noteFailedEmailAttempt('org-pro');
-  L.store.save();
   const before = durable(dir);
   assert.deepEqual(before.challenges, [['org-pro', EMAIL_CHALLENGE_MAX_ATTEMPTS - 1]]);
   L.store.sqlite.exec("CREATE TEMP TRIGGER t_mail_delete BEFORE DELETE ON email_challenges BEGIN SELECT RAISE(ABORT, 'injected challenge delete failure'); END");
@@ -252,7 +249,6 @@ test('e-mail side, a multi-statement operation that already wrote: the tenth wro
 test('the boundary itself: joined successes commit with the unit (issue, consume and an unrelated edit, one transaction); an uncaught failure rolls back as before; expected negative results stay return values and never poison a unit; a validation failure is part of the operation (caught inside a unit, it still poisons the unit); a raw SQLite transaction a tool opened is honoured without a nested BEGIN and is not mistaken for a unit (its ROLLBACK undoes the operation); a malformed participant API is refused at construction', () => {
   const dir = tempDir('otc-joined-edge'); s5File(dir);
   const L = live(dir);
-  L.store.save();
   // Joined successes. (Rewritten in S14a: the unrelated edit was a blob and the save revision was counted; now it
   // is an organisation row and the BEGINs are counted.)
   const exec = L.store.sqlite.exec.bind(L.store.sqlite);

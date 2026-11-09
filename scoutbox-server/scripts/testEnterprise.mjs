@@ -5,7 +5,7 @@
 // not match its clocks); an invite is found by its code's hash only, and moves pending → accepted (naming staff of its
 // organisation) | revoked | expired once; an organisation has one SSO configuration and a sign-in state is used once,
 // decided in the database; a ticket keeps its references and replies as ordered rows; a grant is approved for its
-// hours and logs every read; a rolled-back unit leaves nothing; the db.* names throw; and the snapshot write types,
+// hours and logs every read; a rolled-back unit leaves nothing; and the snapshot write types,
 // names a missing reference and reads back what it wrote. Temporary databases only; nothing touches DATA_DIR.
 // Run with: npm test
 
@@ -157,12 +157,11 @@ test('[support] a ticket keeps references and replies as rows; a grant is approv
 });
 
 // ------------------------------------------------------------- units, retirement, snapshot
-test('[unit] a rolled-back unit leaves nothing, and the db.* names throw naming the repository', () => {
+test('[unit] a rolled-back unit leaves nothing', () => {
   const { dir, s } = seeded('s13b-unit');
   assert.throws(() => s.unit(() => { s.repo.tickets.create(ticket()); s.repo.grants.request(grant()); throw new Error('boom'); }), /boom/);
   assert.equal(s.repo.reads.tickets.byId('tkt-1'), null); assert.equal(s.repo.reads.grants.byId('sag-1'), null);
   assert.equal(typeof s.repo.reads.invites.create, 'undefined', 'the reads cannot write');
-  for (const n of COLLECTIONS) assert.throws(() => s.db[n], new RegExp(`db\\.${n} is gone: read it through the enterprise repository`));
   s.close(); rm(dir);
 });
 

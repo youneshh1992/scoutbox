@@ -79,7 +79,6 @@ are refused in production.
 | **`SCOUTBOX_TEST_CLOCK`** | `1` enables test-clock routes (m23 / m28) | off |
 | **`ALLOW_LOCAL_WEBHOOKS`** | `1` permits loopback webhook targets (tests) | off (SSRF guard) |
 | **`M13_FAST_RETRY`** | `1` compresses retry ladders and sweep intervals (tests) | off |
-| **`SCOUTBOX_SAVE_DEBOUNCE_MS`** | Shortens the 2-second debounced save (10–2000 ms) so test suites need not wait for it | 2000. Never honoured in production, and fatal there (`SAVE_DEBOUNCE_IN_PRODUCTION`). Any other value is the normal delay (`SAVE_DEBOUNCE_INVALID`) |
 | **`M13_QUIET_LOGS`** | `1` silences boot and per-request logs | off |
 
 A trust-weights total other than 100 is also fatal (`TRUST_WEIGHTS_INVALID`).
@@ -92,8 +91,8 @@ A trust-weights total other than 100 is also fatal (`TRUST_WEIGHTS_INVALID`).
 every mint).
 
 Every repository writes its rows at once, inside the unit of work it joined (or a transaction of its own), and reads
-through SQL. Since S14h no repository keeps a mirror in memory: `persist()` and `persistNow()` have nothing of a
-domain's left to write (they go with the save path, S14 last).
+through SQL. No repository keeps records in memory, and there is no save step: a write is durable when its
+transaction commits.
 
 `GET /capabilities` → `dataLayer` lists the tables, the applied migrations and each
 domain's counts.
@@ -104,8 +103,7 @@ registration → listen.
 
 ### Rules when writing server code
 
-- **Write through the repository.** No domain has a `db.<collection>` any more: reading or assigning one throws and
-  names the repository. Add records with the repository's `create` / `add*` operations and change them with
+- **Write through the repository.** There is no `db` object: every domain is owned by its repository. Add records with the repository's `create` / `add*` operations and change them with
   `update(id, (draft) => …)` (or a player's lists with `addItem` / `setItems` / `patchItem`). New domains follow
   S8b (`repositories/recruitmentCases.mjs`, cases and rooms), S8a
   (`repositories/recruitment.mjs`, requests and trials), S8c
@@ -130,9 +128,7 @@ registration → listen.
   `players.drillBests`, `players.scan` / `list`, `players.byExternalId`, `guardians.forPlayer`,
   `guardians.byEmail`. `players.profile_signal` is kept by the repositories (every player write, every
   trial write); nothing else writes it.
-- **Read SQL where the domain has no view.** Since §4.3 step 2 a domain whose reads moved
-  to SQL has no `db.<collection>` at all (reading or assigning it throws and names the
-  repository). The whole recruitment domain (cases and Room records, requests, trials,
+- **Read SQL.** Every domain is read through its repository's queries. The whole recruitment domain (cases and Room records, requests, trials,
   contacts, offers, signing packages, signings, follow-ups, outcome reports) has moved, and so
   have the scouting evidence passport, coach affiliations and squad invitations (S9a) the assessment templates, assessments, video segments and playlists (S9b), and a club's tactical setup, squad, shadow list, looking-for, federation request and vacancies (S9c, which also retired the organisation facets `tactical`, `squad`, `lookingFor` and `federationCheck`; since S14g an organisation record has only its typed fields and writing one of these is refused, naming the repository), the opportunity board, applications, assessment campaigns and players' private suitability preferences (S9d), and the verification claims, their evidence vault, tokens, administrators, root applications, disputes, references, squad invitations by code, conflicts, domain requests and verified domains (S10a, which also retired the organisation facet `verification`: its revocation is the organisation field `verificationRevokedAt`), the Passport's preferences, career entries, achievements, share links and correction requests (S10b), and transition cases and coach references (S10c; a reference's one-time code is stored only as its hash): ask the repository (`recruitmentContactsOffers.contacts.forCase`,
   `signingsFollowUps.signings.forOrgPlayer`, `scoutingEvidence.evidence.currentForPlayer`, …, or the read-only `recruitmentReads`
@@ -140,13 +136,13 @@ registration → listen.
   `domains/platform/paging.mjs` (`readPage` at the route, a `pageFor…` query in the
   repository that asks for one row more than the page). Each record is a fresh,
   deep-frozen decode; a query inside a unit of work sees the unit's own writes. Pure
-  projectors take the queries as an argument (`reads`) rather than reading `db`.
+  projectors take the queries as an argument (`reads`).
 - **Units of work.** If one operation touches more than one table, wrap it in `unit(() => { ... })` (`store.unitOfWork`). Inside the unit:
   - The callback must be **synchronous**. An `async` function is refused before it runs.
     A returned promise is not cancelled and counts as a stray. Prepare async work before
     the unit and publish it after.
   - Everything commits or rolls back together. On failure the error is rethrown with
-    `err.unitOfWork = 'rolled_back'`; there is no memory to restore (S14h). Nothing is left pending for a later save.
+    `err.unitOfWork = 'rolled_back'`; there is no memory to restore.
   - A nested unit joins the outer one. An inner failure fails the whole unit even if the
     caller catches it. Repository refusals do the same (participant failure).
   - Retry is explicit: rerun the whole operation.
@@ -159,10 +155,8 @@ registration → listen.
   rejected promise inside it is counted and logged, and it never undoes the data. Outside
   a unit it runs immediately. A notification's push and `notify` event go through it too:
   inside a unit they wait for its commit, outside one the row is already committed.
-- **Ordinary saves.** If a debounced save fails, memory stays the intended state and the
-  next save writes it. The log line `save failed:` means a retry is pending, not
-  that data was lost. Every save and unit begins with `BEGIN IMMEDIATE`, and every
-  connection sets `busy_timeout = 5000`.
+- **Transactions.** Every unit begins with `BEGIN IMMEDIATE`, and every connection sets
+  `busy_timeout = 5000`.
 - **Responses use allowlists.** Player and guardian responses are built in
   `views/playerViews.mjs`. Add a field to an allowlist on purpose. Never serialise a raw
   record.
@@ -258,4 +252,5 @@ used to relabel stubs as live providers; production now refuses them (`PROVIDER_
 - **Rate limits** are per process (`domains/platform/rateLimit.mjs`, `RATE_LIMIT_POLICY` is the
   single table). Behind a proxy, set `SCOUTBOX_TRUST_PROXY`. Otherwise every client
   shares one address and the `/auth` limit becomes global.
-- **Shutdown.** `SIGINT` / `SIGTERM` flush the pending debounced save (`persistNow()`).
+- **Shutdown.** `SIGINT` / `SIGTERM` close the database connection and exit 0. Every write has already
+  committed (units of work are synchronous), so nothing is pending.

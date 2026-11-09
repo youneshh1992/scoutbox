@@ -5,7 +5,7 @@
 // a facet filed under the wrong member association, a request entry that disagrees with its agreement, a minor);
 // each record is created whole and read back; an update keeps what never changes, writes a key once, never reopens an
 // ended membership, keeps a share's content and only grows the history; the queries answer what the routes need; a
-// client's removal leaves id-only tombstones; a rolled-back unit leaves nothing; the db.* names throw; and the
+// client's removal leaves id-only tombstones; a rolled-back unit leaves nothing; and the
 // snapshot write types every record, names a missing staff member and reads back what it wrote. Temporary databases
 // only; nothing touches DATA_DIR. Run with: npm test
 
@@ -219,7 +219,7 @@ test('[settings] an agency\'s settings are empty until saved, then typed whole',
   } finally { s.close(); rm(dir); }
 });
 
-test('[units] a rolled-back unit leaves nothing; the db.* names throw', () => {
+test('[units] a rolled-back unit leaves nothing', () => {
   const dir = tempDir('s11a-unit'); saveFixture(dir);
   const s = serverOpen(dir);
   try {
@@ -227,7 +227,6 @@ test('[units] a rolled-back unit leaves nothing; the db.* names throw', () => {
     assert.equal(s.repo.reads.profiles.byId('agp-1'), null);
     assert.equal(s.repo.reads.affiliations.byId('aff-1'), null);
     assert.equal(s.repo.reads.agreements.byId('rep-1'), null);
-    for (const n of COLLECTIONS) assert.throws(() => s.db[n], new RegExp(`db\\.${n} is gone: read it through the agentCore repository`));
   } finally { s.close(); rm(dir); }
 });
 

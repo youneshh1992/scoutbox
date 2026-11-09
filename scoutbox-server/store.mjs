@@ -10,9 +10,8 @@
 //
 // Two modes:
 //
-//   server mode   openStore(dir, { tableBacked: [...] }) — the running server. The repositories own their tables;
-//                 the store gives them the unit of work and runs the save hooks of the repositories that still stage
-//                 their writes (`save()`).
+//   server mode   openStore(dir, { tableBacked: [...] }) — the running server. The repositories own their tables and
+//                 write their rows at once; the store gives them the unit of work.
 //   snapshot mode openStore(dir) — tools, fixtures and the persistence suites, which treat the file as one
 //                 snapshot. The file is brought up to the current table schema when it is opened; `load` reads every
 //                 table-backed collection from its table and `save` writes it into that table (validated: junk is
@@ -70,27 +69,15 @@ export function openStore(dataDir, { tableBacked = null } = {}) {
   if (!serverMode) migrateForSnapshot(sqlite);
   const knownCollections = new Set(TABLE_BACKED);
 
-  // Server mode only: save hooks the data layer registers. `flush` runs inside
-  // every save transaction, so a repository that keeps part of its records in
-  // memory between saves (the organisations' transitional facets, S3) persists
-  // them atomically. A flush failure fails the save: nothing half-written. After the
-  // transaction ends the outcome is reported to every hook — `commit` once
-  // COMMIT returned, `rollback` once ROLLBACK ran (for a failure after the
-  // flush, in a later write or in COMMIT itself) — so a hook's change tracking
-  // reflects committed state only and a rolled-back change is flushed again.
-  const hooks = [];
-  const report = (phase) => { for (const hook of hooks) hook[phase]?.(); };
-
   // Server mode only: the unit of work (see `unitOfWork` below). While one is
-  // open, repository row writes are allowed inside the store's transaction,
-  // `save()` is absorbed into the unit's commit, and side effects registered
-  // with `afterCommit` wait until COMMIT returned.
+  // open, repository row writes run inside the store's transaction, and side
+  // effects registered with `afterCommit` wait until COMMIT returned.
   let unit = null; // { afterCommit: [], failure: null } while a unit of work is open
   let afterCommitFailures = 0;
   let afterCommitDelivered = 0;
   let lastAfterCommitError = null;
-  let restoreFailures = 0;
-  let lastRestoreError = null;
+  let cleanupFailures = 0;
+  let lastCleanupError = null;
   // Thenables a unit's work returned although it must be synchronous: their
   // continuations run later, OUTSIDE any unit, and nothing here can cancel them.
   const strayAsyncWork = { escaped: 0, rejected: 0, lastError: null };
@@ -129,66 +116,35 @@ export function openStore(dataDir, { tableBacked = null } = {}) {
     });
   }
 
-  /**
-   * Everything a save transaction writes between BEGIN and COMMIT. Server mode: the staged repositories' flush hooks.
-   * Snapshot mode: every collection into its table (a collection with no table is refused before anything is
-   * written), and the id counter.
-   */
-  function writeBody(snapshot, { asSnapshot }) {
-    if (!asSnapshot) { for (const hook of hooks) hook.flush?.(); return; }
+  /** Snapshot mode: every collection into its table (a collection with no table is refused before anything is written), and the id counter. */
+  function writeSnapshot(snapshot) {
     if (!snapshot || typeof snapshot !== 'object' || !snapshot.db || typeof snapshot.db !== 'object') throw new TypeError('a snapshot-mode save needs { db, idCounter? } with db an object of collections; nothing was written');
     const unknown = Object.keys(snapshot.db ?? {}).filter((name) => snapshot.db[name] !== undefined && !knownCollections.has(name));
     if (unknown.length) throw Object.assign(new Error(`SNAPSHOT_COLLECTION_UNKNOWN: ${unknown.join(', ')} ${unknown.length === 1 ? 'has' : 'have'} no table (the blob store is retired, S14a); the save was rolled back and nothing was written`), { code: 'SNAPSHOT_COLLECTION_UNKNOWN' });
-    writeTableBacked(sqlite, snapshot.db ?? {});
-    if (snapshot.idCounter !== undefined) sqlite.prepare("UPDATE counters SET value = MAX(value, ?) WHERE name = 'id'").run(Number(snapshot.idCounter) || 0);
-  }
-
-  /**
-   * One save transaction. `asSnapshot` writes every collection into its table
-   * (snapshot mode); a server-mode save passes false and runs only the staged
-   * repositories' flush hooks (every other repository writes its rows at once).
-   *
-   * Contract of an ORDINARY save (unchanged since S3): memory is the intended
-   * state. A failed save leaves memory as it is, the hooks discard what they
-   * wrote, and the next save retries everything that is still different from
-   * the committed state. Nothing is undone in memory.
-   */
-  function write(snapshot, { asSnapshot }) {
-    // IMMEDIATE (S8a-core): a save is a write transaction and takes the write lock
-    // at BEGIN, through the busy handler. A deferred BEGIN whose first statements
-    // are reads (the save hooks' final-state assertions read before they write)
-    // holds a read snapshot; if another process commits in between, the later
-    // upgrade to a write fails at once with "database is locked" (SQLITE_BUSY_SNAPSHOT,
-    // which the busy handler never retries). The S2 busy-timeout test proves the wait.
+    // IMMEDIATE: a save is a write transaction and takes the write lock at BEGIN, through the busy handler (a deferred
+    // BEGIN that reads first would fail at once with SQLITE_BUSY_SNAPSHOT if another process committed in between).
     sqlite.exec('BEGIN IMMEDIATE');
     try {
-      writeBody(snapshot, { asSnapshot });
+      writeTableBacked(sqlite, snapshot.db ?? {});
+      if (snapshot.idCounter !== undefined) sqlite.prepare("UPDATE counters SET value = MAX(value, ?) WHERE name = 'id'").run(Number(snapshot.idCounter) || 0);
       runBeforeCommit(sqlite);
       sqlite.exec('COMMIT');
     } catch (err) {
-      // A failure anywhere above — a flush, a table write, COMMIT itself — ends
-      // the transaction; the hooks learn that nothing they wrote exists.
-      try { if (sqlite.isTransaction) sqlite.exec('ROLLBACK'); } finally { if (!asSnapshot) report('rollback'); }
+      if (sqlite.isTransaction) sqlite.exec('ROLLBACK');
       throw err;
     }
-    if (!asSnapshot) report('commit');
   }
 
   /**
    * An explicit UNIT OF WORK: run `work()` so that every repository row write
-   * it performs, and the staged repositories' flush, commit or roll back
-   * TOGETHER, in one SQLite transaction.
+   * it performs commits or rolls back TOGETHER, in one SQLite transaction.
    *
-   * Contract (different from an ordinary save, on purpose):
-   *  - On any failure — inside `work`, in a flush, at COMMIT — the transaction
-   *    is rolled back and each participating repository restores its own
-   *    in-memory records, views and change tracking to the state they had when
-   *    the unit began. A later ordinary save therefore persists NO fragment of
-   *    the failed operation. Retrying means calling `unitOfWork` again with the
-   *    whole operation. The error carries `unitOfWork = 'rolled_back'`.
-   *  - Edits that were pending BEFORE the unit began (an unsaved facet change,
-   *    a staged write) are part of the restored state: they stay in
-   *    memory, still pending, exactly as an ordinary save failure leaves them.
+   * Contract:
+   *  - On any failure — inside `work`, in a pre-commit hook, at COMMIT — the
+   *    transaction is rolled back and nothing of the operation exists. No
+   *    repository keeps records in memory, so there is nothing else to undo.
+   *    Retrying means calling `unitOfWork` again with the whole operation. The
+   *    error carries `unitOfWork = 'rolled_back'`.
    *  - `work` must be synchronous: a SQLite transaction never spans an await
    *    or a network call. An `async function` is identifiable and is REFUSED
    *    BEFORE IT IS INVOKED — none of its body runs (top-level or nested). A
@@ -202,23 +158,17 @@ export function openStore(dataDir, { tableBacked = null } = {}) {
    *  - A unit started inside a unit JOINS it (one transaction). An inner
    *    failure marks the WHOLE unit unable to commit, even when the inner
    *    caller catches the error: the outer unit then fails at its end with the
-   *    inner error as `cause`, and everything is rolled back and restored.
+   *    inner error as `cause`, and everything is rolled back.
    *    A unit cannot start inside a foreign open transaction.
-   *  - `save()` called inside a unit is absorbed: the unit's commit flushes
-   *    once. `afterCommit(fn)` defers a side effect (a broadcast, a push)
-   *    until COMMIT returned; a side effect never fails the operation: a
+   *  - `afterCommit(fn)` defers a side effect (a broadcast, a push) until
+   *    COMMIT returned; a side effect never fails the operation: a
    *    synchronous throw or a rejected returned promise is counted and
    *    reported (`unitOfWorkState()`), and is NOT a rollback — the data is
    *    committed. Later callbacks still run. Outside a unit `afterCommit`
    *    runs the callback immediately, observed the same way.
    *  - Setup and teardown are exception-safe: a failed BEGIN opens no unit and
-   *    runs no work; a failing cleanup step (ROLLBACK, a participant's
-   *    restore) is recorded (`restoreFailures`, attached to the
-   *    error as `unitOfWorkCleanup`) and still closes the unit.
-   *  - Participants are the registered save hooks that implement
-   *    `snapshotState()` / `restoreState()`; a repository without them must
-   *    refuse writes while a unit is open (`store.unit.active()`), or its
-   *    bookkeeping would survive a rollback.
+   *    runs no work; a failing ROLLBACK is recorded (`cleanupFailures`,
+   *    attached to the error as `unitOfWorkCleanup`) and still closes the unit.
    */
   const asyncRefusal = (kind, nested) => new TypeError(`a unit of work must be synchronous: the ${nested ? 'nested ' : ''}work is an ${kind} and was not invoked (a SQLite transaction never spans an await; nothing of it ran)`);
   const thenableRefusal = () => new Error('a unit of work must be synchronous: the work returned a promise/thenable, so the unit was rolled back; its continuation is not cancelled and whatever it does later happens outside any unit (counted in unitOfWorkState().strayAsyncWork)');
@@ -237,25 +187,24 @@ export function openStore(dataDir, { tableBacked = null } = {}) {
     }
   }
 
-  /** Close a failed unit: ROLLBACK, restore memory and the participants, tell the hooks — each step attempted even when another fails, and the unit is closed whatever happens. */
-  function abort(states, err) {
-    const cleanup = [];
-    const attempt = (label, fn) => { try { fn(); } catch (e) { cleanup.push(`${label}: ${String(e?.message ?? e).slice(0, 200)}`); } };
+  /** Close a failed unit: ROLLBACK, and the unit is closed whatever happens. */
+  function abort(err) {
+    let cleanup = null;
     try {
-      attempt('ROLLBACK', () => { if (sqlite.isTransaction) sqlite.exec('ROLLBACK'); });
-      hooks.forEach((hook, i) => { if (hook.restoreState) attempt(`participant ${i} restoreState`, () => hook.restoreState(states[i])); });
-      attempt('hooks rollback', () => report('rollback'));
+      if (sqlite.isTransaction) sqlite.exec('ROLLBACK');
+    } catch (e) {
+      cleanup = `ROLLBACK: ${String(e?.message ?? e).slice(0, 200)}`;
     } finally {
       unit = null;
     }
-    if (cleanup.length) {
-      restoreFailures += cleanup.length;
-      lastRestoreError = { at: Date.now(), message: cleanup.join('; ').slice(0, 400) };
-      console.error(`unit of work: rollback cleanup failed in ${cleanup.length} step(s) (the unit is closed; memory may not match the database until the next restart): ${lastRestoreError.message}`);
+    if (cleanup) {
+      cleanupFailures += 1;
+      lastCleanupError = { at: Date.now(), message: cleanup };
+      console.error(`unit of work: the rollback failed (the unit is closed): ${cleanup}`);
     }
     if (err && typeof err === 'object') {
       err.unitOfWork = 'rolled_back';
-      if (cleanup.length) err.unitOfWorkCleanup = cleanup;
+      if (cleanup) err.unitOfWorkCleanup = [cleanup];
     }
   }
 
@@ -266,10 +215,9 @@ export function openStore(dataDir, { tableBacked = null } = {}) {
     if (sqlite.isTransaction) throw new Error('a unit of work cannot start inside an open transaction');
     const kind = asyncKind(work);
     if (kind) throw asyncRefusal(kind, false); // before anything is captured or begun: nothing to undo
-    const states = hooks.map((hook) => (hook.snapshotState ? hook.snapshotState() : null));
     // BEGIN first: if it fails, no unit was ever open, the work does not run and
     // the error propagates as it is (nothing to roll back or restore). IMMEDIATE,
-    // for the reason given in write(): a unit of work is a write transaction.
+    // for the reason given in writeSnapshot(): a unit of work is a write transaction.
     sqlite.exec('BEGIN IMMEDIATE');
     unit = { afterCommit: [], failure: null };
     let result;
@@ -277,16 +225,14 @@ export function openStore(dataDir, { tableBacked = null } = {}) {
       result = work();
       if (isThenable(result)) { observeStrayAsync(result); throw thenableRefusal(); }
       if (unit.failure) throw new Error(`the unit of work cannot commit: a nested (joined) unit failed inside it and its caller swallowed the error — ${String(unit.failure?.message ?? unit.failure).slice(0, 200)}`, { cause: unit.failure });
-      writeBody(null, { asSnapshot: false });
       runBeforeCommit(sqlite);
       sqlite.exec('COMMIT');
     } catch (err) {
-      abort(states, err);
+      abort(err);
       throw err;
     }
     const deferred = unit.afterCommit;
     unit = null;
-    report('commit');
     for (const fn of deferred) runSideEffect(fn);
     return result;
   }
@@ -294,12 +240,6 @@ export function openStore(dataDir, { tableBacked = null } = {}) {
   const store = {
     engine: 'sqlite',
     sqlite,
-    /** Register a save hook `{ flush?, commit?, rollback?, snapshotState?, restoreState? }` (or a bare flush function) for every server-mode save transaction and unit of work (see `hooks`). */
-    setSaveHook(hook) {
-      if (typeof hook === 'function') hooks.push({ flush: hook });
-      else if (hook && (typeof hook.flush === 'function' || typeof hook.snapshotState === 'function')) hooks.push(hook);
-      else throw new TypeError('a save hook is { flush?, commit?, rollback?, snapshotState?, restoreState? } with a flush or a snapshotState, or a flush function');
-    },
     /** Snapshot mode: every table-backed collection, as plain arrays in the shape the server sees, and the id counter. */
     load() {
       if (serverMode) throw new Error('load is a snapshot mode operation; the server reads through its repositories');
@@ -332,11 +272,11 @@ export function openStore(dataDir, { tableBacked = null } = {}) {
       sqlite.exec('CREATE TABLE fault_commit_parent (id TEXT PRIMARY KEY); CREATE TABLE fault_commit_child (parent_id TEXT NOT NULL REFERENCES fault_commit_parent(id))');
       sqlite.prepare('INSERT INTO fault_commit_child (parent_id) VALUES (?)').run('missing-on-purpose');
     },
-    /**
-     * Server mode: flush the staged repositories (no argument). Snapshot mode: write `{ db, idCounter }` into the
-     * tables. Inside an open unit of work it is absorbed: the unit's commit flushes once.
-     */
-    save(snapshot = null) { if (unit) return; write(snapshot, { asSnapshot: !serverMode }); },
+    /** Snapshot mode: write `{ db, idCounter }` into the tables, in one transaction (junk is refused and nothing is written). */
+    save(snapshot) {
+      if (serverMode) throw new Error('save is a snapshot mode operation; the server writes through its repositories');
+      writeSnapshot(snapshot);
+    },
     unitOfWork,
     /**
      * The participant API for repositories. `active()`: whether a unit of work
@@ -370,7 +310,7 @@ export function openStore(dataDir, { tableBacked = null } = {}) {
     unitOfWorkState: () => ({
       active: unit !== null,
       afterCommitFailures, afterCommitDelivered, lastAfterCommitError,
-      restoreFailures, lastRestoreError,
+      cleanupFailures, lastCleanupError,
       strayAsyncWork: { ...strayAsyncWork },
     }),
   };

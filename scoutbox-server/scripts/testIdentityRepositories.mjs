@@ -56,7 +56,7 @@ test('authority and initialisation: the repositories attach only behind the cuto
     { guardian_id: 'gd-primary', player_id: 'pl-grown', role: 'primary' }, { guardian_id: 'gd-co', player_id: 'pl-child1', role: 'co' }, { guardian_id: 'gd-co', player_id: 'pl-child2', role: 'co' },
   ]);
   assert.equal(t.invariantBreaks(), 0);
-  t.store.save(); t.close();
+  t.close();
   const again = boot(t.dir, { players: [adult()], guardians: [] });
   assert.equal(again.layer.firstInstallation, false);
   assert.equal(again.layer.boot.identity.imported, 0, 'a later boot imports nothing, whatever seed it is handed');
@@ -115,8 +115,6 @@ test('no mirror: a row written by another connection is what the next read retur
   s.prepare("UPDATE players SET name = 'Renamed Elsewhere' WHERE id = 'pl-adult'").run();
   s.close();
   assert.equal(t.players.byId('pl-adult').name, 'Renamed Elsewhere');
-  assert.throws(() => t.db.players, /db\.players is gone/);
-  assert.throws(() => t.db.guardians, /db\.guardians is gone/);
   t.close();
 });
 
@@ -356,7 +354,6 @@ test('lookups: byExternalId and byNameAndDob (the import\'s identity match), byG
 test('the snapshot path: a read gives every live record with its hashes and no derived lists; a save types the whole pair first and rewrites the tables, keeping the retained rows and refusing their ids', () => {
   const t = boot();
   t.players.erase('pl-child2', { at: NOW });
-  t.store.save();
   const tool = openStore(t.dir);
   const snap = tool.load();
   const p = snap.db.players.find((x) => x.id === 'pl-adult');

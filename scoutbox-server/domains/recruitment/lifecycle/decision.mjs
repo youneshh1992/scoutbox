@@ -151,7 +151,7 @@ export function validateEvidenceRefShapes(raw) {
  * (§51): who assessed and when, the trial's state, the session's verification
  * state, the claim type. Never a rating, a note, a trace or a value.
  */
-export function resolveEvidenceRefs(refs, { db, reads = {}, kase, testProviderEnabled = false, providers = {} }) {
+export function resolveEvidenceRefs(refs, { reads = {}, kase, testProviderEnabled = false, providers = {} }) {
   // §4.3 step 2: the trials are read through SQL — this club's trials of this player, the only ones a ref may name.
   const caseTrials = typeof reads.trials?.forOrgPlayer === 'function' ? reads.trials.forOrgPlayer(kase.orgId, kase.playerId) : [];
   const out = [];
@@ -304,7 +304,7 @@ export function assessmentSnapshot(summary) {
  * (§106). Box Cam observations appear as a STATE — observed, no reliable
  * observation, withdrawn — never as a recommendation (§26, §27).
  */
-export function evidenceCandidates({ db, reads = {}, kase, assessmentsVisible, trialEvidenceViews = null, providers = {}, testProviderEnabled = false }) {
+export function evidenceCandidates({ reads = {}, kase, assessmentsVisible, trialEvidenceViews = null, providers = {}, testProviderEnabled = false }) {
   // §4.3 step 2: this club's trials of this player, read through SQL.
   const caseTrials = typeof reads.trials?.forOrgPlayer === 'function' ? reads.trials.forOrgPlayer(kase.orgId, kase.playerId) : [];
   const trials = caseTrials

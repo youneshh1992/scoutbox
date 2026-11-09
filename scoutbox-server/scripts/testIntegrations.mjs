@@ -6,7 +6,7 @@
 // route wrote; a commit writes its prospects, reviews and history at once, and one live prospect per provider and
 // external id holds (a reversal frees the identity); a review's record is its batch row's; a key is found by its hash
 // only while live and records its use; a rotation keeps the old secret; a delivery's attempts are numbered rows and the
-// due query finds only open ones; a rolled-back unit leaves nothing; the db.* names throw; and the snapshot write types,
+// due query finds only open ones; a rolled-back unit leaves nothing; and the snapshot write types,
 // names a missing reference and reads back what it wrote. Temporary databases only; nothing touches DATA_DIR.
 // Run with: npm test
 
@@ -176,12 +176,11 @@ test('[webhooks] a rotation keeps the old secret; a delivery\'s attempts are num
 });
 
 // ------------------------------------------------------------- units, retirement, snapshot
-test('[unit] a rolled-back unit leaves nothing, and the db.* names throw naming the repository', () => {
+test('[unit] a rolled-back unit leaves nothing', () => {
   const { dir, s } = seeded('s13a-unit');
   assert.throws(() => s.unit(() => { s.repo.endpoints.create(endpoint()); s.repo.apiKeys.create(apiKey()); throw new Error('boom'); }), /boom/);
   assert.equal(s.repo.reads.endpoints.byId('whk-1'), null); assert.equal(s.repo.reads.apiKeys.byId('key-1'), null);
   assert.equal(typeof s.repo.reads.apiKeys.create, 'undefined', 'the reads cannot write');
-  for (const n of COLLECTIONS) assert.throws(() => s.db[n], new RegExp(`db\\.${n} is gone: read it through the integrations repository`));
   s.close(); rm(dir);
 });
 

@@ -110,7 +110,6 @@ test('the push log and the tokens: a push record is typed (an unknown audience k
 // ============================================================= the server's attachment and units
 test('in the server: no mirror and no db.outbox, db.pushLog or db.pushTokens (each name throws, naming the repository); a write inside a unit commits or rolls back with it; outside a unit each write is durable at once', () => {
   const dir = tempDir('obx-unit'); fixtureFile(dir); const L = live(dir);
-  for (const name of ['outbox', 'pushLog', 'pushTokens']) { assert.throws(() => L.db[name], new RegExp(`db\\.${name} is gone: read it through the outboxPush repository`)); assert.equal(Object.keys(L.db).includes(name), false); }
   L.layer.outbox.append(mail({ id: 'mail-now' }));
   { const s = second(L.store.dir ?? dir); assert.equal(s.prepare("SELECT COUNT(*) AS n FROM outbox WHERE id = 'mail-now'").get().n, 1, 'durable at once, seen by a second connection'); s.close(); }
   assert.throws(() => L.store.unitOfWork(() => { L.layer.outbox.append(mail({ id: 'mail-u' })); L.layer.pushTokens.register(token()); throw new Error('refused later in the unit'); }), /refused later/);

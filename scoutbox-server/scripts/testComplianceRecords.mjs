@@ -7,7 +7,7 @@
 // rule statuses worked out) and an entry that claims to repeat it must; a context keeps what never changes and does not
 // reopen; a review's snapshot names an evaluation of its context, its decision is final and its supersession written
 // once; a consent is answered once and revoked once, on its own row; the queue pages open items first; an account
-// deletion keeps ids only; a rolled-back unit leaves nothing; the db.* names throw; and the snapshot write types every
+// deletion keeps ids only; a rolled-back unit leaves nothing; and the snapshot write types every
 // record, keeps the omitted collections, refuses a review naming a context that is not there and reads back what it
 // wrote. Temporary databases only; nothing touches DATA_DIR. Run with: npm test
 
@@ -248,13 +248,12 @@ test('[consents] a consent is requested, answered once and revoked once on its o
   } finally { s.close(); rm(dir); }
 });
 
-test('[units] a rolled-back unit leaves nothing; the db.* names throw', () => {
+test('[units] a rolled-back unit leaves nothing', () => {
   const dir = tempDir('s11b2-units'); saveFixture(dir);
   const s = serverOpen(dir);
   try {
     refused(() => s.unit(() => { s.repo.contexts.create(context()); s.repo.contexts.recordEvaluation('ctx-1', result(), inputs, evaluated('aud-e1')); s.repo.reviews.create(review()); throw new Error('boom'); }), /boom/);
     assert.equal(s.repo.contexts.byId('ctx-1'), null); assert.equal(s.repo.reviews.byId('rrv-1'), null);
-    for (const n of COLLECTIONS) assert.throws(() => s.db[n], /read it through the complianceRecords repository/);
   } finally { s.close(); rm(dir); }
 });
 

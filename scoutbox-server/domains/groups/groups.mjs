@@ -27,7 +27,7 @@ export const grantView = (gr) => ({
 
 export function registerGroups(ctx) {
   const {
-    db, byId, users, orgRouter, adminRouter, nextId, notify, findPlayer, unit,
+    byId, users, orgRouter, adminRouter, nextId, notify, findPlayer, unit,
     orgCanSee, requireLead, suppress, groups, groupReads,
   } = ctx;
   if (!groups || !groupReads) throw new TypeError('registerGroups needs the groups repository (ctx.groups, ctx.groupReads)');

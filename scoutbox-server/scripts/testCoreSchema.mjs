@@ -173,8 +173,8 @@ function cleanSnapshot() {
 const NOW = Date.UTC(2026, 9, 11, 12);
 const rows = (s, sql) => s.prepare(sql).all().map((r) => ({ ...r }));
 const identityState = (s) => JSON.stringify({ players: rows(s, 'SELECT * FROM players ORDER BY rowid'), guardians: rows(s, 'SELECT * FROM guardians ORDER BY rowid'), links: rows(s, 'SELECT * FROM guardian_children ORDER BY rowid') });
-/** A first installation of `records` through the data layer (the seed is imported once), then the server-mode save. */
-const firstInstallation = (server, records, extra = {}) => { const layer = attachDataLayer({ db: {}, seed: { orgs: records.orgs, players: records.players, guardians: records.guardians }, store: server, nextId, sessionTtlMs: TTL, now: () => NOW, ...extra }); server.save(); return layer; };
+/** A first installation of `records` through the data layer (the seed is imported once). */
+const firstInstallation = (server, records, extra = {}) => { const layer = attachDataLayer({ db: {}, seed: { orgs: records.orgs, players: records.players, guardians: records.guardians }, store: server, nextId, sessionTtlMs: TTL, now: () => NOW, ...extra }); return layer; };
 
 test('identity snapshot (tool mode): a tool reads players and guardians from the live tables as the records the server sees (childIds from the links, in order, roles per side), writes a changed snapshot back through the tables — inserts, updates, link changes and removals — and the next server boot attaches to exactly that', () => {
   const dir = tempDir('s4-snap');

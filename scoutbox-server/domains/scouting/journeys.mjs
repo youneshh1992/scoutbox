@@ -48,7 +48,7 @@ const submissionView = (s) => ({
 
 export function registerJourneys(ctx) {
   const {
-    db, byId, scoutingReads, nextId, persistNow, notify, ledgerAppend, broadcast, findPlayer,
+    byId, scoutingReads, nextId, notify, ledgerAppend, broadcast, findPlayer,
     orgRouter, playerRouter, guardianRouter, adminRouter,
     orgCanSee, paginate, audit, requireLead, isLead, moderateOrRefuse, isAdult,
     checkEligibility, distanceBand, guardianOwnsChild, recordActivity, DRILLS,
