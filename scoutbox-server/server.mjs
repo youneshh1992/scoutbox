@@ -1510,7 +1510,7 @@ guardianRouter.post('/requests/:id/respond', (req, res) => {
   // commit together or not at all.
   const answered = unit(() => {
   // The record the hooks see is the stored one.
-  let request = recruitment.requests.update(found.id, (d) => { d.status = accept ? 'accepted' : 'declined'; d.respondedAt = respondedAt; d.respondedBy = 'guardian'; });
+  let request = recruitment.requests.recordResponse(found.id, { status: accept ? 'accepted' : 'declined', respondedAt, respondedBy: 'guardian' });
   // The Contact that created this request learns of the answer.
   m23Ctx?.onRequestResponded?.({ request, accept: !!accept, message: replyCheck.reply, by: 'guardian', at: respondedAt });
   // The answer, the channel and the trial row are ONE unit,
@@ -1519,7 +1519,7 @@ guardianRouter.post('/requests/:id/respond', (req, res) => {
   if (accept) {
     // The conversation that opens is between adults: club staff and guardian.
     const channel = openChannel(request);
-    request = recruitment.requests.update(request.id, (d) => { d.contactChannel = channel.id; });
+    request = recruitment.requests.attachChannel(request.id, { channelId: channel.id });
     ledgerAppend({ type: `${request.type}_accepted_by_guardian`, playerId: child.id, orgId: request.orgId, orgName: request.orgName, userId: request.userId, scoutName: request.scoutName });
     if (request.type === 'trial') {
       const trial = issueAcceptedTrial({ request, player: child, trialDate: slot.date, by: 'guardian', at: respondedAt, actor: { id: req.guardian.id, name: req.guardian.name } });
@@ -1737,7 +1737,7 @@ function handleReport(req, res, actor) {
     for (const pid of playerIds) {
       safetyAudit.blocks.add({ id: nextId('blk'), playerId: pid, orgId: targetOrgId, by: actor.by, reason: 'suspended_pending_review', ts: Date.now() });
       for (const r of recruitment.requests.forOrgPlayer(targetOrgId, pid).filter((x) => x.status === 'pending')) {
-        recruitment.requests.update(r.id, (d) => { d.status = 'suspended'; }); // the frozen request, with its block
+        recruitment.requests.suspend(r.id); // the frozen request, with its block
       }
     }
   });
@@ -2429,7 +2429,7 @@ orgRouter.get('/feed', (req, res) => {
     items.push({ type: 'report_due', ts: dueAt ?? Date.now(), playerId: t.playerId, playerName: t.playerName, trialId: t.id, dueAt });
     // one-shot reminder when the mandatory report is due within 48h
     if (!t.reminderSent && dueAt !== null && dueAt - Date.now() < 48 * 3600 * 1000) {
-      recruitment.trials.update(t.id, (d) => { d.reminderSent = true; }); // the one-shot marker, written now
+      recruitment.trials.markReportReminderSent(t.id); // the one-shot marker, written now
       const request = recruitment.requests.byId(t.requestId);
       if (request?.userId) notify({ kind: 'org_user', id: request.userId }, 'report_due', `Mandatory trial report for ${t.playerName} is due ${utcDayOf(dueAt)}.`, t.id); // the UTC day, not the server locale
     }
@@ -2586,7 +2586,7 @@ orgRouter.post('/trials/:trialId/report', (req, res) => {
   // onto the player. The report and its ledger row commit together.
   const p = findPlayer(trial.playerId);
   unit(() => {
-    recruitment.trials.update(trial.id, (d) => { d.status = 'reported'; d.report = report; });
+    recruitment.trials.fileReport(trial.id, { report });
     ledgerAppend({ type: 'trial_report', playerId: p.id, orgId: req.org.id, orgName: req.org.name, userId: req.orgUser.id, scoutName: req.orgUser.name });
   });
   // The mandatory report closes the club's obligation even while
@@ -3373,14 +3373,14 @@ playerRouter.post('/requests/:id/respond', (req, res) => {
   // commit together or not at all.
   const answered = unit(() => {
   // Both respond paths stamp who answered.
-  let request = recruitment.requests.update(found.id, (d) => { d.status = accept ? 'accepted' : 'declined'; d.respondedAt = respondedAt; d.respondedBy = 'player'; });
+  let request = recruitment.requests.recordResponse(found.id, { status: accept ? 'accepted' : 'declined', respondedAt, respondedBy: 'player' });
   // The Contact that created this request learns of the answer.
   m23Ctx?.onRequestResponded?.({ request, accept: !!accept, message: replyCheck.reply, by: 'player', at: respondedAt });
 
   if (accept) {
     // Only now does a contact channel exist.
     const channel = openChannel(request);
-    request = recruitment.requests.update(request.id, (d) => { d.contactChannel = channel.id; });
+    request = recruitment.requests.attachChannel(request.id, { channelId: channel.id });
     ledgerAppend({ type: `${request.type}_accepted`, playerId: req.player.id, orgId: request.orgId, orgName: request.orgName, userId: request.userId, scoutName: request.scoutName });
     if (request.type === 'trial') {
       const trial = issueAcceptedTrial({ request, player: req.player, trialDate: slot.date, by: 'player', at: respondedAt, actor: { id: req.player.id, name: req.player.name } });
@@ -4126,91 +4126,6 @@ function exportPlayer(p) {
   };
 }
 
-/**
- * What an accepted trial leaves behind when its subject removes
- * their account. The rule is the ledger's: history stays, and it carries only
- * ids, states, times and the club's own filed numbers. Everything that
- * describes the person — name, the club's notes about them, the family's
- * emergency contact, arrival instructions written for them, the feedback
- * written to them — goes. The row keeps its id so a recruitment case that
- * references it (history, links, evidence) still resolves, and
- * `subjectRemovedAt` tells every reader why the person-shaped fields are gone.
- */
-function tombstoneTrial(t, at) {
-  const report = t.report ? {
-    id: t.report.id, trialId: t.report.trialId, playerId: t.report.playerId, orgId: t.report.orgId, orgName: t.report.orgName,
-    userId: t.report.userId, scoutName: t.report.scoutName, filedAt: t.report.filedAt,
-    ...Object.fromEntries(TRIAL_REPORT_FIELDS.map((f) => [f, t.report[f]])),
-    notes: null, strengthNote: null, focusNote: null,
-  } : undefined;
-  const day = t.day ? {
-    staff: t.day.staff ?? [], // the club's own named staff and their checks
-    consents: (t.day.consents ?? []).map((c) => ({ id: c.id, by: c.by?.kind ? { kind: c.by.kind } : null, scope: c.scope, at: c.at })),
-    arrival: null, emergency: null, collection: null,
-    checkins: (t.day.checkins ?? []).map((c) => ({ playerId: c.playerId, at: c.at, byUserId: c.byUserId, byName: c.byName })),
-    statusEvents: t.day.statusEvents ?? [],
-  } : undefined;
-  // The operational containers keep ids, states and times —
-  // the case's evidence stays honest — and lose everything written for or
-  // about the person: instructions, venue address lines, attendance notes,
-  // Box Cam evidence links (the player's sessions are no longer the club's to
-  // cite), the guardian id in recipient snapshots, and history detail text.
-  const stripSession = (s) => ({ id: s.id, kind: s.kind, startsAt: s.startsAt, endsAt: s.endsAt, venue: s.venue ? { name: s.venue.name, town: s.venue.town ?? null, address: null } : null, instructions: null });
-  const schedule = t.schedule && typeof t.schedule === 'object' ? {
-    timezone: t.schedule.timezone, revision: t.schedule.revision, proposedAt: t.schedule.proposedAt ?? null,
-    proposedBy: t.schedule.proposedBy ? { kind: t.schedule.proposedBy.kind } : null,
-    confirmedAt: t.schedule.confirmedAt ?? null, confirmedBy: t.schedule.confirmedBy ? { kind: t.schedule.confirmedBy.kind } : null,
-    sessions: (t.schedule.sessions ?? []).map((s) => ({ ...stripSession(s), evidence: [] })),
-    revisions: (t.schedule.revisions ?? []).map((r) => ({ revision: r.revision, timezone: r.timezone, proposedAt: r.proposedAt ?? null, proposedBy: r.proposedBy ? { kind: r.proposedBy.kind } : null, confirmedAt: r.confirmedAt ?? null, supersededAt: r.supersededAt ?? null, reason: null, material: r.material ?? null, sessions: (r.sessions ?? []).map(stripSession) })),
-  } : (t.schedule ?? null);
-  return {
-    id: t.id, requestId: t.requestId, caseId: t.caseId ?? null, playerId: t.playerId, playerName: null,
-    orgId: t.orgId, orgName: t.orgName, scoutName: t.scoutName,
-    acceptedAt: t.acceptedAt, acceptedBy: t.acceptedBy ?? null, guardianApproved: t.guardianApproved ?? null,
-    proposedDate: t.proposedDate ?? null, venue: t.venue ?? null, notes: '',
-    reportDueAt: Number.isFinite(t.reportDueAt) ? t.reportDueAt : null,
-    status: t.status,
-    ...(t.reminderSent ? { reminderSent: true } : {}),
-    ...(t.feedbackEscalatedAt ? { feedbackEscalatedAt: t.feedbackEscalatedAt } : {}),
-    ...(report ? { report } : {}),
-    ...(day ? { day } : {}),
-    workflowState: t.workflowState ?? 'legacy_accepted',
-    schedule,
-    attendance: (t.attendance ?? []).map((a) => ({ sessionId: a.sessionId, state: a.state, source: a.source, recordedAt: a.recordedAt, recordedBy: a.recordedBy ? { kind: a.recordedBy.kind ?? 'org', userId: a.recordedBy.userId ?? null, name: a.recordedBy.name ?? null } : null, note: null })),
-    completion: t.completion ? { state: t.completion.state, at: t.completion.at, by: t.completion.by ? { kind: t.completion.by.kind } : null, reason: null, phase: t.completion.phase ?? null } : null,
-    recipient: t.recipient ? { type: t.recipient.type, minor: !!t.recipient.minor, at: t.recipient.at ?? null } : null,
-    keys: t.keys ?? {},
-    history: (t.history ?? []).map((h) => ({ id: h.id, at: h.at, action: h.action, by: h.by?.kind ? { kind: h.by.kind } : null, detail: h.detail && typeof h.detail === 'object' ? Object.fromEntries(Object.entries(h.detail).filter(([, v]) => typeof v !== 'string' || v.length <= 40)) : null })),
-    reminders: t.reminders ?? {},
-    rev: t.rev ?? 1, revAt: t.revAt ?? null, revBy: null,
-    subjectRemovedAt: at,
-  };
-}
-
-/** The request row the trial (or contact) came from, reduced the same way. */
-function tombstoneRequest(r, at) {
-  const td = r.trialDetails && typeof r.trialDetails === 'object' ? r.trialDetails : null;
-  return {
-    id: r.id, playerId: r.playerId, playerName: null,
-    orgId: r.orgId, orgName: r.orgName, orgType: r.orgType, orgVerified: r.orgVerified,
-    orgSafeguardingCertified: r.orgSafeguardingCertified, trustedPartner: r.trustedPartner,
-    userId: r.userId, scoutName: r.scoutName, scoutRole: r.scoutRole,
-    type: r.type, message: null,
-    ...(r.contactId ? { contactId: r.contactId } : {}),
-    trialDetails: td ? {
-      proposedDate: td.proposedDate ?? null, altSlots: Array.isArray(td.altSlots) ? td.altSlots : [], venue: td.venue ?? null, notes: '',
-      // Slots: times and venue name/town only; no instructions, no address line.
-      ...(Array.isArray(td.slots) ? { slots: td.slots.map((s) => ({ id: s.id, day: s.day, startsAt: s.startsAt, endsAt: s.endsAt, timezone: s.timezone, kind: s.kind ?? null, venue: s.venue ? { name: s.venue.name, town: s.venue.town ?? null, address: null } : null })) } : {}),
-    } : null,
-    ...(r.caseId ? { caseId: r.caseId } : {}),
-    ...(r.trialId ? { trialId: r.trialId } : {}),
-    status: r.status, createdAt: r.createdAt,
-    respondedAt: r.respondedAt ?? null, respondedBy: r.respondedBy ?? null,
-    routedTo: r.routedTo ?? null, guardianId: null, contactChannel: null,
-    subjectRemovedAt: at,
-  };
-}
-
 function deletePlayerData(playerId) {
   const p = findPlayer(playerId);
   if (!p) return false;
@@ -4240,7 +4155,7 @@ function deletePlayerData(playerId) {
   // is gone from it. The case's status is NOT touched here — deletion is not
   // a lifecycle event, and no path other than the lifecycle writer moves a
   // case. The case's copy of the name goes with the person.
-  recruitment.tombstoneForPlayer(playerId, { request: (r) => tombstoneRequest(r, at), trial: (t) => tombstoneTrial(t, at) });
+  recruitment.redactPlayer(playerId, at);
   recruitmentCases.redactPlayer(playerId, at); // the case's copy of the name goes, in this unit
   scoutingAssessments.assessments.redactPlayer(playerId); // the club keeps its assessments; the player's name goes, in this unit
   recruitmentContactsOffers.contacts.redactPlayer(playerId); // the reply's words go; the contact stays

@@ -167,13 +167,13 @@ await test('[routes] through the real routes: an invitation with a clientKey rep
   const replayS = async (srv, token, label) => { const t = await srv.j('GET', `/org/rooms/${RID}/trials/${TID}`, undefined, token); const r = await srv.j('POST', `/org/rooms/${RID}/trials/${TID}/reschedule`, RESCHEDULE(t.body.trial?.rev ?? t.body.rev), token); assert.equal(r.status, 200, `${label}: ${r.text}`); assert.equal(r.body.idempotent, true, `${label}: the schedule clientKey replays`); return r; };
   await replayS(S, maria, 'same process');
   await S.stop(); S = await boot(dir); maria = await orgLogin(S); await replayS(S, maria, 'after a restart'); await S.stop();
-  // An act the routes never write (an unknown act, a prototype-named own act) is refused by the trial's
-  // repository update with the trial's id — nothing written — and the real keys survive a backup and a restore, where they still replay.
+  // A client key for an act the routes never write (an unknown act, a prototype-named one) is refused by the trial's
+  // key column with the trial's id — nothing written — and the real keys survive a backup and a restore, where they still replay.
   { const L = openLayer(dir); const trials = L.layer.recruitment.trials; const t = trials.byId(TID); assert.ok(t && Array.isArray(t.keys.schedule) && t.keys.schedule[0].key === 'sched-key-1');
     const before = fullDump(L.sqlite);
     try {
-      for (const [label, edit] of [['an unknown act', (k) => { k.extraEmpty = {}; }], ['a prototype-named own act', (k) => { Object.defineProperty(k, '__proto__', { value: { key: 'proto-key', fp: 'proto-fp' }, enumerable: true, writable: true, configurable: true }); }]]) {
-        assert.throws(() => trials.update(TID, (x) => { edit(x.keys); }), (e) => e.code === 'RECRUITMENT_INPUT_INVALID' && e.message.includes(TID) && /keys\.(extraEmpty|__proto__)/.test(e.message), `${label} is refused with the trial's id`);
+      for (const [label, act] of [['an unknown act', 'extraEmpty'], ['a prototype-named act', '__proto__']]) {
+        assert.throws(() => trials.recordAct(TID, { at: Date.now(), key: { act, key: 'k', fp: 'f' } }), (e) => e.code === 'RECRUITMENT_INPUT_INVALID' && e.message.includes(TID) && new RegExp(`key ${act}: CHECK constraint failed`).test(e.message), `${label} is refused with the trial's id`);
         assert.equal(fullDump(L.sqlite), before, `${label}: nothing written`);
       }
     } finally { L.close(); } }

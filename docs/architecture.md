@@ -47,8 +47,9 @@ transaction documents are evidence records.
 
 ## Writes
 
-- **Named acts** (recruitment cases and their Room rows, contacts and offers: `repositories/recruitmentCases.mjs`,
-  `repositories/recruitmentContactsOffers.mjs`; the direction for the other domains). A record is created whole, then
+- **Named acts** (recruitment cases and their Room rows, contacts and offers, requests and trials:
+  `repositories/recruitmentCases.mjs`, `repositories/recruitmentContactsOffers.mjs`, `repositories/recruitment.mjs`;
+  the direction for the other domains). A record is created whole, then
   changes only through operations named after what happened (`moveRoom`, `recordDelivery`, `issueRevision`), each an
   `UPDATE` of named columns or an `INSERT` of new rows, called as `act(id, input, bookkeeping)`; the bookkeeping is the
   history entries, rev bump and change instant the act leaves, and `recordAct(id, bookkeeping)` is it alone. History is

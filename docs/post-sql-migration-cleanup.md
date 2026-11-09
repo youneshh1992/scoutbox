@@ -122,12 +122,16 @@ The rules are likely well under half of the production lines.
    became 28 named acts. A Room's status moves only along `ROOM_TRANSITIONS` (plus the lifecycle's resume out of
    `on_hold`); a decision's snapshot and chain and a comment's reply are composite keys. The shared write kit
    (`repositories/writes.mjs`) now serves contacts and offers too.
+   **Trials and requests done too (9 Nov):** `repositories/recruitment.mjs` has no JavaScript validator (1,017 → 963
+   lines, 86k → 77k characters); the 30 draft edits in `trialRoutes.mjs`, `journeys.mjs`, the sweeps and `server.mjs`
+   became 24 named acts. A schedule proposal must be one past the current revision, nothing changes an ended trial,
+   completion needs a scheduled trial and a report is filed once, all guarded in SQL; a report names its trial's player
+   by a composite key. The erasure tombstone is now the repository's `redactPlayer` (SQL), as for cases.
    **Follow-up:** `offerIntegrity` (`offer.mjs`) still checks shapes the schema now rules out (unknown statuses, duplicate
    or missing revisions). Trim it once the batteries that test it on in-memory records have been looked at.
    **Still to do (9 Nov):** about 223 draft edits remain in domain code, across ~25 repositories; ~30 repositories
    still have JavaScript validators. In order:
-   1. **Trials and trial requests** (`repositories/recruitment.mjs`, ~32 edits). The last of recruitment on drafts;
-      trial scheduling has revisions, confirmations and supersession, the same shape as offers.
+   1. ~~**Trials and trial requests**~~ (done, above).
    2. **Agent transactions, compliance and core** (`agentTransactions.mjs`, `complianceRecords.mjs`, `agentCore.mjs`,
       ~40 edits). State machines with history, and the modules in the agent core ↔ compliance ↔ transactions cycle:
       do them together with the wiring (step 3), so each module's dependencies change once.

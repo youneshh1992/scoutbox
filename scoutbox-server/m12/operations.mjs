@@ -235,7 +235,7 @@ export function registerOperations(ctx) {
       // A null deadline is "unknown", not "now"; a tombstoned
       // trial has nobody to file for, so it never escalates.
       if (Number.isFinite(t.reportDueAt) && t.reportDueAt < now && !t.report && !t.feedbackEscalatedAt && !t.subjectRemovedAt) {
-        trials.update(t.id, (d) => { d.feedbackEscalatedAt = now; });
+        trials.escalateFeedback(t.id, { at: now });
         const lead = usersOf(t.orgId)[0];
         if (lead) notify({ kind: 'org_user', id: lead.id }, 'trial_day', `🚨 Trial feedback for ${t.playerName} is overdue — the mandatory report blocks new trials until filed.`, t.id);
         changed = true;
@@ -273,13 +273,13 @@ export function registerOperations(ctx) {
         if (lead) notify({ kind: 'org_user', id: lead.id }, 'trial_day', `The trial for ${t.playerName} has ended — record attendance and complete it.`, t.id);
         changed = true;
       }
-      if (Object.keys(marks).length) trials.update(t.id, (d) => { Object.assign(d.reminders, marks); });
+      if (Object.keys(marks).length) trials.markReminders(t.id, { markers: marks });
     }
     for (const t of trials.completedUnreminded(now - 7 * 86_400_000)) {
       if (t.subjectRemovedAt || t.completion?.state !== 'completed' || t.reminders?.assessmentPending) continue;
       if (!Number.isFinite(t.completion.at) || now - t.completion.at < 7 * 86_400_000) continue;
       if (ctx.scoutingReads.assessments.anyForTrial(t.id)) continue;
-      trials.update(t.id, (d) => { d.reminders.assessmentPending = now; });
+      trials.markReminders(t.id, { markers: { assessmentPending: now } });
       const lead = usersOf(t.orgId)[0];
       if (lead) notify({ kind: 'org_user', id: lead.id }, 'trial_day', `No assessment has been recorded for ${t.playerName}'s completed trial yet.`, t.id);
       changed = true;

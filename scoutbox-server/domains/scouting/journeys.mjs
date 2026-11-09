@@ -55,7 +55,7 @@ export function registerJourneys(ctx) {
     players, users, unit, recruitment, opportunitiesCampaigns,
   } = ctx;
   if (typeof opportunitiesCampaigns?.opportunities?.create !== 'function') throw new TypeError('registerJourneys needs the opportunities and campaigns repository from the data layer');
-  // A trial-day change is a write of the trial (recruitment.trials.update); the records the views hand out are read-only.
+  // A trial-day change is a named act of the trial (recruitment.trials.addStaff, …); the records the views hand out are read-only.
   const trials = recruitment?.trials;
   if (!trials) throw new TypeError('registerJourneys needs the recruitment repository from the data layer');
 
@@ -578,7 +578,7 @@ export function registerJourneys(ctx) {
       } : null,
       addedBy: req.orgUser.name, addedAt: Date.now(),
     };
-    trials.update(t.id, (d) => { d.day.staff.push(s); });
+    trials.addStaff(t.id, { staff: s });
     res.status(201).json({ staff: s, note: 'The check is PENDING until Trust & Safety reviews it — an uploaded reference is not a completed background check.' });
   });
 
@@ -587,9 +587,9 @@ export function registerJourneys(ctx) {
     if (!t) return;
     const { time, address, notes, collection } = req.body ?? {};
     if (notes && !moderateOrRefuse(res, notes, { kind: 'trial_arrival', playerId: t.playerId, orgId: req.org.id })) return;
-    const fresh = trials.update(t.id, (d) => {
-      d.day.arrival = { time: time ? String(time).slice(0, 40) : null, address: address ? String(address).slice(0, 200) : null, notes: notes ? String(notes).slice(0, 300) : null };
-      if (collection) d.day.collection = { policy: String(collection).slice(0, 300) };
+    const fresh = trials.setArrival(t.id, {
+      arrival: { time: time ? String(time).slice(0, 40) : null, address: address ? String(address).slice(0, 200) : null, notes: notes ? String(notes).slice(0, 300) : null },
+      collection: collection ? { policy: String(collection).slice(0, 300) } : null,
     });
     notifyTrialParties(fresh, `📍 ${fresh.orgName} published arrival details for the trial on ${fresh.proposedDate ?? 'TBC'}.`);
     res.json({ trial: trialDayView(fresh, 'org') });
@@ -611,13 +611,10 @@ export function registerJourneys(ctx) {
     // re-derived from the new day by the one derivation — never computed here.
     const moved = kind === 'postponed' ? parseTrialDate(newDate) : { ok: true, value: null };
     if (!moved.ok) return res.status(400).json({ ...moved, field: 'newDate' });
-    const fresh = trials.update(t.id, (d) => {
-      d.day.statusEvents.push({ kind, at: Date.now(), by: req.orgUser.name, reason: String(reason).slice(0, 200), newDate: moved.value });
-      if (kind === 'postponed' && moved.value) {
-        d.proposedDate = moved.value;
-        d.reportDueAt = trialReportDueAt(moved.value, d.acceptedAt);
-      }
-    });
+    const event = { kind, at: Date.now(), by: req.orgUser.name, reason: String(reason).slice(0, 200), newDate: moved.value };
+    const fresh = trials.recordDayStatus(t.id, kind === 'postponed' && moved.value
+      ? { event, proposedDate: moved.value, reportDueAt: trialReportDueAt(moved.value, t.acceptedAt) }
+      : { event });
     notifyTrialParties(fresh, kind === 'cancelled'
       ? `❌ ${fresh.orgName} cancelled the trial: ${reason}`
       : `📅 ${fresh.orgName} moved the trial to ${newDate ?? 'a new date TBC'}: ${reason}`);
@@ -646,21 +643,17 @@ export function registerJourneys(ctx) {
     // trial, the player's attendance row and activity, and the ledger row
     // commit together before the response.
     const fresh = unit(() => {
-    const checkedIn = trials.update(t.id, (d) => {
-    d.day.checkins.push({ playerId: d.playerId, at: checkedInAt, byUserId: req.orgUser.id, byName: req.orgUser.name });
-    // A check-in is the strongest attendance source. If the
-    // trial carries a confirmed schedule, the session whose window holds
-    // this moment (from two hours before its start) gets an `attended`
-    // record with source `checkin` — once, append-only, never a judgement.
-    // A trial without a schedule records nothing new here.
-    const sessions = d.schedule?.confirmedAt ? d.schedule.sessions : [];
+    // A check-in is the strongest attendance source. If the trial carries a confirmed schedule, the session whose
+    // window holds this moment (from two hours before its start) gets an `attended` record with source `checkin`:
+    // once, append-only, never a judgement. A trial without a schedule records nothing new here.
+    const by = { kind: 'org', userId: req.orgUser.id, name: req.orgUser.name };
+    const sessions = t.schedule?.confirmedAt ? t.schedule.sessions : [];
     const live = sessions.find((s) => s.startsAt - 2 * 3600_000 <= checkedInAt && checkedInAt <= s.endsAt) ?? null;
-    if (live && !d.attendance.some((a) => a.sessionId === live.id && a.state === 'attended')) {
-      d.attendance.push({ sessionId: live.id, state: 'attended', source: 'checkin', recordedBy: { kind: 'org', userId: req.orgUser.id, name: req.orgUser.name }, recordedAt: checkedInAt, note: null });
-      d.history.push({ id: nextId('aud'), at: checkedInAt, action: 'trial_attendance_recorded', by: { kind: 'org', userId: req.orgUser.id, name: req.orgUser.name }, detail: { sessionId: live.id, state: 'attended', source: 'checkin' } });
-      d.rev = (Number(d.rev) || 1) + 1; d.revAt = checkedInAt; d.revBy = { userId: req.orgUser.id, name: req.orgUser.name };
-    }
-    });
+    const attends = live && !t.attendance.some((a) => a.sessionId === live.id && a.state === 'attended');
+    const checkedIn = trials.checkIn(t.id, {
+      checkin: { playerId: t.playerId, at: checkedInAt, byUserId: req.orgUser.id, byName: req.orgUser.name },
+      attendance: attends ? { sessionId: live.id, state: 'attended', source: 'checkin', recordedBy: by, recordedAt: checkedInAt, note: null } : null,
+    }, attends ? { at: checkedInAt, bump: true, revBy: req.orgUser, history: [{ id: nextId('aud'), at: checkedInAt, action: 'trial_attendance_recorded', by, detail: { sessionId: live.id, state: 'attended', source: 'checkin' } }] } : {});
     // Feed the existing attendance record — once, coach-signed, no duplicate.
     if (p && !(p.attendance ?? []).some((a) => a.trialId === t.id)) {
       players.addItem(p.id, 'attendance', {
@@ -686,7 +679,7 @@ export function registerJourneys(ctx) {
 
   function giveConsent(req, res, t, by, scope) {
     if (t.day.consents.some((c) => c.scope === scope && c.by.id === by.id)) return res.status(409).json({ error: 'ALREADY_CONSENTED' });
-    trials.update(t.id, (d) => { d.day.consents.push({ id: nextId('cns'), by, scope, at: Date.now() }); });
+    trials.giveConsent(t.id, { consent: { id: nextId('cns'), by, scope, at: Date.now() } });
     res.status(201).json({ consented: scope });
   }
 
@@ -706,7 +699,7 @@ export function registerJourneys(ctx) {
     if (!name || !phone) return res.status(400).json({ error: 'NAME_AND_PHONE_REQUIRED' });
     // Restricted: written by the family, readable ONLY in the org's trial-day
     // view for the named event. Never in profiles, search or exports.
-    trials.update(t.id, (d) => { d.day.emergency = { name: String(name).slice(0, 80), phone: String(phone).slice(0, 30), setBy: by, at: Date.now() }; });
+    trials.setEmergencyContact(t.id, { emergency: { name: String(name).slice(0, 80), phone: String(phone).slice(0, 30), setBy: by, at: Date.now() } });
     res.json({ ok: true, note: 'Held for this event’s safety staff only.' });
   }
   playerRouter.post('/trials/:id/emergency-contact', (req, res) => {
@@ -776,13 +769,7 @@ export function registerJourneys(ctx) {
     if (!['reviewed', 'rejected'].includes(status)) return res.status(400).json({ error: 'STATUS_INVALID', allowed: ['reviewed', 'rejected'] });
     const exp = checkExpiryOrRefuse(res, expiresAt);
     if (exp === undefined) return;
-    const fresh = trials.update(t.id, (d) => {
-      const c = d.day.staff.find((x) => x.id === s.id).check;
-      c.status = status;
-      c.reviewedBy = 'Trust & Safety';
-      c.reviewedAt = Date.now();
-      if (exp !== null) c.expiresAt = exp;
-    });
+    const fresh = trials.reviewStaffCheck(t.id, { staffId: s.id, status, reviewedBy: 'Trust & Safety', reviewedAt: Date.now(), expiresAt: exp });
     const check = fresh.day.staff.find((x) => x.id === s.id).check;
     res.json({ check: { ...check, state: checkState(check) } });
   });

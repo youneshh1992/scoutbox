@@ -213,7 +213,7 @@ test('units of work: the threads join the open unit; a failure anywhere in it (a
   const before = fileDump(dir);
   const unchanged = (label) => { assert.deepEqual(fileDump(dir), before, label); assert.deepEqual(L.repo.byId('chan-1').messages.map((m) => m.id), ['m-0'], `${label}: a read agrees`); assert.equal(L.store.sqlite.isTransaction, false); };
   const work = () => {
-    L.layer.recruitment.requests.update('req-free', (d) => { d.contactChannel = 'chan-u'; });
+    L.layer.recruitment.requests.attachChannel('req-free', { channelId: 'chan-u' });
     L.repo.open(channel({ id: 'chan-u', requestId: 'req-free' }));
     L.repo.appendMessage('chan-1', message({ id: 'm-u', attachment: clip() }));
     L.repo.markRead('chan-1', 'counterparty', NOW + 5);

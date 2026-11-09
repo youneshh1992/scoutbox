@@ -27,7 +27,6 @@ import { fileURLToPath } from 'node:url';
 import { writeFixture, readRecords } from '../../scripts/dataLayerFixture.mjs';
 import { JOURNEY_REQUIRED_STORES } from '../../domains/recruitment/lifecycle/journey.mjs';
 import { trialIntegrity, deriveWorkflowState, TRIAL_WORKFLOW_STATES } from '../../domains/recruitment/lifecycle/trial.mjs';
-import { typeTrial } from '../../repositories/recruitment.mjs';
 import { DATA_MIGRATIONS, TABLE_BACKED } from '../../repositories/index.mjs';
 import { createEvidenceProvider } from '../../scripts/recruitmentReadsFixture.mjs'; // the contacts/offers queries over plain arrays
 const LATEST_SCHEMA = Number(DATA_MIGRATIONS.map((m) => m.id).sort().at(-1).slice(0, 4)); // the latest table migration's number
@@ -149,28 +148,15 @@ const write = (dir, db) => writeFixture(dir, db);
 // organisation and player, by id): the yardstick for "nothing was written".
 const rowIds = (d) => JSON.stringify(Object.fromEntries(Object.entries(d).map(([k, rows]) => [k, rows.map((r) => r?.id ?? JSON.stringify(r))])));
 const FRESH = (() => { const { orgs, players, guardians } = baseDb(); return rowIds(readRecords(writeFixture(mkdtempSync(path.join(tmpdir(), 'sbx-m23t-fresh-')), { orgs, players, guardians }))); })();
-/** What a typed trial row reads back as — the record as written, with every absent field null and every absent list empty. */
-const typedJson = (t) => { const r = typeTrial(t); if (!r.ok) throw new Error(r.reason); return stableJson(r.record); };
+/** What the repository stored for the trials of a written directory, by id. */
+const storedTrials = (dir) => new Map(readRecords(dir).trials.map((t) => [t.id, t]));
+/** A stored record holds every field the writer gave it (absent and null say nothing), at every depth. */
+const holdsAll = (written, stored) => (written === undefined || written === null ? true
+  : typeof written !== 'object' ? written === stored
+    : stored !== null && typeof stored === 'object' && Array.isArray(stored) === Array.isArray(written) && (!Array.isArray(written) || written.length === stored.length) && Object.entries(written).every(([k, v]) => holdsAll(v, stored[k])));
 
-// ======================================================= 1 — the migration
-section('1 — a trial row: neutral containers, nothing renamed, nothing invented');
-{
-  // The trials are typed rows read through SQL; every trial reads back from its row with the containers (typeTrial).
-  ok(TABLE_BACKED.includes('trials') && !JOURNEY_REQUIRED_STORES.includes('trials') && DATA_MIGRATIONS.length === LATEST_SCHEMA, 'trials is a typed table read through SQL');
-  const input = legacyTrial();
-  const l = JSON.parse(typedJson(input)); // the legacy row as its typed table row reads back
-  ok(stableJson(input) === stableJson(legacyTrial()) && l.workflowState === 'legacy_accepted' && l.caseId === null && l.schedule === null && Array.isArray(l.attendance) && l.attendance.length === 0 && l.completion === null && l.rev === 1 && Array.isArray(l.history) && l.history.length === 0 && Object.values(l.keys).every((k) => k === null || (Array.isArray(k) && k.length === 0)) && stableJson(l.reminders) === '{}', 'the legacy row, typed, reads back with legacy_accepted and empty containers (the record it came from untouched)');
-  neg(l.status === 'reported' && l.report.id === 'rep-1' && l.proposedDate === '2026-12-01' && l.notes === 'Bring boots' && l.day.checkins.length === 1 && l.day.emergency.name === 'Mum', 'and keeps status, report, date, notes and the P2 day record exactly — no attendance derived from the check-in, no completion invented');
-  neg(deriveWorkflowState(l) === 'legacy_accepted' && trialIntegrity(l, { orgId: 'org-x' }).length === 0, 'the legacy row is sound and derives legacy_accepted');
-  const sound = soundTrial(); const soundBefore = stableJson(sound);
-  ok(typeTrial(sound).ok && stableJson(sound) === soundBefore, 'a row that already carries P4B fields types cleanly and is left byte-identical');
-  neg(!TRIAL_WORKFLOW_STATES.includes('awaiting_report') && !TRIAL_WORKFLOW_STATES.includes('reported'), 'the report statuses are not workflow states — nothing can have renamed them');
-}
-
-// ======================================================= 2 — byte-faithful restore
-section('2 — a fixture with trial rows restores byte-faithfully through a real boot');
-{
-  const RESTORE_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-m23t-restore-'));
+/** The sound trial and the legacy one, each with the accepted invitation it came from, in case-x. */
+function pairDb() {
   const db = baseDb();
   db.trials.push(soundTrial(), legacyTrial());
   // The legacy trial carries a filed report; the player's trialReports are read from the trials, so the fixture
@@ -182,8 +168,33 @@ section('2 — a fixture with trial rows restores byte-faithfully through a real
   db.requests = [{ id: 'req-0', orgId: 'org-x', orgName: 'X FC', orgType: 'club', orgVerified: true, orgSafeguardingCertified: true, playerId: 'pl-x', playerName: 'Xavier Adult', userId: 'usr-owner', scoutName: 'Owner', scoutRole: 'Head of Recruitment', type: 'trial', message: 'Come and train.', trialDetails: { proposedDate: '2026-12-01', altSlots: [], venue: 'Old Ground', notes: 'Bring boots' }, status: 'accepted', createdAt: T0 - 401 * H, respondedAt: T0 - 400 * H, respondedBy: 'player', routedTo: 'player', guardianId: null, contactChannel: null }, { id: 'req-1', orgId: 'org-x', orgName: 'X FC', orgType: 'club', orgVerified: true, orgSafeguardingCertified: true, playerId: 'pl-x', playerName: 'Xavier Adult', userId: 'usr-owner', scoutName: 'Owner', scoutRole: 'Head of Recruitment', type: 'trial', message: 'Come.', status: 'accepted', routedTo: 'player', guardianId: null, contactChannel: null, createdAt: T0 - 1000, respondedAt: T0, respondedBy: 'player', caseId: 'case-x', trialId: 'trial-1', recipient: { type: 'player', playerId: 'pl-x', guardianId: null, minor: false }, keys: { invite: { key: 'ik-1', fp: 'fp-i' } }, trialDetails: { proposedDate: '2027-01-15', altSlots: [], venue: 'Dome, London', notes: '', slots: [{ id: 'tslot-1', day: '2027-01-15', kind: 'training', startsAt: T0 + 2 * H, endsAt: T0 + 4 * H, timezone: 'Europe/London', venue: { name: 'Dome', town: 'London' } }], private: { venueAddress: '1 Dome Road', instructions: null } } }];
   db.recruitmentCases[0].room.status = 'trial_scheduled';
   db.recruitmentCases[0].links.trialIds.push('trial-1');
+  return db;
+}
+
+// ======================================================= 1 — the migration
+section('1 — a trial row: neutral containers, nothing renamed, nothing invented');
+{
+  // The trials are typed rows read through SQL; every trial reads back from its rows with the containers.
+  ok(TABLE_BACKED.includes('trials') && !JOURNEY_REQUIRED_STORES.includes('trials') && DATA_MIGRATIONS.length === LATEST_SCHEMA, 'trials is a typed table read through SQL');
+  const input = legacyTrial(); const sound = soundTrial(); const soundBefore = stableJson(sound);
+  const WRITTEN_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-m23t-written-'));
+  const pair = pairDb(); pair.trials = [sound, input]; write(WRITTEN_DIR, pair);
+  const back = storedTrials(WRITTEN_DIR);
+  const l = back.get('trial-legacy'); // the legacy row as its table rows read back
+  ok(stableJson(input) === stableJson(legacyTrial()) && l.workflowState === 'legacy_accepted' && l.caseId === null && l.schedule === null && Array.isArray(l.attendance) && l.attendance.length === 0 && l.completion === null && l.rev === 1 && Array.isArray(l.history) && l.history.length === 0 && Object.values(l.keys).every((k) => k === null || (Array.isArray(k) && k.length === 0)) && stableJson(l.reminders) === '{}', 'the legacy row, typed, reads back with legacy_accepted and empty containers (the record it came from untouched)');
+  neg(l.status === 'reported' && l.report.id === 'rep-1' && l.proposedDate === '2026-12-01' && l.notes === 'Bring boots' && l.day.checkins.length === 1 && l.day.emergency.name === 'Mum', 'and keeps status, report, date, notes and the P2 day record exactly — no attendance derived from the check-in, no completion invented');
+  neg(deriveWorkflowState(l) === 'legacy_accepted' && trialIntegrity(l, { orgId: 'org-x' }).length === 0, 'the legacy row is sound and derives legacy_accepted');
+  ok(stableJson(sound) === soundBefore && holdsAll(sound, back.get('trial-1')), 'a row that already carries P4B fields is stored as written, and the record it came from is left byte-identical');
+  neg(!TRIAL_WORKFLOW_STATES.includes('awaiting_report') && !TRIAL_WORKFLOW_STATES.includes('reported'), 'the report statuses are not workflow states — nothing can have renamed them');
+}
+
+// ======================================================= 2 — byte-faithful restore
+section('2 — a fixture with trial rows restores byte-faithfully through a real boot');
+{
+  const RESTORE_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-m23t-restore-'));
+  const db = pairDb();
   write(RESTORE_DIR, db);
-  const beforeSound = typedJson(db.trials[0]); const beforeLegacy = typedJson(db.trials[1]);
+  const written = storedTrials(RESTORE_DIR); const beforeSound = stableJson(written.get('trial-1')); const beforeLegacy = stableJson(written.get('trial-legacy'));
   const s = await bootOn(RESTORE_DIR, PORT);
   if (!s.up) console.error(s.log().split('\n').slice(-12).join('\n'));
   ok(s.up, 'the server boots on the fixture');
@@ -222,7 +233,7 @@ section('3 — corrupt trial rows are named and omitted, never fabricated, never
     soundTrial({ id: 'trial-bad-rev', requestId: 'req-bad-rev', workflowState: 'cancelled', rev: 0 }),
   );
   db.requests = db.trials.map((t) => invitation(t.requestId, t.id));
-  write(CORRUPT_DIR, db);
+  write(CORRUPT_DIR, db); const writtenCorrupt = storedTrials(CORRUPT_DIR);
   const s = await bootOn(CORRUPT_DIR, PORT + 1);
   if (!s.up) console.error(s.log().split('\n').slice(-12).join('\n'));
   ok(s.up, 'the server boots with four trials, three of them corrupt rows');
@@ -241,7 +252,7 @@ section('3 — corrupt trial rows are named and omitted, never fabricated, never
   ok(journey.status === 200 && journey.body.trials.length === 1 && journey.body.trialsOmitted === 3, 'the journey omits and counts the same three');
   const after = await s.stop();
   neg(after.trials.length === 4 && after.trials.some((x) => x.id === 'trial-bad-tz' && x.schedule.timezone === 'Mars/Olympus') && after.trials.some((x) => x.id === 'trial-bad-rev' && x.rev === 0), 'the corrupt rows are still in the snapshot exactly as they were — omitted on read, never deleted or repaired');
-  if (after.trials.map(stableJson).join() !== db.trials.map(typedJson).join()) { for (let i = 0; i < db.trials.length; i += 1) if (stableJson(after.trials[i]) !== typedJson(db.trials[i])) console.error('   changed row', i, JSON.stringify(after.trials[i]).slice(0, 200)); }
+  for (const t of after.trials) if (stableJson(t) !== stableJson(writtenCorrupt.get(t.id))) console.error('   changed row', t.id, JSON.stringify(t).slice(0, 200));
 }
 
 // ======================================================= 3c — records the typed tables cannot hold
@@ -250,10 +261,10 @@ section('3c — a state, a completion or an attendance row outside the vocabular
   const db = baseDb();
   const invitation = (id) => ({ id, orgId: 'org-x', orgName: 'X FC', orgType: 'club', orgVerified: true, orgSafeguardingCertified: true, playerId: 'pl-x', playerName: 'Xavier Adult', userId: 'usr-owner', scoutName: 'Owner', scoutRole: 'Head of Recruitment', type: 'trial', message: 'Come.', trialDetails: { proposedDate: null, altSlots: [], venue: null, notes: '' }, status: 'accepted', createdAt: T0 - 1000, routedTo: 'player', guardianId: null, contactChannel: null });
   const cases = [
-    ['trial-bad-state', { workflowState: 'flying' }, /trial-bad-state\.workflowState must be one of/],
-    ['trial-bad-att', { workflowState: 'cancelled', attendance: [{ sessionId: 'ghost', state: 'attended' }] }, /trial-bad-att attendance\[0\]\.source must be one of/],
-    ['trial-bad-sessions', { workflowState: 'cancelled', schedule: { ...soundTrial().schedule, sessions: 'two' } }, /trial-bad-sessions\.schedule\.sessions must be a list/],
-    ['trial-bad-completion', { workflowState: 'cancelled', completion: { state: 'done', at: 1 } }, /trial-bad-completion\.completion\.state must be one of/],
+    ['trial-bad-state', { workflowState: 'flying' }, /trials trial-bad-state trial: CHECK constraint failed: workflow_state/],
+    ['trial-bad-att', { workflowState: 'cancelled', attendance: [{ sessionId: 'ghost', state: 'attended' }] }, /trials trial-bad-att attendance\[0\]: NOT NULL constraint failed: trial_attendance\.source/],
+    ['trial-bad-sessions', { workflowState: 'cancelled', schedule: { ...soundTrial().schedule, sessions: 'two' } }, /trials trial-bad-sessions schedule\.sessions: must be a list/],
+    ['trial-bad-completion', { workflowState: 'cancelled', completion: { state: 'done', at: 1 } }, /trials trial-bad-completion trial: CHECK constraint failed: completion_state/],
   ];
   for (const [id, over, named] of cases) {
     const dir = mkdtempSync(path.join(tmpdir(), 'sbx-m23t-unstorable-'));
@@ -281,7 +292,7 @@ section('3b — alien entries in the trials store are refused with their positio
     let refused = null;
     try { write(ALIEN_DIR, db); } catch (err) { refused = err; }
     const msg = String(refused?.message ?? '');
-    neg(refused?.code === 'RECRUITMENT_INPUT_INVALID' && msg.includes(`trials is not an object (${what})`), `a trials entry that is ${what} is refused by its kind (${msg.slice(0, 120)})`);
+    neg(refused?.code === 'RECRUITMENT_INPUT_INVALID' && msg.includes(`trials: a record must be an object (got ${what.replace(/^a /, '')})`), `a trials entry that is ${what} is refused by its kind (${msg.slice(0, 120)})`);
     neg(rowIds(readRecords(ALIEN_DIR)) === FRESH, `${what}: nothing was written: the directory holds only the first installation`);
   }
   const s = await bootOn(ALIEN_DIR, PORT + 2);

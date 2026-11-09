@@ -62,6 +62,8 @@ export function writeKit(sqlite, prefix) {
   const cache = new Map();
   /** A prepared statement, prepared once per connection. */
   const q = (sql) => { let s = cache.get(sql); if (!s) cache.set(sql, (s = sqlite.prepare(sql))); return s; };
+  /** An absent (`undefined`) column value is bound as NULL. */
+  const absentAsNull = (cols) => Object.fromEntries(Object.entries(cols).map(([c, v]) => [c, v === undefined ? null : v]));
   const assign = (cols) => Object.keys(cols).map((c) => `${c} = @${c}`).join(', ');
   /** `col IN ('a','b')` over a domain vocabulary (its values are code constants, never input); an empty one holds for no row. */
   const sqlIn = (col, values) => (values.length ? `${col} IN (${values.map((v) => `'${v}'`).join(', ')})` : '0');
@@ -75,7 +77,7 @@ export function writeKit(sqlite, prefix) {
     const params = Object.fromEntries(Object.entries(keys).map(([c, v]) => [`key_${c}`, v]));
     const assignments = [assign(cols), set].filter(Boolean).join(', ');
     const found = assignments
-      ? q(`UPDATE ${table} SET ${assignments} WHERE ${match}`).run({ ...cols, ...params }).changes === 1
+      ? q(`UPDATE ${table} SET ${assignments} WHERE ${match}`).run({ ...absentAsNull(cols), ...params }).changes === 1
       : !!q(`SELECT 1 FROM ${table} WHERE ${match}`).get(params);
     if (!found) throw refusal('STATE_CONFLICT', what);
   };

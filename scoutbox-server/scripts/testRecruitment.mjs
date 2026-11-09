@@ -31,8 +31,14 @@ const recDump = (s) => JSON.stringify(TABLES.map((t) => s.prepare(`SELECT * FROM
 const ddlOf = (s, t) => s.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?").get(t)?.sql ?? null;
 const col = (s, sql, ...p) => { const r = s.prepare(sql).get(...p); return r ? Object.values({ ...r })[0] : undefined; };
 const CHANNEL = (over = {}) => ({ id: 'chan-1', requestId: 'req-p4b', playerId: 'pl-adult', playerName: 'Adult Signup', orgId: 'org-pro', orgName: 'Eastport FC', orgVerified: true, scoutName: 'Maria', scoutRole: 'Head of Recruitment', counterparty: 'player', guardianId: null, createdAt: T.accepted, messages: [], readBy: { org: null, counterparty: null }, ...over });
-/** The typed expectation of a writer's literal: what every read returns. */
-const typed = (name, raw) => { const t = (name === 'requests' ? rec.typeRequest : rec.typeTrial)(persisted(raw)); assert.ok(t.ok, t.reason); return plain(t.record); };
+/** A stored record holds everything the writer's literal said (absent and null say nothing), at every depth. */
+const storedAs = (written, stored, at) => {
+  if (written === undefined || written === null) return;
+  if (typeof written !== 'object') { assert.equal(stored, written, at); return; }
+  assert.ok(stored !== null && typeof stored === 'object' && Array.isArray(stored) === Array.isArray(written), `${at}: stored as ${Array.isArray(written) ? 'a list' : 'an object'}`);
+  if (Array.isArray(written)) assert.equal(stored.length, written.length, `${at}: length`);
+  for (const [k, v] of Object.entries(written)) storedAs(v, stored[k], `${at}.${k}`);
+};
 
 /** Every writer shape: the accepted P4B pair (req-p4b ↔ trial-1, thread chan-1), a contact, an open-day invitation, a pending date-only invitation, the minor's invitation, and the legacy reported trial on req-old. */
 const FIX = () => ({ requests: [acceptedRequest(p4bInvitation(), 'trial-1'), contactRequest(), openDayRequest(), legacyTrialRequest(), minorInvitation(), legacyTrialRequest({ id: 'req-old', status: 'accepted', respondedAt: T.accepted - 30 * 86_400_000, respondedBy: 'player', contactChannel: null })], trials: [scheduledTrial(), preP4bTrial()] });
@@ -79,11 +85,12 @@ test('[schema] migration 0015 is registered before 0016–0018 and creates the s
   F.close(); rm(d);
 });
 
-test('[fixtures][typed] every writer shape is typed into its columns and reads back as the typed record (an absent field null, an absent list empty, the trial-day container, the five key lists and the reminder map always present): the P4B invitation (slots, private details, invitation key, recipient), the contact, the open-day literal, the legacy and the minor\'s invitations, the scheduled, accepted, M12-shaped, worked and cancelled trials', () => {
+test('[fixtures] every writer shape is written into its columns and reads back as written (an absent field null, an absent list empty, the trial-day container, the five key lists and the reminder map always present): the P4B invitation (slots, private details, invitation key, recipient), the contact, the open-day literal, the legacy and the minor\'s invitations, the scheduled, accepted, M12-shaped, worked and cancelled trials', () => {
   const all = EVERY_TRIAL_SHAPE();
   const d = file('typed', all); const S = { db: readRecords(d) };
-  assert.deepEqual(plain(S.db.requests), all.requests.map((r) => typed('requests', r)), 'every request reads back as its typed record');
-  assert.deepEqual(plain(S.db.trials), all.trials.map((t) => typed('trials', t)), 'every trial reads back as its typed record');
+  assert.deepEqual(S.db.requests.map((r) => r.id), all.requests.map((r) => r.id)); assert.deepEqual(S.db.trials.map((t) => t.id), all.trials.map((t) => t.id));
+  all.requests.forEach((r, i) => storedAs(persisted(r), plain(S.db.requests[i]), r.id)); all.trials.forEach((t, i) => storedAs(persisted(t), plain(S.db.trials[i]), t.id));
+  for (const r of S.db.requests) assert.ok(r.playerName !== undefined && r.subject !== undefined && r.recipient !== undefined && 'invite' in r.keys, `${r.id}: an absent field reads back as null`);
   const worked = S.db.trials.find((t) => t.id === 'trial-worked');
   assert.equal(worked.schedule.sessions[0].evidence.length, 2); assert.equal(worked.day.staff[0].check.status, 'pending'); assert.equal(worked.report.coachRating, 8); assert.equal(worked.reminders['t48:tses-2:2'], T.session + 86_400_000 - 48 * 3_600_000); assert.equal(worked.keys.schedule[0].key, 'k-sched-1');
   const old = S.db.trials.find((t) => t.id === 'trial-old'); assert.deepEqual(plain(old.day), { staff: [], consents: [], arrival: null, emergency: null, checkins: [], collection: null, statusEvents: [] }, 'a trial without a day reads back with the empty container'); assert.deepEqual(Object.keys(old.keys).sort(), ['attendance', 'cancel', 'complete', 'link', 'schedule']);
@@ -92,13 +99,13 @@ test('[fixtures][typed] every writer shape is typed into its columns and reads b
   rm(d);
 });
 
-test('[fixtures][typed] a write STOPS with the ids on a record the tables cannot hold — nothing written: an unknown field (top level and nested), a status outside the vocabulary, an off-type rev, a trial without its request, a request naming no case, a missing guardian, two open trials in one case, alien entries (each one named)', () => {
+test('[fixtures] a write STOPS with the ids on a record the tables cannot hold — nothing written: an unknown field (top level and nested), a status outside the vocabulary, an off-type rev, a trial without its request, a request naming no case, a missing guardian, two open trials in one case, alien entries (each one named)', () => {
   const fix = FIX();
-  refusedSave('unknown field', { ...fix, requests: [{ ...fix.requests[0], legacyFlag: true }, ...fix.requests.slice(1)] }, /RECRUITMENT_INPUT_INVALID[\s\S]*req-p4b\.record\.legacyFlag is not a field/);
-  refusedSave('unknown nested field', { ...fix, trials: [scheduledTrial({ blockedBy: null, keys: { accept: { key: null, fp: 'x' } } }), fix.trials[1]] }, /trial-1\.record\.blockedBy|trial-1\.keys\.accept/);
-  refusedSave('status', { ...fix, requests: [{ ...fix.requests[0], status: 'maybe' }, ...fix.requests.slice(1)] }, /req-p4b\.status must be one of/);
-  refusedSave('off-type rev', { ...fix, trials: [scheduledTrial({ rev: '3' }), fix.trials[1]] }, /trial-1\.rev must be an integer/);
-  refusedSave('trial without its request', { ...fix, trials: [...fix.trials, acceptedTrial({ id: 'trial-orphan', requestId: 'req-ghost' })] }, /FOREIGN KEY|RECRUITMENT_REFERENCE_MISSING[\s\S]*trial-orphan/);
+  refusedSave('unknown field', { ...fix, requests: [{ ...fix.requests[0], legacyFlag: true }, ...fix.requests.slice(1)] }, /RECRUITMENT_INPUT_INVALID[\s\S]*req-p4b legacyFlag: is not stored as written/);
+  refusedSave('unknown nested field', { ...fix, trials: [scheduledTrial({ blockedBy: null, keys: { accept: { key: null, fp: 'x' } } }), fix.trials[1]] }, /trial-1 (blockedBy|keys\.accept): is not stored as written/);
+  refusedSave('status', { ...fix, requests: [{ ...fix.requests[0], status: 'maybe' }, ...fix.requests.slice(1)] }, /req-p4b request: CHECK constraint failed: status/);
+  refusedSave('off-type rev', { ...fix, trials: [scheduledTrial({ rev: '3' }), fix.trials[1]] }, /trial-1 rev: is not stored as written/);
+  refusedSave('trial without its request', { ...fix, trials: [...fix.trials, acceptedTrial({ id: 'trial-orphan', requestId: 'req-ghost' })] }, /RECRUITMENT_INPUT_INVALID: trials trial-orphan trial: FOREIGN KEY constraint failed/);
   refusedSave('request naming no case', { ...fix, requests: [...fix.requests, p4bInvitation({ id: 'req-ghost-case', caseId: 'case-ghost', trialId: null })] }, /RECRUITMENT_CASE_MISSING[\s\S]*req-ghost-case → recruitment_cases case-ghost/);
   refusedSave('missing guardian', { ...fix, requests: [...fix.requests, minorInvitation({ id: 'req-ghost-g', guardianId: 'gd-ghost', recipient: { type: 'guardian', playerId: 'pl-child1', guardianId: 'gd-ghost', minor: true }, caseId: null })] }, /RECRUITMENT_GUARDIAN_MISSING[\s\S]*req-ghost-g names a guardian that does not exist \(gd-ghost/);
   refusedSave('two open trials in one case', { requests: [...fix.requests, legacyTrialRequest({ id: 'req-second', status: 'accepted', respondedAt: T.accepted, respondedBy: 'player', caseId: 'case-1' })], trials: [...fix.trials, acceptedTrial({ id: 'trial-second', requestId: 'req-second', caseId: 'case-1' })] }, /UNIQUE constraint failed: trials\.case_id/);
@@ -110,26 +117,81 @@ test('[fixtures] Q7a: a request naming a missing player is stored and counted, n
   const L = serverOpen(d); assert.equal(L.layer.report().domains.recruitment.unresolvedPlayerReferences.requests, 1, 'the missing player is counted'); L.close(); rm(d);
 });
 
-test('[repository] explicit writes: there is no db.requests or db.trials (reading or assigning throws, naming the repository) and every returned record is read-only (a field assignment and a nested push throw); create and update write their rows at once and return the stored record; an update is typed whole (a refusal changes nothing), cannot change an identifier, and names no value; a duplicate create is refused; byId', () => {
+test('[repository] explicit writes: every returned record is read-only (a field assignment and a nested push throw); create writes its rows at once and returns the stored record; a duplicate create is refused; there is no whole-record update, only named acts, and a refused act changes nothing and names no value; byId', () => {
   const d = file('repo'); const L = serverOpen(d); const { requests, trials } = L.repo;
   assert.throws(() => { trials.byId('trial-1').status = 'reported'; }, /read only|Cannot assign/); assert.throws(() => trials.byId('trial-1').history.push({}), /not extensible|read only|Cannot add/);
+  assert.equal(requests.update, undefined); assert.equal(trials.update, undefined);
   const made = requests.create(contactRequest({ id: 'req-new' })); assert.equal(made.id, 'req-new'); assert.throws(() => { made.status = 'accepted'; }, /read only|Cannot assign/);
   assert.equal(withRo(d, (s) => col(s, "SELECT status FROM recruitment_requests WHERE id = 'req-new'")), 'pending', 'written at once, no save');
   refused(() => requests.create(contactRequest({ id: 'req-new' })), /RECRUITMENT_DUPLICATE[\s\S]*req-new/, 'duplicate');
-  const answered = requests.update('req-new', (x) => { x.status = 'accepted'; x.respondedAt = NOW; x.respondedBy = 'player'; }); assert.equal(answered.status, 'accepted'); assert.equal(requests.byId('req-new').status, 'accepted', 'a read serves the stored record');
+  const answered = requests.recordResponse('req-new', { status: 'accepted', respondedAt: NOW, respondedBy: 'player' }); assert.equal(answered.status, 'accepted'); assert.equal(requests.byId('req-new').status, 'accepted', 'a read serves the stored record');
   const rows = withRo(d, recDump);
-  refused(() => requests.update('req-new', (x) => { x.status = 'maybe'; }), /req-new\.status must be one of/, 'vocabulary'); refused(() => requests.update('req-new', (x) => { x.playerId = 'pl-other'; }), /playerId cannot change/, 'identifier');
-  refused(() => trials.update('trial-1', (x) => { x.attendance.push({ sessionId: 'tses-1', state: 'how it went', source: 'manual', recordedAt: NOW }); }), /attendance\[0\]\.state must be one of/, 'nested vocabulary');
-  assert.equal(withRo(d, recDump), rows, 'a refused update changed no row'); assert.equal(requests.byId('req-new').status, 'accepted', 'nor a read');
-  const t = trials.update('trial-1', (x) => { x.attendance.push({ sessionId: 'tses-1', state: 'attended', source: 'manual', recordedBy: { kind: 'org', userId: 'usr-1', name: 'Maria' }, recordedAt: NOW, note: null }); x.rev += 1; });
-  assert.equal(t.attendance.length, 1); assert.equal(withRo(d, (s) => col(s, "SELECT count(*) FROM trial_attendance WHERE trial_id = 'trial-1'")), 1); assert.equal(trials.byId('trial-1').rev, 2); assert.equal(trials.byId('trial-ghost'), null);
+  refused(() => requests.recordResponse('req-new', { status: 'declined', respondedAt: NOW, respondedBy: 'player' }), /RECRUITMENT_STATE_CONFLICT: recruitment_requests req-new is not pending/, 'a second answer');
+  refused(() => requests.attachChannel('req-contact', { channelId: 'chan-x' }), /req-contact is not an accepted request without a channel/, 'a channel on a pending request');
+  refused(() => trials.recordAttendance('trial-1', { attendance: { sessionId: 'tses-1', state: 'how it went', source: 'manual', recordedAt: NOW } }), /trials trial-1 recordAttendance: CHECK constraint failed: state IS NULL OR state IN/, 'vocabulary');
+  refused(() => trials.recordAttendance('trial-1', { attendance: { sessionId: 'tses-1', state: 'attended', source: 'manual', recordedAt: NOW, mood: 'great' } }), /trials trial-1 attendance\.mood: is not stored as written/, 'a field with no column');
+  refused(() => trials.cancel('trial-ghost', { at: NOW }), /RECRUITMENT_NOT_FOUND[\s\S]*trial-ghost/, 'no such trial');
+  assert.equal(withRo(d, recDump), rows, 'a refused act changed no row');
+  const t = trials.recordAttendance('trial-1', { attendance: { sessionId: 'tses-1', state: 'attended', source: 'manual', recordedBy: { kind: 'org', userId: 'usr-1', name: 'Maria' }, recordedAt: NOW, note: null } }, { at: NOW, bump: true, revBy: { id: 'usr-1', name: 'Maria' } });
+  assert.equal(t.attendance.length, 1); assert.equal(withRo(d, (s) => col(s, "SELECT count(*) FROM trial_attendance WHERE trial_id = 'trial-1'")), 1); assert.equal(trials.byId('trial-1').rev, 2); assert.deepEqual(plain(t.revBy), { userId: 'usr-1', name: 'Maria' }); assert.equal(trials.byId('trial-ghost'), null);
+  L.close(); rm(d);
+});
+
+test('[repository] the acts of a trial, each guarded in SQL: a schedule proposal is one past the current revision (it supersedes the open revision, keeps a kept session\'s evidence links and drops a dropped one\'s), a confirmation or a decline answers only a proposed schedule, nothing changes an ended trial, completion needs a scheduled trial, an evidence link is withdrawn once, a report is filed once; a trial keeps its newest client keys; the trial-day acts', () => {
+  const d = file('acts'); const L = serverOpen(d); const { trials } = L.repo;
+  const org = { kind: 'org', userId: 'usr-1', name: 'Maria' }; const fam = { kind: 'player', id: 'pl-adult', name: 'Adult Signup' };
+  trials.linkEvidence('trial-1', { sessionId: 'tses-1', evidence: { id: 'tev-9', kind: 'box_cam_session', sessionId: 'box-9', linkedAt: NOW, linkedBy: org, removedAt: null, removedBy: null } });
+  refused(() => trials.linkEvidence('trial-1', { sessionId: 'tses-ghost', evidence: { id: 'tev-10', kind: 'box_cam_session', sessionId: 'box-9', linkedAt: NOW } }), /trial-1 linkEvidence: FOREIGN KEY constraint failed/, 'evidence on a session the trial does not have');
+  const s1 = { id: 'tses-1', kind: 'training', startsAt: T.session, endsAt: T.sessionEnd, venue: { name: 'Eastport Ground', town: 'Eastport', address: null }, instructions: null };
+  const s2 = { id: 'tses-2', kind: 'match', startsAt: T.sessionEnd + 3_600_000, endsAt: T.sessionEnd + 7_200_000, venue: null, instructions: null };
+  refused(() => trials.proposeSchedule('trial-1', { revision: 3, timezone: 'Europe/London', sessions: [s1], proposedAt: NOW, proposedBy: org, workflowState: 'accepted' }), /RECRUITMENT_STATE_CONFLICT: trials trial-1 is not open at schedule revision 2/, 'a revision that skips one');
+  let t = trials.proposeSchedule('trial-1', { revision: 2, timezone: 'Europe/London', sessions: [s1, s2], proposedAt: NOW, proposedBy: org, reason: 'more', material: true, workflowState: 'accepted' }, { at: NOW, bump: true, revBy: { id: 'usr-1', name: 'Maria' }, key: { act: 'schedule', key: 'k-1', fp: 'fp-1' } });
+  assert.equal(t.schedule.revision, 2); assert.equal(t.schedule.confirmedAt, null); assert.equal(t.workflowState, 'accepted'); assert.deepEqual(t.schedule.sessions.map((s) => s.id), ['tses-1', 'tses-2']);
+  assert.equal(t.schedule.sessions[0].evidence.length, 1, 'a kept session keeps its evidence'); assert.deepEqual(t.schedule.revisions.map((r) => [r.revision, r.supersededAt]), [[1, NOW], [2, null]]); assert.equal(t.schedule.revisions[1].sessions.length, 2); assert.equal(t.keys.schedule[0].key, 'k-1');
+  t = trials.proposeSchedule('trial-1', { revision: 3, timezone: 'Europe/London', sessions: [s2], proposedAt: NOW + 1, proposedBy: org, workflowState: 'accepted' });
+  assert.deepEqual(t.schedule.sessions.map((s) => s.id), ['tses-2']); assert.equal(withRo(d, (s) => col(s, "SELECT count(*) FROM trial_session_evidence WHERE trial_id = 'trial-1'")), 0, 'a dropped session takes its evidence links with it');
+  t = trials.declineSchedule('trial-1', { at: NOW, by: fam }); assert.equal(t.schedule.declinedAt, NOW);
+  refused(() => trials.declineSchedule('trial-1', { at: NOW, by: fam }), /trial-1 has no proposed schedule awaiting an answer/, 'a second decline');
+  refused(() => trials.complete('trial-1', { at: NOW, by: org }), /trial-1 is not scheduled/, 'completion before confirmation');
+  t = trials.confirmSchedule('trial-1', { at: NOW, by: fam, recipient: { type: 'player', playerId: 'pl-adult', guardianId: null, minor: false, at: NOW }, workflowState: 'scheduled' });
+  assert.equal(t.workflowState, 'scheduled'); assert.equal(t.schedule.confirmedAt, NOW); assert.equal(t.schedule.declinedAt, null); assert.equal(t.schedule.revisions.at(-1).confirmedAt, NOW);
+  refused(() => trials.confirmSchedule('trial-1', { at: NOW, by: fam, recipient: null, workflowState: 'scheduled' }), /trial-1 has no proposed schedule awaiting confirmation/, 'a second confirmation');
+  refused(() => trials.confirmSchedule('trial-1', { at: NOW, by: fam, recipient: { type: 'guardian', playerId: 'pl-adult', guardianId: 'gd-ghost', minor: true }, workflowState: 'scheduled' }), /RECRUITMENT_GUARDIAN_MISSING[\s\S]*gd-ghost/, 'a guardian that does not exist');
+  t = trials.complete('trial-1', { at: NOW, by: org }); assert.equal(t.workflowState, 'completed'); assert.equal(t.completion.phase, 'scheduled');
+  refused(() => trials.cancel('trial-1', { at: NOW, by: org, reason: 'x', phase: 'completed', cancelledBy: 'club' }), /RECRUITMENT_STATE_CONFLICT: trials trial-1 has ended/, 'nothing changes an ended trial');
+  refused(() => trials.proposeSchedule('trial-1', { revision: 4, timezone: 'Europe/London', sessions: [s2], proposedAt: NOW, proposedBy: org, workflowState: 'accepted' }), /trial-1 is not open/, 'nor a schedule');
+  t = trials.recordLifecycle('trial-1', { lifecycle: { applied: true, from: 'trial_scheduled', to: 'trial_completed', at: NOW } }); assert.deepEqual(plain(t.lifecycle), { applied: true, from: 'trial_scheduled', to: 'trial_completed', at: NOW });
+  refused(() => trials.recordLifecycle('trial-1', { lifecycle: { applied: true, from: 'a', to: 'b', at: NOW, reason: 'x' } }), /trial-1 lifecycle\.reason: is not stored as written/, 'an applied move carries no reason');
+  t = trials.fileReport('trial-1', { report: report({ id: 'rep-9' }) }); assert.equal(t.status, 'reported'); assert.equal(t.report.id, 'rep-9');
+  refused(() => trials.fileReport('trial-1', { report: report({ id: 'rep-10' }) }), /trial-1 already has its report/, 'a second report');
+  refused(() => trials.fileReport('trial-old', { report: report({ id: 'rep-11', trialId: 'trial-old', playerId: 'pl-child1' }) }), /trial-old already has its report|FOREIGN KEY/, 'a report names its trial\'s player');
+  // client keys: the newest are kept
+  for (let i = 0; i < 52; i++) trials.recordAct('trial-old', { at: NOW + i, key: { act: 'cancel', key: `k-${i}`, fp: 'f' } });
+  const keys = trials.byId('trial-old').keys.cancel; assert.equal(keys.length, 50); assert.equal(keys[0].key, 'k-2'); assert.equal(keys.at(-1).key, 'k-51');
+  // reminders, escalation
+  t = trials.markReminders('trial-old', { markers: { assessmentPending: NOW } }); assert.equal(t.reminders.assessmentPending, NOW);
+  refused(() => trials.markReminders('trial-old', { markers: { assessmentPending: NOW } }), /trial-old markReminders: UNIQUE constraint failed/, 'a marker is set once');
+  trials.escalateFeedback('trial-old', { at: NOW }); refused(() => trials.escalateFeedback('trial-old', { at: NOW }), /trial-old was already escalated/);
+  trials.markReportReminderSent('trial-old'); refused(() => trials.markReportReminderSent('trial-old'), /trial-old was already reminded/);
+  // the trial day
+  t = trials.addStaff('trial-old', { staff: { id: 'stf-1', name: 'Coach', role: 'Coach', check: { kind: 'DBS', ref: 'R1', status: 'pending', expiresAt: null, reviewedBy: null }, addedBy: 'Maria', addedAt: NOW } });
+  t = trials.reviewStaffCheck('trial-old', { staffId: 'stf-1', status: 'reviewed', reviewedBy: 'Trust & Safety', reviewedAt: NOW, expiresAt: '2030-01-01' }); assert.deepEqual([t.day.staff[0].check.status, t.day.staff[0].check.expiresAt], ['reviewed', '2030-01-01']);
+  t = trials.addStaff('trial-old', { staff: { id: 'stf-2', name: 'Kit', role: 'Kit', check: null, addedBy: 'Maria', addedAt: NOW } });
+  refused(() => trials.reviewStaffCheck('trial-old', { staffId: 'stf-2', status: 'reviewed', reviewedBy: 'T&S', reviewedAt: NOW }), /trial-old staff stf-2 has no check/, 'no check to review');
+  t = trials.setArrival('trial-old', { arrival: { time: '10:00', address: null, notes: null }, collection: { policy: 'Parents collect' } }); assert.deepEqual(plain(t.day.arrival), { time: '10:00', address: null, notes: null }); assert.equal(t.day.collection.policy, 'Parents collect');
+  t = trials.setArrival('trial-old', { arrival: { time: null, address: null, notes: null }, collection: null }); assert.equal(t.day.arrival, null); assert.equal(t.day.collection.policy, 'Parents collect', 'the policy stays unless replaced');
+  t = trials.giveConsent('trial-old', { consent: { id: 'cns-1', by: fam, scope: 'player_event_consent', at: NOW } });
+  refused(() => trials.giveConsent('trial-old', { consent: { id: 'cns-2', by: fam, scope: 'player_event_consent', at: NOW } }), /trial-old giveConsent: UNIQUE constraint failed/, 'one consent per person and scope');
+  t = trials.setEmergencyContact('trial-old', { emergency: { name: 'Mum', phone: '0770', setBy: 'player', at: NOW } }); assert.equal(t.day.emergency.name, 'Mum');
+  t = trials.recordDayStatus('trial-old', { event: { kind: 'postponed', at: NOW, by: 'Maria', reason: 'Rain', newDate: '2026-12-01' }, proposedDate: '2026-12-01', reportDueAt: NOW + 1 }); assert.equal(t.proposedDate, '2026-12-01'); assert.equal(t.reportDueAt, NOW + 1); assert.equal(t.day.statusEvents.length, 1);
+  t = trials.checkIn('trial-old', { checkin: { playerId: 'pl-adult', at: NOW, byUserId: 'usr-1', byName: 'Maria' } }); assert.equal(t.day.checkins.length, 1); assert.equal(t.attendance.length, 0);
   L.close(); rm(d);
 });
 
 test('[repository] a unit of work: a request and a trial written in a unit with the case created first in the same unit commit together; a unit that fails rolls the rows back while a read inside it sees its writes; a request naming a missing case refuses the whole unit with its ids', () => {
   const d = file('unit'); const L = serverOpen(d); const { requests, trials } = L.repo;
   const rows = withRo(d, recDump); const before = JSON.stringify(L.repo.exportAll().requests);
-  assert.throws(() => L.unit(() => { requests.create(contactRequest({ id: 'req-u' })); trials.update('trial-1', (x) => { x.rev += 1; }); assert.ok(requests.byId('req-u'), 'a read inside the unit sees its create'); assert.equal(trials.byId('trial-1').rev, 2); throw new Error('synthetic unit failure'); }), /synthetic unit failure/);
+  assert.throws(() => L.unit(() => { requests.create(contactRequest({ id: 'req-u' })); trials.recordAct('trial-1', { at: NOW, bump: true }); assert.ok(requests.byId('req-u'), 'a read inside the unit sees its create'); assert.equal(trials.byId('trial-1').rev, 2); throw new Error('synthetic unit failure'); }), /synthetic unit failure/);
   assert.equal(withRo(d, recDump), rows, 'no row changed'); assert.equal(JSON.stringify(L.repo.exportAll().requests), before, 'a fresh read sees the rollback'); assert.equal(trials.byId('trial-1').rev, 1);
   assert.throws(() => L.unit(() => { requests.create(p4bInvitation({ id: 'req-ghost', caseId: 'case-ghost', trialId: null, keys: { invite: null } })); }), /RECRUITMENT_CASE_MISSING[\s\S]*req-ghost → recruitment_cases case-ghost/, 'a request naming no case is refused with its ids (the case key is immediate)');
   assert.equal(requests.byId('req-ghost'), null); assert.equal(withRo(d, (s) => col(s, "SELECT count(*) FROM recruitment_requests WHERE id = 'req-ghost'")), 0);
@@ -164,7 +226,7 @@ test('[repository] SQL reads: byId and every list query return exactly what a sc
   const checks = (pendingOnly) => all.trials.flatMap((t) => (t.day?.staff ?? []).filter((x) => x.check && (!pendingOnly || x.check.status === 'pending')).map((x) => `${t.id}/${x.id}`));
   const walk = (pendingOnly, limit) => { const seen = []; let after = null; for (let i = 0; i < 50; i += 1) { const page = trials.staffChecksPage({ pendingOnly, limit, after }); seen.push(...page.items.map((r) => `${r.trialId}/${r.staffId}`)); if (!page.nextCursor) return seen; after = JSON.parse(Buffer.from(page.nextCursor, 'base64url').toString('utf8')); } throw new Error('the pages never ended'); };
   for (const pendingOnly of [true, false]) for (const limit of [1, 2, 100]) assert.deepEqual(walk(pendingOnly, limit), checks(pendingOnly), `staffChecksPage pendingOnly=${pendingOnly} by ${limit}`);
-  for (const n of ['requests', 'trials']) { assert.ok(Object.isFrozen(L.repo.reads[n])); assert.equal(L.repo.reads[n].byId, L.repo[n].byId); assert.equal(L.repo.reads[n].create, undefined); assert.equal(L.repo.reads[n].update, undefined); }
+  for (const n of ['requests', 'trials']) { assert.ok(Object.isFrozen(L.repo.reads[n])); assert.equal(L.repo.reads[n].byId, L.repo[n].byId); for (const w of ['create', 'recordResponse', 'suspend', 'proposeSchedule', 'cancel', 'fileReport', 'addStaff', 'recordAct']) assert.equal(L.repo.reads[n][w], undefined, `${n}.${w} is not a read`); }
   assert.deepEqual(L.repo.counts(), { requests: all.requests.length, trials: all.trials.length, trialReports: all.trials.filter((t) => t.report).length });
   L.close(); rm(d);
 });
@@ -226,13 +288,24 @@ test('[repository] the reminder sweep query: remindersDue(now) is exactly the co
   L.close(); rm(d);
 });
 
-test('[repository] the deletion unit: tombstoneForPlayer writes every request and trial of the player as the reduced record the callbacks build (ids, states and times kept); a tombstone that changes an identifier is refused; the derived trial reports are the reports on the player\'s trials in filing order', () => {
-  const d = file('tomb'); const L = serverOpen(d);
-  assert.deepEqual(L.repo.trialReportsFor('pl-adult').map((r) => r.id), ['rep-old']);
-  refused(() => L.repo.tombstoneForPlayer('pl-adult', { request: (r) => ({ ...r, id: 'req-renamed' }), trial: (t) => t }), /id cannot change/, 'an identifier');
-  const n = L.repo.tombstoneForPlayer('pl-adult', { request: (r) => ({ ...r, playerName: null, message: null, subjectRemovedAt: NOW }), trial: (t) => ({ ...t, playerName: null, subjectRemovedAt: NOW }) });
-  assert.deepEqual(n, { requests: 5, trials: 2 });
-  withRo(d, (s) => { assert.equal(col(s, "SELECT count(*) FROM recruitment_requests WHERE player_id = 'pl-adult' AND subject_removed_at IS NULL"), 0); assert.equal(col(s, "SELECT count(*) FROM trials WHERE player_id = 'pl-adult' AND player_name IS NOT NULL"), 0); assert.equal(col(s, "SELECT count(*) FROM recruitment_requests WHERE player_id = 'pl-child1' AND subject_removed_at IS NULL"), 1, 'another player\'s request untouched'); });
+test('[repository] the deletion unit: redactPlayer keeps every request and trial of the player with its ids, states, times and the club\'s filed numbers, and removes what describes the person (names, message, subject, notes, instructions and address lines, the emergency contact, report feedback, evidence links, recipient and guardian ids, actors\' names, long history detail); another player\'s rows are untouched; the derived trial reports are the reports on the player\'s trials in filing order', () => {
+  const all = EVERY_TRIAL_SHAPE(); const d = file('tomb', all); const L = serverOpen(d);
+  assert.deepEqual(L.repo.trialReportsFor('pl-adult').map((r) => r.id), ['rep-old', 'rep-1']);
+  const before = plain(L.repo.trials.byId('trial-worked'));
+  const n = L.repo.redactPlayer('pl-adult', NOW);
+  assert.deepEqual(n, { requests: 8, trials: 5 });
+  withRo(d, (s) => { assert.equal(col(s, "SELECT count(*) FROM recruitment_requests WHERE player_id = 'pl-adult' AND (subject_removed_at IS NULL OR player_name IS NOT NULL OR message IS NOT NULL OR subject IS NOT NULL OR trial_private_venue_address IS NOT NULL OR invite_key IS NOT NULL OR recipient_type IS NOT NULL)"), 0); assert.equal(col(s, "SELECT count(*) FROM recruitment_requests WHERE player_id = 'pl-child1' AND subject_removed_at IS NULL"), 1, 'another player\'s request untouched'); assert.equal(col(s, 'SELECT count(*) FROM request_trial_slots WHERE venue_address IS NOT NULL'), 0); });
+  const t = plain(L.repo.trials.byId('trial-worked'));
+  assert.equal(t.playerName, null); assert.equal(t.notes, ''); assert.equal(t.subjectRemovedAt, NOW); assert.equal(t.revBy, null); assert.equal(t.lifecycle, null);
+  assert.deepEqual([t.id, t.requestId, t.caseId, t.status, t.workflowState, t.rev, t.acceptedAt, t.reportDueAt], [before.id, before.requestId, before.caseId, before.status, before.workflowState, before.rev, before.acceptedAt, before.reportDueAt], 'ids, states and times kept');
+  assert.deepEqual([t.report.id, t.report.coachRating, t.report.notes, t.report.strengthNote, t.report.focusNote], [before.report.id, before.report.coachRating, null, null, null], 'the club\'s filed numbers kept, the feedback gone');
+  assert.ok(t.schedule.sessions.every((s) => s.instructions === null && (s.venue === null || s.venue.address === null) && s.evidence.length === 0), 'sessions keep their times and venue, lose instructions, address and evidence');
+  assert.ok(t.schedule.revisions.every((r) => r.confirmedBy === null && r.reason === null && (r.proposedBy === null || Object.keys(r.proposedBy).join() === 'kind')));
+  assert.ok(t.history.every((h) => h.by === null || Object.keys(h.by).join() === 'kind'), 'history keeps who by kind only'); assert.deepEqual(t.history.map((h) => h.id), before.history.map((h) => h.id));
+  assert.ok(t.history.every((h) => h.detail === null || Object.values(h.detail).every((v) => typeof v !== 'string' || v.length <= 40)), 'long history detail text goes');
+  assert.ok(t.attendance.every((a) => a.note === null)); assert.equal(t.day.emergency, null); assert.equal(t.day.arrival, null); assert.equal(t.day.collection, null); assert.deepEqual(t.day.staff, before.day.staff, 'the club\'s own staff stay');
+  assert.ok(t.day.consents.every((c) => c.by === null || Object.keys(c.by).join() === 'kind'));
+  assert.equal(t.completion?.reason ?? null, null); assert.equal(t.recipient?.playerId ?? null, null);
   L.close(); rm(d);
 });
 
@@ -243,18 +316,18 @@ test('[repository] a player\'s stored profile figure (players.profile_signal) co
   assert.equal(L.layer.players.byId('pl-adult').trialReports.length, 1, 'the fixture\'s reported trial');
   assert.equal(stored(), derived(), 'the fixture\'s trial writes refreshed the figure');
   const before = stored();
-  assert.throws(() => L.unit(() => { L.repo.trials.update('trial-1', (x) => { x.report = report(); }); throw new Error('synthetic unit failure'); }), /synthetic unit failure/);
+  assert.throws(() => L.unit(() => { L.repo.trials.fileReport('trial-1', { report: report() }); throw new Error('synthetic unit failure'); }), /synthetic unit failure/);
   assert.equal(stored(), before, 'a failed unit leaves the figure as it was');
-  L.repo.trials.update('trial-1', (x) => { x.report = report(); });
+  L.repo.trials.fileReport('trial-1', { report: report() });
   assert.equal(L.layer.players.byId('pl-adult').trialReports.length, 2);
   assert.equal(stored(), derived(), 'the write that files a report refreshes the figure');
   assert.equal(stored(), Math.min(before + TRUST.PER_TRIAL_REPORT, TRUST.MAX), 'by one report\'s worth');
   L.close(); rm(d);
 });
 
-test('[capabilities] the live report: explicit write mode, no pending writes, the counts and the player counters', () => {
+test('[capabilities] the live report: the named-acts write mode, no pending writes, the counts and the player counters', () => {
   const d = file('caps'); const L = serverOpen(d); const r = L.layer.report().domains.recruitment;
-  assert.equal(r.mode, 'live'); assert.match(r.writeMode, /explicit/); assert.equal(r.pendingWrites, 0); assert.deepEqual(plain(r.rows), { requests: 6, trials: 2, trialReports: 1 }); assert.deepEqual(plain(r.unresolvedPlayerReferences), { requests: 0, trials: 0 });
+  assert.equal(r.mode, 'live'); assert.match(r.writeMode, /named acts/); assert.equal(r.pendingWrites, 0); assert.deepEqual(plain(r.rows), { requests: 6, trials: 2, trialReports: 1 }); assert.deepEqual(plain(r.unresolvedPlayerReferences), { requests: 0, trials: 0 });
   L.close(); rm(d);
 });
 
