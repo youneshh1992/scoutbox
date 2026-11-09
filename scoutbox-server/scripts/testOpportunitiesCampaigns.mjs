@@ -5,14 +5,15 @@
 // the approved summary, drills, rubric, attempts with their file-check issues, preferences with slots and tags); one
 // live application per opportunity and player and one submission per campaign and player hold; the fixed fields of an
 // update cannot change and a nested update is refused; a rolled-back unit leaves nothing; preferences are not stored
-// until saved; the counts, the reminder query and the club lists by cursor answer from SQL; and the snapshot write
-// types, names missing references with ids, and reads back what it wrote.
+// until saved; the counts, the reminder query and the club lists by cursor answer from SQL; and a fixture written
+// through the repository is typed, refuses missing references and duplicates (nothing written), and reads back.
 // Temporary databases only; nothing touches DATA_DIR. Run with: npm test
 
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
-import { attachDataLayer, DATA_MIGRATIONS, TABLE_BACKED, readTableBacked } from '../repositories/index.mjs';
+import { attachDataLayer, DATA_MIGRATIONS, TABLE_BACKED } from '../repositories/index.mjs';
+import { readRecords, writeFixture } from './dataLayerFixture.mjs';
 import { runDataMigrations } from '../repositories/database.mjs';
 import { openStore } from '../store.mjs';
 import { NOW, TTL, tempDir } from './coreIdentityTestFixtures.mjs';
@@ -70,10 +71,8 @@ const prefs = (over = {}) => ({
 
 function serverOpen(dir) {
   const store = openStore(dir, { tableBacked: TABLE_BACKED });
-  const db = {}; // S14a: a fixture-saved file is not a first installation, so there is nothing to hand in
-  const layer = attachDataLayer({ db, store, nextId, persist: () => {}, sessionTtlMs: TTL, now: () => NOW, warn: () => {} });
-  const snapshot = () => ({ savedAt: NOW, idCounter: 1000, db });
-  return { store, db, repo: layer.opportunitiesCampaigns, layer, unit: (w) => store.unitOfWork(w, { snapshot }), close: () => store.sqlite.close() };
+  const layer = attachDataLayer({ store, nextId, sessionTtlMs: TTL, now: () => NOW, warn: () => {} });
+  return { store, repo: layer.opportunitiesCampaigns, layer, unit: (w) => store.unitOfWork(w), close: () => store.sqlite.close() };
 }
 
 // ------------------------------------------------------------- schema
@@ -209,29 +208,28 @@ test('[sweep and preferences] the reminder query finds week-old unanswered appli
   } finally { o.close(); rm(dir); }
 });
 
-// ------------------------------------------------------------- snapshot
-test('[snapshot] a snapshot save types the records, names missing references with ids, and reads back what it wrote', () => {
+// ------------------------------------------------------------- fixtures
+/** The players' preferences: the shared loader has no writer for them. */
+const fixture = (dir, db) => writeFixture(dir, fixtureDb(db), { now: NOW, idCounter: 1000 });
+
+test('[fixtures] a fixture written through the repository is typed, refuses missing references, duplicates and junk with ids (nothing written), and reads back what it wrote', () => {
   const full = { opportunities: [opportunity({ structured: STRUCTURED })], applications: [application()], campaigns: [campaign()], campaignSubmissions: [submission()], playerPrefs: [prefs()] };
-  const dir = saveFixture(tempDir('s9d-snap'), full);
-  const refusedSave = (db, re) => { const st = openStore(dir); try { refused(() => st.save({ savedAt: NOW, idCounter: 1000, db: fixtureDb(db) }), re); } finally { st.sqlite.close(); } };
+  const dir = fixture(tempDir('s9d-fix'), full);
   try {
-    const st = openStore(dir);
-    try {
-      const back = readTableBacked(st.sqlite);
-      for (const n of COLLECTIONS) assert.deepEqual(plain(back[n]), plain(full[n]), `${n} reads back`);
-    } finally { st.sqlite.close(); }
-    refusedSave({ applications: [application({ opportunityId: 'opp-gone' })] }, /OPPORTUNITIES_CAMPAIGNS_REFERENCE_MISSING: .*applications apl-1 → opportunities opp-gone/);
-    refusedSave({ applications: [application(), application({ id: 'apl-2' })] }, /OPPORTUNITIES_CAMPAIGNS_UNIQUENESS: .*apl-2/);
-    refusedSave({ campaigns: [campaign({ attemptsAllowed: 0 })] }, /OPPORTUNITIES_CAMPAIGNS_IMPORT_BLOCKED: .*cmp-1\.attemptsAllowed/);
-    refusedSave({ opportunities: [], applications: [application()] }, /applications apl-1 → opportunities opp-1/);
-    const st2 = openStore(dir);
-    try {
-      st2.save({ savedAt: NOW, idCounter: 1000, db: fixtureDb({ applications: [], campaignSubmissions: [], opportunities: [], campaigns: [], playerPrefs: [] }) });
-      const back = readTableBacked(st2.sqlite);
-      for (const n of COLLECTIONS) assert.deepEqual(back[n], [], `${n} emptied by the snapshot`);
-      for (const t of TABLES) assert.equal(st2.sqlite.prepare(`SELECT COUNT(*) AS n FROM ${t}`).get().n, 0, `${t} empty`);
-    } finally { st2.sqlite.close(); }
+    const back = readRecords(dir);
+    for (const n of COLLECTIONS) assert.deepEqual(plain(back[n]), plain(full[n]), `${n} reads back`);
   } finally { rm(dir); }
+  const refusedFixture = (label, db, re) => {
+    const d = tempDir(`s9d-fix-${label}`);
+    try {
+      refused(() => fixture(d, { campaigns: [campaign()], ...db }), re, label);
+      const back = readRecords(d);
+      for (const n of COLLECTIONS) assert.deepEqual(back[n], [], `${label}: a refused fixture wrote no ${n}`);
+    } finally { rm(d); }
+  };
+  refusedFixture('ref', { applications: [application({ opportunityId: 'opp-gone' })] }, /OPPORTUNITIES_CAMPAIGNS_INPUT_INVALID: applications apl-1: opportunity opp-gone is not an opportunity/);
+  refusedFixture('dup', { opportunities: [opportunity()], applications: [application(), application({ id: 'apl-2' })] }, /OPPORTUNITIES_CAMPAIGNS_UNIQUENESS: applications: player pl-adult already has a live application to opp-1/);
+  refusedFixture('junk', { campaigns: [campaign({ attemptsAllowed: 0 })], opportunities: [opportunity()] }, /OPPORTUNITIES_CAMPAIGNS_INPUT_INVALID: campaigns cmp-1\.attemptsAllowed/);
 });
 
 console.log(`\n${passed} opportunities/campaigns checks passed`);

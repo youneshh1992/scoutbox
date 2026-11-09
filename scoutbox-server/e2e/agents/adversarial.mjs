@@ -59,7 +59,7 @@ import { agentClientBasis } from '../../m27/integration.mjs';
 import { EVENT_REGISTRY } from '../../domains/platform/eventRegistry.mjs';
 import { DATA_MIGRATIONS } from '../../repositories/index.mjs';
 import { RATE_LIMIT_POLICY } from '../../domains/platform/rateLimit.mjs';
-import { openStore } from '../../store.mjs';
+import { readRecords, writeFixture } from '../../scripts/dataLayerFixture.mjs';
 import { hashPassword } from '../../adapters.mjs';
 
 const SCHEMA_VERSION = Number(DATA_MIGRATIONS.map((m) => m.id).sort().at(-1).slice(0, 4));
@@ -335,19 +335,20 @@ const expect = (r, status, code) => {
 let server = await boot();
 await stop(server);
 {
-  const store = openStore(DATA_DIR);
-  const snap = store.load();
-  const agency = snap.db.orgs.find((o) => o.type === 'agency');
-  snap.db.orgs.push({ ...structuredClone(agency), id: 'org-southgate', name: 'Southgate Sports Management' });
+  const before = readRecords(DATA_DIR);
+  const { password: _password, ...agency } = before.orgs.find((o) => o.type === 'agency');
   // A password-protected guardian reachable by id AND by email, for the
   // failed-login alias check (F-11). The seeded guardians have open (null)
   // passwords in development, so nothing about them can ever fail to
   // authenticate — and a budget that is never charged cannot be tested.
-  const guardianBase = snap.db.guardians[0];
-  snap.db.guardians.push({ ...structuredClone(guardianBase), id: 'gd-locktest', name: 'Lock Test', email: 'locktest@example.test', password: hashPassword('right-password-1'), childIds: [] });
-  store.save(snap);
-  ok(snap.db.orgs.filter((o) => o.type === 'agency').length === 2, 'fixture: two agencies exist');
-  ok(snap.db.guardians.some((g) => g.id === 'gd-locktest' && g.password), 'fixture: a password-protected guardian exists, so a wrong password is a chargeable failure');
+  const { password: _pw, emailCodeHash: _code, ...guardianBase } = before.guardians[0];
+  writeFixture(DATA_DIR, {
+    orgs: [{ ...agency, id: 'org-southgate', name: 'Southgate Sports Management' }],
+    guardians: [{ ...guardianBase, id: 'gd-locktest', name: 'Lock Test', email: 'locktest@example.test', passwordHash: hashPassword('right-password-1'), childIds: [] }],
+  });
+  const after = readRecords(DATA_DIR);
+  ok(after.orgs.filter((o) => o.type === 'agency').length === 2, 'fixture: two agencies exist');
+  ok(after.guardians.some((g) => g.id === 'gd-locktest' && g.password), 'fixture: a password-protected guardian exists, so a wrong password is a chargeable failure');
 }
 server = await boot();
 

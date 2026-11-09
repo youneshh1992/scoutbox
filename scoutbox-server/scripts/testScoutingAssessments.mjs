@@ -4,16 +4,17 @@
 // record and field named (never the content); create/update write rows at once and return fresh, deep-frozen records
 // whose attributes snapshot is the template version's; the guards hold (unknown field, identity change, duplicate id,
 // nested update, a segment of another club or player, a template version out of turn); the queries match the rows; the
-// account-deletion redaction drops only the name; a rolled-back unit leaves nothing; there is no db.* view; and the
-// snapshot write types, names missing references and uniqueness with ids, removes departures and reads back what it
+// account-deletion redaction drops only the name; a rolled-back unit leaves nothing; there is no db.* view; and a
+// fixture written through the repository is typed, refuses missing references (nothing written) and reads back what it
 // wrote. Temporary databases only; nothing touches DATA_DIR. Run with: npm test
 
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { attachDataLayer, DATA_MIGRATIONS, TABLE_BACKED, readTableBacked } from '../repositories/index.mjs';
+import { attachDataLayer, DATA_MIGRATIONS, TABLE_BACKED } from '../repositories/index.mjs';
+import { openLayer, readRecords, writeFixture } from './dataLayerFixture.mjs';
 import { openStore } from '../store.mjs';
 import { NOW, TTL, tempDir } from './coreIdentityTestFixtures.mjs';
-import { saveFixture, fixtureDb, ORG, SCOUT } from './recruitmentTestFixtures.mjs';
+import { saveFixture, ORG, SCOUT } from './recruitmentTestFixtures.mjs';
 import {
   SCOUTING_ASSESSMENTS_MIGRATION as MIGRATION, SCOUTING_ASSESSMENTS_TABLES as TABLES, SCOUTING_ASSESSMENTS_COLLECTIONS as COLLECTIONS,
   SEED_TEMPLATES, typeTemplate, typeAssessment, typeSegment, typePlaylist,
@@ -51,10 +52,8 @@ const template = (over = {}) => ({ id: 'tpl-gk', positionGroup: 'GK', version: 2
 
 function serverOpen(dir) {
   const store = openStore(dir, { tableBacked: TABLE_BACKED });
-  const db = {}; // S14a: a fixture-saved file is not a first installation, so there is nothing to hand in
-  const layer = attachDataLayer({ db, store, nextId, persist: () => {}, sessionTtlMs: TTL, now: () => NOW, warn: () => {} });
-  const snapshot = () => ({ savedAt: NOW, idCounter: 1000, db });
-  return { store, db, repo: layer.scoutingAssessments, layer, unit: (w) => store.unitOfWork(w, { snapshot }), close: () => store.sqlite.close() };
+  const layer = attachDataLayer({ store, nextId, sessionTtlMs: TTL, now: () => NOW, warn: () => {} });
+  return { store, repo: layer.scoutingAssessments, layer, unit: (w) => store.unitOfWork(w), close: () => store.sqlite.close() };
 }
 
 // ------------------------------------------------------------- schema
@@ -62,7 +61,7 @@ test('[schema] 0020 is registered after 0019 and creates the ten STRICT tables, 
   const ids = DATA_MIGRATIONS.map((m) => m.id);
   assert.equal(ids.indexOf(MIGRATION), ids.indexOf('0019_scouting_evidence') + 1);
   for (const n of COLLECTIONS) assert.ok(TABLE_BACKED.includes(n), `${n} is table-backed`);
-  const dir = tempDir('s9b-empty'); const s = openStore(dir).sqlite;
+  const dir = tempDir('s9b-empty'); const s = openLayer(dir).sqlite;
   for (const t of TABLES) {
     assert.match(s.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?").get(t).sql, /STRICT\s*$/, `${t} is STRICT`);
     const cols = s.prepare(`PRAGMA table_info(${t})`).all().map((c) => c.name);
@@ -169,32 +168,34 @@ test('[queries] the club, player, scout, feedback and trial queries match the ro
   o.close(); rm(dir);
 });
 
-// ------------------------------------------------------------- snapshot mode
-test('[snapshot] a save types and writes the four collections and reads them back; departures leave; junk and missing references refuse the whole save with ids', () => {
-  const templates = [...SEED_TEMPLATES.map((t) => ({ ...t, createdAt: NOW - 9000 })), template()];
-  const data = { assessmentTemplates: templates, videoSegments: [segment()], assessments: [assessment({ ratings: [{ ...assessment().ratings[0], evidenceRefs: [{ segmentId: 'seg-1' }] }] }), assessment({ id: 'ass-2', templateVersion: 2, ratings: [], secondOpinionOf: 'ass-1', history: [] })], playlists: [playlist({ segmentIds: ['seg-1'] })] };
-  const dir = saveFixture(tempDir('s9b-snap'), data);
-  const read = (d) => { const s = openStore(d); try { return readTableBacked(s.sqlite); } finally { s.sqlite.close(); } };
-  let back = read(dir);
-  assert.deepEqual(plain(back.assessmentTemplates), plain(templates));
-  assert.deepEqual(plain(back.videoSegments), plain(data.videoSegments)); assert.deepEqual(plain(back.playlists), plain(data.playlists));
-  assert.deepEqual(plain(back.assessments.map(({ attributesSnapshot, ...rest }) => rest)), plain(data.assessments));
-  assert.deepEqual(back.assessments[1].attributesSnapshot.map((x) => x.id), ['handling', 'kicking'], 'the v2 assessment reads the v2 attributes');
-  // a supplied collection is the whole final collection; an omitted one is kept; a segment leaves once nothing names it
-  const s = openStore(dir);
-  s.save({ savedAt: NOW, idCounter: 1000, db: fixtureDb({ playlists: [], assessments: [assessment({ id: 'ass-1', ratings: [] })], videoSegments: [] }) });
-  s.sqlite.close();
-  back = read(dir);
-  assert.deepEqual([back.playlists.length, back.assessments.length, back.videoSegments.length, back.assessmentTemplates.length], [0, 1, 0, 5], 'templates omitted, kept');
-  const refusedSave = (db, re) => { const st = openStore(dir); try { refused(() => st.save({ savedAt: NOW, idCounter: 1000, db: fixtureDb(db) }), re); } finally { st.sqlite.close(); } };
-  refusedSave({ assessments: [assessment({ state: 'maybe' })] }, /SCOUTING_IMPORT_BLOCKED: .*assessments entry #0 ass-1\.state/);
-  refusedSave({ assessments: [assessment({ orgId: 'org-gone' })] }, /SCOUTING_REFERENCE_MISSING: .*assessments ass-1 → orgs org-gone/);
-  refusedSave({ assessments: [assessment({ templateVersion: 9 })] }, /assessments ass-1 → assessment_templates tpl-gk@9/);
-  refusedSave({ playlists: [playlist({ segmentIds: ['seg-9'] })] }, /playlists pls-1 → video_segments seg-9/);
-  refusedSave({ videoSegments: [segment({ createdBy: { userId: 'usr-gone', name: 'X' } })] }, /video_segments seg-1 createdBy → org_users usr-gone/);
-  refusedSave({ assessmentTemplates: [] }, /assessments ass-1 → assessment_templates tpl-gk@1/);
-  back = read(dir); assert.equal(back.assessments.length, 1, 'every refused save changed nothing'); assert.equal(back.assessmentTemplates.length, 5);
-  rm(dir);
+// ------------------------------------------------------------- fixtures
+test('[fixtures] a fixture writes the four collections through the repository and reads them back; junk and missing references refuse the whole fixture', () => {
+  // The four v1 templates are the migration's; the fixture adds the club's own.
+  const data = { assessmentTemplates: [template()], videoSegments: [segment()], assessments: [assessment({ ratings: [{ ...assessment().ratings[0], evidenceRefs: [{ segmentId: 'seg-1' }] }] }), assessment({ id: 'ass-2', templateVersion: 2, ratings: [], secondOpinionOf: 'ass-1', history: [] })], playlists: [playlist({ segmentIds: ['seg-1'] })] };
+  // A rating cites a segment, so the segments are written first (the shared loader writes assessments before segments).
+  const dir = saveFixture(tempDir('s9b-fix'), { assessmentTemplates: data.assessmentTemplates, videoSegments: data.videoSegments });
+  writeFixture(dir, { assessments: data.assessments, playlists: data.playlists }, { now: NOW });
+  try {
+    const back = readRecords(dir);
+    assert.deepEqual(back.assessmentTemplates.map((t) => `${t.id}@${t.version}`), [...SEED_TEMPLATES, template()].map((t) => `${t.id}@${t.version}`));
+    assert.deepEqual(plain(back.assessmentTemplates.at(-1)), plain(template()));
+    assert.deepEqual(plain(back.videoSegments), plain(data.videoSegments)); assert.deepEqual(plain(back.playlists), plain(data.playlists));
+    assert.deepEqual(plain(back.assessments.map(({ attributesSnapshot, ...rest }) => rest)), plain(data.assessments));
+    assert.deepEqual(back.assessments[1].attributesSnapshot.map((x) => x.id), ['handling', 'kicking'], 'the v2 assessment reads the v2 attributes');
+  } finally { rm(dir); }
+  const refusedFixture = (label, db, re) => {
+    const d = tempDir(`s9b-fix-${label}`);
+    try {
+      refused(() => saveFixture(d, { assessmentTemplates: [template()], ...db }), re, label);
+      const back = readRecords(d);
+      assert.deepEqual([back.assessmentTemplates.length, back.assessments.length, back.videoSegments.length, back.playlists.length], [SEED_TEMPLATES.length, 0, 0, 0], `${label}: a refused fixture wrote nothing`);
+    } finally { rm(d); }
+  };
+  refusedFixture('junk', { assessments: [assessment({ state: 'maybe' })] }, /SCOUTING_INPUT_INVALID: assessments ass-1\.state/);
+  refusedFixture('org', { assessments: [assessment({ orgId: 'org-gone' })] }, /FOREIGN KEY constraint failed/);
+  refusedFixture('version', { assessments: [assessment({ templateVersion: 9 })] }, /SCOUTING_REFERENCE_MISSING: assessments ass-1 → assessment_templates tpl-gk@9/);
+  refusedFixture('segment', { videoSegments: [segment()], playlists: [playlist({ segmentIds: ['seg-9'] })] }, /SCOUTING_REFERENCE_MISSING: playlists pls-1 names seg-9/);
+  refusedFixture('user', { videoSegments: [segment({ createdBy: { userId: 'usr-gone', name: 'X' } })] }, /FOREIGN KEY constraint failed/);
 });
 
 console.log(`\n${passed} scouting assessments checks passed`);

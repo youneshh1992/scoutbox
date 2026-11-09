@@ -6,16 +6,17 @@
 // route wrote; a commit writes its prospects, reviews and history at once, and one live prospect per provider and
 // external id holds (a reversal frees the identity); a review's record is its batch row's; a key is found by its hash
 // only while live and records its use; a rotation keeps the old secret; a delivery's attempts are numbered rows and the
-// due query finds only open ones; a rolled-back unit leaves nothing; and the snapshot write types,
-// names a missing reference and reads back what it wrote. Temporary databases only; nothing touches DATA_DIR.
+// due query finds only open ones; a rolled-back unit leaves nothing; and a fixture written through the repository is
+// typed, names a missing reference and reads back what it wrote. Temporary databases only; nothing touches DATA_DIR.
 // Run with: npm test
 
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { attachDataLayer, DATA_MIGRATIONS, TABLE_BACKED, readTableBacked } from '../repositories/index.mjs';
+import { attachDataLayer, DATA_MIGRATIONS, TABLE_BACKED } from '../repositories/index.mjs';
+import { openLayer, readRecords, writeFixture } from './dataLayerFixture.mjs';
 import { openStore } from '../store.mjs';
 import { NOW, TTL, tempDir, USERS } from './coreIdentityTestFixtures.mjs';
-import { saveFixture, ORG, SCOUT } from './recruitmentTestFixtures.mjs';
+import { saveFixture, fixtureDb, ORG, SCOUT } from './recruitmentTestFixtures.mjs';
 import {
   INTEGRATIONS_MIGRATION as MIGRATION, INTEGRATIONS_TABLES as TABLES, INTEGRATIONS_COLLECTIONS as COLLECTIONS,
   typeBatch, typeApiKey, typeEndpoint, typeDelivery, typeProspect,
@@ -61,10 +62,8 @@ const delivery = (over = {}) => ({ id: 'dlv-1', endpointId: 'whk-1', orgId: ORG.
 const FIX = () => ({ users: [...USERS()], notifications: [], dispatches: [] });
 function serverOpen(dir) {
   const store = openStore(dir, { tableBacked: TABLE_BACKED });
-  const db = {}; // S14a: a fixture-saved file is not a first installation, so there is nothing to hand in
-  const layer = attachDataLayer({ db, store, nextId, persist: () => {}, sessionTtlMs: TTL, now: () => NOW, warn: () => {} });
-  const snapshot = () => ({ savedAt: NOW, idCounter: 1000, db });
-  return { store, db, repo: layer.integrations, unit: (w) => store.unitOfWork(w, { snapshot }), close: () => store.sqlite.close() };
+  const layer = attachDataLayer({ store, nextId, sessionTtlMs: TTL, now: () => NOW, warn: () => {} });
+  return { store, repo: layer.integrations, unit: (w) => store.unitOfWork(w), close: () => store.sqlite.close() };
 }
 const seeded = (label) => { const dir = tempDir(label); saveFixture(dir, FIX()); return { dir, s: serverOpen(dir) }; };
 const by = { id: SCOUT.userId, name: 'Maria' };
@@ -74,7 +73,7 @@ test('[schema] 0034 is registered after 0033 and creates the STRICT tables (no J
   const ids = DATA_MIGRATIONS.map((m) => m.id);
   assert.equal(ids.indexOf(MIGRATION), ids.indexOf('0033_insight_coverage') + 1);
   for (const n of COLLECTIONS) assert.ok(TABLE_BACKED.includes(n), `${n} is table-backed`);
-  const dir = tempDir('s13a-empty'); const s = openStore(dir).sqlite;
+  const dir = tempDir('s13a-empty'); const s = openLayer(dir).sqlite;
   for (const t of TABLES) {
     const sql = s.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?").get(t).sql;
     assert.match(sql, /STRICT\s*$/, `${t} is STRICT`);
@@ -175,7 +174,7 @@ test('[webhooks] a rotation keeps the old secret; a delivery\'s attempts are num
   s.close(); rm(dir);
 });
 
-// ------------------------------------------------------------- units, retirement, snapshot
+// ------------------------------------------------------------- units, retirement, fixtures
 test('[unit] a rolled-back unit leaves nothing', () => {
   const { dir, s } = seeded('s13a-unit');
   assert.throws(() => s.unit(() => { s.repo.endpoints.create(endpoint()); s.repo.apiKeys.create(apiKey()); throw new Error('boom'); }), /boom/);
@@ -184,24 +183,61 @@ test('[unit] a rolled-back unit leaves nothing', () => {
   s.close(); rm(dir);
 });
 
-test('[snapshot] the write types every record, names a missing reference, and reads back what it wrote', () => {
-  const dir = tempDir('s13a-snapshot');
+/**
+ * Records written the way the routes write them: a batch is validated, then committed with the prospects it lists and
+ * its open identity reviews (then reversed); a review is resolved after; any other prospect is one kept separate; a
+ * delivery is queued, then each attempt recorded, the last with where the delivery ended. The batch's prospects and
+ * reviews travel with its commit, so the writers are built from the whole fixture.
+ */
+const writersFor = (fix) => {
+  const by = (h) => ({ id: h.byId, name: h.byName });
+  return {
+    importBatches: (L, records) => {
+      for (const b of records) {
+        const [validated, ...later] = b.history;
+        L.integrations.batches.create({ ...b, status: 'validated', committedAt: null, reversedAt: null, createdProspectIds: [], history: [validated] });
+        const committed = later.find((h) => h.action === 'committed');
+        if (committed) {
+          const reviews = (fix.identityReviews ?? []).filter((r) => r.batchId === b.id).map(({ record, ...r }) => ({ ...r, status: 'open', resolvedBy: null, resolvedAt: null, resolution: null }));
+          L.integrations.batches.commit(b.id, { at: b.committedAt, by: by(committed), historyId: committed.id, prospects: (fix.prospects ?? []).filter((p) => b.createdProspectIds.includes(p.id)), reviews });
+        }
+        const reversed = later.find((h) => h.action === 'reversed');
+        if (reversed) L.integrations.batches.reverse(b.id, { at: b.reversedAt, by: by(reversed), historyId: reversed.id });
+      }
+    },
+    prospects: (L, records) => { for (const p of records) if (!L.integrations.prospects.byId(p.id)) L.integrations.prospects.keepSeparate(p); },
+    identityReviews: (L, records) => {
+      for (const r of records) {
+        if (!L.integrations.reviews.byId(r.id)) throw new Error(`identity_reviews ${r.id}: a review is written by its batch's commit (batch ${r.batchId})`);
+        if (r.status === 'resolved') L.integrations.reviews.resolve(r.id, { resolution: r.resolution, by: r.resolvedBy, at: r.resolvedAt });
+      }
+    },
+    webhookDeliveries: (L, records) => {
+      for (const { attempts = [], status, nextAt, deliveredAt = null, ...d } of records) {
+        L.integrations.deliveries.create({ ...d, status: 'queued', attempts: [], nextAt: d.createdAt, deliveredAt: null });
+        attempts.forEach((a, i) => L.integrations.deliveries.recordAttempt(d.id, a, i === attempts.length - 1 ? { status, nextAt, deliveredAt } : { status: 'retrying' }));
+      }
+    },
+  };
+};
+const write = (dir, records) => writeFixture(dir, records, { now: NOW, writers: writersFor(records) });
+test('[fixtures] a record written through the repository is typed, a missing reference is named, a refused write leaves nothing, and the records read back as written', () => {
+  const dir = tempDir('s13a-fix');
   const committed = batch({ status: 'committed', committedAt: NOW + 1, createdProspectIds: ['prs-1'], history: [...batch().history, { id: 'aud-2', at: NOW + 1, byKind: 'org_user', byId: SCOUT.userId, byName: 'Maria', action: 'committed', detail: { created: 1 } }] });
   const failing = delivery({ status: 'failed', attempts: [{ at: NOW, error: 'ECONNREFUSED' }, { at: NOW + 1, status: 500 }] });
-  saveFixture(dir, { ...FIX(), importBatches: [committed], prospects: [prospect()], identityReviews: [review()], apiKeys: [apiKey()], webhookEndpoints: [endpoint()], webhookDeliveries: [failing] });
-  const store = openStore(dir);
-  const back = readTableBacked(store.sqlite);
+  write(dir, fixtureDb({ ...FIX(), importBatches: [committed], prospects: [prospect()], identityReviews: [review()], apiKeys: [apiKey()], webhookEndpoints: [endpoint()], webhookDeliveries: [failing] }));
+  const back = readRecords(dir);
   assert.deepEqual(plain(back.importBatches), [plain(committed)]);
   assert.deepEqual(plain(back.webhookDeliveries), [plain(failing)]);
-  assert.deepEqual(plain(back.identityReviews[0].record), plain(rows()[2].record));
-  const snap = store.load();
-  refused(() => store.save({ ...snap, db: { ...snap.db, prospects: [prospect({ batchId: 'imp-none' })] } }), /INTEGRATIONS_REFERENCE_MISSING.*imp-none/);
-  refused(() => store.save({ ...snap, db: { ...snap.db, identityReviews: [review({ row: 9 })] } }), /import_batch_rows imp-1#9/);
-  refused(() => store.save({ ...snap, db: { ...snap.db, identityReviews: [{ ...review(), record: { name: 'Someone else' } }] } }), /carries a record that is not its batch row's/);
-  refused(() => store.save({ ...snap, db: { ...snap.db, prospects: [prospect(), prospect({ id: 'prs-2' })] } }), /two live prospects name the same organisation, provider and external id/);
-  refused(() => store.save({ ...snap, db: { ...snap.db, apiKeys: [apiKey({ scopes: ['admin'] })] } }), /INTEGRATIONS_IMPORT_BLOCKED.*scopes\[0\]/);
-  assert.deepEqual(readTableBacked(store.sqlite).prospects.map((p) => p.id), ['prs-1'], 'a refused write changed nothing');
-  store.sqlite.close(); rm(dir);
+  assert.deepEqual(plain(back.identityReviews[0].record), plain(rows()[2].record), 'a review\'s record is its batch row\'s');
+  refused(() => write(dir, { prospects: [prospect({ id: 'prs-2', batchId: 'imp-none' })] }), /INTEGRATIONS_REFERENCE_MISSING.*imp-none/);
+  const second = batch({ id: 'imp-2', status: 'committed', committedAt: NOW + 2, history: [{ ...batch().history[0], id: 'aud-3' }, { id: 'aud-4', at: NOW + 2, byKind: 'org_user', byId: SCOUT.userId, byName: 'Maria', action: 'committed', detail: { created: 0 } }] });
+  refused(() => write(dir, { importBatches: [second], identityReviews: [review({ id: 'idr-2', batchId: 'imp-2', row: 9 })] }), /INTEGRATIONS_INPUT_INVALID.*idr-2: names no ambiguous row of the batch/);
+  refused(() => write(dir, { prospects: [prospect({ id: 'prs-2' })] }), /IMPORT_IDENTITY_TAKEN.*sp SP-1 is already a live prospect/);
+  refused(() => write(dir, { apiKeys: [apiKey({ id: 'key-2', scopes: ['admin'] })] }), /INTEGRATIONS_INPUT_INVALID.*scopes\[0\]/);
+  const after = readRecords(dir);
+  assert.deepEqual([after.importBatches.map((b) => b.id), after.prospects.map((p) => p.id), after.identityReviews.map((r) => r.id), after.apiKeys.map((k) => k.id)], [['imp-1'], ['prs-1'], ['idr-1'], ['key-1']], 'a refused write changed nothing');
+  rm(dir);
 });
 
 console.log(`\n${passed} integrations checks passed`);

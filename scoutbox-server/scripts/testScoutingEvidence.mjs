@@ -4,13 +4,14 @@
 // create/update write rows at once and return fresh, deep-frozen records, refuse an unknown field, an identity change, a
 // duplicate id, a second pending invitation and an update from inside its own update; a correction commits with its
 // superseded original; the queries (current records, the dispute queue, the coach lookup, the pending invitations) match
-// the rows; a rolled-back unit leaves nothing; there is no db.* view; and the snapshot write types, names missing
-// references and uniqueness with ids, removes departures and reads back what it wrote.
+// the rows; a rolled-back unit leaves nothing; there is no db.* view; and a fixture written through the repository is
+// typed, refuses missing references and uniqueness (nothing written) and reads back what it wrote.
 // Temporary databases only; nothing touches DATA_DIR. Run with: npm test
 
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { attachDataLayer, DATA_MIGRATIONS, TABLE_BACKED, readTableBacked } from '../repositories/index.mjs';
+import { attachDataLayer, DATA_MIGRATIONS, TABLE_BACKED } from '../repositories/index.mjs';
+import { openLayer, readRecords, writeFixture } from './dataLayerFixture.mjs';
 import { openStore } from '../store.mjs';
 import { NOW, TTL, tempDir } from './coreIdentityTestFixtures.mjs';
 import { saveFixture, fixtureDb, ORG, SCOUT } from './recruitmentTestFixtures.mjs';
@@ -51,10 +52,8 @@ const invite = (over = {}) => ({ id: 'sqi-1', orgId: ORG.id, orgName: ORG.name, 
 
 function serverOpen(dir) {
   const store = openStore(dir, { tableBacked: TABLE_BACKED });
-  const db = {}; // S14a: a fixture-saved file is not a first installation, so there is nothing to hand in
-  const layer = attachDataLayer({ db, store, nextId, persist: () => {}, sessionTtlMs: TTL, now: () => NOW, warn: () => {} });
-  const snapshot = () => ({ savedAt: NOW, idCounter: 1000, db });
-  return { store, db, repo: layer.scoutingEvidence, layer, unit: (w) => store.unitOfWork(w, { snapshot }), close: () => store.sqlite.close() };
+  const layer = attachDataLayer({ store, nextId, sessionTtlMs: TTL, now: () => NOW, warn: () => {} });
+  return { store, repo: layer.scoutingEvidence, layer, unit: (w) => store.unitOfWork(w), close: () => store.sqlite.close() };
 }
 
 // ------------------------------------------------------------- schema
@@ -62,7 +61,7 @@ test('[schema] 0019 is registered after 0018 and creates the seven STRICT tables
   const ids = DATA_MIGRATIONS.map((m) => m.id);
   assert.equal(ids.indexOf(MIGRATION), ids.indexOf('0018_signings_follow_ups') + 1);
   for (const n of COLLECTIONS) assert.ok(TABLE_BACKED.includes(n), `${n} is table-backed`);
-  const dir = tempDir('s9a-empty'); const s = openStore(dir).sqlite;
+  const dir = tempDir('s9a-empty'); const s = openLayer(dir).sqlite;
   for (const t of TABLES) {
     assert.match(s.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?").get(t).sql, /STRICT\s*$/, `${t} is STRICT`);
     assert.equal(s.prepare(`SELECT count(*) AS n FROM ${t}`).get().n, 0);
@@ -166,27 +165,29 @@ test('[queries] the dispute queue pages by offset in filing order; the coach loo
   o.close(); rm(dir);
 });
 
-// ------------------------------------------------------------- snapshot mode
-test('[snapshot] a save types and writes the three collections and reads them back; departures leave; junk, missing references and a second pending invitation refuse the whole save with ids', () => {
+// ------------------------------------------------------------- fixtures
+
+test('[fixtures] a fixture writes the three collections through the repository and reads them back; junk, missing references and a second pending invitation refuse the whole fixture', () => {
   const corrected = [evidence({ supersededBy: 'evd-2' }), evidence({ id: 'evd-2', correctionOf: 'evd-1', recordedAt: NOW, history: [] })];
-  const dir = saveFixture(tempDir('s9a-snap'), { evidence: corrected, coachAffiliations: [affiliation()], squadInvites: [invite()] });
-  const read = (d) => { const s = openStore(d); try { return readTableBacked(s.sqlite); } finally { s.sqlite.close(); } };
-  let back = read(dir);
-  assert.deepEqual(plain(back.evidence), plain(corrected), 'the self references round-trip whatever the array order');
-  assert.deepEqual(plain(back.coachAffiliations), plain([affiliation()])); assert.deepEqual(plain(back.squadInvites), plain([invite()]));
-  // a supplied collection is the whole final collection; an omitted one is kept
-  const s = openStore(dir);
-  s.save({ savedAt: NOW, idCounter: 1000, db: fixtureDb({ squadInvites: [] }) });
-  s.sqlite.close();
-  back = read(dir); assert.equal(back.squadInvites.length, 0); assert.equal(back.evidence.length, 2, 'evidence omitted, kept');
-  const refusedSave = (db, re) => { const st = openStore(dir); try { refused(() => st.save({ savedAt: NOW, idCounter: 1000, db: fixtureDb(db) }), re); } finally { st.sqlite.close(); } };
-  refusedSave({ evidence: [evidence({ value: { x: 1 } })] }, /SCOUTING_IMPORT_BLOCKED: .*evidence entry #0 evd-1\.value/);
-  refusedSave({ coachAffiliations: [affiliation({ orgId: 'org-gone' })] }, /SCOUTING_REFERENCE_MISSING: .*coach_affiliations aff-1 → orgs org-gone/);
-  refusedSave({ squadInvites: [invite({ byUserId: 'usr-gone' })] }, /squad_invites sqi-1 byUserId → org_users usr-gone/);
-  refusedSave({ evidence: [evidence({ supersededBy: 'evd-9' })] }, /evidence evd-1 supersededBy → evd-9/);
-  refusedSave({ squadInvites: [invite(), invite({ id: 'sqi-2' })] }, /SCOUTING_UNIQUENESS: .*one pending invitation per organisation and player/);
-  back = read(dir); assert.equal(back.evidence.length, 2, 'every refused save changed nothing'); assert.equal(back.coachAffiliations.length, 1);
-  rm(dir);
+  const dir = writeFixture(tempDir('s9a-fix'), fixtureDb({ evidence: corrected, coachAffiliations: [affiliation()], squadInvites: [invite()] }), { now: NOW, idCounter: 1000 });
+  try {
+    const back = readRecords(dir);
+    assert.deepEqual(plain(back.evidence), plain(corrected), 'the correction and its superseded original read back linked');
+    assert.deepEqual(plain(back.coachAffiliations), plain([affiliation()])); assert.deepEqual(plain(back.squadInvites), plain([invite()]));
+  } finally { rm(dir); }
+  const refusedFixture = (label, db, re) => {
+    const d = tempDir(`s9a-fix-${label}`);
+    try {
+      refused(() => saveFixture(d, { coachAffiliations: [affiliation()], ...db }), re, label);
+      const back = readRecords(d);
+      assert.equal(back.evidence.length + back.coachAffiliations.length + back.squadInvites.length, 0, `${label}: a refused fixture wrote nothing`);
+    } finally { rm(d); }
+  };
+  refusedFixture('junk', { evidence: [evidence({ value: { x: 1 } })] }, /SCOUTING_INPUT_INVALID: evidence evd-1\.value/);
+  refusedFixture('org', { coachAffiliations: [affiliation({ orgId: 'org-gone' })] }, /FOREIGN KEY constraint failed/);
+  refusedFixture('user', { squadInvites: [invite({ byUserId: 'usr-gone' })] }, /FOREIGN KEY constraint failed/);
+  refusedFixture('superseded', { evidence: [evidence({ supersededBy: 'evd-9' })] }, /FOREIGN KEY constraint failed/);
+  refusedFixture('pending', { squadInvites: [invite(), invite({ id: 'sqi-2' })] }, /SCOUTING_UNIQUENESS: squad_invites: organisation org-pro already has a pending invitation for player pl-adult/);
 });
 
 console.log(`\n${passed} scouting evidence checks passed`);

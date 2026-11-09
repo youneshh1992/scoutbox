@@ -6,6 +6,7 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { openStore } from '../store.mjs';
+import { writeFixture, readRecords } from './dataLayerFixture.mjs';
 import { attachDataLayer, TABLE_BACKED, DATA_MIGRATIONS } from '../repositories/index.mjs';
 import { runDataMigrations } from '../repositories/database.mjs';
 import { createIdentityRepositories, CORE_IDENTITY_INIT_META, PLAYER_RECORD_KEYS, GUARDIAN_RECORD_KEYS, bornByForAge } from '../repositories/identity.mjs';
@@ -28,14 +29,13 @@ const ORGS = () => [
 /** A server-mode store on a new directory with the data layer attached the way the server attaches it (the seed imported once). */
 function boot(dir = tempDir('idrepo'), { players = FIXTURE().players, guardians = FIXTURE().guardians } = {}) {
   const store = openStore(dir, { tableBacked: TABLE_BACKED });
-  const db = {};
-  const layer = attachDataLayer({ db, seed: { orgs: ORGS(), players: clone(players), guardians: clone(guardians) }, store, nextId, sessionTtlMs: TTL, now: () => NOW });
+  const layer = attachDataLayer({ seed: { orgs: ORGS(), players: clone(players), guardians: clone(guardians) }, store, nextId, sessionTtlMs: TTL, now: () => NOW });
   const all = (sql, ...p) => store.sqlite.prepare(sql).all(...p).map((r) => ({ ...r }));
   const get = (sql, ...p) => store.sqlite.prepare(sql).get(...p);
   const invariantBreaks = () => get(`SELECT COUNT(*) AS n FROM players p LEFT JOIN guardian_children l ON l.player_id = p.id AND l.role = 'primary'
     WHERE (p.guardian_id IS NULL) <> (l.guardian_id IS NULL) OR (p.guardian_id IS NOT NULL AND l.guardian_id <> p.guardian_id)`).n
     + store.sqlite.prepare('PRAGMA foreign_key_check').all().length;
-  return { dir, store, layer, db, identity: layer.identity, players: layer.players, guardians: layer.guardians, all, get, invariantBreaks,
+  return { dir, store, layer, identity: layer.identity, players: layer.players, guardians: layer.guardians, all, get, invariantBreaks,
     unit: (fn) => store.unitOfWork(fn), close: () => store.sqlite.close() };
 }
 const orgOf = (t, id) => t.layer.orgs.byId(id);
@@ -351,24 +351,22 @@ test('lookups: byExternalId and byNameAndDob (the import\'s identity match), byG
   t.close();
 });
 
-test('the snapshot path: a read gives every live record with its hashes and no derived lists; a save types the whole pair first and rewrites the tables, keeping the retained rows and refusing their ids', () => {
+test('read back: every live record with its hashes and no derived lists, a retained record is not a player; a new record is typed whole, so a retained id and junk are refused and nothing is written', () => {
   const t = boot();
   t.players.erase('pl-child2', { at: NOW });
-  const tool = openStore(t.dir);
-  const snap = tool.load();
-  const p = snap.db.players.find((x) => x.id === 'pl-adult');
+  const back = readRecords(t.dir);
+  const p = back.players.find((x) => x.id === 'pl-adult');
   assert.equal(p.password, 'scrypt$aa$bb'); assert.equal('trialReports' in p, false);
-  const g = snap.db.guardians.find((x) => x.id === 'gd-signup');
+  const g = back.guardians.find((x) => x.id === 'gd-signup');
   assert.equal(g.emailCodeHash.length, 64); assert.equal('coGuardians' in g, false);
-  assert.equal(snap.db.players.some((x) => x.id === 'pl-child2'), false, 'a retained record is not a player');
-  tool.save(snap);
-  assert.equal(tool.sqlite.prepare("SELECT deleted_at FROM players WHERE id = 'pl-child2'").get().deleted_at, NOW, 'the retained row survives the rewrite');
-  const resurrect = clone(snap); resurrect.db.players.push(child('pl-child2', 'gd-primary', '2016-08-08'));
-  assert.throws(() => tool.save(resurrect), (e) => e.code === 'IDENTITY_IMPORT_BLOCKED' && /pl-child2: the id is a deleted account/.test(e.message));
-  const junk = clone(snap); junk.db.players.find((x) => x.id === 'pl-adult').heightCm = 'tall';
-  assert.throws(() => tool.save(junk), (e) => e.code === 'IDENTITY_IMPORT_BLOCKED' && /pl-adult: heightCm must be a whole number/.test(e.message));
-  assert.equal(tool.sqlite.prepare("SELECT height_cm FROM players WHERE id = 'pl-adult'").get().height_cm, 182, 'nothing was written');
-  tool.sqlite.close(); t.close();
+  assert.equal(back.players.some((x) => x.id === 'pl-child2'), false, 'a retained record is not a player');
+  assert.equal(t.get("SELECT deleted_at FROM players WHERE id = 'pl-child2'").deleted_at, NOW, 'the retained row is kept');
+  const before = JSON.stringify(t.all('SELECT * FROM players ORDER BY rowid'));
+  // (A created record carries no password field: the hash is written by its own operation.)
+  assert.throws(() => writeFixture(t.dir, { players: [{ ...child('pl-child2', 'gd-primary', '2016-08-08'), password: undefined }] }, { now: NOW }), (e) => e.code === 'PLAYER_ID_RETAINED' && /player pl-child2 was deleted and its id is retained/.test(e.message));
+  assert.throws(() => writeFixture(t.dir, { players: [{ ...adult(), id: 'pl-adult2', password: undefined, heightCm: 'tall' }] }, { now: NOW }), (e) => e.code === 'PLAYER_RECORD_INVALID' && /pl-adult2\): heightCm must be a whole number/.test(e.message));
+  assert.equal(JSON.stringify(t.all('SELECT * FROM players ORDER BY rowid')), before, 'nothing was written');
+  t.close();
 });
 
 console.log(`identity repositories: ${passed} checks passed`);

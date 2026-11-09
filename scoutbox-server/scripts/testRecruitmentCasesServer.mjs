@@ -19,7 +19,7 @@ import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import { tempDir } from './coreIdentityTestFixtures.mjs';
 import { readCases, readRoomComments, readRoomDecisions } from '../repositories/recruitmentCases.mjs';
-import { openStore } from '../store.mjs';
+import { openLayer } from './dataLayerFixture.mjs';
 
 let passed = 0;
 const only = process.env.TEST_ONLY || '';
@@ -173,7 +173,7 @@ await test('[routes] a fresh boot records 0016_recruitment_cases last; the twent
   await S.stop(); rm(dir);
 });
 
-await test('[routes] the deletion unit tombstones the person\'s cases in place (player_name NULL, subject_removed_at set; the room rows, the comments and the decision stay) — a failure of the REAL COMMIT leaves every row as it was and the retry lands once; a restored backup to which a case naming a historically missing player is added (a snapshot-mode save) serves it as today and counts it (Q8a), never refused', async () => {
+await test('[routes] the deletion unit tombstones the person\'s cases in place (player_name NULL, subject_removed_at set; the room rows, the comments and the decision stay) — a failure of the REAL COMMIT leaves every row as it was and the retry lands once; a restored backup to which a case naming a historically missing player is added (through the repository) serves it as today and counts it (Q8a), never refused', async () => {
   const dir = tempDir('s8b-unit'); let S = await boot(dir);
   const maria = await orgLogin(S); const a = await signupAdult(S, 'Leaving Adult'); const room = await roomFor(S, maria, a.pid); const RID = room.id;
   assert.equal((await S.j('POST', `/org/rooms/${RID}/comments`, { body: 'Before they left.' }, maria)).status, 201);
@@ -191,9 +191,8 @@ await test('[routes] the deletion unit tombstones the person\'s cases in place (
   // Q8a: a historically missing player, through a restored backup
   const bk = await S.j('POST', '/admin/backup', {}, null, A); assert.equal(bk.status, 201, bk.text); await S.stop();
   const restored = tempDir('s8b-q8a'); fs.cpSync(bk.body.dir, restored, { recursive: true });
-  { const store = openStore(restored); const loaded = store.load(); const base = loaded.db.recruitmentCases.find((c) => c.id === RID);
-    loaded.db.recruitmentCases = [...loaded.db.recruitmentCases, { ...base, id: 'case-gone', playerId: 'pl-gone-long-ago', playerName: 'Gone Player', subjectRemovedAt: undefined, room: null, decisionDraft: null, history: [], links: { requestIds: [], trialIds: [], signingId: null } }];
-    store.save(loaded); store.sqlite.close(); }
+  { const L = openLayer(restored); const cases = L.layer.recruitmentCases.cases; const base = cases.byId(RID);
+    try { cases.create({ ...base, id: 'case-gone', playerId: 'pl-gone-long-ago', playerName: 'Gone Player', subjectRemovedAt: undefined, room: null, decisionDraft: null, history: [], links: { requestIds: [], trialIds: [], signingId: null } }); } finally { L.close(); } }
   S = await boot(restored); assert.ok(live(restored));
   assert.equal((await S.j('GET', '/capabilities')).body.dataLayer.domains.recruitmentCases.retainedPlayerReferences.recruitmentCases, 1, 'the retained person still counted after the restore');
   const mariaR = await orgLogin(S); const list = await S.j('GET', '/org/cases', undefined, mariaR); assert.ok((list.body.cases ?? list.body.items ?? list.body).some((x) => x.id === 'case-gone'), 'the case of a missing player is served as today');

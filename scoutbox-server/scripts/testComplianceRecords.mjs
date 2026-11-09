@@ -7,16 +7,15 @@
 // rule statuses worked out) and an entry that claims to repeat it must; a context keeps what never changes and does not
 // reopen; a review's snapshot names an evaluation of its context, its decision is final and its supersession written
 // once; a consent is answered once and revoked once, on its own row; the queue pages open items first; an account
-// deletion keeps ids only; a rolled-back unit leaves nothing; and the snapshot write types every
-// record, keeps the omitted collections, refuses a review naming a context that is not there and reads back what it
-// wrote. Temporary databases only; nothing touches DATA_DIR. Run with: npm test
+// deletion keeps ids only; a rolled-back unit leaves nothing; and a fixture written through the
+// repositories is typed, refuses a review naming a context that is not there and reads back what it wrote. Temporary databases only; nothing touches DATA_DIR. Run with: npm test
 
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { attachDataLayer, DATA_MIGRATIONS, TABLE_BACKED, readTableBacked } from '../repositories/index.mjs';
-import { openStore } from '../store.mjs';
+import { DATA_MIGRATIONS, TABLE_BACKED } from '../repositories/index.mjs';
+import { openLayer, readRecords, writeFixture } from './dataLayerFixture.mjs';
 import { NOW, TTL, tempDir } from './coreIdentityTestFixtures.mjs';
-import { saveFixture, ORG, SCOUT } from './recruitmentTestFixtures.mjs';
+import { saveFixture, fixtureDb, ORG, SCOUT } from './recruitmentTestFixtures.mjs';
 import {
   COMPLIANCE_RECORDS_MIGRATION as MIGRATION, COMPLIANCE_RECORDS_TABLES as TABLES, COMPLIANCE_RECORDS_COLLECTIONS as COLLECTIONS,
   typeContext, typeReview, typeConsent,
@@ -87,12 +86,9 @@ const consent = (over = {}) => {
 const PLAYER = { kind: 'player', userId: 'pl-1', name: 'Kola' };
 
 function serverOpen(dir) {
-  const store = openStore(dir, { tableBacked: TABLE_BACKED });
-  const db = {}; // S14a: a fixture-saved file is not a first installation, so there is nothing to hand in
-  const layer = attachDataLayer({ db, store, nextId, persist: () => {}, sessionTtlMs: TTL, now: () => NOW, warn: () => {} });
+  const { store, layer, unit, close } = openLayer(dir, { nextId, sessionTtlMs: TTL, now: () => NOW });
   layer.compliancePolicies.reviewers.create({ id: 'tsr-a', name: 'Priya', role: 'trust_safety_admin', status: 'active', secretHash: 'h', createdAt: NOW, createdBy: { kind: 'system', userId: null, name: 'test' }, revokedAt: null, revokedBy: null, rev: 1, revAt: NOW, revBy: null, history: [] });
-  const snapshot = () => ({ savedAt: NOW, idCounter: 1000, db });
-  return { store, db, repo: layer.complianceRecords, unit: (w) => store.unitOfWork(w, { snapshot }), close: () => store.sqlite.close() };
+  return { store, repo: layer.complianceRecords, unit, close };
 }
 
 // ------------------------------------------------------------- schema
@@ -101,7 +97,7 @@ test('[schema] 0028 is registered after 0027 and creates the twenty-six STRICT t
   assert.equal(ids.indexOf(MIGRATION), ids.indexOf('0027_compliance_policies') + 1);
   assert.equal(TABLES.length, 26);
   for (const n of COLLECTIONS) assert.ok(TABLE_BACKED.includes(n), `${n} is table-backed`);
-  const dir = tempDir('s11b2-empty'); const s = openStore(dir).sqlite;
+  const dir = tempDir('s11b2-empty'); const s = openLayer(dir).sqlite;
   for (const t of TABLES) {
     assert.match(s.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?").get(t).sql, /STRICT\s*$/, `${t} is STRICT`);
     assert.equal(s.prepare(`SELECT count(*) AS n FROM ${t}`).get().n, 0);
@@ -257,26 +253,45 @@ test('[units] a rolled-back unit leaves nothing', () => {
   } finally { s.close(); rm(dir); }
 });
 
-test('[snapshot] the snapshot write types every record, keeps the omitted collections, refuses junk and a review naming a missing context, and reads back what it wrote', () => {
-  const dir = tempDir('s11b2-snapshot'); saveFixture(dir);
-  const store = openStore(dir);
+// The fixture writes these the way the routes do: a context is opened and then evaluated (recordEvaluation); a consent is
+// requested, then answered (update), and a revocation is its own row (revoke).
+const WRITERS = {
+  complianceContexts: (L, records) => {
+    for (const { evaluations = [], ...c } of records) {
+      const entries = c.history.filter((h) => h.action === 'compliance_context_evaluated');
+      L.complianceRecords.contexts.create({ ...c, history: c.history.filter((h) => h.action !== 'compliance_context_evaluated') });
+      evaluations.forEach(({ snapshotOf, ...r }, i) => L.complianceRecords.contexts.recordEvaluation(c.id, r, snapshotOf, entries[i]));
+    }
+  },
+  regulatoryConsents: (L, records) => {
+    for (const k of records) {
+      if (k.kind === 'revocation') { L.complianceRecords.consents.revoke(k.of, { id: k.id, at: k.at, by: k.by }); continue; }
+      L.complianceRecords.consents.create({ ...k, status: 'requested', grantedAt: null, grantedBy: null, declinedAt: null, declinedBy: null, particulars: { ...k.particulars, acknowledged: null }, history: k.history.slice(0, 1) });
+      if (k.status !== 'requested') L.complianceRecords.consents.update(k.id, () => k);
+    }
+  },
+};
+const fixture = (dir, collections) => writeFixture(dir, fixtureDb(collections), { now: NOW, writers: WRITERS });
+
+test('[fixtures] records written through the repository are typed, junk and a review naming a missing context are refused (nothing written), and they read back as written', () => {
+  const dir = tempDir('s11b2-fix');
+  const ctx = { ...context(), history: [...context().history, evaluated('aud-e1')], evaluations: [{ ...result(), snapshotOf: inputs }] };
+  const granted = consent({ status: 'granted', grantedAt: NOW, grantedBy: PLAYER, particulars: { ...consent().particulars, acknowledged: { particulars: true, legalAdvice: true, at: NOW } } });
+  granted.history.push(entry('aud-g', 'regulatory_consent_granted', { partyRole: 'individual', policyVersions: [PV] }, PLAYER));
+  const reviewer = { id: 'tsr-a', name: 'Priya', role: 'trust_safety_admin', status: 'active', secretHash: 'h', createdAt: NOW, createdBy: { kind: 'system', userId: null, name: 'test' }, revokedAt: null, revokedBy: null, rev: 1, revAt: NOW, revBy: null, history: [] };
   try {
-    const ctx = { ...context(), history: [...context().history, evaluated('aud-e1')], evaluations: [{ ...result(), snapshotOf: inputs }] };
-    const granted = consent({ status: 'granted', grantedAt: NOW, grantedBy: PLAYER, particulars: { ...consent().particulars, acknowledged: { particulars: true, legalAdvice: true, at: NOW } } });
-    granted.history.push(entry('aud-g', 'regulatory_consent_granted', { partyRole: 'individual', policyVersions: [PV] }, PLAYER));
-    store.save({ db: { complianceContexts: [ctx], regulatoryReviews: [review({ snapshot: { outcome: PERMITTED_WITH_CONSENT, evaluationId: 'ctx-1#1', evaluatedAt: NOW } })], regulatoryConsents: [granted, { id: 'rcs-r', kind: 'revocation', of: 'rcs-1', at: NOW + 1, by: PLAYER }] } });
-    const back = readTableBacked(store.sqlite);
+    fixture(dir, { tsReviewers: [reviewer], complianceContexts: [ctx], regulatoryReviews: [review({ snapshot: { outcome: PERMITTED_WITH_CONSENT, evaluationId: 'ctx-1#1', evaluatedAt: NOW } })], regulatoryConsents: [granted, { id: 'rcs-r', kind: 'revocation', of: 'rcs-1', at: NOW + 1, by: PLAYER }] });
+    const back = readRecords(dir);
     assert.equal(back.complianceContexts[0].evaluations.length, 1); assert.deepEqual(back.complianceContexts[0].evaluations[0].reasons, result().reasons);
     assert.deepEqual(back.regulatoryReviews[0].snapshot, { outcome: PERMITTED_WITH_CONSENT, evaluationId: 'ctx-1#1', evaluatedAt: NOW });
     assert.deepEqual(back.regulatoryConsents.map((k) => [k.id, k.kind]), [['rcs-1', 'dual_representation'], ['rcs-r', 'revocation']], 'the ledger reads back with its revocation row');
-    store.save({ db: { regulatoryConsents: [] } });
-    const kept = readTableBacked(store.sqlite);
-    assert.equal(kept.complianceContexts.length, 1); assert.equal(kept.regulatoryReviews.length, 1); assert.equal(kept.regulatoryConsents.length, 0, 'the omitted collections are kept');
-    refused(() => store.save({ db: { regulatoryReviews: [review({ id: 'rrv-9', subject: { contextId: 'ctx-gone', representationId: null, partyRole: 'individual' } })] } }), /COMPLIANCE_RECORDS_REFERENCE_MISSING/);
-    refused(() => store.save({ db: { regulatoryConsents: [granted, { id: 'rcs-r', kind: 'revocation', of: 'rcs-1', at: NOW, by: PLAYER }, { id: 'rcs-r2', kind: 'revocation', of: 'rcs-1', at: NOW, by: PLAYER }] } }), /revokes rcs-1 a second time/);
-    refused(() => store.save({ db: { complianceContexts: [{ ...ctx, interests: [], status: 'paused' }] } }), /COMPLIANCE_RECORDS_IMPORT_BLOCKED.*ctx-1\.status/);
-    assert.equal(readTableBacked(store.sqlite).regulatoryReviews.length, 1, 'a refused save wrote nothing');
-  } finally { store.sqlite.close(); rm(dir); }
+    const bad = [tempDir('s11b2-fix-ctx'), tempDir('s11b2-fix-rev'), tempDir('s11b2-fix-status')];
+    refused(() => fixture(bad[0], { regulatoryReviews: [review({ id: 'rrv-9', subject: { contextId: 'ctx-gone', representationId: null, partyRole: 'individual' } })] }), /FOREIGN KEY constraint failed/, 'a review naming a missing context');
+    refused(() => fixture(bad[1], { complianceContexts: [ctx], regulatoryConsents: [granted, { id: 'rcs-r', kind: 'revocation', of: 'rcs-1', at: NOW, by: PLAYER }, { id: 'rcs-r2', kind: 'revocation', of: 'rcs-1', at: NOW, by: PLAYER }] }), /already revoked/, 'a second revocation');
+    refused(() => fixture(bad[2], { complianceContexts: [{ ...ctx, status: 'paused' }] }), /COMPLIANCE_RECORDS_INPUT_INVALID.*ctx-1\.status/, 'an unknown status');
+    for (const d of bad) { const r = readRecords(d); assert.deepEqual([r.complianceContexts.length, r.regulatoryReviews.length, r.regulatoryConsents.length], [0, 0, 0], 'a refused fixture wrote nothing'); }
+    rm(...bad);
+  } finally { rm(dir); }
 });
 
 console.log(`\ncompliance records repository: ${passed} checks passed`);

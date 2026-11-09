@@ -1,12 +1,11 @@
 // S8d — signing packages, completed signings, follow-ups and outcome reports as typed tables with EXPLICIT writes
 // (repositories/signingsFollowUps.mjs, migration 0018): docs/architecture/s8d-design-note.md. What this suite proves:
-// the migration creates the typed tables; a snapshot save (fixtures, tools) types every field into its column,
+// the migration creates the typed tables; a fixture written through the repository types every field into its column,
 // normalises what the note lists, stops on a row it cannot type and names every missing reference and every
-// uniqueness rule with ids; the repository's operations write rows at once and return fresh records; there is no db.*
+// uniqueness rule; the repository's operations write rows at once and return fresh records; there is no db.*
 // view (§4.3 step 2: a reader naming one throws) and every query, page and sweep query matches a scan of the tables; a
 // unit of work rolls the rows back (a statement failure, a real COMMIT failure, the deferred completion key) and a read
-// inside it sees its own writes; the completion cycle commits in one unit; the snapshot write (full, partial,
-// [], junk, a retained dependant) and the live counters.
+// inside it sees its own writes; the completion cycle commits in one unit; the live counters.
 // Temporary databases only; nothing touches DATA_DIR. Run with: npm test
 
 import assert from 'node:assert/strict';
@@ -14,11 +13,12 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync, StatementSync } from 'node:sqlite';
 import { runDataMigrations } from '../repositories/database.mjs';
-import { attachDataLayer, DATA_MIGRATIONS, TABLE_BACKED, readTableBacked } from '../repositories/index.mjs';
+import { attachDataLayer, DATA_MIGRATIONS, TABLE_BACKED } from '../repositories/index.mjs';
 import { openStore } from '../store.mjs';
+import { openLayer, readRecords } from './dataLayerFixture.mjs';
 import { playerJourneyReads } from '../domains/recruitment/lifecycle/journeyReads.mjs';
 import { NOW, TTL, tempDir, hasBlobTable } from './coreIdentityTestFixtures.mjs';
-import { p4bInvitation, minorInvitation, acceptedRequest, scheduledTrial, legacyTrialRequest, saveFixture, fixtureDb } from './recruitmentTestFixtures.mjs';
+import { p4bInvitation, minorInvitation, acceptedRequest, scheduledTrial, legacyTrialRequest, saveFixture } from './recruitmentTestFixtures.mjs';
 import { S8B_FIX } from './recruitmentCasesTestFixtures.mjs';
 import { S8C_FIX } from './recruitmentContactsOffersTestFixtures.mjs';
 import { S8D_FIX, draftPackage, completedPackage, canonicalSigning, legacySigning, followUpsFor, outcomeReport, srevision, parties, sdoc, shist, BY, SHA, SHA2, T } from './signingsFollowUpsTestFixtures.mjs';
@@ -47,7 +47,7 @@ const ddlOf = (s, t) => s.prepare("SELECT sql FROM sqlite_master WHERE type = 't
 const openRaw = (dir) => { const s = new DatabaseSync(dbFile(dir)); s.exec('PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;'); return s; };
 const S8A_FIX = () => ({ requests: [acceptedRequest(p4bInvitation(), 'trial-1'), minorInvitation(), legacyTrialRequest()], trials: [scheduledTrial()] });
 
-/** A database holding the S8a–S8d fixtures, written by a snapshot-mode save (the tables, never blobs). `four` overrides an S8d collection (undefined omits it). */
+/** A database holding the S8a–S8d fixtures, written through the repositories. `four` overrides an S8d collection (undefined omits it). */
 const fixtureCollections = ({ more = {}, ...four } = {}) => {
   const fix = S8D_FIX(); const db = { ...S8B_FIX(), ...S8C_FIX(), ...S8A_FIX(), ...more };
   for (const name of COLLECTIONS) { const v = Object.hasOwn(four, name) ? four[name] : fix[name]; if (v !== undefined) db[name] = v; }
@@ -55,24 +55,16 @@ const fixtureCollections = ({ more = {}, ...four } = {}) => {
 };
 const migrateAll = (s, { now = NOW } = {}) => runDataMigrations(s, DATA_MIGRATIONS, { now, context: { sessionTtlMs: TTL } });
 const file = (tag, over = {}) => saveFixture(tempDir(`s8d-${tag}`), fixtureCollections(over));
-/** Save the fixtures, with `over`, into a new database and expect the save refused, atomically. */
+/** Write the fixtures, with `over`, into a new database and expect the write refused, atomically: no recruitment row written. */
 const refusedSave = (tag, over, pattern) => {
-  const d = tempDir(`s8d-ref-${tag}`); const st = openStore(d); const before = fullDump(st.sqlite);
-  refused(() => st.save({ savedAt: NOW, idCounter: 1000, db: fixtureDb(fixtureCollections(over)) }), pattern, tag);
-  assert.equal(st.sqlite.isTransaction, false); assert.equal(fullDump(st.sqlite), before, `${tag}: nothing written`);
-  refused(() => st.save({ savedAt: NOW, idCounter: 1000, db: fixtureDb(fixtureCollections(over)) }), pattern, `${tag} (again)`);
-  st.sqlite.close(); rm(d);
+  const d = tempDir(`s8d-ref-${tag}`);
+  refused(() => saveFixture(d, fixtureCollections(over)), pattern, tag);
+  assert.equal(withRo(d, (s) => TABLES.concat(EARLIER).reduce((n, t) => n + col(s, `SELECT count(*) FROM ${t}`), 0)), 0, `${tag}: nothing written`); rm(d);
 };
 function serverOpen(dir, { warnings = [] } = {}) {
   const store = openStore(dir, { tableBacked: TABLE_BACKED });
-  const db = {}; // S14a: a fixture-saved file is not a first installation, so there is nothing to hand in
-  const layer = attachDataLayer({ db, store, nextId, sessionTtlMs: TTL, now: () => NOW, warn: (m) => warnings.push(m) });
-  return { store, layer, db, warnings, unit: (w) => store.unitOfWork(w), repo: layer.signingsFollowUps, close: () => store.sqlite.close() };
-}
-function snapshotOpen(dir) {
-  const store = openStore(dir); const loaded = store.load(); const db = loaded.db;
-  const save = (over = {}, { omit = [] } = {}) => { const d = { ...db, ...over }; for (const k of omit) delete d[k]; return store.save({ savedAt: NOW, idCounter: 1000, db: d }); };
-  return { store, db, save, close: () => store.sqlite.close() };
+  const layer = attachDataLayer({ store, nextId, sessionTtlMs: TTL, now: () => NOW, warn: (m) => warnings.push(m) });
+  return { store, layer, warnings, unit: (w) => store.unitOfWork(w), repo: layer.signingsFollowUps, close: () => store.sqlite.close() };
 }
 const refused = (fn, pattern, label = '') => { let err = null; try { fn(); } catch (e) { err = e; } assert.ok(err, `${label}: expected a refusal`); assert.match(String(err.message), pattern, `${label}: ${err.message}`); assert.doesNotMatch(String(err.message), /agreed verbally|Regular starter|All good|open day|Adult Signup|Kid One/, `${label}: ids only, never a note, a name or a text`); return err; };
 /** The typed expectation of a fixture: what the cutover and every read return (the normalisations applied). */
@@ -80,11 +72,11 @@ const typed = (name, raw) => { const t = mod[{ signingPackages: 'typeSigningPack
 
 // ------------------------------------------------------------- the cutover
 
-test('[schema] migration 0018 is registered last and creates the ten typed STRICT tables (no lossless side column), the deferred completion key and the signing method CHECK, and broadens idempotency_keys to signing_packages; a fresh database holds no row; the step never runs twice; the fixtures written by a snapshot save read back as the typed expectation (the legacy signing\'s method and the copied ledger row normalised), with their key rows; the live player counters', () => {
+test('[schema] migration 0018 is registered last and creates the ten typed STRICT tables (no lossless side column), the deferred completion key and the signing method CHECK, and broadens idempotency_keys to signing_packages; a fresh database holds no row; the step never runs twice; the fixtures written through the repository read back as the typed expectation (the legacy signing\'s method and the copied ledger row normalised), with their key rows; the live player counters', () => {
   need();
   assert.equal(DATA_MIGRATIONS.filter((m) => m.id < '0019').at(-1)?.id, MIGRATION, 'the last registered migration of the recruitment steps (S9 onwards follow)'); for (const n of COLLECTIONS) assert.ok(TABLE_BACKED.includes(n), `${n} is table-backed`);
   // a fresh database: the tables exist and are empty
-  const empty = tempDir('s8d-empty'); const e = openStore(empty).sqlite;
+  const empty = tempDir('s8d-empty'); const E = openLayer(empty); const e = E.sqlite;
   assert.equal(e.prepare("SELECT id FROM data_migrations WHERE id < '0019' ORDER BY id").all().at(-1).id, MIGRATION);
   for (const t of TABLES) { assert.ok(tableExistsIn(e, t), `${t} exists`); assert.equal(e.prepare(`SELECT count(*) AS n FROM ${t}`).get().n, 0); }
   for (const t of TABLES) { assert.doesNotMatch(ddlOf(e, t), /absent_keys_json|offtype_json|extra_json/, `${t} has no lossless side column`); assert.match(ddlOf(e, t), /STRICT/); }
@@ -92,12 +84,11 @@ test('[schema] migration 0018 is registered last and creates the ten typed STRIC
   assert.match(ddlOf(e, 'signings'), /CHECK \(method IN \('CANONICAL_COMPLETION','LEGACY_RECORDED'\)\)/);
   assert.match(ddlOf(e, 'idempotency_keys'), /owner_table IN \('signing_packages'\)/, 'the signing packages are the only owner: the other steps keep their keys as columns');
   assert.equal(hasBlobTable(e), false, 'no blob table'); // rewritten in S14a: it described the blob
-  e.close(); rm(empty);
+  E.close(); rm(empty);
   // the fixtures
-  const d = file('mig'); const s = openRaw(d);
+  const d = file('mig'); const back = readRecords(d); const s = openRaw(d);
   const after = fullDump(s); assert.deepEqual(migrateAll(s).ran, []); assert.equal(fullDump(s), after, 'never runs twice');
   assert.equal(hasBlobTable(s), false, 'no blob table'); // rewritten in S14a: it described the blob
-  const back = readTableBacked(s);
   assert.deepEqual(plain(back.signingPackages), [typed('signingPackages', draftPackage()), typed('signingPackages', completedPackage())]);
   assert.deepEqual(plain(back.signings), [typed('signings', canonicalSigning()), typed('signings', legacySigning())]);
   assert.deepEqual(plain(back.followUps), S8D_FIX().followUps.map((f) => typed('followUps', f)));
@@ -112,34 +103,33 @@ test('[schema] migration 0018 is registered last and creates the ten typed STRIC
   s.close(); rm(d);
 });
 
-test('[snapshot][typed] a save STOPS with the id on a row the columns cannot hold — nothing written, the revision unchanged, the same save refused again: an unknown status word, a note over 400 characters, a package without a revision, a present null collection, a report whose matchesPlayed is not an integer, two confirmations by one person, an unknown party type; whereas the dead signing fields and an unknown field are dropped, not refused', () => {
+test('[fixtures][typed] a write STOPS with the id on a row the columns cannot hold — nothing written: an unknown status word, a note over 400 characters, a package without a revision, a report whose matchesPlayed is not an integer, two confirmations by one person, an unknown party type; whereas the dead signing fields and an unknown field are dropped, not refused', () => {
   need();
-  refusedSave('status', { signingPackages: [draftPackage({ status: 'OPEN' })] }, /SIGNINGS_IMPORT_BLOCKED[\s\S]*signingPackages entry #0 spk-1\.status must be one of DRAFT\|READY/);
-  refusedSave('note', { signings: [canonicalSigning(), legacySigning({ note: 'x'.repeat(401) })] }, /signings entry #1 sign-legacy\.note exceeds 400 characters/);
+  refusedSave('status', { signingPackages: [draftPackage({ status: 'OPEN' })] }, /SIGNINGS_INPUT_INVALID[\s\S]*signingPackages spk-1\.status must be one of DRAFT\|READY/);
+  refusedSave('note', { signings: [canonicalSigning(), legacySigning({ note: 'x'.repeat(401) })] }, /signings sign-legacy\.note exceeds 400 characters/);
   refusedSave('revisions', { signingPackages: [draftPackage({ revisions: [] })] }, /spk-1\.revisions must be a non-empty array/);
-  refusedSave('null', { followUps: null }, /followUps: the snapshot collection must be an array/);
-  refusedSave('matches', { outcomeReports: [outcomeReport({ matchesPlayed: 2.5 })] }, /outcomeReports entry #0 out-1\.matchesPlayed must be a non-negative integer or null/);
+  refusedSave('matches', { outcomeReports: [outcomeReport({ matchesPlayed: 2.5 })] }, /outcomeReports out-1\.matchesPlayed must be a non-negative integer or null/);
   refusedSave('twice', { outcomeReports: [outcomeReport({ confirmations: [outcomeReport().confirmations[0], outcomeReport().confirmations[0]] })] }, /out-1\.confirmations\[1\]\.by\.id duplicates pl-adult/);
   refusedSave('party-type', { signingPackages: [draftPackage({ revisions: [srevision({ requiredParties: [{ ...parties()[0], partyType: 'AGENT' }] })] })] }, /spk-1\.revisions\[0\]\.requiredParties\[0\]\.partyType must be one of PLAYER\|GUARDIAN\|CLUB_SIGNATORY/);
   // dropped, not refused
   const d = file('notes', { signings: [canonicalSigning({ cancelledAt: null, revokedAt: null, voidedAt: null, legacyFlag: true }), legacySigning()] });
-  withRo(d, (s) => { const sg = readTableBacked(s).signings[0]; assert.equal(Object.hasOwn(sg, 'legacyFlag'), false); assert.equal(Object.hasOwn(sg, 'cancelledAt'), false); }); rm(d);
+  { const sg = readRecords(d).signings[0]; assert.equal(Object.hasOwn(sg, 'legacyFlag'), false); assert.equal(Object.hasOwn(sg, 'cancelledAt'), false); } rm(d);
 });
 
-test('[snapshot] every reference and every uniqueness rule is named with ids before the engine would: a package naming a missing case / offer / organisation / staff member, a signing naming a missing package, a follow-up naming a missing signing, a report naming a missing follow-up; two completed packages per offer, two signings per package, two standing legacy signings per organisation and player, two follow-ups per signing and milestone, two reports per follow-up; and the player references (Q7a/Q8a/Q8c-a applied): a missing player id is written and counted, never refused', () => {
+test('[fixtures] every reference and every uniqueness rule is refused (a missing reference by its key, a uniqueness rule by its index or the repository): a package naming a missing case / offer / organisation / staff member, a signing naming a missing package, a follow-up naming a missing signing, a report naming a missing follow-up; two completed packages per offer, two signings per package, two standing legacy signings per organisation and player, two follow-ups per signing and milestone, two reports per follow-up; and the player references (Q7a/Q8a/Q8c-a applied): a missing player id is written and counted, never refused', () => {
   need();
-  refusedSave('case', { signingPackages: [draftPackage({ caseId: 'case-nowhere' }), completedPackage()] }, /SIGNINGS_REFERENCE_MISSING[\s\S]*signing_packages spk-1 → recruitment_cases case-nowhere/);
-  refusedSave('offer', { signingPackages: [draftPackage({ offerId: 'rof-nowhere' }), completedPackage()] }, /signing_packages spk-1 → recruitment_offers rof-nowhere/);
-  refusedSave('org', { signingPackages: [draftPackage({ orgId: 'org-nowhere' }), completedPackage()] }, /signing_packages spk-1 → orgs org-nowhere/);
-  refusedSave('staff', { signingPackages: [draftPackage({ createdBy: { ...BY, id: 'usr-ghost' } }), completedPackage()] }, /signing_packages spk-1 createdBy → org_users usr-ghost/);
-  refusedSave('package', { signings: [canonicalSigning({ signingPackageId: 'spk-ghost', signingRevisionId: null })] }, /signings sign-2 → signing_packages spk-ghost/);
-  refusedSave('signing', { followUps: [{ ...followUpsFor()[0], signingId: 'sign-ghost' }] }, /follow_ups fup-sign-2-3m → signings sign-ghost/);
-  refusedSave('followup', { outcomeReports: [outcomeReport({ followUpId: 'fup-ghost' })] }, /outcome_reports out-1 → follow_ups fup-ghost/);
-  refusedSave('two-done', { signingPackages: [draftPackage(), completedPackage(), completedPackage({ id: 'spk-dup', currentRevisionId: 'spr-dup', revisions: [srevision({ id: 'spr-dup', status: 'COMPLETED', readyAt: T.ready, readyBy: BY, completedAt: T.completed, completedBy: BY, document: sdoc('sgd-dup') })], keys: { start: null }, history: [], completion: { ...completedPackage().completion, signingId: 'sign-dup' } })], signings: [canonicalSigning(), canonicalSigning({ id: 'sign-dup', signingPackageId: 'spk-dup', signingRevisionId: 'spr-dup' })] }, /SIGNINGS_UNIQUENESS[\s\S]*a completed package per offer rof-1/);
-  refusedSave('two-signings', { signings: [canonicalSigning(), canonicalSigning({ id: 'sign-dup', signingPackageId: 'spk-2', signingRevisionId: 'spr-2' })] }, /a signing per package spk-2/);
-  refusedSave('two-legacy', { signings: [canonicalSigning(), legacySigning(), legacySigning({ id: 'sign-legacy-2' })] }, /a standing legacy signing per organisation and player org-pro\/pl-child1/);
-  refusedSave('two-fups', { followUps: [...followUpsFor(), { ...followUpsFor()[0], id: 'fup-dup' }] }, /a follow-up per signing and milestone sign-2\/3m/);
-  refusedSave('two-reports', { outcomeReports: [outcomeReport(), outcomeReport({ id: 'out-dup' })] }, /a report per follow-up fup-sign-2-3m/);
+  refusedSave('case', { signingPackages: [draftPackage({ caseId: 'case-nowhere' }), completedPackage()] }, /FOREIGN KEY constraint failed/);
+  refusedSave('offer', { signingPackages: [draftPackage({ offerId: 'rof-nowhere' }), completedPackage()] }, /FOREIGN KEY constraint failed/);
+  refusedSave('org', { signingPackages: [draftPackage({ orgId: 'org-nowhere' }), completedPackage()] }, /FOREIGN KEY constraint failed/);
+  refusedSave('staff', { signingPackages: [draftPackage({ createdBy: { ...BY, id: 'usr-ghost' } }), completedPackage()] }, /FOREIGN KEY constraint failed/);
+  refusedSave('package', { signings: [canonicalSigning({ signingPackageId: 'spk-ghost', signingRevisionId: null })] }, /FOREIGN KEY constraint failed/);
+  refusedSave('signing', { followUps: [{ ...followUpsFor()[0], signingId: 'sign-ghost' }] }, /FOREIGN KEY constraint failed/);
+  refusedSave('followup', { outcomeReports: [outcomeReport({ followUpId: 'fup-ghost' })] }, /FOREIGN KEY constraint failed/);
+  refusedSave('two-done', { signingPackages: [draftPackage(), completedPackage(), completedPackage({ id: 'spk-dup', currentRevisionId: 'spr-dup', revisions: [srevision({ id: 'spr-dup', status: 'COMPLETED', readyAt: T.ready, readyBy: BY, completedAt: T.completed, completedBy: BY, document: sdoc('sgd-dup') })], keys: { start: null }, history: [], completion: { ...completedPackage().completion, signingId: 'sign-dup' } })], signings: [canonicalSigning(), canonicalSigning({ id: 'sign-dup', signingPackageId: 'spk-dup', signingRevisionId: 'spr-dup' })] }, /UNIQUE constraint failed: signing_packages\.offer_id/);
+  refusedSave('two-signings', { signings: [canonicalSigning(), canonicalSigning({ id: 'sign-dup', signingPackageId: 'spk-2', signingRevisionId: 'spr-2' })] }, /UNIQUE constraint failed: signings\.offer_id/);
+  refusedSave('two-legacy', { signings: [canonicalSigning(), legacySigning(), legacySigning({ id: 'sign-legacy-2' })] }, /UNIQUE constraint failed: signings\.org_id, signings\.player_id/);
+  refusedSave('two-fups', { followUps: [...followUpsFor(), { ...followUpsFor()[0], id: 'fup-dup' }] }, /UNIQUE constraint failed: follow_ups\.signing_id, follow_ups\.milestone/);
+  refusedSave('two-reports', { outcomeReports: [outcomeReport(), outcomeReport({ id: 'out-dup' })] }, /SIGNINGS_UNIQUENESS[\s\S]*follow_ups fup-sign-2-3m already has a report/);
   // tolerated and counted
   const d = file('tolerant', { signings: [canonicalSigning(), legacySigning({ playerId: 'pl-never-existed' })], followUps: followUpsFor().concat([{ ...followUpsFor('sign-legacy', 'pl-never-existed', T.legacy)[1], id: 'fup-gone' }]) });
   withRo(d, (s) => { assert.deepEqual(mod.unresolvedPlayerReferences(s), { signingPackages: 0, signings: 1, followUps: 1, outcomeReports: 0 }, 'the legacy signing and its follow-up'); assert.equal(col(s, "SELECT player_id FROM signings WHERE id = 'sign-legacy'"), 'pl-never-existed', 'kept verbatim'); });
@@ -341,34 +331,6 @@ test('[repository] the unit of work: several operations and a failure at the end
   const touched = L.unit(() => sp.redactPlayer('pl-adult', NOW + 9)); assert.equal(touched.length, 2);
   const r = L.repo.signingPackages.byId('spk-2'); assert.equal(r.subjectRemovedAt, NOW + 9); assert.equal(r.revisions[0].requiredParties[0].completedBy.name, null, 'the player\'s name nulled'); assert.equal(r.revisions[0].requiredParties[1].completedBy.name, BY.name, 'the club signatory\'s kept'); assert.equal(r.history.find((h) => h.by?.kind === 'player').by.name, null);
   L.close(); rm(d);
-});
-
-// ------------------------------------------------------------- the snapshot write (backups, restores, the persistence suites)
-
-test('[snapshot] readTableBacked / writeTableBacked (snapshot mode): a save with the four collections supplied lands exactly (every record typed; a legacy-shaped signing normalised); a partial save retains the omitted collections whole; [] empties one; a departing signing a RETAINED follow-up still names is refused with the ids, atomically, as is a departing package a retained signing names; junk is refused with the id; the departures of a package and its offer in ONE save succeed (the S8d departures run before the S8c ones)', () => {
-  need();
-  const d = file('snap'); const S = snapshotOpen(d);
-  // a legacy-shaped signing: sign-legacy without a method, a copied ledger row — typed on the way in
-  const fups = plain(S.db.followUps); const reports = plain(S.db.outcomeReports);
-  S.save({ signingPackages: plain(S.db.signingPackages), signings: [canonicalSigning(), legacySigning()], followUps: fups, outcomeReports: reports }, { omit: ['requests', 'trials'] });
-  withRo(d, (s) => { assert.equal(col(s, "SELECT method FROM signings WHERE id = 'sign-legacy'"), 'LEGACY_RECORDED'); assert.deepEqual(plain(readTableBacked(s).signings), [typed('signings', canonicalSigning()), typed('signings', legacySigning())]); });
-  // partial: follow-ups omitted are retained whole; [] empties the reports (the follow-up's report departs; nothing names it)
-  const before = withRo(d, fullDump);
-  S.save({ outcomeReports: [] }, { omit: ['signingPackages', 'signings', 'followUps', 'requests', 'trials'] });
-  withRo(d, (s) => { assert.equal(s.prepare('SELECT count(*) AS n FROM outcome_reports').get().n, 0); assert.equal(s.prepare('SELECT count(*) AS n FROM outcome_report_confirmations').get().n, 0); assert.equal(s.prepare('SELECT count(*) AS n FROM follow_ups').get().n, 3, 'retained'); });
-  S.save({ outcomeReports: [outcomeReport()] }, { omit: ['signingPackages', 'signings', 'followUps', 'requests', 'trials'] }); assert.equal(withRo(d, fullDump).length > 0, true);
-  // a departing signing still named by a RETAINED follow-up; a departing package still named by a RETAINED signing
-  const mid = withRo(d, fullDump);
-  refused(() => S.save({ signings: [legacySigning()] }, { omit: ['signingPackages', 'followUps', 'outcomeReports', 'requests', 'trials'] }), /SIGNINGS_STILL_REFERENCED[\s\S]*follow_ups fup-sign-2-3m → signings sign-2/, 'a retained follow-up');
-  refused(() => S.save({ signingPackages: [draftPackage()] }, { omit: ['signings', 'followUps', 'outcomeReports', 'requests', 'trials'] }), /SIGNINGS_STILL_REFERENCED[\s\S]*signings sign-2 → signing_packages spk-2/, 'a retained signing');
-  refused(() => S.save({ signings: [canonicalSigning(), legacySigning({ note: 'x'.repeat(401) })] }, { omit: ['signingPackages', 'followUps', 'outcomeReports', 'requests', 'trials'] }), /SIGNINGS_IMPORT_BLOCKED[\s\S]*sign-legacy\.note exceeds 400/, 'junk');
-  refused(() => S.save({ followUps: null }, { omit: ['signingPackages', 'signings', 'outcomeReports', 'requests', 'trials'] }), /followUps: the snapshot collection must be an array/, 'a present null');
-  assert.equal(withRo(d, fullDump), mid, 'every refusal atomic');
-  // the joint departure: the completed package, its signing, its follow-ups and report, and the OFFER it was opened over, in one save
-  const offers = plain(S.db.recruitmentOffers).filter((o) => o.id !== 'rof-1'); const contacts = plain(S.db.recruitmentContacts).filter((c) => !(c.caseId === 'case-1'));
-  S.save({ recruitmentOffers: offers, recruitmentContacts: contacts, signingPackages: [], signings: [legacySigning()], followUps: [], outcomeReports: [] }, { omit: ['requests', 'trials'] });
-  withRo(d, (s) => { assert.equal(s.prepare('SELECT count(*) AS n FROM signing_packages').get().n, 0); assert.equal(s.prepare("SELECT count(*) AS n FROM recruitment_offers WHERE id = 'rof-1'").get().n, 0, 'the offer departed with its package'); assert.equal(s.prepare("SELECT count(*) AS n FROM idempotency_keys WHERE owner_table = 'signing_packages'").get().n, 0, 'the packages\' key rows went with them'); assert.equal(s.prepare('PRAGMA foreign_key_check').all().length, 0); });
-  S.close(); rm(d);
 });
 
 console.log(`\n${passed} signings/follow-ups checks passed`);

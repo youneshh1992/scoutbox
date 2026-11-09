@@ -39,7 +39,7 @@ import { TYPE_CATEGORY, CATEGORIES } from '../../domains/platform/notificationPr
 import { DATA_MIGRATIONS, TABLE_BACKED } from '../../repositories/index.mjs';
 import { COMPLIANCE_POLICIES_MIGRATION, COMPLIANCE_POLICIES_TABLES } from '../../repositories/compliancePolicies.mjs';
 import { COMPLIANCE_RECORDS_MIGRATION, COMPLIANCE_RECORDS_TABLES } from '../../repositories/complianceRecords.mjs';
-import { openStore } from '../../store.mjs';
+import { readRecords } from '../../scripts/dataLayerFixture.mjs';
 import { pickPort } from '../../scripts/testPort.mjs';
 
 const SCHEMA_VERSION = Number(DATA_MIGRATIONS.map((m) => m.id).sort().at(-1).slice(0, 4));
@@ -519,7 +519,7 @@ section('S/T — revocation, stale client submits, party change invalidates the 
 {
   const rv = await j('POST', `/player/agent/consents/${KOLA_CONSENT}/revoke`, { clientKey: 'kola-revoke' }, kola.token);
   ok(rv.status === 200 && rv.body.consent.status === 'revoked' && typeof rv.body.consent.revokedAt === 'number', 'R22 Kola revokes his consent');
-  const db0 = openStore(DATA_DIR).load()?.db;
+  const db0 = readRecords(DATA_DIR);
   const granted = db0.regulatoryConsents.find((k) => k.id === KOLA_CONSENT);
   const revRow = db0.regulatoryConsents.find((k) => k.kind === 'revocation' && k.of === KOLA_CONSENT);
   neg(granted.status === 'granted' && granted.revokedAt === undefined && revRow && revRow.at > granted.grantedAt, 'AE4 the ledger is append-only: the granted row is untouched and the revocation is a new row');
@@ -736,7 +736,7 @@ section('policy — dual-control publication; historical snapshots keep their ve
   ok(re.body.evaluation.policyVersions.join() === 'jp-fifa-2025-2' && re.body.evaluation.outcome === 'CLEAR', 'C22 re-evaluated under v2 (only the club is represented so far): CLEAR');
   const ind = collect('C23', await j('POST', `/org/agent/compliance/contexts/${CTX3}/representations`, { partyRole: 'individual', agreementId: REL_MATEUS }, ANA.token));
   ok(expect(ind, 422, 'CONSENT_REQUIRED') && ind.body.policyVersions.join() === 'jp-fifa-2025-2', 'C23 E16 over HTTP: what was "manual review" under v1 is "consent required" under v2 — a data change, not code');
-  const db = openStore(DATA_DIR).load()?.db;
+  const db = readRecords(DATA_DIR);
   const ctx = db.complianceContexts.find((c) => c.id === CTX3);
   ok(ctx.evaluations[0].policyVersions.join() === 'jp-fifa-2025-1' && ctx.evaluations.at(-1).policyVersions.join() === 'jp-fifa-2025-2' && ctx.evaluations.every((e) => e.inputHash && e.ruleStatuses), 'C24 the earlier evaluation rows keep v1 and their rule statuses; the latest names v2 (§80)');
   const oldReview = await j('GET', `/ts/compliance/reviews/${CTX3_REVIEW}`, undefined, PRIYA.token);
@@ -757,7 +757,7 @@ section('AJ — deletion leaves ids; the last administrator stays');
 {
   const del = await j('DELETE', '/player/account', undefined, kola.token);
   ok(del.status === 200, 'AJ1 Kola deletes his account');
-  const db = openStore(DATA_DIR).load()?.db;
+  const db = readRecords(DATA_DIR);
   const ctx = db.complianceContexts.find((c) => c.id === CTX1);
   neg(ctx.parties.find((p) => p.partyRole === 'individual').removed === true && ctx.history.filter((h) => h.by?.kind === 'player').every((h) => h.by.name === null), 'AJ2 the context keeps the party as an id-only removed party; player attributions are nulled');
   neg(db.regulatoryConsents.filter((k) => k.subject?.id === 'pl-adeyemi').every((k) => (k.grantedBy?.kind !== 'player' || k.grantedBy.name === null) && (k.history ?? []).every((h) => h.by?.kind !== 'player' || h.by.name === null)), 'AJ3 consent rows keep the subject id and lose the person\'s name');

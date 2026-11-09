@@ -27,6 +27,7 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { DatabaseSync } from 'node:sqlite';
 import * as T from '../../temporal.mjs';
 import { parseDob, ageOn, isAdult, adultAgeFor, parseTrialDate, trialReportDueAt, isTrialDate } from '../../domain.mjs';
 import { effectiveFacetState, affiliationActive, agreementGrantsAccess, effectiveAgreementStatus, verificationGap } from '../../domains/agents/core/shared.mjs';
@@ -41,7 +42,7 @@ import { briefIsLiveOn, validateRecruitmentBrief } from '../../domains/discovery
 import { normWhen } from '../../domains/verification/passport/shared.mjs';
 import { parseDate as devParseDate } from '../../domains/development/hub/shared.mjs';
 import { DATA_MIGRATIONS } from '../../repositories/index.mjs';
-import { openStore } from '../../store.mjs';
+import { writeFixture } from '../../scripts/dataLayerFixture.mjs';
 
 const SCHEMA_VERSION = Number(DATA_MIGRATIONS.map((m) => m.id).sort().at(-1).slice(0, 4));
 
@@ -426,18 +427,15 @@ const login = async (orgId, scoutName, role, platform) => (await j('POST', '/aut
 let server = await boot();
 await stop(server);
 {
-  const store = openStore(DATA_DIR);
-  const snap = store.load();
-  snap.db.trials ??= [];
+  // Written through the repositories onto the stopped server's database (an additive fixture).
   // S8a-core: a trial names its request by a real key and a request names its staff member by a real key, so the
   // fixture carries the staff row and the accepted invitation trial-p57 came from (the legacy direct-request literal);
   // a trial naming an absent request is refused at the write with its id (PAIR_MISMATCH), never repaired. The trial
   // row and the staff checks it carries are unchanged.
-  snap.db.users ??= [];
-  if (!snap.db.users.some((u) => u.orgId === 'org-eastport' && u.name === 'Maria Keane')) snap.db.users.push({ id: 'usr-p57-maria', orgId: 'org-eastport', name: 'Maria Keane', role: 'Head of Recruitment', createdAt: 1 });
-  snap.db.requests ??= [];
-  snap.db.requests.push({ id: 'req-p57', playerId: 'pl-adeyemi', playerName: 'Kola Adeyemi', orgId: 'org-eastport', orgName: 'Eastport FC', orgType: 'club', orgVerified: true, orgSafeguardingCertified: false, userId: snap.db.users.find((u) => u.orgId === 'org-eastport' && u.name === 'Maria Keane').id, scoutName: 'Maria Keane', scoutRole: 'Head of Recruitment', type: 'trial', message: 'Come and train.', trialDetails: { proposedDate: T.utcDayOf(Date.now() + 10 * DAY), altSlots: [], venue: 'Training ground', notes: '' }, status: 'accepted', createdAt: Date.now() - 4 * DAY, respondedAt: Date.now() - 3 * DAY, respondedBy: 'player', routedTo: 'player', guardianId: null, contactChannel: null });
-  snap.db.trials.push({
+  const existing = (() => { const s = new DatabaseSync(path.join(DATA_DIR, 'scoutbox.db'), { readOnly: true }); try { return s.prepare("SELECT id FROM org_users WHERE org_id = 'org-eastport' AND name = 'Maria Keane'").get()?.id ?? null; } finally { s.close(); } })();
+  const users = existing ? [] : [{ id: 'usr-p57-maria', orgId: 'org-eastport', name: 'Maria Keane', role: 'Head of Recruitment', createdAt: 1 }];
+  const requests = [{ id: 'req-p57', playerId: 'pl-adeyemi', playerName: 'Kola Adeyemi', orgId: 'org-eastport', orgName: 'Eastport FC', orgType: 'club', orgVerified: true, orgSafeguardingCertified: false, userId: existing ?? 'usr-p57-maria', scoutName: 'Maria Keane', scoutRole: 'Head of Recruitment', type: 'trial', message: 'Come and train.', trialDetails: { proposedDate: T.utcDayOf(Date.now() + 10 * DAY), altSlots: [], venue: 'Training ground', notes: '' }, status: 'accepted', createdAt: Date.now() - 4 * DAY, respondedAt: Date.now() - 3 * DAY, respondedBy: 'player', routedTo: 'player', guardianId: null, contactChannel: null }];
+  const trials = [{
     id: 'trial-p57', requestId: 'req-p57', playerId: 'pl-adeyemi', playerName: 'Kola Adeyemi', orgId: 'org-eastport', orgName: 'Eastport FC', scoutName: 'Maria Keane',
     acceptedAt: Date.now() - 3 * DAY, acceptedBy: 'player', proposedDate: T.utcDayOf(Date.now() + 10 * DAY), venue: 'Training ground', notes: '', reportDueAt: Date.now() + 17 * DAY, status: 'awaiting_report',
     workflowState: 'accepted', rev: 1, // issueAcceptedTrial's literal for a date-only invitation
@@ -451,9 +449,8 @@ await stop(server);
       ],
       consents: [], arrival: null, emergency: null, checkins: [], collection: null, statusEvents: [],
     },
-  });
-  store.save(snap);
-  store.close?.();
+  }];
+  writeFixture(DATA_DIR, { users, requests, trials });
 }
 server = await boot();
 

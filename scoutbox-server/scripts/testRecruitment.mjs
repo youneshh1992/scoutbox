@@ -1,8 +1,8 @@
 // S8a — recruitment requests and accepted trials as typed tables with EXPLICIT writes (repositories/recruitment.mjs,
 // migration 0015; docs/architecture/migration.md §4.3). What this suite proves: the migration creates the sixteen typed
 // tables (no lossless side column, the vocabulary CHECKs, the case key immediate and the trial key deferred to COMMIT) and channels with
-// the real request key; a snapshot save (fixtures, tools) types every writer shape into its columns and reads back the
-// typed record, refuses a record it cannot type and names every missing reference with ids; the player references are
+// the real request key; a fixture written through the repository types every writer shape into its columns and reads back
+// the typed record, refuses a record it cannot type and names every missing reference with ids; the player references are
 // counted, never refused (Q7a), and a missing guardian is refused (Q7c); the repository's operations write rows at once
 // and return fresh read-only records, there is no db.* view (§4.3 step 2) and every query matches a table scan, a unit
 // of work rolls the rows back and a read inside it sees its writes,
@@ -17,8 +17,9 @@ import { DatabaseSync, StatementSync } from 'node:sqlite';
 import { attachDataLayer, DATA_MIGRATIONS, TABLE_BACKED } from '../repositories/index.mjs';
 import { computeTrustScore, TRUST } from '../domain.mjs';
 import { openStore } from '../store.mjs';
+import { openLayer, readRecords } from './dataLayerFixture.mjs';
 import { NOW, TTL, tempDir, hasBlobTable } from './coreIdentityTestFixtures.mjs';
-import { legacyTrialRequest, contactRequest, openDayRequest, p4bInvitation, minorInvitation, acceptedRequest, scheduledTrial, acceptedTrial, session, preP4bTrial, workedTrial, cancelledTrial, report, CASES, persisted, T, saveFixture, fixtureDb } from './recruitmentTestFixtures.mjs';
+import { legacyTrialRequest, contactRequest, openDayRequest, p4bInvitation, minorInvitation, acceptedRequest, scheduledTrial, acceptedTrial, session, preP4bTrial, workedTrial, cancelledTrial, report, CASES, persisted, T, saveFixture } from './recruitmentTestFixtures.mjs';
 
 let passed = 0;
 const only = process.env.TEST_ONLY || '';
@@ -32,7 +33,6 @@ const TABLES = rec.RECRUITMENT_TABLES;
 const second = (dir) => new DatabaseSync(dbFile(dir), { readOnly: true });
 const withRo = (dir, fn) => { const s = second(dir); try { return fn(s); } finally { s.close(); } };
 const plain = (v) => JSON.parse(JSON.stringify(v));
-const fullDump = (s) => JSON.stringify(s.prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").all().map((r) => [r.name, s.prepare(`SELECT * FROM "${r.name}"`).all().map((x) => ({ ...x }))]));
 const recDump = (s) => JSON.stringify(TABLES.map((t) => s.prepare(`SELECT * FROM ${t} ORDER BY rowid`).all().map((r) => ({ ...r }))));
 const ddlOf = (s, t) => s.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?").get(t)?.sql ?? null;
 const col = (s, sql, ...p) => { const r = s.prepare(sql).get(...p); return r ? Object.values({ ...r })[0] : undefined; };
@@ -54,28 +54,24 @@ function fixtureCollections({ requests, trials, cases = CASES(), channels = [CHA
 }
 const file = (tag, fixture = FIX()) => saveFixture(tempDir(`s8a-${tag}`), fixtureCollections(fixture));
 const refused = (fn, pattern, label = '') => { let err = null; try { fn(); } catch (e) { err = e; } assert.ok(err, `${label}: expected a refusal`); assert.match(String(err.message), pattern, `${label}: ${err.message}`); assert.doesNotMatch(String(err.message), /Adult Signup|Come and train|Gate B|Harbour Road|Quick feet/, `${label}: ids only, never a name, a message or an address`); return err; };
-/** Save the fixtures, with `over`, into a new database and expect the save refused, atomically, twice. */
+const RECRUITMENT_ROWS = (s) => TABLES.concat(['recruitment_cases', 'channels']).reduce((n, t) => n + col(s, `SELECT count(*) FROM ${t}`), 0);
+/** Write the fixtures into a new database and expect the write refused, atomically: no recruitment row written. */
 const refusedSave = (tag, fixture, pattern) => {
-  const d = tempDir(`s8a-ref-${tag}`); const st = openStore(d); const before = fullDump(st.sqlite);
-  for (const label of [tag, `${tag} (again)`]) { refused(() => st.save({ savedAt: NOW, idCounter: 1000, db: fixtureDb(fixtureCollections(fixture)) }), pattern, label); assert.equal(st.sqlite.isTransaction, false); assert.equal(fullDump(st.sqlite), before, `${label}: nothing written`); }
-  st.sqlite.close(); rm(d);
+  const d = tempDir(`s8a-ref-${tag}`);
+  const err = refused(() => saveFixture(d, fixtureCollections(fixture)), pattern, tag);
+  assert.equal(withRo(d, RECRUITMENT_ROWS), 0, `${tag}: nothing written`); rm(d);
+  return err;
 };
 function serverOpen(dir) {
   const store = openStore(dir, { tableBacked: TABLE_BACKED });
-  const db = {}; // S14a: a fixture-saved file is not a first installation, so there is nothing to hand in
-  const layer = attachDataLayer({ db, store, nextId, sessionTtlMs: TTL, now: () => NOW, warn: () => {} });
-  return { store, layer, db, unit: (w) => store.unitOfWork(w), repo: layer.recruitment, close: () => store.sqlite.close() };
-}
-function snapshotOpen(dir) {
-  const store = openStore(dir); const db = store.load().db;
-  const save = (over = {}, { omit = [] } = {}) => { const d = { ...db, ...over }; for (const k of omit) delete d[k]; return store.save({ savedAt: NOW, idCounter: 1000, db: d }); };
-  return { store, db, save, close: () => store.sqlite.close() };
+  const layer = attachDataLayer({ store, nextId, sessionTtlMs: TTL, now: () => NOW, warn: () => {} });
+  return { store, layer, unit: (w) => store.unitOfWork(w), repo: layer.recruitment, close: () => store.sqlite.close() };
 }
 
 test('[schema] migration 0015 is registered before 0016–0018 and creates the sixteen typed STRICT tables (no lossless side column, the vocabulary CHECKs, the case key immediate and the trial key deferred to COMMIT) and channels with the real request key; a fresh database holds no row and no blob', () => {
   const ids = DATA_MIGRATIONS.map((m) => m.id); assert.ok(ids.indexOf(MIGRATION) >= 0 && ids.indexOf(MIGRATION) < ids.indexOf('0016_recruitment_cases'), '0015 before 0016');
   for (const n of rec.RECRUITMENT_COLLECTIONS) assert.ok(TABLE_BACKED.includes(n), `${n} is table-backed`);
-  const d = tempDir('s8a-fresh'); const f = openStore(d).sqlite;
+  const d = tempDir('s8a-fresh'); const F = openLayer(d); const f = F.sqlite;
   for (const t of TABLES) {
     const sql = ddlOf(f, t); assert.ok(sql, `${t} exists`); assert.match(sql, /STRICT\s*$/, `${t} is STRICT`); assert.equal(col(f, `SELECT count(*) FROM ${t}`), 0);
     for (const c of ['raw_json', 'extra_json', 'absent_keys_json', 'offtype_json']) assert.ok(!f.prepare(`PRAGMA table_info(${t})`).all().some((x) => x.name === c), `${t}: no ${c}`);
@@ -86,12 +82,12 @@ test('[schema] migration 0015 is registered before 0016–0018 and creates the s
   assert.match(ddlOf(f, 'recruitment_requests'), /status IN \('pending','accepted','declined','suspended'\)/); assert.match(ddlOf(f, 'trials'), /workflow_state IN \('legacy_accepted'/); assert.match(ddlOf(f, 'trial_attendance'), /source IN \('checkin','manual'\)/);
   assert.deepEqual(f.prepare('PRAGMA foreign_key_list(channels)').all().map((x) => [x.from, x.table, x.on_delete]).sort(), [['org_id', 'orgs', 'RESTRICT'], ['request_id', 'recruitment_requests', 'RESTRICT']]);
   assert.equal(hasBlobTable(f), false, 'no blob table'); // rewritten in S14a: it described the blob
-  f.close(); rm(d);
+  F.close(); rm(d);
 });
 
-test('[snapshot][typed] every writer shape is typed into its columns and reads back as the typed record (an absent field null, an absent list empty, the trial-day container, the five key lists and the reminder map always present): the P4B invitation (slots, private details, invitation key, recipient), the contact, the open-day literal, the legacy and the minor\'s invitations, the scheduled, accepted, M12-shaped, worked and cancelled trials', () => {
+test('[fixtures][typed] every writer shape is typed into its columns and reads back as the typed record (an absent field null, an absent list empty, the trial-day container, the five key lists and the reminder map always present): the P4B invitation (slots, private details, invitation key, recipient), the contact, the open-day literal, the legacy and the minor\'s invitations, the scheduled, accepted, M12-shaped, worked and cancelled trials', () => {
   const all = EVERY_TRIAL_SHAPE();
-  const d = file('typed', all); const S = snapshotOpen(d);
+  const d = file('typed', all); const S = { db: readRecords(d) };
   assert.deepEqual(plain(S.db.requests), all.requests.map((r) => typed('requests', r)), 'every request reads back as its typed record');
   assert.deepEqual(plain(S.db.trials), all.trials.map((t) => typed('trials', t)), 'every trial reads back as its typed record');
   const worked = S.db.trials.find((t) => t.id === 'trial-worked');
@@ -99,10 +95,10 @@ test('[snapshot][typed] every writer shape is typed into its columns and reads b
   const old = S.db.trials.find((t) => t.id === 'trial-old'); assert.deepEqual(plain(old.day), { staff: [], consents: [], arrival: null, emergency: null, checkins: [], collection: null, statusEvents: [] }, 'a trial without a day reads back with the empty container'); assert.deepEqual(Object.keys(old.keys).sort(), ['attendance', 'cancel', 'complete', 'link', 'schedule']);
   const contact = S.db.requests.find((r) => r.id === 'req-contact'); assert.equal(contact.trialDetails, null); assert.equal(contact.subject, 'Next season');
   const inv = S.db.requests.find((r) => r.id === 'req-p4b'); assert.equal(inv.trialDetails.slots.length, 2); assert.deepEqual(plain(inv.trialDetails.private), { venueAddress: '1 Harbour Road', instructions: 'Gate B, ask for Maria' }); assert.deepEqual(plain(inv.keys.invite), { key: 'client-key-1', fp: 'fp-1' });
-  const before = withRo(d, recDump); S.save(); assert.equal(withRo(d, recDump), before, 'an unchanged snapshot re-saved writes the same rows'); S.close(); rm(d);
+  rm(d);
 });
 
-test('[snapshot][typed] a save STOPS with the ids on a record the tables cannot hold — nothing written, the same save refused again: an unknown field (top level and nested), a status outside the vocabulary, an off-type rev, a trial without its request, a request naming no case, a missing guardian, a request naming a trial that does not name it back, two open trials in one case, alien entries (each one named)', () => {
+test('[fixtures][typed] a write STOPS with the ids on a record the tables cannot hold — nothing written: an unknown field (top level and nested), a status outside the vocabulary, an off-type rev, a trial without its request, a request naming no case, a missing guardian, two open trials in one case, alien entries (each one named)', () => {
   const fix = FIX();
   refusedSave('unknown field', { ...fix, requests: [{ ...fix.requests[0], legacyFlag: true }, ...fix.requests.slice(1)] }, /RECRUITMENT_INPUT_INVALID[\s\S]*req-p4b\.record\.legacyFlag is not a field/);
   refusedSave('unknown nested field', { ...fix, trials: [scheduledTrial({ blockedBy: null, keys: { accept: { key: null, fp: 'x' } } }), fix.trials[1]] }, /trial-1\.record\.blockedBy|trial-1\.keys\.accept/);
@@ -110,22 +106,13 @@ test('[snapshot][typed] a save STOPS with the ids on a record the tables cannot 
   refusedSave('off-type rev', { ...fix, trials: [scheduledTrial({ rev: '3' }), fix.trials[1]] }, /trial-1\.rev must be an integer/);
   refusedSave('trial without its request', { ...fix, trials: [...fix.trials, acceptedTrial({ id: 'trial-orphan', requestId: 'req-ghost' })] }, /FOREIGN KEY|RECRUITMENT_REFERENCE_MISSING[\s\S]*trial-orphan/);
   refusedSave('request naming no case', { ...fix, requests: [...fix.requests, p4bInvitation({ id: 'req-ghost-case', caseId: 'case-ghost', trialId: null })] }, /RECRUITMENT_CASE_MISSING[\s\S]*req-ghost-case → recruitment_cases case-ghost/);
-  refusedSave('missing guardian', { ...fix, requests: [...fix.requests, minorInvitation({ id: 'req-ghost-g', guardianId: 'gd-ghost', recipient: { type: 'guardian', playerId: 'pl-child1', guardianId: 'gd-ghost', minor: true }, caseId: null })] }, /RECRUITMENT_GUARDIAN_MISSING[\s\S]*req-ghost-g → guardians gd-ghost/);
-  refusedSave('pair mismatch', { ...fix, requests: [...fix.requests.map((r) => (r.id === 'req-old' ? { ...r, trialId: 'trial-1' } : r))] }, /RECRUITMENT_PAIR_MISMATCH[\s\S]*req-old → trial-1/);
+  refusedSave('missing guardian', { ...fix, requests: [...fix.requests, minorInvitation({ id: 'req-ghost-g', guardianId: 'gd-ghost', recipient: { type: 'guardian', playerId: 'pl-child1', guardianId: 'gd-ghost', minor: true }, caseId: null })] }, /RECRUITMENT_GUARDIAN_MISSING[\s\S]*req-ghost-g names a guardian that does not exist \(gd-ghost/);
   refusedSave('two open trials in one case', { requests: [...fix.requests, legacyTrialRequest({ id: 'req-second', status: 'accepted', respondedAt: T.accepted, respondedBy: 'player', caseId: 'case-1' })], trials: [...fix.trials, acceptedTrial({ id: 'trial-second', requestId: 'req-second', caseId: 'case-1' })] }, /UNIQUE constraint failed: trials\.case_id/);
-  const e = (() => { const dd = tempDir('s8a-alien'); const st = openStore(dd); try { return refused(() => st.save({ savedAt: NOW, idCounter: 1000, db: fixtureDb(fixtureCollections({ ...fix, trials: [fix.trials[0], null, 'x', 7] })) }), /RECRUITMENT_INPUT_INVALID/, 'alien'); } finally { st.sqlite.close(); rm(dd); } })();
-  for (const n of [1, 2, 3]) assert.match(e.message, new RegExp(`trials entry #${n} is not an object`), `alien entry #${n} named`);
+  for (const alien of [null, 'x', 7]) refusedSave(`alien ${JSON.stringify(alien)}`, { ...fix, trials: [fix.trials[0], alien] }, /RECRUITMENT_INPUT_INVALID/);
 });
 
-test('[snapshot] the collection rule: an omitted collection is retained whole; an array IS the whole final collection (an unlisted trial departs with its children and the request\'s back-reference is cleared, an unlisted request departs after the threads that named it); a request still named by a thread refuses the save with the thread\'s id (CHANNEL_REQUEST_MISSING); Q7a: a missing player is stored and counted, never refused', () => {
-  const d = file('rule'); const S = snapshotOpen(d);
-  S.save({ recruitmentCases: S.db.recruitmentCases }, { omit: ['requests', 'trials'] }); assert.equal(withRo(d, (s) => col(s, 'SELECT count(*) FROM trials')), 2, 'omitted: retained');
-  S.save({ trials: S.db.trials.filter((t) => t.id !== 'trial-1') }, { omit: ['requests'] });
-  withRo(d, (s) => { assert.equal(col(s, "SELECT count(*) FROM trials WHERE id = 'trial-1'"), 0); for (const t of ['trial_schedule_sessions', 'trial_revision_sessions', 'trial_history']) assert.equal(col(s, `SELECT count(*) FROM ${t} WHERE trial_id = 'trial-1'`), 0, `${t}: its rows went with it`); assert.equal(col(s, "SELECT trial_id FROM recruitment_requests WHERE id = 'req-p4b'"), null, 'the retained request\'s back-reference is cleared (SET NULL)'); });
-  refused(() => S.save({ requests: S.db.requests.filter((r) => r.id !== 'req-p4b') }, { omit: ['trials', 'channels'] }), /CHANNEL_REQUEST_MISSING[\s\S]*chan-1/, 'a request removed under its thread');
-  const nowRequests = () => S.db.requests.map((r) => (r.id === 'req-p4b' ? { ...r, trialId: null } : r)); // the request as the tables hold it now (its trial departed)
-  S.save({ requests: nowRequests().filter((r) => r.id !== 'req-contact') }, { omit: ['trials'] }); assert.equal(withRo(d, (s) => col(s, "SELECT count(*) FROM recruitment_requests WHERE id = 'req-contact'")), 0, 'an unlisted request departs');
-  S.save({ requests: [...nowRequests().filter((r) => r.id !== 'req-contact'), contactRequest({ id: 'req-gone-player', playerId: 'pl-gone' })] }, { omit: ['trials'] }); S.close();
+test('[fixtures] Q7a: a request naming a missing player is stored and counted, never refused', () => {
+  const fix = FIX(); const d = file('q7a', { ...fix, requests: [...fix.requests, contactRequest({ id: 'req-gone-player', playerId: 'pl-gone' })] });
   const L = serverOpen(d); assert.equal(L.layer.report().domains.recruitment.unresolvedPlayerReferences.requests, 1, 'the missing player is counted'); L.close(); rm(d);
 });
 
@@ -255,12 +242,12 @@ test('[repository] the deletion unit: tombstoneForPlayer writes every request an
   L.close(); rm(d);
 });
 
-test('[repository] S14i: a player\'s stored profile figure (players.profile_signal) counts the reports filed on their trials: right after a snapshot save, and refreshed by the trial write that files one, in its own unit (a unit that fails leaves it as it was)', () => {
+test('[repository] S14i: a player\'s stored profile figure (players.profile_signal) counts the reports filed on their trials: right after the fixture is written, and refreshed by the trial write that files one, in its own unit (a unit that fails leaves it as it was)', () => {
   const d = file('signal'); const L = serverOpen(d);
   const stored = () => withRo(d, (s) => col(s, "SELECT profile_signal FROM players WHERE id = 'pl-adult'"));
   const derived = () => computeTrustScore(L.layer.players.byId('pl-adult'));
   assert.equal(L.layer.players.byId('pl-adult').trialReports.length, 1, 'the fixture\'s reported trial');
-  assert.equal(stored(), derived(), 'the snapshot save refreshed the figure against the final trials');
+  assert.equal(stored(), derived(), 'the fixture\'s trial writes refreshed the figure');
   const before = stored();
   assert.throws(() => L.unit(() => { L.repo.trials.update('trial-1', (x) => { x.report = report(); }); throw new Error('synthetic unit failure'); }), /synthetic unit failure/);
   assert.equal(stored(), before, 'a failed unit leaves the figure as it was');

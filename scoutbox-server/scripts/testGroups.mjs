@@ -6,16 +6,17 @@
 // while both are members; a grant is created only between members and revoked once; a departure ends a grant only
 // when its owner shares no group with any recipient (not when just the first recipient leaves); the given list pages
 // by cursor and the received list keeps only live grants of fellow members; a rolled-back unit leaves nothing; the
-// db.* names throw; and the snapshot write types, names a missing reference and reads back what it wrote. Temporary
+// db.* names throw; and a fixture written through the repository is typed, names a missing reference and reads back what it wrote. Temporary
 // databases only; nothing touches DATA_DIR.
 // Run with: npm test
 
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { attachDataLayer, DATA_MIGRATIONS, TABLE_BACKED, readTableBacked } from '../repositories/index.mjs';
+import { attachDataLayer, DATA_MIGRATIONS, TABLE_BACKED } from '../repositories/index.mjs';
+import { openLayer, readRecords, writeFixture } from './dataLayerFixture.mjs';
 import { openStore } from '../store.mjs';
 import { NOW, TTL, tempDir, USERS, ORGS } from './coreIdentityTestFixtures.mjs';
-import { saveFixture } from './recruitmentTestFixtures.mjs';
+import { saveFixture, fixtureDb } from './recruitmentTestFixtures.mjs';
 import {
   GROUPS_MIGRATION as MIGRATION, GROUPS_TABLES as TABLES, GROUPS_COLLECTIONS as COLLECTIONS,
   typeGroup, typeGrant, typeExpiresDays, grantExpiry,
@@ -45,10 +46,8 @@ const grant = (over = {}) => ({
 const FIX = () => ({ users: [...USERS()], orgs: [...ORGS(), club(B, 'Hackney Marsh'), club(C, 'Northside')], notifications: [], dispatches: [] });
 function serverOpen(dir) {
   const store = openStore(dir, { tableBacked: TABLE_BACKED });
-  const db = {}; // S14a: a fixture-saved file is not a first installation, so there is nothing to hand in
-  const layer = attachDataLayer({ db, store, nextId, persist: () => {}, sessionTtlMs: TTL, now: () => NOW, warn: () => {} });
-  const snapshot = () => ({ savedAt: NOW, idCounter: 1000, db });
-  return { store, db, repo: layer.groups, unit: (w) => store.unitOfWork(w, { snapshot }), close: () => store.sqlite.close() };
+  const layer = attachDataLayer({ store, nextId, sessionTtlMs: TTL, now: () => NOW, warn: () => {} });
+  return { store, repo: layer.groups, unit: (w) => store.unitOfWork(w), close: () => store.sqlite.close() };
 }
 const seeded = (label) => { const dir = tempDir(label); saveFixture(dir, FIX()); return { dir, s: serverOpen(dir) }; };
 /** A group with A (admin), B and C as members. */
@@ -62,7 +61,7 @@ test('[schema] 0036 is registered after 0035 and creates the STRICT tables (no J
   const ids = DATA_MIGRATIONS.map((m) => m.id);
   assert.equal(ids.indexOf(MIGRATION), ids.indexOf('0035_enterprise') + 1);
   for (const n of COLLECTIONS) assert.ok(TABLE_BACKED.includes(n), `${n} is table-backed`);
-  const dir = tempDir('s13c-empty'); const s = openStore(dir).sqlite;
+  const dir = tempDir('s13c-empty'); const s = openLayer(dir).sqlite;
   for (const t of TABLES) {
     const sql = s.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?").get(t).sql;
     assert.match(sql, /STRICT\s*$/, `${t} is STRICT`);
@@ -161,7 +160,7 @@ test('[departure] a grant ends only when its owner shares no group with any reci
   s.close(); rm(dir);
 });
 
-// ------------------------------------------------------------- units, retirement, snapshot
+// ------------------------------------------------------------- units, retirement, fixtures
 test('[unit] a rolled-back unit leaves nothing', () => {
   const { dir, s } = seeded('s13c-unit');
   assert.throws(() => s.unit(() => { s.repo.groups.create(group()); s.repo.groups.invite('grp-1', { orgId: B, invitedBy: A, at: NOW }); throw new Error('boom'); }), /boom/);
@@ -171,21 +170,44 @@ test('[unit] a rolled-back unit leaves nothing', () => {
   s.close(); rm(dir);
 });
 
-test('[snapshot] the write types every record, names a missing reference, and reads back what it wrote', () => {
-  const dir = tempDir('s13c-snapshot');
+/**
+ * Groups and grants written the way the routes write them: a group is created with its admin as its one member, then
+ * each other member is invited by the admin and accepts, the open invites are sent, the templates shared and the
+ * programmes added; a grant is created live and then revoked.
+ */
+const WRITERS = {
+  groups: (L, records) => {
+    for (const { memberOrgIds, pendingInvites = [], sharedTemplateIds = [], programmes = [], ...g } of records) {
+      const [admin] = g.adminOrgIds;
+      L.groups.groups.create({ ...g, memberOrgIds: [admin], pendingInvites: [], sharedTemplateIds: [], programmes: [] });
+      for (const orgId of memberOrgIds.filter((o) => o !== admin)) { L.groups.groups.invite(g.id, { orgId, invitedBy: admin, at: g.createdAt }); L.groups.groups.accept(g.id, orgId); }
+      for (const i of pendingInvites) L.groups.groups.invite(g.id, i);
+      for (const t of sharedTemplateIds) L.groups.groups.shareTemplate(g.id, t);
+      for (const p of programmes) L.groups.groups.addProgramme(g.id, p);
+    }
+  },
+  groupGrants: (L, records) => {
+    for (const { revokedAt = null, revokeReason = null, ...g } of records) {
+      L.groups.grants.create({ ...g, revokedAt: null, revokeReason: null });
+      if (revokedAt !== null) L.groups.grants.revoke(g.id, { at: revokedAt, reason: revokeReason });
+    }
+  },
+};
+const write = (dir, records) => writeFixture(dir, records, { now: NOW, writers: WRITERS });
+test('[fixtures] a record written through the repository is typed, a missing reference is named, a refused write leaves nothing, and the records read back as written', () => {
+  const dir = tempDir('s13c-fix');
   const full = group({ memberOrgIds: [A, B], pendingInvites: [{ orgId: C, invitedBy: A, at: NOW }], sharedTemplateIds: ['tpl-1'], programmes: [{ id: 'pgm-1', name: 'U14', region: 'North', createdAt: NOW }] });
   const ended = grant({ revokedAt: NOW + 1, revokeReason: 'revoked_by_owner' });
-  saveFixture(dir, { ...FIX(), groups: [full], groupGrants: [ended] });
-  const store = openStore(dir);
-  const back = readTableBacked(store.sqlite);
+  write(dir, fixtureDb({ ...FIX(), groups: [full], groupGrants: [ended] }));
+  const back = readRecords(dir);
   assert.deepEqual(plain(back.groups), [plain(full)]);
   assert.deepEqual(plain(back.groupGrants), [plain(ended)]);
-  const snap = store.load();
-  refused(() => store.save({ ...snap, db: { ...snap.db, groupGrants: [grant({ groupId: 'grp-none' })] } }), /GROUPS_REFERENCE_MISSING.*grp-none/);
-  refused(() => store.save({ ...snap, db: { ...snap.db, groups: [group({ memberOrgIds: [A, 'org-none'] })] } }), /GROUPS_REFERENCE_MISSING.*org-none/);
-  refused(() => store.save({ ...snap, db: { ...snap.db, groups: [{ ...group(), youAdmin: true }] } }), /GROUPS_IMPORT_BLOCKED.*does not store: youAdmin/);
-  assert.deepEqual(readTableBacked(store.sqlite).groups.map((g) => g.memberOrgIds), [[A, B]], 'a refused write changed nothing');
-  store.sqlite.close(); rm(dir);
+  refused(() => write(dir, { groupGrants: [grant({ id: 'gnt-2', groupId: 'grp-none' })] }), /GROUPS_REFERENCE_MISSING.*grp-none/);
+  refused(() => write(dir, { groups: [group({ id: 'grp-2', memberOrgIds: [A, 'org-none'] })] }), /GROUPS_REFERENCE_MISSING.*org-none/);
+  refused(() => write(dir, { groups: [{ ...group({ id: 'grp-3' }), youAdmin: true }] }), /GROUPS_INPUT_INVALID.*does not store: youAdmin/);
+  const after = readRecords(dir);
+  assert.deepEqual([after.groups.map((g) => g.id), after.groupGrants.map((g) => g.id)], [['grp-1'], ['gnt-1']], 'a refused write changed nothing');
+  rm(dir);
 });
 
 console.log(`\n${passed} groups checks passed`);

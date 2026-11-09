@@ -1,12 +1,11 @@
 // S8c — recruitment contacts and offers as typed tables with EXPLICIT writes (repositories/recruitmentContactsOffers.mjs,
 // migration 0017; docs/architecture/migration.md §4.3). What this suite proves: the migration creates the ten typed
-// tables (no lossless side column, the deferred case and request keys); a snapshot save (fixtures, tools) types every
-// field into its column and reads back the typed record, stops on a record it cannot type and names every missing
-// reference with ids; the player references are counted, never refused (Q8c-a), and a missing guardian is refused
-// (Q8c-b); the repository's operations write rows at once and return fresh read-only records; there is no db.* view
+// tables (no lossless side column, the deferred case and request keys); a fixture written through the repository types
+// every field into its column and reads back the typed record, stops on a record it cannot type and names every missing
+// reference with ids; the player references are counted, never refused (Q8c-a); the repository's operations write rows at once and return fresh read-only records; there is no db.* view
 // (§4.3 step 2: a reader naming one throws) and every query matches a scan of the tables; a unit of work rolls the rows
 // back and a read inside it sees its own writes; a contact may name a request the staged S8a repository writes at the
-// same unit's COMMIT; the deletion unit's redactions; a partial, an empty and a departing snapshot write.
+// same unit's COMMIT; the deletion unit's redactions.
 // Temporary databases only; nothing touches DATA_DIR. Run with: npm test
 import assert from 'node:assert/strict';
 import { checkHistoryFeed } from './historyFeedCheck.mjs';
@@ -14,10 +13,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { runDataMigrations } from '../repositories/database.mjs';
-import { attachDataLayer, DATA_MIGRATIONS, TABLE_BACKED, readTableBacked } from '../repositories/index.mjs';
+import { attachDataLayer, DATA_MIGRATIONS, TABLE_BACKED } from '../repositories/index.mjs';
 import { openStore } from '../store.mjs';
+import { openLayer, readRecords } from './dataLayerFixture.mjs';
 import { NOW, TTL, tempDir, hasBlobTable } from './coreIdentityTestFixtures.mjs';
-import { p4bInvitation, minorInvitation, acceptedRequest, scheduledTrial, legacyTrialRequest, saveFixture, fixtureDb } from './recruitmentTestFixtures.mjs';
+import { p4bInvitation, minorInvitation, acceptedRequest, scheduledTrial, legacyTrialRequest, saveFixture } from './recruitmentTestFixtures.mjs';
 import { S8B_FIX } from './recruitmentCasesTestFixtures.mjs';
 import { draftContact, respondedContact, nullKeyContact, externalContact, cancelledContact, draftOffer, acceptedOffer, declinedOffer, withdrawnOffer, revision, contactRequest, S8C_FIX, persisted, TX } from './recruitmentContactsOffersTestFixtures.mjs';
 
@@ -43,7 +43,7 @@ const S8A_FIX = () => ({ requests: [acceptedRequest(p4bInvitation(), 'trial-1'),
 /** The typed expectation of a fixture: what every read returns. */
 const typed = (name, raw) => { const t = (name === 'recruitmentContacts' ? mod.typeContact : mod.typeOffer)(persisted(raw)); assert.ok(t.ok, t.reason); return plain(t.record); };
 
-/** The S8a–S8c fixtures as one snapshot; `two` overrides a contact/offer collection (undefined omits it). */
+/** The S8a–S8c fixtures as one fixture; `two` overrides a contact/offer collection (undefined omits it). */
 function fixtureCollections({ more = {}, ...two } = {}) {
   const fix = S8C_FIX(); const db = { ...S8B_FIX(), ...S8A_FIX(), ...more };
   for (const name of COLLECTIONS) { const v = Object.hasOwn(two, name) ? two[name] : fix[name]; if (v !== undefined) db[name] = v; }
@@ -51,30 +51,24 @@ function fixtureCollections({ more = {}, ...two } = {}) {
 }
 const file = (tag, over = {}) => saveFixture(tempDir(`s8c-${tag}`), fixtureCollections(over));
 const refused = (fn, pattern, label = '') => { let err = null; try { fn(); } catch (e) { err = e; } assert.ok(err, `${label}: expected a refusal`); assert.match(String(err.message), pattern, `${label}: ${err.message}`); assert.doesNotMatch(String(err.message), /next season|winter window|Yes please|Too far|Primary Parent|Adult Signup|Spoke on the phone/, `${label}: ids only, never a body, a note, a reply or a name`); return err; };
-/** Save the fixtures, with `over`, into a new database and expect the save refused, atomically, twice. */
+/** Write the fixtures, with `over`, into a new database and expect the write refused, atomically: no recruitment row written. */
 const refusedSave = (tag, over, pattern) => {
-  const d = tempDir(`s8c-ref-${tag}`); const st = openStore(d); const before = fullDump(st.sqlite);
-  for (const label of [tag, `${tag} (again)`]) { refused(() => st.save({ savedAt: NOW, idCounter: 1000, db: fixtureDb(fixtureCollections(over)) }), pattern, label); assert.equal(st.sqlite.isTransaction, false); assert.equal(fullDump(st.sqlite), before, `${label}: nothing written`); }
-  st.sqlite.close(); rm(d);
+  const d = tempDir(`s8c-ref-${tag}`);
+  refused(() => saveFixture(d, fixtureCollections(over)), pattern, tag);
+  assert.equal(withRo(d, (s) => TABLES.concat(['recruitment_cases', 'recruitment_requests', 'trials']).reduce((n, t) => n + col(s, `SELECT count(*) FROM ${t}`), 0)), 0, `${tag}: nothing written`); rm(d);
 };
 function serverOpen(dir) {
   const store = openStore(dir, { tableBacked: TABLE_BACKED });
-  const db = {}; // S14a: a fixture-saved file is not a first installation, so there is nothing to hand in
-  const layer = attachDataLayer({ db, store, nextId, sessionTtlMs: TTL, now: () => NOW, warn: () => {} });
-  return { store, layer, db, unit: (w) => store.unitOfWork(w), repo: layer.recruitmentContactsOffers, recruitment: layer.recruitment, close: () => store.sqlite.close() };
-}
-function snapshotOpen(dir) {
-  const store = openStore(dir); const db = store.load().db;
-  const save = (over = {}, { omit = [] } = {}) => { const d = { ...db, ...over }; for (const k of omit) delete d[k]; return store.save({ savedAt: NOW, idCounter: 1000, db: d }); };
-  return { store, db, save, close: () => store.sqlite.close() };
+  const layer = attachDataLayer({ store, nextId, sessionTtlMs: TTL, now: () => NOW, warn: () => {} });
+  return { store, layer, unit: (w) => store.unitOfWork(w), repo: layer.recruitmentContactsOffers, recruitment: layer.recruitment, close: () => store.sqlite.close() };
 }
 
-// ------------------------------------------------------------- the schema and the typed snapshot
+// ------------------------------------------------------------- the schema and the typed fixtures
 
-test('[schema] migration 0017 is registered before 0018 and creates the ten typed STRICT tables (no lossless side column, the case key immediate and the request key deferred to COMMIT, the vocabulary CHECKs); a fresh database holds no row and no blob; the fixtures written by a snapshot save read back as the typed expectation, their keys as columns and offer_keys rows; the live counters count the historically missing player (Q8c-a); the step never runs twice', () => {
+test('[schema] migration 0017 is registered before 0018 and creates the ten typed STRICT tables (no lossless side column, the case key immediate and the request key deferred to COMMIT, the vocabulary CHECKs); a fresh database holds no row and no blob; the fixtures written through the repository read back as the typed expectation, their keys as columns and offer_keys rows; the live counters count the historically missing player (Q8c-a); the step never runs twice', () => {
   const ids = DATA_MIGRATIONS.map((m) => m.id); assert.ok(ids.indexOf(MIGRATION) >= 0 && ids.indexOf(MIGRATION) < ids.indexOf('0018_signings_follow_ups'));
   for (const n of COLLECTIONS) assert.ok(TABLE_BACKED.includes(n), `${n} is table-backed`);
-  const empty = tempDir('s8c-empty'); const e = openStore(empty).sqlite;
+  const empty = tempDir('s8c-empty'); const E = openLayer(empty); const e = E.sqlite;
   for (const t of TABLES) { assert.ok(tableExistsIn(e, t), `${t} exists`); assert.equal(col(e, `SELECT count(*) FROM ${t}`), 0); assert.match(ddlOf(e, t), /STRICT/); assert.doesNotMatch(ddlOf(e, t), /absent_keys_json|offtype_json|extra_json|raw_json/, `${t} has no lossless side column`); }
   assert.match(ddlOf(e, 'recruitment_contacts'), /case_id TEXT NOT NULL REFERENCES recruitment_cases\(id\) ON DELETE RESTRICT,/);
   assert.match(ddlOf(e, 'recruitment_contacts'), /request_id TEXT REFERENCES recruitment_requests\(id\) DEFERRABLE INITIALLY DEFERRED/);
@@ -82,10 +76,10 @@ test('[schema] migration 0017 is registered before 0018 and creates the ten type
   assert.match(ddlOf(e, 'offer_revisions'), /internal_note TEXT CHECK \(internal_note IS NULL OR length\(internal_note\) <= 2000\)/);
   assert.doesNotMatch(ddlOf(e, 'idempotency_keys'), /'recruitment_contacts'|'recruitment_offers'/, 'the keys are the owners\' own columns');
   assert.equal(hasBlobTable(e), false, 'no blob table'); // rewritten in S14a: it described the blob
-  e.close(); rm(empty);
-  const d = file('schema'); const s = new DatabaseSync(dbFile(d)); s.exec('PRAGMA foreign_keys = ON');
+  E.close(); rm(empty);
+  const d = file('schema'); const back = readRecords(d); const s = new DatabaseSync(dbFile(d)); s.exec('PRAGMA foreign_keys = ON');
   const after = fullDump(s); assert.deepEqual(runDataMigrations(s, DATA_MIGRATIONS, { now: NOW, context: { sessionTtlMs: TTL } }).ran, []); assert.equal(fullDump(s), after, 'never runs twice');
-  const back = readTableBacked(s); const fix = S8C_FIX();
+  const fix = S8C_FIX();
   assert.deepEqual(plain(back.recruitmentContacts), fix.recruitmentContacts.map((c) => typed('recruitmentContacts', c)));
   assert.deepEqual(plain(back.recruitmentOffers), fix.recruitmentOffers.map((o) => typed('recruitmentOffers', o)));
   assert.deepEqual(back.recruitmentContacts[2].keys.send, { key: null, fp: '{"contactId":"rct-3"}' }, 'the null-key send');
@@ -97,10 +91,10 @@ test('[schema] migration 0017 is registered before 0018 and creates the ten type
   s.close(); rm(d);
 });
 
-test('[snapshot][typed] a save STOPS with the id on a record the columns cannot hold — nothing written, the same save refused again: an unknown status, a subject over 120 characters, an unknown field (top level and nested), an off-type rev, a list that is not a list, a current revision the offer does not hold, a response naming another offer\'s revision, two answers to one revision, a receipt naming a missing revision, a present null collection; a guardian that is not in the guardians table (Q8c-b); a contact naming a case or a request that is not there; a contact whose request names another contact', () => {
+test('[fixtures][typed] a write STOPS with the id on a record the columns cannot hold — nothing written: an unknown status, a subject over 120 characters, an unknown field (top level and nested), an off-type rev, a list that is not a list, a current revision the offer does not hold, a response naming another offer\'s revision, two answers to one revision, a receipt naming a missing revision; a contact naming a case or a request that is not there', () => {
   const C = (over) => ({ recruitmentContacts: [draftContact(over)] });
   const O = (o) => ({ recruitmentOffers: [o] });
-  refusedSave('status', C({ status: 'sent' }), /CONTACTS_OFFERS_INPUT_INVALID[\s\S]*recruitmentContacts entry #0 rct-1\.status must be one of draft\|delivered/);
+  refusedSave('status', C({ status: 'sent' }), /CONTACTS_OFFERS_INPUT_INVALID[\s\S]*recruitmentContacts rct-1\.status must be one of draft\|delivered/);
   refusedSave('subject', C({ subject: 'x'.repeat(121) }), /rct-1\.subject exceeds 120 characters/);
   refusedSave('unknown', C({ legacyFlag: 'kept' }), /rct-1\.record\.legacyFlag is not a field this table stores/);
   refusedSave('nested', C({ emailCopy: { state: 'queued', to: 'guardian', outboxId: null, at: NOW, extra: 1 } }), /rct-1\.emailCopy\.extra is not a field this table stores/);
@@ -112,38 +106,15 @@ test('[snapshot][typed] a save STOPS with the id on a record the columns cannot 
   const twice = acceptedOffer(); twice.responses.push({ ...twice.responses[0], id: 'rofa-9', clientKey: null });
   refusedSave('twice', O(twice), /rof-2\.responses answer revision rofr-3 twice/);
   refusedSave('receipt', O(draftOffer({ readReceipts: [{ revisionId: 'rofr-x', viewerKind: 'player', viewerId: 'pl-adult', firstViewedAt: NOW }] })), /rof-1\.readReceipts name rofr-x, not a revision of this offer/);
-  refusedSave('null', { recruitmentOffers: null }, /recruitmentOffers: the snapshot collection must be an array of records \(got null\)/);
-  refusedSave('guardian', { recruitmentContacts: [respondedContact({ recipient: { type: 'guardian', playerId: 'pl-child1', guardianId: 'gd-nobody', minor: true } })] }, /CONTACTS_OFFERS_GUARDIAN_MISSING[\s\S]*recruitment_contacts rct-2 → guardians gd-nobody/);
   refusedSave('actor-empty', { recruitmentOffers: [acceptedOffer({ responses: [{ ...acceptedOffer().responses[0], actorId: '' }] })] }, /rof-2 responses\[0\]\.actorId must not be empty/);
-  const emptyGuardian = acceptedOffer(); emptyGuardian.revisions[0].recipientSnapshot.guardianId = '';
-  refusedSave('guardian-empty', { recruitmentOffers: [emptyGuardian] }, /recruitment_offers rof-2 → guardians ""/);
   refusedSave('case', C({ caseId: 'case-nowhere' }), /CONTACTS_OFFERS_REFERENCE_MISSING[\s\S]*recruitment_contacts holds 1 row\(s\) naming a recruitment_cases row that is not there \(rct-1 → recruitment_cases case-nowhere\)/);
-  refusedSave('request', C({ status: 'delivered', requestId: 'req-nowhere', recipient: { type: 'player', playerId: 'pl-adult', guardianId: null, minor: false } }), /rct-1 → recruitment_requests/);
-  refusedSave('pair', { recruitmentContacts: [nullKeyContact()], more: { requests: [acceptedRequest(p4bInvitation({ contactId: 'rct-other' }), 'trial-1'), minorInvitation(), legacyTrialRequest()] } }, /CONTACT_REQUEST_MISMATCH[\s\S]*rct-3 → req-p4b/);
-});
-
-test('[snapshot] the collection rule: an omitted collection is retained whole; an array IS the whole final collection (an unlisted record departs with its history, keys and children); `[]` empties it; the departures land atomically with the arrivals and a reopen reads the same', () => {
-  const d = file('coll'); const S = snapshotOpen(d);
-  const offersBefore = withRo(d, (s) => s.prepare('SELECT * FROM offer_revisions ORDER BY rowid').all().map((r) => ({ ...r })));
-  S.save({ recruitmentContacts: [draftContact(), respondedContact()] }, { omit: ['recruitmentOffers'] });
-  withRo(d, (s) => {
-    assert.deepEqual(s.prepare('SELECT id FROM recruitment_contacts ORDER BY rowid').all().map((r) => r.id), ['rct-1', 'rct-2']);
-    assert.equal(col(s, "SELECT count(*) FROM contact_history WHERE contact_id IN ('rct-3','rct-4','rct-5')"), 0, 'the departed contacts\' history went with them');
-    assert.deepEqual(s.prepare('SELECT * FROM offer_revisions ORDER BY rowid').all().map((r) => ({ ...r })), offersBefore, 'the omitted offers are retained whole');
-  });
-  S.save({ recruitmentOffers: [] }, { omit: ['recruitmentContacts'] });
-  withRo(d, (s) => { for (const t of ['recruitment_offers', 'offer_revisions', 'offer_revision_documents', 'offer_responses', 'offer_read_receipts', 'offer_history', 'offer_keys']) assert.equal(col(s, `SELECT count(*) FROM ${t}`), 0, `${t} emptied`); assert.equal(col(s, 'SELECT count(*) FROM recruitment_contacts'), 2); });
-  S.close();
-  const R = snapshotOpen(d); assert.deepEqual(plain(R.db.recruitmentContacts), [typed('recruitmentContacts', draftContact()), typed('recruitmentContacts', respondedContact())]); assert.deepEqual(R.db.recruitmentOffers, []); R.close(); rm(d);
+  refusedSave('request', C({ status: 'delivered', requestId: 'req-nowhere', recipient: { type: 'player', playerId: 'pl-adult', guardianId: null, minor: false } }), /FOREIGN KEY constraint failed/); // the deferred request key, at COMMIT
 });
 
 // ------------------------------------------------------------- the repository
 
 test('[repository] explicit writes: there is no db.* view (reading or assigning db.recruitmentContacts / db.recruitmentOffers throws, naming the repository); every returned record is read-only (a field assignment and a nested push throw); create and update write their rows at once — a second connection sees them with no save — and return the fresh record; update hands out a plain copy, types the result whole and refuses junk, a changed identifier and an unknown id; nothing is written by a save; a reopen serves the same records', () => {
   const d = file('repo'); const L = serverOpen(d); const { contacts, offers } = L.repo;
-  for (const name of COLLECTIONS) {
-    assert.equal(Object.keys(L.db).includes(name), false, `${name} is not enumerable on db`);
-  }
   assert.throws(() => { contacts.byId('rct-1').status = 'cancelled'; }, TypeError);
   assert.throws(() => { offers.byId('rof-2').revisions[0].documents.push({}); }, TypeError);
   const created = contacts.create(draftContact({ id: 'rct-new', keys: { create: null, send: null, record: null }, history: [] }));

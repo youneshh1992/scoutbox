@@ -1,5 +1,5 @@
 // Unit tests for the relational data layer (repositories/): the table
-// migration runner, the read-only views and the snapshot store's table-backed exclusions. Everything runs on
+// migration runner, the read-only views and the store's tables. Everything runs on
 // an in-memory or throwaway SQLite database. Run with: npm test
 import { SCOUTING_ASSESSMENTS_TABLES } from '../repositories/scoutingAssessments.mjs';
 import { CLUB_SETUP_TABLES } from '../repositories/clubSetup.mjs';
@@ -16,6 +16,7 @@ import { RECRUITMENT_CASES_TABLES } from '../repositories/recruitmentCases.mjs';
 import { RECRUITMENT_CONTACTS_OFFERS_TABLES } from '../repositories/recruitmentContactsOffers.mjs';
 import { SIGNINGS_FOLLOWUPS_TABLES } from '../repositories/signingsFollowUps.mjs';
 import { openStore } from '../store.mjs';
+import { writeFixture, readRecords, openLayer } from './dataLayerFixture.mjs';
 import { hasBlobTable } from './coreIdentityTestFixtures.mjs';
 
 let passed = 0;
@@ -82,9 +83,8 @@ test('schema report: names tables and counts, never rows', () => {
 test('attachDataLayer: the staff are written through their repository; every table is live', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sb-layer-'));
   const store = openStore(dir, { tableBacked: TABLE_BACKED });
-  const db = {};
   // Staff are never seeded (S14a: there is no users array to import); they are written through the repository.
-  const layer = attachDataLayer({ db, seed: { orgs: [ORG_O] }, store, nextId, persist: () => {} });
+  const layer = attachDataLayer({ seed: { orgs: [ORG_O] }, store, nextId });
   assert.deepEqual(layer.boot.users, { engine: 'sqlite', rows: 0 });
   layer.users.create({ orgId: 'o', name: 'A', role: 'Scout' });
   assert.equal(layer.users.count(), 1);
@@ -96,51 +96,35 @@ test('attachDataLayer: the staff are written through their repository; every tab
   assert.deepEqual(layer.report().mediaDeletions, { queued: 0, conflicts: 0 });
   store.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
 });
-test('store: a snapshot that carries players without guardians, or a collection with no table, is refused and nothing is written; server mode neither loads nor writes snapshots', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sb-store-'));
-  const PLAYER = { id: 'p', name: 'P', dob: '2001-01-01', country: 'GB', medical: { shared: false, records: [], conditionStatus: 'unknown' } };
-  let store = openStore(dir);
-  // (A snapshot that carries players carries guardians: the identity pair is coupled, see checkTableBackedShapes.)
-  assert.throws(() => store.save({ idCounter: 1000, db: { players: [PLAYER], users: [] } }), /players: a snapshot that carries players must carry guardians too/);
-  // Rewritten in S14a: a collection without a table used to become a blob; now it is refused and nothing lands.
-  assert.throws(() => store.save({ idCounter: 1001, db: { players: [PLAYER], guardians: [], notes: [{ id: 'n1' }] } }), (e) => e.code === 'SNAPSHOT_COLLECTION_UNKNOWN' && /notes/.test(e.message));
-  assert.equal(store.sqlite.prepare('SELECT COUNT(*) AS n FROM players').get().n, 0, 'nothing of the refused snapshot landed');
-  assert.equal(hasBlobTable(store.sqlite), false, 'there is no blob table');
-  store.sqlite.close();
-  store = openStore(dir, { tableBacked: TABLE_BACKED });
-  attachDataLayer({ db: {}, store, nextId, persist: () => {} });
-  assert.equal(store.sqlite.prepare('SELECT COUNT(*) AS n FROM players').get().n, 0, 'a server-mode save leaves the tables to their repositories');
-  assert.throws(() => store.load(), /snapshot mode operation/);
-  store.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
-});
-test('store (snapshot mode): load merges table-backed collections in from their tables and save writes them back there', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sb-snap-'));
-  // A server boot: the table exists and holds one row; the blob is gone.
+test('store: the tables read back as the records the server sees, a staff change written through the repository lands in the tables, and the next boot reads exactly that', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sb-records-'));
+  // A server boot: the table exists and holds one row; there is no blob.
   const server = openStore(dir, { tableBacked: TABLE_BACKED });
   const PLAYER = { id: 'p', name: 'P', dob: '2001-01-01', country: 'GB', medical: { shared: false, records: [], conditionStatus: 'unknown' } };
-  const db = {};
-  const first = attachDataLayer({ db, seed: { players: [PLAYER], guardians: [], orgs: [ORG_O] }, store: server, nextId, persist: () => {} });
+  const first = attachDataLayer({ seed: { players: [PLAYER], guardians: [], orgs: [ORG_O] }, store: server, nextId });
   const usr1 = first.users.create({ orgId: 'o', name: 'A', role: 'Scout' });
   server.sqlite.close();
-  // A tool reading the file as one snapshot sees the staff rows as before, and the players from their table (S4a).
-  const tool = openStore(dir);
-  const snap = tool.load();
-  assert.deepEqual(snap.db.users, [{ id: usr1.id, orgId: 'o', name: 'A', role: 'Scout', email: null, ssoSubject: null, createdAt: usr1.createdAt, removedAt: null, removedById: null, provenance: null, mfa: null, deliveryPrefs: { quietStart: null, quietEnd: null, channels: { email: true } } }]);
-  assert.deepEqual(snap.db.players, [{ ...PLAYER, city: null, position: null, foot: null, heightCm: null, weightKg: null, squadNumber: null, contractUntil: null, marketValueRange: null, agentName: null, academyPlus: false, firstTeamSeeker: false, availability: 'not_seeking', contractStatus: 'unknown', level: 'amateur', footballCategory: null, identityVerified: false, guardianId: null, createdAt: null, location: null, stats: null, notificationPrefs: null, programme: null, media: [], attendance: [], timeline: [], badges: [], drills: [], drillResults: [], activityLog: [], externalIds: [], seasonHistory: [], password: null }]); // S14h: every field on every record (null or false when unset), the password hash beside it in snapshot form; every list on every record (S5 typed tables)
-  assert.deepEqual(snap.db.guardians, []);
-  // Writing a changed snapshot lands in the table, not in a blob.
-  snap.db.users.push({ id: 'usr-2', orgId: 'o', name: 'B', role: 'Manager', createdAt: 2, mfa: { secretB32: 'SECRETSECRETSECRET', enabledAt: 3, recoveryHashes: ['a'.repeat(64)] } });
-  snap.db.users[0].role = 'Director';
-  tool.save(snap);
-  assert.equal(hasBlobTable(tool.sqlite), false, 'rewritten in S14a: every collection is a table; there is no blob');
-  assert.deepEqual(tool.sqlite.prepare('SELECT id, role, mfa_secret, mfa_enabled_at FROM org_users ORDER BY rowid').all().map((r) => ({ ...r })),
-    [{ id: usr1.id, role: 'Director', mfa_secret: null, mfa_enabled_at: null }, { id: 'usr-2', role: 'Manager', mfa_secret: 'SECRETSECRETSECRET', mfa_enabled_at: 3 }]);
-  assert.deepEqual(tool.sqlite.prepare('SELECT org_user_id, code_hash FROM org_user_recovery_codes').all().map((r) => ({ ...r })), [{ org_user_id: 'usr-2', code_hash: 'a'.repeat(64) }]);
-  tool.sqlite.close();
+  // Read back, the staff rows and the players are the records (S4a).
+  const back = readRecords(dir);
+  assert.deepEqual(back.users, [{ id: usr1.id, orgId: 'o', name: 'A', role: 'Scout', email: null, ssoSubject: null, createdAt: usr1.createdAt, removedAt: null, removedById: null, provenance: null, mfa: null, deliveryPrefs: { quietStart: null, quietEnd: null, channels: { email: true } } }]);
+  assert.deepEqual(back.players, [{ ...PLAYER, city: null, position: null, foot: null, heightCm: null, weightKg: null, squadNumber: null, contractUntil: null, marketValueRange: null, agentName: null, academyPlus: false, firstTeamSeeker: false, availability: 'not_seeking', contractStatus: 'unknown', level: 'amateur', footballCategory: null, identityVerified: false, guardianId: null, createdAt: null, location: null, stats: null, notificationPrefs: null, programme: null, media: [], attendance: [], timeline: [], badges: [], drills: [], drillResults: [], activityLog: [], externalIds: [], seasonHistory: [], password: null }]); // S14h: every field on every record (null or false when unset), the password hash beside it; every list on every record (S5 typed tables)
+  assert.deepEqual(back.guardians, []);
+  // A new staff member with MFA enabled, and a role change, written through the repository in one unit.
+  const L = openLayer(dir);
+  try {
+    L.unit(() => {
+      L.layer.users.create({ id: 'usr-2', orgId: 'o', name: 'B', role: 'Manager', createdAt: 2 });
+      L.layer.users.startMfa('usr-2', 'SECRETSECRETSECRET'); L.layer.users.enableMfa('usr-2', { at: 3, recoveryHashes: ['a'.repeat(64)] });
+      L.layer.users.update(usr1.id, (d) => { d.role = 'Director'; });
+    });
+    assert.equal(hasBlobTable(L.sqlite), false, 'rewritten in S14a: every collection is a table; there is no blob');
+    assert.deepEqual(L.sqlite.prepare('SELECT id, role, mfa_secret, mfa_enabled_at FROM org_users ORDER BY rowid').all().map((r) => ({ ...r })),
+      [{ id: usr1.id, role: 'Director', mfa_secret: null, mfa_enabled_at: null }, { id: 'usr-2', role: 'Manager', mfa_secret: 'SECRETSECRETSECRET', mfa_enabled_at: 3 }]);
+    assert.deepEqual(L.sqlite.prepare('SELECT org_user_id, code_hash FROM org_user_recovery_codes').all().map((r) => ({ ...r })), [{ org_user_id: 'usr-2', code_hash: 'a'.repeat(64) }]);
+  } finally { L.close(); }
   // And the next server boot reads exactly that.
   const again = openStore(dir, { tableBacked: TABLE_BACKED });
-  const db2 = {};
-  const layer = attachDataLayer({ db: db2, store: again, nextId, persist: () => {} });
+  const layer = attachDataLayer({ store: again, nextId });
   assert.deepEqual(layer.boot.users, { engine: 'sqlite', rows: 2 });
   assert.equal(layer.users.byId(usr1.id).role, 'Director');
   assert.deepEqual(layer.users.byId('usr-2').mfa, { enabledAt: 3 }, 'the record carries the MFA state, never the secret');
@@ -149,19 +133,18 @@ test('store (snapshot mode): load merges table-backed collections in from their 
   assert.equal(layer.players.byId('p').name, 'P');
   again.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
 });
-test('store (snapshot mode): a fixture saved into a new directory is written into the tables, and the first boot attaches to them', () => {
+test('store: a fixture written into a new directory is written into the tables, and the first boot attaches to them', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sb-fixture-'));
-  const tool = openStore(dir);
-  tool.save({ idCounter: 1000, db: { players: [], guardians: [], orgs: [ORG_O], users: [{ id: 'usr-1', orgId: 'o', name: 'A', role: 'Scout', createdAt: 1 }] } });
-  assert.equal(hasBlobTable(tool.sqlite), false, 'no blob: every collection of the fixture has a table');
-  assert.equal(tool.sqlite.prepare('SELECT COUNT(*) AS n FROM org_users').get().n, 1);
-  tool.sqlite.close();
+  writeFixture(dir, { players: [], guardians: [], orgs: [ORG_O], users: [{ id: 'usr-1', orgId: 'o', name: 'A', role: 'Scout', createdAt: 1 }] });
+  { const s = new DatabaseSync(path.join(dir, 'scoutbox.db'), { readOnly: true });
+    assert.equal(hasBlobTable(s), false, 'no blob: every collection of the fixture has a table');
+    assert.equal(s.prepare('SELECT COUNT(*) AS n FROM org_users').get().n, 1);
+    s.close(); }
   const server = openStore(dir, { tableBacked: TABLE_BACKED });
-  const db = {};
-  const layer = attachDataLayer({ db, store: server, nextId, persist: () => {} });
+  const layer = attachDataLayer({ store: server, nextId });
   assert.deepEqual(layer.boot.users, { engine: 'sqlite', rows: 1 });
   assert.equal(layer.users.byId('usr-1').name, 'A');
-  // A saved snapshot is never a first installation: the identity tables are attached, not seeded.
+  // A written fixture is never a first installation again: the identity tables are attached, not seeded.
   assert.deepEqual(layer.boot.identity, { engine: 'sqlite', players: 0, guardians: 0, links: 0, imported: 0 });
   assert.equal(layer.report().identity.initState, 'done');
   server.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });

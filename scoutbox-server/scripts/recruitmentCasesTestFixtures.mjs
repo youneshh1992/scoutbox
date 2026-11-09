@@ -112,3 +112,4 @@ export const S8B_FIX = () => ({
 
 /** JSON shape: a live `undefined` is absence. */
 export const persisted = (v) => JSON.parse(JSON.stringify(v));
+

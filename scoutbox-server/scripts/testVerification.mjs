@@ -11,7 +11,8 @@
 
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { attachDataLayer, DATA_MIGRATIONS, TABLE_BACKED, readTableBacked } from '../repositories/index.mjs';
+import { attachDataLayer, DATA_MIGRATIONS, TABLE_BACKED } from '../repositories/index.mjs';
+import { readRecords, openLayer } from './dataLayerFixture.mjs';
 import { openStore } from '../store.mjs';
 import { NOW, TTL, tempDir } from './coreIdentityTestFixtures.mjs';
 import { saveFixture, ORG, SCOUT } from './recruitmentTestFixtures.mjs';
@@ -64,7 +65,7 @@ test('[schema] 0023 is registered after 0022 and creates the eighteen STRICT tab
   const ids = DATA_MIGRATIONS.map((m) => m.id);
   assert.equal(ids.indexOf(MIGRATION), ids.indexOf('0022_opportunities_campaigns') + 1);
   for (const n of COLLECTIONS) assert.ok(TABLE_BACKED.includes(n), `${n} is table-backed`);
-  const dir = tempDir('s10a-empty'); const s = openStore(dir).sqlite;
+  const dir = tempDir('s10a-empty'); const s = openLayer(dir).sqlite;
   for (const t of TABLES) {
     assert.match(s.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?").get(t).sql, /STRICT\s*$/, `${t} is STRICT`);
     assert.equal(s.prepare(`SELECT count(*) AS n FROM ${t}`).get().n, 0);
@@ -181,21 +182,21 @@ test('[tokens and events] tokens are hashed rows consumed once through the repos
   assert.equal(eventDetail(null, null), null);
 });
 
-test('[snapshot] the snapshot write types every record, names a missing reference with its id, and reads back exactly what it wrote', () => {
-  const dir = tempDir('s10a-snap');
-  refused(() => saveFixture(dir, { verClaims: [claim()], verDisputes: [dispute({ claimId: 'vclm-missing' })] }), /ver_disputes vdsp-1 claimId → ver_claims vclm-missing/, 'missing claim');
-  refused(() => saveFixture(dir, { verClaims: [claim({ metadata: { issueDate: '2026' } })] }), /VERIFICATION_IMPORT_BLOCKED[\s\S]*issueDate/, 'junk metadata');
+test('[fixtures] a record written through the repository is typed (junk refused naming the field, nothing written), a dangling reference is refused by its key, and the records read back as written', () => {
+  const dir = tempDir('s10a-fix');
+  refused(() => saveFixture(dir, { verClaims: [claim()], verDisputes: [dispute({ claimId: 'vclm-missing' })] }), /FOREIGN KEY constraint failed/, 'missing claim');
+  refused(() => saveFixture(tempDir('s10a-fix-junk'), { verClaims: [claim({ metadata: { issueDate: '2026' } })] }), /VERIFICATION_INPUT_INVALID[\s\S]*issueDate/, 'junk metadata');
   rm(dir);
-  const dir2 = tempDir('s10a-snap2');
-  const supplied = { verClaims: [claim({ evidenceIds: ['vevd-1'] })], verEvidence: [evidence({ claimIds: ['vclm-1'] })], verDisputes: [dispute()], orgVerifiedDomains: [{ orgId: ORG.id, domain: 'eastport.example', status: 'verified', method: 'official_domain_email', verifiedAt: NOW, addedBy: 'migration' }] };
+  const dir2 = tempDir('s10a-fix2');
+  // The evidence links itself to its claims as it is created (as the vault route does), so the claim is written without them.
+  const supplied = { verClaims: [claim()], verEvidence: [evidence({ claimIds: ['vclm-1'] })], verDisputes: [dispute()], orgVerifiedDomains: [{ orgId: ORG.id, domain: 'eastport.example', status: 'verified', method: 'official_domain_email', verifiedAt: NOW, addedBy: 'migration' }] };
   saveFixture(dir2, supplied);
-  const s = openStore(dir2).sqlite;
   try {
-    const back = readTableBacked(s);
-    assert.deepEqual(plain(back.verClaims), plain([typeClaim(supplied.verClaims[0]).record]));
+    const back = readRecords(dir2);
+    assert.deepEqual(plain(back.verClaims), plain([typeClaim(claim({ evidenceIds: ['vevd-1'] })).record]));
     assert.deepEqual(plain(back.verEvidence), plain([typeEvidence(supplied.verEvidence[0]).record]));
     assert.equal(back.verDisputes.length, 1); assert.deepEqual(back.orgVerifiedDomains.map((d) => d.domain), ['eastport.example']);
-  } finally { s.close(); rm(dir2); }
+  } finally { rm(dir2); }
 });
 
 console.log(`${passed} verification checks passed`);

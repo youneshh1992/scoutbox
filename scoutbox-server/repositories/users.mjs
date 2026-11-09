@@ -259,8 +259,8 @@ export function createUsersRepository({ sqlite, nextId, unit = null, now = Date.
   const repo = {
     // ---------------------------------------------------------- writes
     /** Create a staff account (the id is minted here). Refuses junk by field and a name, e-mail or SSO subject already taken. Returns the stored record. */
-    create: ({ orgId, name, role, email = null, ssoSubject = null, provenance = null, deliveryPrefs = null, createdAt = now() } = {}) => operation(() => {
-      const r = { id: nextId('usr'), orgId, name, role, email, ssoSubject, createdAt, removedAt: null, removedById: null, provenance, deliveryPrefs: deliveryPrefs ?? DEFAULT_PREFS };
+    create: ({ id = null, orgId, name, role, email = null, ssoSubject = null, provenance = null, deliveryPrefs = null, createdAt = now() } = {}) => operation(() => {
+      const r = { id: id ?? nextId('usr'), orgId, name, role, email, ssoSubject, createdAt, removedAt: null, removedById: null, provenance, deliveryPrefs: deliveryPrefs ?? DEFAULT_PREFS };
       const problems = recordProblems(r);
       if (problems.length) throw invalid(r.id, problems);
       if (!q('SELECT 1 FROM orgs WHERE id = ?').get(orgId)) throw refusal('STAFF_ORG_MISSING', `org_users ${r.id}: organisation ${orgId} does not exist`);

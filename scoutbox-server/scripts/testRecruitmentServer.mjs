@@ -19,7 +19,7 @@ import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import { tempDir } from './coreIdentityTestFixtures.mjs';
 import { readTrials } from '../repositories/recruitment.mjs';
-import { openStore } from '../store.mjs';
+import { openLayer, readRecords } from './dataLayerFixture.mjs';
 
 let passed = 0;
 const only = process.env.TEST_ONLY || '';
@@ -107,12 +107,11 @@ await test('[routes] two stored open-day invitations for one player (the shape t
   const maria = await orgLogin(S); const { pid, token } = await signupAdult(S, 'Open Day Adult'); const flow = await inviteAndAccept(S, maria, pid, token);
   await S.stop();
   assert.ok(noBlobTable(dir), 'no blob table'); // rewritten in S14a: it described the blob
-  // two pending open-day invitations for the same org/player/type and one request of a missing player, written by a
-  // snapshot-mode save (as a tool would); then the backup of that database restored into a NEW directory
-  { const store = openStore(dir); const loaded = store.load(); const base = loaded.db.requests.find((r) => r.id === flow.requestId);
+  // two pending open-day invitations for the same org/player/type and one request of a missing player, written through
+  // the repository (as the open-day outcome route writes them); then the backup of that database restored into a NEW directory
+  { const L = openLayer(dir); const base = L.layer.recruitment.requests.byId(flow.requestId);
     const openDay = (id) => ({ id, playerId: pid, playerName: 'Open Day Adult', orgId: base.orgId, orgName: base.orgName, orgType: base.orgType, orgVerified: base.orgVerified, orgSafeguardingCertified: base.orgSafeguardingCertified, trustedPartner: base.trustedPartner, userId: base.userId, scoutName: base.scoutName, scoutRole: base.scoutRole, type: 'trial', message: 'We liked what we saw at "Open day" — come for a proper trial.', trialDetails: { proposedDate: null, altSlots: [], venue: 'Eastport Ground', notes: 'Follow-up from open day "Open day".' }, status: 'pending', createdAt: base.createdAt + 1, routedTo: 'player', guardianId: null, contactChannel: null });
-    loaded.db.requests = [...loaded.db.requests, openDay('req-od1'), openDay('req-od2'), { ...openDay('req-gone'), playerId: 'pl-gone-long-ago', playerName: 'Gone' }];
-    store.save(loaded); store.sqlite.close(); }
+    try { L.unit(() => { for (const r of [openDay('req-od1'), openDay('req-od2'), { ...openDay('req-gone'), playerId: 'pl-gone-long-ago', playerName: 'Gone' }]) L.layer.recruitment.requests.create(r); }); } finally { L.close(); } }
   S = await boot(dir); const bkp = await S.j('POST', '/admin/backup', {}, null, A); assert.equal(bkp.status, 201, bkp.text); await S.stop();
   const restored = tempDir('s8a-restored'); fs.cpSync(bkp.body.dir, restored, { recursive: true });
   S = await boot(restored);
@@ -155,7 +154,7 @@ await test('[backup] the admin backup is a copy of the database: its requests an
 });
 
 // ------------------------------------------------------------- review of 6d77aa7 (F1)
-await test('[routes] through the real routes: an invitation with a clientKey replays (the same row, idempotent) and conflicts (TRIAL_IDEMPOTENCY_CONFLICT); a reschedule with a clientKey replays across a restart; a snapshot save of an act the routes never write (an unknown act, a prototype-named own act) is refused with the trial\'s id, and the real keys survive a backup and a restore (where the same clientKey still replays)', async () => {
+await test('[routes] through the real routes: an invitation with a clientKey replays (the same row, idempotent) and conflicts (TRIAL_IDEMPOTENCY_CONFLICT); a reschedule with a clientKey replays across a restart; a repository write of an act the routes never write (an unknown act, a prototype-named own act) is refused with the trial\'s id, and the real keys survive a backup and a restore (where the same clientKey still replays)', async () => {
   const dir = tempDir('s8a-f1'); let S = await boot(dir); let maria = await orgLogin(S); const a = await signupAdult(S, 'Keyed Adult');
   const room = await S.j('POST', '/org/rooms', { playerId: a.pid, sourceContext: 'search' }, maria); assert.equal(room.status, 201, room.text); const RID = room.body.room.roomId;
   const jr = (await S.j('GET', `/org/rooms/${RID}/journey`, undefined, maria)).body; if (jr.lifecycle.currentStage === 'watching') { const mv = await S.j('POST', `/org/rooms/${RID}/lifecycle`, { action: 'startReview', expectedRev: jr.case.rev }, maria); assert.equal(mv.status, 200, mv.text); }
@@ -175,23 +174,23 @@ await test('[routes] through the real routes: an invitation with a clientKey rep
   const replayS = async (srv, token, label) => { const t = await srv.j('GET', `/org/rooms/${RID}/trials/${TID}`, undefined, token); const r = await srv.j('POST', `/org/rooms/${RID}/trials/${TID}/reschedule`, RESCHEDULE(t.body.trial?.rev ?? t.body.rev), token); assert.equal(r.status, 200, `${label}: ${r.text}`); assert.equal(r.body.idempotent, true, `${label}: the schedule clientKey replays`); return r; };
   await replayS(S, maria, 'same process');
   await S.stop(); S = await boot(dir); maria = await orgLogin(S); await replayS(S, maria, 'after a restart'); await S.stop();
-  // S8a (§4.3): an act the routes never write (an unknown act, a prototype-named own act) is refused by a snapshot save
-  // with the trial's id — nothing written — and the real keys survive a backup and a restore, where they still replay.
-  { const store = openStore(dir); const loaded = store.load(); const t = loaded.db.trials.find((x) => x.id === TID); assert.ok(t && Array.isArray(t.keys.schedule) && t.keys.schedule[0].key === 'sched-key-1');
-    const before = fullDump(store.sqlite);
-    for (const [label, edit] of [['an unknown act', (k) => { k.extraEmpty = {}; }], ['a prototype-named own act', (k) => { Object.defineProperty(k, '__proto__', { value: { key: 'proto-key', fp: 'proto-fp' }, enumerable: true, writable: true, configurable: true }); }]]) {
-      const copy = JSON.parse(JSON.stringify(loaded)); const ct = copy.db.trials.find((x) => x.id === TID); edit(ct.keys);
-      assert.throws(() => store.save(copy), (e) => e.code === 'RECRUITMENT_INPUT_INVALID' && e.message.includes(TID) && /keys\.(extraEmpty|__proto__)/.test(e.message), `${label} is refused with the trial's id`);
-      assert.equal(fullDump(store.sqlite), before, `${label}: nothing written`);
-    }
-    store.sqlite.close(); }
+  // S8a (§4.3): an act the routes never write (an unknown act, a prototype-named own act) is refused by the trial's
+  // repository update with the trial's id — nothing written — and the real keys survive a backup and a restore, where they still replay.
+  { const L = openLayer(dir); const trials = L.layer.recruitment.trials; const t = trials.byId(TID); assert.ok(t && Array.isArray(t.keys.schedule) && t.keys.schedule[0].key === 'sched-key-1');
+    const before = fullDump(L.sqlite);
+    try {
+      for (const [label, edit] of [['an unknown act', (k) => { k.extraEmpty = {}; }], ['a prototype-named own act', (k) => { Object.defineProperty(k, '__proto__', { value: { key: 'proto-key', fp: 'proto-fp' }, enumerable: true, writable: true, configurable: true }); }]]) {
+        assert.throws(() => trials.update(TID, (x) => { edit(x.keys); }), (e) => e.code === 'RECRUITMENT_INPUT_INVALID' && e.message.includes(TID) && /keys\.(extraEmpty|__proto__)/.test(e.message), `${label} is refused with the trial's id`);
+        assert.equal(fullDump(L.sqlite), before, `${label}: nothing written`);
+      }
+    } finally { L.close(); } }
   const expectKeys = (keys, label) => { assert.ok(Array.isArray(keys.cancel) && keys.cancel.length === 0, `${label}: an act with no key reads back as an empty list`); assert.equal(keys.schedule[0].key, 'sched-key-1', `${label}: the real key`); assert.deepEqual(Object.keys(keys).sort(), ['attendance', 'cancel', 'complete', 'link', 'schedule'], `${label}: the five acts and nothing else`); };
   S = await boot(dir); maria = await orgLogin(S); await replayS(S, maria, 'after the refused edits');
   const bk = await S.j('POST', '/admin/backup', {}, null, A); assert.equal(bk.status, 201, bk.text); await S.stop();
   { const s = new DatabaseSync(path.join(bk.body.dir, 'scoutbox.db'), { readOnly: true }); expectKeys(readTrials(s).find((x) => x.id === TID).keys, 'the backup copy'); s.close(); }
   const restored = tempDir('s8a-f1-restored'); fs.cpSync(bk.body.dir, restored, { recursive: true });
   S = await boot(restored); maria = await orgLogin(S); await replayS(S, maria, 'the restore'); await S.stop();
-  { const store = openStore(restored); expectKeys(store.load().db.trials.find((x) => x.id === TID).keys, 'read back from the restored tables'); store.sqlite.close(); }
+  expectKeys(readRecords(restored).trials.find((x) => x.id === TID).keys, 'read back from the restored tables');
   rm(dir, restored, bk.body.dir);
 });
 
@@ -199,12 +198,11 @@ await test('[paging] the club Requests and Trials lists and both inboxes page ne
   const dir = tempDir('s8a-paging'); let S = await boot(dir);
   const maria = await orgLogin(S); const { pid, token } = await signupAdult(S, 'Paging Adult'); const flow = await inviteAndAccept(S, maria, pid, token);
   await S.stop();
-  { const store = openStore(dir); const loaded = store.load(); const base = loaded.db.requests.find((r) => r.id === flow.requestId);
+  { const L = openLayer(dir); const base = L.layer.recruitment.requests.byId(flow.requestId);
     const pending = (id, i, over = {}) => ({ id, playerId: pid, playerName: 'Paging Adult', orgId: base.orgId, orgName: base.orgName, orgType: base.orgType, orgVerified: base.orgVerified, orgSafeguardingCertified: base.orgSafeguardingCertified, trustedPartner: base.trustedPartner, userId: base.userId, scoutName: base.scoutName, scoutRole: base.scoutRole, type: 'trial', message: 'Synthetic open-day follow-up.', trialDetails: { proposedDate: null, altSlots: [], venue: 'Eastport Ground', notes: 'Synthetic.' }, status: 'pending', createdAt: base.createdAt + 1 + i, routedTo: 'player', guardianId: null, contactChannel: null, ...over });
     const toPlayer = Array.from({ length: 55 }, (_, i) => pending(`req-pg-${String(i).padStart(2, '0')}`, i));
     const toGuardian = Array.from({ length: 3 }, (_, i) => pending(`req-pgg-${i}`, 100 + i, { playerId: 'pl-guni', playerName: 'Guni', routedTo: 'guardian', guardianId: 'gd-amara' }));
-    loaded.db.requests = [...loaded.db.requests, ...toPlayer, ...toGuardian];
-    store.save(loaded); store.sqlite.close(); }
+    try { L.unit(() => { for (const r of [...toPlayer, ...toGuardian]) L.layer.recruitment.requests.create(r); }); } finally { L.close(); } }
   S = await boot(dir);
   const maria2 = await orgLogin(S); const adult = (await S.j('POST', '/auth/player/login', { playerId: pid, password: 'synthetic-pass-1' })).body.token;
   const amara = (await S.j('POST', '/auth/guardian/login', { guardianId: 'gd-amara' })).body.token; const harbour = await orgLogin(S, 'org-harbour', 'Synthetic Scout', 'Scout');

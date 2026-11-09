@@ -41,7 +41,7 @@ import { ROOM_STATUSES, TERMINAL_ROOM_STATUSES, OPEN_ROOM_STATUSES, SOURCE_CONTE
 import { EVENT_NAMES } from '../../domains/platform/eventRegistry.mjs';
 import { CATEGORIES } from '../../domains/platform/notificationPrefs.mjs';
 import { DATA_MIGRATIONS } from '../../repositories/index.mjs';
-import { openStore } from '../../store.mjs';
+import { openLayer } from '../../scripts/dataLayerFixture.mjs';
 import { RATE_LIMIT_POLICY } from '../../domains/platform/rateLimit.mjs';
 import { buildReportingContext } from '../../scripts/recruitmentReadsFixture.mjs'; // §4.3 step 2: the contacts/offers queries over the plain arrays
 
@@ -456,7 +456,7 @@ section('§9 — nothing new is emitted, notified or stored');
   // Rewritten in S14a: N30–N33 ran migrateM20 and the blob's runMigrations in memory; the same claims are now made of
   // the table migrations on a fresh file.
   const MIG_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-m20-mig-'));
-  const readFile = () => { const st = openStore(MIG_DIR); try { return { tables: st.sqlite.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((r) => r.name), ledger: st.sqlite.prepare('SELECT id, applied_at FROM data_migrations ORDER BY id').all() }; } finally { st.sqlite.close(); } };
+  const readFile = () => { const st = openLayer(MIG_DIR); try { return { tables: st.sqlite.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((r) => r.name), ledger: st.sqlite.prepare('SELECT id, applied_at FROM data_migrations ORDER BY id').all() }; } finally { st.close(); } };
   const first = readFile();
   const second = readFile();
   N(30, first.tables.length > 0 && !first.tables.some((t) => /analytic|metric|rollup/i.test(t)),

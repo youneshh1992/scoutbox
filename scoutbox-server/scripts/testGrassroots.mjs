@@ -6,16 +6,17 @@
 // past and unanswered, and deleting it stamps it (it leaves every list, the row and a coverage assignment's key stay);
 // a deleted player's registrations lose the name and keep the id; match days and the organisation's open days page
 // newest first; the friendlies board pages by date with the radius box and an exact filter, and takes one response per
-// club; a rolled-back unit leaves nothing; and the snapshot write types, names a missing
-// reference, refuses to drop an event an assignment names, and reads back what it wrote. Temporary databases only.
+// club; a rolled-back unit leaves nothing; and a fixture written through the repository is typed, names a missing
+// reference and reads back what it wrote. Temporary databases only.
 // Run with: npm test
 
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { attachDataLayer, DATA_MIGRATIONS, TABLE_BACKED, readTableBacked } from '../repositories/index.mjs';
+import { attachDataLayer, DATA_MIGRATIONS, TABLE_BACKED } from '../repositories/index.mjs';
+import { openLayer, readRecords, writeFixture } from './dataLayerFixture.mjs';
 import { openStore } from '../store.mjs';
 import { NOW, TTL, tempDir, USERS, ORGS } from './coreIdentityTestFixtures.mjs';
-import { saveFixture } from './recruitmentTestFixtures.mjs';
+import { saveFixture, fixtureDb } from './recruitmentTestFixtures.mjs';
 import {
   GRASSROOTS_MIGRATION as MIGRATION, GRASSROOTS_TABLES as TABLES, GRASSROOTS_COLLECTIONS as COLLECTIONS,
   typeOpenTrial, typeRegistration, typeMatchday, typeFriendly, boxAround,
@@ -53,10 +54,8 @@ const friendly = (over = {}) => ({ id: 'fr-1', orgId: MOSS, postedByUserId: STAF
 
 function serverOpen(dir) {
   const store = openStore(dir, { tableBacked: TABLE_BACKED });
-  const db = {}; // S14a: a fixture-saved file is not a first installation, so there is nothing to hand in
-  const layer = attachDataLayer({ db, store, nextId, persist: () => {}, sessionTtlMs: TTL, now: () => NOW, warn: () => {} });
-  const snapshot = () => ({ savedAt: NOW, idCounter: 1000, db });
-  return { store, db, repo: layer.grassroots, coverage: layer.insightCoverage, unit: (w) => store.unitOfWork(w, { snapshot }), close: () => store.sqlite.close() };
+  const layer = attachDataLayer({ store, nextId, sessionTtlMs: TTL, now: () => NOW, warn: () => {} });
+  return { store, repo: layer.grassroots, coverage: layer.insightCoverage, unit: (w) => store.unitOfWork(w), close: () => store.sqlite.close() };
 }
 const seeded = (label) => { const dir = tempDir(label); saveFixture(dir, FIX()); return { dir, s: serverOpen(dir) }; };
 
@@ -65,7 +64,7 @@ test('[schema] 0037 is registered after 0036 and creates the STRICT tables (no J
   const ids = DATA_MIGRATIONS.map((m) => m.id);
   assert.equal(ids.indexOf(MIGRATION), ids.indexOf('0036_groups') + 1);
   for (const n of COLLECTIONS) assert.ok(TABLE_BACKED.includes(n), `${n} is table-backed`);
-  const dir = tempDir('s13d-empty'); const s = openStore(dir).sqlite;
+  const dir = tempDir('s13d-empty'); const s = openLayer(dir).sqlite;
   for (const t of TABLES) {
     const sql = s.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?").get(t).sql;
     assert.match(sql, /STRICT\s*$/, `${t} is STRICT`);
@@ -188,29 +187,44 @@ test('[unit] a rolled-back unit leaves nothing', () => {
   s.close(); rm(dir);
 });
 
-// ------------------------------------------------------------- snapshot
-test('[snapshot] the write types every record, names a missing reference, keeps an assigned event, and reads back what it wrote', () => {
-  const dir = tempDir('s13d-snapshot');
+// ------------------------------------------------------------- fixtures
+/**
+ * Open days and friendlies written the way the routes write them: an open day is posted, then each registration made
+ * and answered (then a deletion); a friendly is posted, then answered.
+ */
+const WRITERS = {
+  openTrials: (L, records) => {
+    for (const { registrations = [], deletedAt = null, ...t } of records) {
+      L.grassroots.openTrials.create({ ...t, registrations: [], deletedAt: null });
+      for (const { outcome = null, outcomeNote = null, outcomeAt = null, ...r } of registrations) {
+        L.grassroots.openTrials.register(t.id, r);
+        if (outcome !== null) L.grassroots.openTrials.resolve(t.id, r.id, { outcome, note: outcomeNote, at: outcomeAt });
+      }
+      if (deletedAt !== null) L.grassroots.openTrials.remove(t.orgId, t.id, deletedAt);
+    }
+  },
+  friendlies: (L, records) => {
+    for (const { responses = [], ...f } of records) {
+      L.grassroots.friendlies.create({ ...f, responses: [] });
+      for (const r of responses) L.grassroots.friendlies.respond(f.id, r);
+    }
+  },
+};
+const write = (dir, records) => writeFixture(dir, records, { now: NOW, writers: WRITERS });
+test('[fixtures] a record written through the repository is typed, a missing reference is named, a refused write leaves nothing, and the records read back as written', () => {
+  const dir = tempDir('s13d-fix');
   const full = trial({ registrations: [reg({ outcome: 'invite_trial', outcomeNote: 'Come back', outcomeAt: NOW + 1 })] });
   const resp = friendly({ responses: [{ orgId: LEY, message: 'Yes', respondedByUserId: STAFF.ley, ts: NOW }] });
-  saveFixture(dir, { ...FIX(), openTrials: [full], matchdays: [matchday()], friendlies: [resp] });
-  const store = openStore(dir);
-  const back = readTableBacked(store.sqlite);
+  write(dir, fixtureDb({ ...FIX(), openTrials: [full], matchdays: [matchday()], friendlies: [resp] }));
+  const back = readRecords(dir);
   assert.deepEqual(plain(back.openTrials), [plain(full)]);
   assert.deepEqual(plain(back.matchdays), [plain(matchday())]);
   assert.deepEqual(plain(back.friendlies), [plain(resp)]);
-  const snap = store.load();
-  refused(() => store.save({ ...snap, db: { ...snap.db, matchdays: [matchday({ orgId: 'org-none' })] } }), /GRASSROOTS_REFERENCE_MISSING.*org-none/);
-  refused(() => store.save({ ...snap, db: { ...snap.db, openTrials: [{ ...full, orgName: 'x' }] } }), /GRASSROOTS_IMPORT_BLOCKED.*does not store: orgName/);
-  // an assignment names the friendly: a whole replacement that keeps it is fine, one that drops it is refused
-  store.sqlite.prepare(`INSERT INTO coverage_assignments (id, org_id, fixture_kind, friendly_id, fixture_date, fixture_label, scout_user_id, created_at)
-    VALUES ('cva-1', ?, 'friendly_board', 'fr-1', '2026-12-10', 'Hackney Wick v open invitation', ?, ?)`).run(LEY, STAFF.ley, NOW);
-  const withAssignment = store.load(); // (the earlier snapshot's whole coverageAssignments would delete it first)
-  store.save({ ...withAssignment, db: { ...withAssignment.db, friendlies: [{ ...resp, notes: 'Updated' }] } });
-  assert.equal(readTableBacked(store.sqlite).friendlies[0].notes, 'Updated');
-  refused(() => store.save({ ...withAssignment, db: { ...withAssignment.db, friendlies: [] } }), /coverage assignment still names/);
-  assert.equal(readTableBacked(store.sqlite).friendlies.length, 1, 'a refused write changed nothing');
-  store.sqlite.close(); rm(dir);
+  refused(() => write(dir, { matchdays: [matchday({ id: 'md-2', orgId: 'org-none' })] }), /GRASSROOTS_REFERENCE_MISSING.*org-none/);
+  refused(() => write(dir, { openTrials: [{ ...trial({ id: 'open-2' }), orgName: 'x' }], matchdays: [matchday({ id: 'md-3' })] }), /GRASSROOTS_INPUT_INVALID.*does not store: orgName/);
+  const after = readRecords(dir);
+  assert.deepEqual([after.openTrials.map((t) => t.id), after.matchdays.map((m) => m.id)], [['open-1'], ['md-1']], 'a refused write changed nothing');
+  rm(dir);
 });
 
 console.log(`\n${passed} grassroots checks passed`);

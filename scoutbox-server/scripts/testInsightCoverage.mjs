@@ -7,15 +7,16 @@
 // changed, and keeps one open suggestion per rule; status moves are guarded; a calibration session pins its template
 // version, takes one submission per participant against the rubric's attributes, and pages; an assignment keys its own
 // fixture, keeps targets and warnings as rows, completes once and pages; a rolled-back unit leaves nothing; the db.*
-// names throw; and the snapshot write types, names a missing reference and reads back what it wrote. Temporary
+// names throw; and a fixture written through the repository is typed, names a missing reference and reads back what it wrote. Temporary
 // databases only; nothing touches DATA_DIR. Run with: npm test
 
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { attachDataLayer, DATA_MIGRATIONS, TABLE_BACKED, readTableBacked } from '../repositories/index.mjs';
+import { attachDataLayer, DATA_MIGRATIONS, TABLE_BACKED } from '../repositories/index.mjs';
+import { openLayer, readRecords, writeFixture } from './dataLayerFixture.mjs';
 import { openStore } from '../store.mjs';
 import { NOW, TTL, tempDir, USERS } from './coreIdentityTestFixtures.mjs';
-import { saveFixture, ORG, SCOUT } from './recruitmentTestFixtures.mjs';
+import { saveFixture, fixtureDb, ORG, SCOUT } from './recruitmentTestFixtures.mjs';
 import {
   INSIGHT_COVERAGE_MIGRATION as MIGRATION, INSIGHT_COVERAGE_TABLES as TABLES, INSIGHT_COVERAGE_COLLECTIONS as COLLECTIONS,
   typeExposure, typeSuggestion, typeSession, typeFixture, typePlan, typeAssignment, typeSubmission,
@@ -61,10 +62,8 @@ const assignment = (over = {}) => ({
 const FIX = () => ({ users: [...USERS(), SCOUT2], notifications: [], dispatches: [] });
 function serverOpen(dir) {
   const store = openStore(dir, { tableBacked: TABLE_BACKED });
-  const db = {}; // S14a: a fixture-saved file is not a first installation, so there is nothing to hand in
-  const layer = attachDataLayer({ db, store, nextId, persist: () => {}, sessionTtlMs: TTL, now: () => NOW, warn: () => {} });
-  const snapshot = () => ({ savedAt: NOW, idCounter: 1000, db });
-  return { store, db, repo: layer.insightCoverage, grassroots: layer.grassroots, unit: (w) => store.unitOfWork(w, { snapshot }), close: () => store.sqlite.close() };
+  const layer = attachDataLayer({ store, nextId, sessionTtlMs: TTL, now: () => NOW, warn: () => {} });
+  return { store, repo: layer.insightCoverage, grassroots: layer.grassroots, unit: (w) => store.unitOfWork(w), close: () => store.sqlite.close() };
 }
 const seeded = (label) => { const dir = tempDir(label); saveFixture(dir, FIX()); return { dir, s: serverOpen(dir) }; };
 
@@ -73,7 +72,7 @@ test('[schema] 0033 is registered after 0032 and creates the STRICT tables (no J
   const ids = DATA_MIGRATIONS.map((m) => m.id);
   assert.equal(ids.indexOf(MIGRATION), ids.indexOf('0032_discovery') + 1);
   for (const n of COLLECTIONS) assert.ok(TABLE_BACKED.includes(n), `${n} is table-backed`);
-  const dir = tempDir('s12d-empty'); const s = openStore(dir).sqlite;
+  const dir = tempDir('s12d-empty'); const s = openLayer(dir).sqlite;
   for (const t of TABLES) {
     const sql = s.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?").get(t).sql;
     assert.match(sql, /STRICT\s*$/, `${t} is STRICT`);
@@ -240,26 +239,56 @@ test('[unit] a rolled-back unit leaves nothing', () => {
   s.close(); rm(dir);
 });
 
-test('[snapshot] the write types every record, names a missing reference, and reads back what it wrote', () => {
-  const dir = tempDir('s12d-snapshot');
+/**
+ * Records written the way the routes and jobs write them: a deferral is made, then its reminder marked; a player's
+ * suggestions come from one reconciliation of what the rules found, then each status move; a calibration session is
+ * created open, then each submission and note added (then closed).
+ */
+const WRITERS = {
+  reviewLater: (L, records) => {
+    for (const { remindedAt = null, ...r } of records) {
+      L.insightCoverage.reviewLater.defer({ ...r, remindedAt: null });
+      if (remindedAt !== null) L.insightCoverage.reviewLater.markReminded(r.id, remindedAt);
+    }
+  },
+  evidenceSuggestions: (L, records) => {
+    const byPlayer = Map.groupBy(records, (x) => `${x.orgId}|${x.playerId}`);
+    for (const list of byPlayer.values()) {
+      const ids = list.map((x) => x.id);
+      const [{ orgId, playerId, playerName, createdAt }] = list;
+      L.insightCoverage.suggestions.reconcile({ orgId, playerId, playerName, at: createdAt, mintId: () => ids.shift(), found: list.map((x) => ({ ruleId: x.ruleId, ruleVersion: x.ruleVersion, records: x.records, explanation: x.explanation })) });
+      for (const x of list) if (x.status !== 'suggested') L.insightCoverage.suggestions.setStatus(x.id, x.status, x.status === 'requested' ? x.requestedAt : x.updatedAt);
+    }
+  },
+  calibrationSessions: (L, records) => {
+    for (const { submissions = [], notes = [], status, closedAt = null, ...c } of records) {
+      L.insightCoverage.calibration.create({ ...c, submissions: [], notes: [], status: 'open', closedAt: null });
+      for (const sub of submissions) L.insightCoverage.calibration.submit(c.id, sub);
+      for (const n of notes) L.insightCoverage.calibration.addNote(c.id, n);
+      if (status === 'closed') L.insightCoverage.calibration.close(c.id, closedAt);
+    }
+  },
+};
+const write = (dir, records) => writeFixture(dir, records, { now: NOW, writers: WRITERS });
+test('[fixtures] a record written through the repository is typed, a missing reference is named, a refused write leaves nothing, and the records read back as written', () => {
+  const dir = tempDir('s12d-fix');
   const cal = session({ submissions: [submission(SCOUT2.id, [{ attrId: 'distribution', value: 4, notObserved: false }])], notes: [{ at: NOW, byUserId: SCOUT2.id, byName: 'Tom', text: 'n' }] });
-  saveFixture(dir, {
+  write(dir, fixtureDb({
     ...FIX(),
     exposureEvents: [exposure({ id: 'exp-1' })], reviewLater: [deferral({ id: 'rvl-1' })], evidenceSuggestions: [suggestion()],
     calibrationSessions: [cal], fixtures: [fixture()], coveragePlans: [plan()], coverageAssignments: [assignment()],
-  });
-  const store = openStore(dir);
-  const back = readTableBacked(store.sqlite);
+  }));
+  const back = readRecords(dir);
   assert.deepEqual(plain(back.calibrationSessions), [plain(cal)]);
   assert.deepEqual(plain(back.coverageAssignments), [plain(assignment())]);
   assert.deepEqual(plain(back.evidenceSuggestions), [plain(suggestion())]);
-  const snap = store.load();
-  refused(() => store.save({ ...snap, db: { ...snap.db, coverageAssignments: [assignment({ fixture: { kind: 'own', id: 'fix-none' } })] } }), /INSIGHT_REFERENCE_MISSING.*fix-none/);
-  refused(() => store.save({ ...snap, db: { ...snap.db, calibrationSessions: [session({ submissions: [submission(SCOUT2.id, [{ attrId: 'pace', value: 4 }])] })] } }), /attribute\(s\) its template does not have \(pace\)/);
-  refused(() => store.save({ ...snap, db: { ...snap.db, fixtures: [fixture({ date: '01/10/2026' })] } }), /INSIGHT_IMPORT_BLOCKED.*date/);
-  refused(() => store.save({ ...snap, db: { ...snap.db, exposureEvents: [exposure({ id: 'exp-a' }), exposure({ id: 'exp-b' })] } }), /same organisation, player, kind and day/);
-  assert.deepEqual(readTableBacked(store.sqlite).coverageAssignments.map((a) => a.id), ['cva-1'], 'a refused write changed nothing');
-  store.sqlite.close(); rm(dir);
+  assert.deepEqual(back.reviewLater.map((r) => r.id), ['rvl-1']);
+  refused(() => write(dir, { coverageAssignments: [assignment({ id: 'cva-2', fixture: { kind: 'own', id: 'fix-none' } })] }), /INSIGHT_REFERENCE_MISSING.*fix-none/);
+  refused(() => write(dir, { calibrationSessions: [session({ id: 'cal-2', submissions: [submission(SCOUT2.id, [{ attrId: 'pace', value: 4 }])] })] }), /INSIGHT_INPUT_INVALID.*the rubric has no attribute pace/);
+  refused(() => write(dir, { fixtures: [fixture({ id: 'fix-2', date: '01/10/2026' })] }), /INSIGHT_INPUT_INVALID.*date/);
+  const after = readRecords(dir);
+  assert.deepEqual([after.coverageAssignments.map((a) => a.id), after.calibrationSessions.map((c) => c.id), after.fixtures.map((x) => x.id)], [['cva-1'], ['cal-1'], ['fix-1']], 'a refused write changed nothing');
+  rm(dir);
 });
 
 console.log(`\n${passed} insight and coverage checks passed`);

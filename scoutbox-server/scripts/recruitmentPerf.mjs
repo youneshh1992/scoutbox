@@ -6,7 +6,7 @@
 //    decisions, evidence states, contacts, offers, signing packages, signings, follow-ups and outcome report, plus an
 //    M12 case, a legacy case and a tombstoned one), cloned with fresh ids onto real clubs and players. One club is
 //    busy (BUSY clones); the rest of the clones spread over the other clubs, and one player is in many of them.
-//    The save is a snapshot-mode save, so every record goes through the typed writers.
+//    Every record is written through its repository (scripts/dataLayerFixture.mjs), so it is typed as a route's write is.
 // 2. Boots the real server on that directory and times the hot reads over HTTP (sequential, after a warm-up), for
 //    the busy club, a typical club, the popular player and a guardian.
 // 3. Times one write (a Room comment) and measures what it adds to the write-ahead log, against the size of the
@@ -23,8 +23,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
-import { openStore } from '../store.mjs';
-import { attachDataLayer, TABLE_BACKED } from '../repositories/index.mjs';
+import { openLayer, writeFixture } from './dataLayerFixture.mjs';
 import { createRecruitmentRepository } from '../repositories/recruitment.mjs';
 import { createSigningsFollowUpsRepository } from '../repositories/signingsFollowUps.mjs';
 import { syntheticPopulation } from './perfPopulation.mjs';
@@ -156,21 +155,20 @@ const world = build();
 const sizes = Object.fromEntries(Object.entries(world.db).filter(([, v]) => Array.isArray(v)).map(([k, v]) => [k, v.length]));
 say(`  built in memory in ${fmt(since(t))}`);
 t = t0();
-if (!reuse) { fs.mkdirSync(dir, { recursive: true }); const store = openStore(dir); try { store.save({ savedAt: world.now, idCounter: 1_000_000, db: world.db }); } finally { store.sqlite.close(); } }
+if (!reuse) { fs.mkdirSync(dir, { recursive: true }); writeFixture(dir, world.db, { now: world.now, idCounter: 1_000_000 }); }
 world.db = null; // only the ids are needed from here
 const saveMs = since(t);
 if (reuse) say(`  reusing the database in ${dir}`);
 // sessions are minted through the repository (hashed in the table), as a login would
 const tokens = {};
 {
-  const store = openStore(dir, { tableBacked: TABLE_BACKED });
-  const layer = attachDataLayer({ db: {}, store, nextId: (p) => `${p}-${Math.random().toString(36).slice(2)}`, sessionTtlMs: 30 * DAY, warn: () => {} });
+  const L = openLayer(dir, { nextId: (p) => `${p}-${Math.random().toString(36).slice(2)}`, sessionTtlMs: 30 * DAY }); const { layer } = L;
   tokens.busy = layer.sessions.create('org', world.busy.id, { userId: world.busyUser }).token;
   tokens.typical = layer.sessions.create('org', world.typical.id, { userId: world.typicalUser }).token;
   if (world.grass) tokens.grass = layer.sessions.create('org', world.grass.id, { userId: world.grassUser }).token;
   tokens.player = layer.sessions.create('player', world.popular.id).token;
   tokens.guardian = layer.sessions.create('guardian', world.guardian).token;
-  store.sqlite.close();
+  L.close();
 }
 const ro = new DatabaseSync(path.join(dir, 'scoutbox.db'), { readOnly: true });
 const n = (sql, ...p) => ro.prepare(sql).get(...p).n;

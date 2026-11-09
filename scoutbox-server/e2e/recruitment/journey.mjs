@@ -19,7 +19,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import { DATA_MIGRATIONS } from '../../repositories/index.mjs';
-import { openStore } from '../../store.mjs';
+import { openLayer } from '../../scripts/dataLayerFixture.mjs';
 import { ROOM_STATUSES, TERMINAL_ROOM_STATUSES } from '../../domains/recruitment/rooms/shared.mjs';
 import {
   JOURNEY_STAGES, PIPELINE_STAGES, canonicalStageFor, completedStagesFor, nextActionFor, NEXT_ACTION_CODES, NEXT_ACTIONS,
@@ -151,11 +151,11 @@ async function j(method, url, body, token, extra = {}) {
   let data = null; try { data = await r.json(); } catch { /* non-json */ }
   return { status: r.status, body: data, text: data === null ? null : JSON.stringify(data) };
 }
+// With the server stopped, plant state through the repositories in one unit of work (`mutate` gets the data layer).
 async function offline(mutate) {
   await down(server);
-  const store = openStore(DATA_DIR); const snap = store.load();
-  await mutate(snap.db, snap);
-  store.save({ ...snap, db: snap.db });
+  const L = openLayer(DATA_DIR);
+  try { L.unit(() => mutate(L.layer)); } finally { L.close(); }
   server = await boot();
 }
 const login = async (orgId, scoutName, role, platform) => (await j('POST', '/auth/org/login', { orgId, scoutName, role, ...(platform ? { platform } : {}) })).body;
@@ -449,23 +449,21 @@ const L = {};
   L.offer = await reviewed(maria.token, 'pl-kim');
   L.signed = await reviewed(maria.token, 'pl-tanaka');
   L.broken = await reviewed(maria.token, 'pl-alvarez');
-  const plant = (db, id, chain, extraLast = {}) => {
-    const k = db.recruitmentCases.find((c) => c.id === id);
+  const plant = (layer, id, chain, extraLast = {}, edit = () => {}) => layer.recruitmentCases.cases.update(id, (k) => {
     let prev = k.room.status; let t = Math.max(Date.now(), ...(k.history ?? []).map((h) => Number(h.at) || 0));
     for (const to of chain) { t += H; k.history.push({ id: `hist-p8-${Math.random().toString(36).slice(2, 8)}`, at: t, action: 'room_status_changed', byKind: 'org', byId: 'legacy', byName: 'Legacy Scout', detail: { from: prev, to, reasonCodes: [] , ...(to === chain[chain.length - 1] ? extraLast : {}) } }); prev = to; }
     k.room.status = chain[chain.length - 1];
     k.stage = chain[chain.length - 1] === 'signed' ? 'closed' : 'review';
     k.room.rev = (k.room.rev ?? 1) + chain.length;
-    return k;
-  };
-  await offline((db) => {
-    plant(db, L.contacted, ['contacted']);
-    plant(db, L.trial, ['contacted', 'trial_requested', 'trial_scheduled', 'trial_completed']);
-    plant(db, L.offer, ['offer_consideration', 'offer_made']);
-    const k = plant(db, L.signed, ['offer_consideration', 'offer_made', 'signed']);
-    db.signings.push({ id: 'sign-p8-legacy', orgId: 'org-eastport', playerId: 'pl-tanaka', ts: Date.now() - DAY, method: 'LEGACY_RECORDED', contract: null, scoutUserId: 'legacy', scoutName: 'Legacy Scout', insideAttributionWindow: false });
-    k.links.signingId = 'sign-p8-legacy';
-    plant(db, L.broken, ['contacted'], { contactId: 'rct-gone', trigger: 'contact:rct-gone' });
+    edit(k);
+  });
+  await offline((layer) => {
+    plant(layer, L.contacted, ['contacted']);
+    plant(layer, L.trial, ['contacted', 'trial_requested', 'trial_scheduled', 'trial_completed']);
+    plant(layer, L.offer, ['offer_consideration', 'offer_made']);
+    layer.signingsFollowUps.signings.record({ id: 'sign-p8-legacy', orgId: 'org-eastport', playerId: 'pl-tanaka', ts: Date.now() - DAY, method: 'LEGACY_RECORDED', contract: null, scoutUserId: 'legacy', scoutName: 'Legacy Scout', insideAttributionWindow: false });
+    plant(layer, L.signed, ['offer_consideration', 'offer_made', 'signed'], {}, (k) => { k.links.signingId = 'sign-p8-legacy'; });
+    plant(layer, L.broken, ['contacted'], { contactId: 'rct-gone', trigger: 'contact:rct-gone' });
   });
   await relogin();
   let b = await jb(L.contacted);
@@ -580,7 +578,7 @@ section('H — one writer, one authority: the legacy route, the reopen bridge, t
   // S12c (rewritten: a Second Look item is a typed row naming the decision cycle it belongs to, so the planted item is the
   // writer's whole literal — secondLook.mjs reconcile — on the Room's real decision; the old literal's null decision and
   // made-up trigger are refused by the table).
-  await offline((db) => { db.secondLookItems = [...db.secondLookItems, { id: 'slk-p8-live', orgId: 'org-eastport', playerId: 'pl-martin', roomId: M, decisionId: MDEC, policyVersion: 1, triggerType: 'general_update', changeFingerprints: ['evidence_added:evidence:ev-p8-planted'], directReasonCodes: [], status: 'open', createdAt: Date.now(), updatedAt: Date.now(), latestChangeAt: Date.now(), history: [{ at: Date.now(), action: 'surfaced', by: null }] }]; });
+  await offline((layer) => { layer.discovery.secondLook.create({ id: 'slk-p8-live', orgId: 'org-eastport', playerId: 'pl-martin', roomId: M, decisionId: MDEC, policyVersion: 1, triggerType: 'general_update', changeFingerprints: ['evidence_added:evidence:ev-p8-planted'], directReasonCodes: [], status: 'open', createdAt: Date.now(), updatedAt: Date.now(), latestChangeAt: Date.now(), history: [{ at: Date.now(), action: 'surfaced', by: null }] }); });
   await relogin();
   neg(expect(await j('POST', '/org/second-look/slk-p8-live/reopen-room', { reasonCodes: ['continue_monitoring'] }, maria.token), 409, 'ROOM_NOT_REOPENABLE') && (await stage(M)) === 'offer_accepted', 'H5 Second Look cannot "reopen" a live case: 409 ROOM_NOT_REOPENABLE, the case untouched');
   // Contract truth: the self-service route.

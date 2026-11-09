@@ -33,7 +33,7 @@ import { RATE_LIMIT_POLICY } from '../../domains/platform/rateLimit.mjs';
 import { isAdult, adultAgeFor } from '../../domain.mjs';
 import { isExpiredAt } from '../../temporal.mjs';
 import { canTransitionRecruitmentCase } from '../../domains/recruitment/lifecycle/lifecycle.mjs';
-import { openStore } from '../../store.mjs';
+import { readRecords, writeFixture } from '../../scripts/dataLayerFixture.mjs';
 import { DATA_MIGRATIONS } from '../../repositories/index.mjs';
 import { createEvidenceProvider } from '../../scripts/recruitmentReadsFixture.mjs'; // §4.3 step 2: the contacts/offers queries over the plain arrays
 const LATEST_SCHEMA = Number(DATA_MIGRATIONS.map((m) => m.id).sort().at(-1).slice(0, 4)); // S14a: the latest table migration's number
@@ -147,12 +147,9 @@ async function stop(proc) {
 let server = await boot();
 await stop(server);
 {
-  const store = openStore(DATA_DIR);
-  const snap = store.load();
-  const agency = snap.db.orgs.find((o) => o.type === 'agency');
-  snap.db.orgs.push({ ...structuredClone(agency), id: 'org-southgate', name: 'Southgate Sports Management' });
-  store.save(snap);
-  ok(snap.db.orgs.filter((o) => o.type === 'agency').length === 2, 'fixture: two agencies exist');
+  const { password: _password, ...agency } = readRecords(DATA_DIR).orgs.find((o) => o.type === 'agency'); // the password is not a field of the create
+  writeFixture(DATA_DIR, { orgs: [{ ...structuredClone(agency), id: 'org-southgate', name: 'Southgate Sports Management' }] });
+  ok(readRecords(DATA_DIR).orgs.filter((o) => o.type === 'agency').length === 2, 'fixture: two agencies exist');
 }
 server = await boot();
 async function j(method, url, body, token, extra = {}) {
@@ -764,7 +761,7 @@ section('Y — subject deletion: names nulled, the club\'s record kept, no new w
 {
   const { OID } = globalThis.__T;
   const before = (await getOffer(OID)).body.offer;
-  const storedRow = () => openStore(DATA_DIR).load().db.recruitmentOffers.find((o) => o.id === OID);
+  const storedRow = () => readRecords(DATA_DIR).recruitmentOffers.find((o) => o.id === OID);
   ok(before.status === 'ACCEPTED' && typeof storedRow().responses[0]?.actorName === 'string' && !has(before.responses, 'actorName'), 'Y1 Tanaka accepted earlier: the stored response row names him; the club view never carried the name');
   const del = await j('DELETE', '/player/account', undefined, tanaka.token);
   ok(del.status === 200 && del.body.deleted === true, 'Y2 Tanaka deletes his ScoutBox account');

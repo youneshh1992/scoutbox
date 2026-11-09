@@ -40,7 +40,7 @@ import { RATE_LIMIT_POLICY } from '../../domains/platform/rateLimit.mjs';
 import { DATA_MIGRATIONS } from '../../repositories/index.mjs';
 
 const SCHEMA_VERSION = Number(DATA_MIGRATIONS.map((m) => m.id).sort().at(-1).slice(0, 4)); // the latest table migration's number
-import { openStore } from '../../store.mjs';
+import { openLayer, readRecords } from '../../scripts/dataLayerFixture.mjs';
 
 const PORT = 6200 + Math.floor(Math.random() * 200);
 const BASE = `http://localhost:${PORT}`;
@@ -547,7 +547,7 @@ section('F — calendar export fuzz and deletion races');
 // ============================================================ L — legacy rows
 section('L — legacy rows in the store: read-side defence, signed invariant, restart consistency');
 {
-  // Mateus: a Room now; the snapshot will make the case `signed` with a signing (legacy state no route can produce today).
+  // Mateus: a Room now; the offline edit will make the case `signed` with a signing (legacy state no route can produce today).
   const mRoom = await j('POST', '/org/rooms', { playerId: 'pl-carvalho' }, maria.token);
   ok(mRoom.status === 201, 'L0 a Room exists for Mateus');
   const MID = mRoom.body.room.roomId;
@@ -557,13 +557,14 @@ section('L — legacy rows in the store: read-side defence, signed invariant, re
 
   server.kill('SIGKILL');
   for (let i = 0; i < 60; i += 1) { try { await fetch(`${BASE}/healthz`); await sleep(100); } catch { break; } }
-  const store = openStore(DATA_DIR);
-  const snap = store.load();
-  ok(snap && Array.isArray(snap.db.trials) && Array.isArray(snap.db.recruitmentCases), 'L1 the snapshot loads for the fixture edit');
-  const kase = snap.db.recruitmentCases.find((c) => c.id === MID);
+  // The edit is written through the repositories (below); `db` is the stored records read back, `planted` the new rows.
+  const db = readRecords(DATA_DIR);
+  ok(Array.isArray(db.trials) && Array.isArray(db.recruitmentCases), 'L1 the stored records read for the fixture edit');
+  const planted = { cases: [], signings: [], trials: [], requests: [] };
+  const kase = db.recruitmentCases.find((c) => c.id === MID);
   kase.room.status = 'signed'; // TEST FIXTURE ONLY: a legacy `signed` case with its signing record
   // the D14 matrix: one legacy case per lifecycle position, all for the same player (fixture rows; no route can reach these today)
-  const mariaId = snap.db.users.find((u) => u.orgId === 'org-eastport' && u.name === 'Maria Keane').id;
+  const mariaId = db.users.find((u) => u.orgId === 'org-eastport' && u.name === 'Maria Keane').id;
   const MATRIX = ['trial_requested', 'trial_scheduled', 'trial_completed', 'offer_consideration', 'offer_made', 'offer_accepted', 'archived', 'withdrawn', 'closed'];
   for (const st of MATRIX) {
     const clone = JSON.parse(JSON.stringify(kase));
@@ -571,9 +572,9 @@ section('L — legacy rows in the store: read-side defence, signed invariant, re
     // copy of the original's draft or handoff (those belong to the original case).
     clone.id = `case-matrix-${st}`; clone.room.status = st; clone.room.rev = 3; clone.decisionDraft = null; clone.transactionHandoff = null;
     clone.history = [{ id: `aud-matrix-${st}-1`, at: Date.now() - 20 * DAY, byKind: 'org', byId: mariaId, byName: 'Maria Keane', action: 'room_created', detail: { status: 'watching' } }, { id: `aud-matrix-${st}-2`, at: Date.now() - 10 * DAY, byKind: 'org', byId: mariaId, byName: 'Maria Keane', action: 'room_status_changed', detail: { from: 'watching', to: st } }];
-    snap.db.recruitmentCases.push(clone);
+    planted.cases.push(clone);
   }
-  snap.db.signings.push({ id: 'sign-legacy-1', playerId: 'pl-carvalho', playerName: 'Mateus Carvalho', orgId: 'org-eastport', orgName: 'Eastport FC', userId: mariaId /* the real staff id: a signing names its staff member by a key */, scoutName: 'Maria Keane', ts: Date.now() - 5 * DAY });
+  planted.signings.push({ id: 'sign-legacy-1', playerId: 'pl-carvalho', playerName: 'Mateus Carvalho', orgId: 'org-eastport', orgName: 'Eastport FC', userId: mariaId /* the real staff id: a signing names its staff member by a key */, scoutName: 'Maria Keane', ts: Date.now() - 5 * DAY });
   // legacy trial rows written before the validator existed. S8a (§4.3): a typed row holds a day-shaped value only, so
   // the bad dates planted here are the ones a row can still carry — an impossible month, an impossible day, a day
   // outside the accepted range, no date — and the read side must still defend against each. The shapes a row cannot
@@ -584,7 +585,7 @@ section('L — legacy rows in the store: read-side defence, signed invariant, re
     legacyTrial({ id: 'trial-junk-nan', requestId: 'req-legacy-2', reportDueAt: NaN }),
     legacyTrial({ id: 'trial-junk-accepted', requestId: 'req-legacy-3', acceptedAt: undefined }),
   ];
-  snap.db.trials.push(
+  planted.trials.push(
     legacyTrial({ id: 'trial-legacy-garbage', requestId: 'req-legacy-1', proposedDate: '2026-13-01', venue: 'x' }),
     legacyTrial({ id: 'trial-legacy-nan', requestId: 'req-legacy-2', proposedDate: '2026-02-31' }),
     legacyTrial({ id: 'trial-legacy-null', requestId: 'req-legacy-3', proposedDate: null }),
@@ -594,21 +595,33 @@ section('L — legacy rows in the store: read-side defence, signed invariant, re
   // trials get the accepted invitation each of them came from, in the legacy direct-request literal; a trial naming an
   // absent request is refused at the write with its id (PAIR_MISMATCH), never repaired. The garbage this section
   // proves tolerated lives in the trial rows above, which are unchanged.
-  for (const n of [1, 2, 3, 4]) snap.db.requests.push({ id: `req-legacy-${n}`, playerId: 'pl-carvalho', playerName: 'Mateus Carvalho', orgId: 'org-eastport', orgName: 'Eastport FC', orgType: 'club', orgVerified: true, orgSafeguardingCertified: true, userId: mariaId, scoutName: 'Maria Keane', scoutRole: 'Head of Recruitment', type: 'trial', message: 'legacy accepted invitation', trialDetails: { proposedDate: '1999-01-01', altSlots: [], venue: null, notes: '' }, status: 'accepted', createdAt: Date.now() - 41 * DAY, respondedAt: Date.now() - 40 * DAY, respondedBy: 'player', routedTo: 'player', guardianId: null, contactChannel: null });
-  snap.db.requests.push({ id: 'req-legacy-5', playerId: 'pl-carvalho', playerName: 'Mateus Carvalho', orgId: 'org-eastport', orgName: 'Eastport FC', orgType: 'club', orgVerified: true, orgSafeguardingCertified: true, userId: mariaId /* S8a-core: the real staff id (a request names its staff member by a key) */, scoutName: 'Maria Keane', scoutRole: 'Head of Recruitment', type: 'trial', message: 'legacy pending invitation', trialDetails: { proposedDate: '2026-13-01', altSlots: ['2026-02-30'], venue: null, notes: '' }, status: 'pending', createdAt: Date.now() - 3 * DAY, routedTo: 'player', guardianId: null, contactChannel: null });
+  for (const n of [1, 2, 3, 4]) planted.requests.push({ id: `req-legacy-${n}`, playerId: 'pl-carvalho', playerName: 'Mateus Carvalho', orgId: 'org-eastport', orgName: 'Eastport FC', orgType: 'club', orgVerified: true, orgSafeguardingCertified: true, userId: mariaId, scoutName: 'Maria Keane', scoutRole: 'Head of Recruitment', type: 'trial', message: 'legacy accepted invitation', trialDetails: { proposedDate: '1999-01-01', altSlots: [], venue: null, notes: '' }, status: 'accepted', createdAt: Date.now() - 41 * DAY, respondedAt: Date.now() - 40 * DAY, respondedBy: 'player', routedTo: 'player', guardianId: null, contactChannel: null });
+  planted.requests.push({ id: 'req-legacy-5', playerId: 'pl-carvalho', playerName: 'Mateus Carvalho', orgId: 'org-eastport', orgName: 'Eastport FC', orgType: 'club', orgVerified: true, orgSafeguardingCertified: true, userId: mariaId /* S8a-core: the real staff id (a request names its staff member by a key) */, scoutName: 'Maria Keane', scoutRole: 'Head of Recruitment', type: 'trial', message: 'legacy pending invitation', trialDetails: { proposedDate: '2026-13-01', altSlots: ['2026-02-30'], venue: null, notes: '' }, status: 'pending', createdAt: Date.now() - 3 * DAY, routedTo: 'player', guardianId: null, contactChannel: null });
   for (const junk of unstorable) {
-    const copy = { ...snap, db: { ...snap.db, trials: [...snap.db.trials.filter((t) => t.requestId !== junk.requestId), junk] } };
     // Rewritten in S14a: "nothing written" compared store.revision() (the blob's save sequence); now the file's contents.
-    let refused = null; const dumpBefore = JSON.stringify(store.load());
-    try { store.save(copy); } catch (e) { refused = e; }
-    neg(refused?.code === 'RECRUITMENT_INPUT_INVALID' && refused.message.includes(junk.id) && JSON.stringify(store.load()) === dumpBefore, `L1b a trial the typed row cannot hold (${junk.id}) is refused by the save with its id; nothing written`);
+    let refused = null; const dumpBefore = JSON.stringify(readRecords(DATA_DIR));
+    const L = openLayer(DATA_DIR);
+    try { L.unit(() => { L.layer.recruitment.requests.create(planted.requests.find((q) => q.id === junk.requestId)); L.layer.recruitment.trials.create(junk); }); } catch (e) { refused = e; } finally { L.close(); }
+    neg(refused?.code === 'RECRUITMENT_INPUT_INVALID' && refused.message.includes(junk.id) && JSON.stringify(readRecords(DATA_DIR)) === dumpBefore, `L1b a trial the typed row cannot hold (${junk.id}) is refused by the write with its id; nothing written`);
   }
-  store.save(snap);
+  {
+    const L = openLayer(DATA_DIR);
+    try {
+      L.unit(() => {
+        const { recruitmentCases: C, recruitment: Rq, signingsFollowUps: S } = L.layer;
+        C.cases.update(MID, (c) => { c.room.status = 'signed'; });
+        for (const c of planted.cases) C.cases.create(c);
+        for (const g of planted.signings) S.signings.record(g);
+        for (const q of planted.requests) Rq.requests.create(q);
+        for (const t of planted.trials) Rq.trials.create(t);
+      });
+    } finally { L.close(); }
+  }
   server = await boot();
   maria = await login('org-eastport', 'Maria Keane', 'Head of Recruitment');
   mateus = await playerLogin('pl-carvalho');
   harbour = await login('org-harbour', 'Dan Okoro', 'Head of Recruitment');
-  ok(!!maria.token && !!mateus.token, 'L2 the server boots on the edited snapshot');
+  ok(!!maria.token && !!mateus.token, 'L2 the server boots on the edited store');
   ok((await j('GET', '/healthz')).body.schemaVersion === SCHEMA_VERSION && DATA_MIGRATIONS.length === SCHEMA_VERSION, `L2b schema ${SCHEMA_VERSION} — no migration was needed or added for the closure`);
   const survived = (await orgTrials(maria.token)).find((t) => t.id === mt.id);
   const survivedReq = (await j('GET', '/org/requests', undefined, maria.token)).body.items.find((r) => r.id === D.mateusReq);

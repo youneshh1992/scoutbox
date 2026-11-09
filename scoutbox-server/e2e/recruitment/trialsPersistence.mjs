@@ -6,7 +6,7 @@
 //      values (`legacy_accepted`, no schedule, no attendance, no completion)
 //      and never renames `awaiting_report` / `reported`, never invents a
 //      date, an attendance or a completion.
-//   2. A snapshot that carries P4B trial rows restores them byte-faithfully
+//   2. A fixture that carries P4B trial rows restores them byte-faithfully
 //      through a real boot: sessions keep their ids and order, the append-only
 //      revisions and attendance history keep every entry, the idempotency
 //      keys live on the row.
@@ -24,7 +24,7 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { openStore } from '../../store.mjs';
+import { writeFixture, readRecords } from '../../scripts/dataLayerFixture.mjs';
 import { JOURNEY_REQUIRED_STORES } from '../../domains/recruitment/lifecycle/journey.mjs';
 import { trialIntegrity, deriveWorkflowState, TRIAL_WORKFLOW_STATES } from '../../domains/recruitment/lifecycle/trial.mjs';
 import { typeTrial } from '../../repositories/recruitment.mjs';
@@ -67,7 +67,7 @@ async function bootOn(dataDir, port) {
   const stop = async () => {
     proc.kill('SIGTERM');
     for (let i = 0; i < 60 && proc.exitCode == null; i += 1) await sleep(100);
-    return openStore(dataDir).load()?.db ?? null;
+    return readRecords(dataDir);
   };
   return { up, j, stop, log: () => log };
 }
@@ -144,10 +144,11 @@ const legacyTrial = () => ({
 });
 
 const stableJson = (v) => JSON.stringify(v);
-// What a fresh file holds (the migrations' reference rows, by id: their timestamps are the time of creation): the
-// yardstick for "nothing was written".
+const write = (dir, db) => writeFixture(dir, db);
+// What a new directory holds after a refused fixture (the migrations' reference rows and the first installation's
+// organisation and player, by id): the yardstick for "nothing was written".
 const rowIds = (d) => JSON.stringify(Object.fromEntries(Object.entries(d).map(([k, rows]) => [k, rows.map((r) => r?.id ?? JSON.stringify(r))])));
-const FRESH = rowIds(openStore(mkdtempSync(path.join(tmpdir(), 'sbx-m23t-fresh-'))).load().db);
+const FRESH = (() => { const { orgs, players, guardians } = baseDb(); return rowIds(readRecords(writeFixture(mkdtempSync(path.join(tmpdir(), 'sbx-m23t-fresh-')), { orgs, players, guardians }))); })();
 /** S8a: what a typed trial row reads back as — the record as written, with every absent field null and every absent list empty. */
 const typedJson = (t) => { const r = typeTrial(t); if (!r.ok) throw new Error(r.reason); return stableJson(r.record); };
 
@@ -169,7 +170,7 @@ section('1 — a trial row: neutral containers, nothing renamed, nothing invente
 }
 
 // ======================================================= 2 — byte-faithful restore
-section('2 — a snapshot with P4B trial rows restores byte-faithfully through a real boot');
+section('2 — a fixture with P4B trial rows restores byte-faithfully through a real boot');
 {
   const RESTORE_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-m23t-restore-'));
   const db = baseDb();
@@ -183,12 +184,11 @@ section('2 — a snapshot with P4B trial rows restores byte-faithfully through a
   db.requests = [{ id: 'req-0', orgId: 'org-x', orgName: 'X FC', orgType: 'club', orgVerified: true, orgSafeguardingCertified: true, playerId: 'pl-x', playerName: 'Xavier Adult', userId: 'usr-owner', scoutName: 'Owner', scoutRole: 'Head of Recruitment', type: 'trial', message: 'Come and train.', trialDetails: { proposedDate: '2026-12-01', altSlots: [], venue: 'Old Ground', notes: 'Bring boots' }, status: 'accepted', createdAt: T0 - 401 * H, respondedAt: T0 - 400 * H, respondedBy: 'player', routedTo: 'player', guardianId: null, contactChannel: null }, { id: 'req-1', orgId: 'org-x', orgName: 'X FC', orgType: 'club', orgVerified: true, orgSafeguardingCertified: true, playerId: 'pl-x', playerName: 'Xavier Adult', userId: 'usr-owner', scoutName: 'Owner', scoutRole: 'Head of Recruitment', type: 'trial', message: 'Come.', status: 'accepted', routedTo: 'player', guardianId: null, contactChannel: null, createdAt: T0 - 1000, respondedAt: T0, respondedBy: 'player', caseId: 'case-x', trialId: 'trial-1', recipient: { type: 'player', playerId: 'pl-x', guardianId: null, minor: false }, keys: { invite: { key: 'ik-1', fp: 'fp-i' } }, trialDetails: { proposedDate: '2027-01-15', altSlots: [], venue: 'Dome, London', notes: '', slots: [{ id: 'tslot-1', day: '2027-01-15', kind: 'training', startsAt: T0 + 2 * H, endsAt: T0 + 4 * H, timezone: 'Europe/London', venue: { name: 'Dome', town: 'London' } }], private: { venueAddress: '1 Dome Road', instructions: null } } }];
   db.recruitmentCases[0].room.status = 'trial_scheduled';
   db.recruitmentCases[0].links.trialIds.push('trial-1');
-  const written = openStore(RESTORE_DIR);
-  written.save({ db });
+  write(RESTORE_DIR, db);
   const beforeSound = typedJson(db.trials[0]); const beforeLegacy = typedJson(db.trials[1]);
   const s = await bootOn(RESTORE_DIR, PORT);
   if (!s.up) console.error(s.log().split('\n').slice(-12).join('\n'));
-  ok(s.up, 'the server boots on the snapshot');
+  ok(s.up, 'the server boots on the fixture');
   const lead = (await s.j('POST', '/auth/org/login', { orgId: 'org-x', scoutName: 'Owner', role: 'Head of Recruitment' })).body;
   const list = await s.j('GET', '/org/rooms/case-x/trials', undefined, lead.token);
   ok(list.status === 200 && list.body.items.length === 2 && list.body.omitted === 0, 'both trials serve from the room (the P4B row and the legacy row), none omitted');
@@ -224,7 +224,7 @@ section('3 — corrupt trial rows are named and omitted, never fabricated, never
     soundTrial({ id: 'trial-bad-rev', requestId: 'req-bad-rev', workflowState: 'cancelled', rev: 0 }),
   );
   db.requests = db.trials.map((t) => invitation(t.requestId, t.id));
-  openStore(CORRUPT_DIR).save({ db });
+  write(CORRUPT_DIR, db);
   const s = await bootOn(CORRUPT_DIR, PORT + 1);
   if (!s.up) console.error(s.log().split('\n').slice(-12).join('\n'));
   ok(s.up, 'the server boots with four trials, three of them corrupt rows');
@@ -247,7 +247,7 @@ section('3 — corrupt trial rows are named and omitted, never fabricated, never
 }
 
 // ======================================================= 3c — records the typed tables cannot hold (S8a)
-section('3c — a state, a completion or an attendance row outside the vocabulary, or an off-type list, is refused by the save with its id');
+section('3c — a state, a completion or an attendance row outside the vocabulary, or an off-type list, is refused by the write with its id');
 {
   const db = baseDb();
   const invitation = (id) => ({ id, orgId: 'org-x', orgName: 'X FC', orgType: 'club', orgVerified: true, orgSafeguardingCertified: true, playerId: 'pl-x', playerName: 'Xavier Adult', userId: 'usr-owner', scoutName: 'Owner', scoutRole: 'Head of Recruitment', type: 'trial', message: 'Come.', trialDetails: { proposedDate: null, altSlots: [], venue: null, notes: '' }, status: 'accepted', createdAt: T0 - 1000, routedTo: 'player', guardianId: null, contactChannel: null });
@@ -262,30 +262,32 @@ section('3c — a state, a completion or an attendance row outside the vocabular
     db.trials = [soundTrial({ id, requestId: `req-${id}`, caseId: null, ...over })];
     db.requests = [invitation(`req-${id}`)];
     let refused = null;
-    try { openStore(dir).save({ db }); } catch (err) { refused = err; }
-    neg(refused?.code === 'RECRUITMENT_INPUT_INVALID' && named.test(String(refused.message)), `${id}: the save is refused and names the trial and the field (${String(refused?.message ?? 'not refused').slice(0, 160)})`);
-    neg(rowIds(openStore(dir).load().db) === FRESH, `${id}: nothing was written`); // rewritten in S14a: load() was null with no blob
+    try { write(dir, db); } catch (err) { refused = err; }
+    neg(refused?.code === 'RECRUITMENT_INPUT_INVALID' && named.test(String(refused.message)), `${id}: the write is refused and names the trial and the field (${String(refused?.message ?? 'not refused').slice(0, 160)})`);
+    neg(rowIds(readRecords(dir)) === FRESH, `${id}: nothing was written`);
   }
 }
 
 // ======================================================= 3b — alien entries (S8a-core)
 section('3b — alien entries in the trials store are refused with their positions; the file is not modified');
 {
-  // A null, a string or a number in the trials store is not a record. Since §4.2 a snapshot is written straight into the
-  // tables (store.mjs, snapshot mode), so the refusal comes from the save itself, with each entry's position and kind and
-  // nothing written; there is no blob for a later boot to import. Nothing is dropped or repaired silently.
-  const ALIEN_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-m23t-alien-'));
-  const db = baseDb();
-  db.trials.push(soundTrial(), null, 'string', 42);
-  db.requests = [{ id: 'req-1', orgId: 'org-x', orgName: 'X FC', orgType: 'club', orgVerified: true, orgSafeguardingCertified: true, playerId: 'pl-x', playerName: 'Xavier Adult', userId: 'usr-owner', scoutName: 'Owner', scoutRole: 'Head of Recruitment', type: 'trial', message: 'Come.', trialDetails: { proposedDate: '2027-01-15', altSlots: [], venue: 'Dome, London', notes: '' }, status: 'accepted', createdAt: T0 - 1000, respondedAt: T0, respondedBy: 'player', routedTo: 'player', guardianId: null, contactChannel: null, caseId: 'case-x', trialId: 'trial-1' }];
-  let refused = null;
-  try { openStore(ALIEN_DIR).save({ db }); } catch (err) { refused = err; }
-  neg(!!refused, 'the save of a trials store holding a null, a string and a number is refused');
-  const msg = String(refused?.message ?? '');
-  neg(/RECRUITMENT_INPUT_INVALID/.test(msg) && /trials entry #1 is not an object \(null\)/.test(msg) && /trials entry #2 is not an object \(a string\)/.test(msg) && /trials entry #3 is not an object \(a number\)/.test(msg), 'the refusal names each alien entry by its position and kind, nothing else');
-  neg(rowIds(openStore(ALIEN_DIR).load().db) === FRESH, 'nothing was written: the directory holds only what a fresh one does'); // rewritten in S14a: load() was null with no blob
+  // A null, a string or a number in the trials store is not a record: the trials repository's create refuses each by
+  // its kind and nothing of the fixture is written. Nothing is dropped or repaired silently.
+  const req1 = { id: 'req-1', orgId: 'org-x', orgName: 'X FC', orgType: 'club', orgVerified: true, orgSafeguardingCertified: true, playerId: 'pl-x', playerName: 'Xavier Adult', userId: 'usr-owner', scoutName: 'Owner', scoutRole: 'Head of Recruitment', type: 'trial', message: 'Come.', trialDetails: { proposedDate: '2027-01-15', altSlots: [], venue: 'Dome, London', notes: '' }, status: 'accepted', createdAt: T0 - 1000, respondedAt: T0, respondedBy: 'player', routedTo: 'player', guardianId: null, contactChannel: null, caseId: 'case-x', trialId: 'trial-1' };
+  let ALIEN_DIR = null;
+  for (const [alien, what] of [[null, 'null'], ['string', 'a string'], [42, 'a number']]) {
+    ALIEN_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-m23t-alien-'));
+    const db = baseDb();
+    db.trials.push(soundTrial(), alien);
+    db.requests = [req1];
+    let refused = null;
+    try { write(ALIEN_DIR, db); } catch (err) { refused = err; }
+    const msg = String(refused?.message ?? '');
+    neg(refused?.code === 'RECRUITMENT_INPUT_INVALID' && msg.includes(`trials is not an object (${what})`), `a trials entry that is ${what} is refused by its kind (${msg.slice(0, 120)})`);
+    neg(rowIds(readRecords(ALIEN_DIR)) === FRESH, `${what}: nothing was written: the directory holds only the first installation`);
+  }
   const s = await bootOn(ALIEN_DIR, PORT + 2);
-  ok(s.up, 'a server started on the directory boots from its seed (the refused snapshot left nothing behind)');
+  ok(s.up, 'a server started on the directory boots (the refused fixture left nothing behind)');
   if (s.up) await s.stop();
 }
 
@@ -293,7 +295,7 @@ section('3b — alien entries in the trials store are refused with their positio
 section('4 — clean boot: invitation, acceptance, restart — keys and stages survive');
 {
   const CLEAN_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-m23t-clean-'));
-  openStore(CLEAN_DIR).save({ db: baseDb() });
+  write(CLEAN_DIR, baseDb());
   const s = await bootOn(CLEAN_DIR, PORT + 2);
   const lead = (await s.j('POST', '/auth/org/login', { orgId: 'org-x', scoutName: 'Owner', role: 'Head of Recruitment' })).body;
   const player = (await s.j('POST', '/auth/player/login', { playerId: 'pl-x' })).body;

@@ -23,7 +23,8 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { integrityReport } from '../../domains/platform/integrity.mjs';
-import { openStore } from '../../store.mjs';
+import { DatabaseSync } from 'node:sqlite';
+import { writeFixture, readRecords } from '../../scripts/dataLayerFixture.mjs';
 import { contactIntegrity, CONTACT_STATUSES } from '../../domains/recruitment/lifecycle/contact.mjs';
 import { DATA_MIGRATIONS, TABLE_BACKED } from '../../repositories/index.mjs';
 import { buildRecruitmentJourney, createEvidenceProvider } from '../../scripts/recruitmentReadsFixture.mjs'; // §4.3 step 2: the contacts/offers queries over the plain arrays
@@ -65,7 +66,7 @@ async function bootOn(dataDir, port) {
   const stop = async () => {
     proc.kill('SIGTERM');
     for (let i = 0; i < 60 && proc.exitCode == null; i += 1) await sleep(100);
-    return openStore(dataDir).load()?.db ?? null;
+    return readRecords(dataDir);
   };
   return { up, j, stop, log: () => log };
 }
@@ -108,7 +109,7 @@ const soundContact = (over = {}) => ({
 });
 
 // The table-migration ledger of a stopped server's file: every id with the time it was applied.
-const ledger = (dir) => { const st = openStore(dir); try { return JSON.stringify(st.sqlite.prepare('SELECT id, applied_at FROM data_migrations ORDER BY id').all()); } finally { st.sqlite.close(); } };
+const ledger = (dir) => { const db = new DatabaseSync(path.join(dir, 'scoutbox.db'), { readOnly: true }); try { return JSON.stringify(db.prepare('SELECT id, applied_at FROM data_migrations ORDER BY id').all()); } finally { db.close(); } };
 
 // ======================================================= §100 — the guarantee
 section('§100/§101 — the store is guaranteed by the registry, on every path');
@@ -121,7 +122,7 @@ section('§100/§101 — the store is guaranteed by the registry, on every path'
 }
 
 // ======================================================= §144 — byte-faithful restore
-section('§144 — a snapshot with Contact rows restores byte-faithfully through a real boot');
+section('§144 — a fixture with Contact rows restores byte-faithfully through a real boot');
 const RESTORE_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-cp-restore-'));
 {
   const db = baseDb();
@@ -142,7 +143,7 @@ const RESTORE_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-cp-restore-'));
     { id: 'req-1', playerId: 'pl-x', playerName: 'Xavier Adult', orgId: 'org-x', orgName: 'X FC', orgType: 'club', orgVerified: true, orgSafeguardingCertified: true, userId: 'usr-owner', scoutName: 'Owner', scoutRole: 'Head of Recruitment', type: 'contact', message: 'Hi Xavier.', status: 'pending', createdAt: 2001, routedTo: 'player', guardianId: null, contactId: 'rct-1', contactChannel: null },
     { id: 'req-4', playerId: 'pl-x', playerName: 'Xavier Adult', orgId: 'org-x', orgName: 'X FC', orgType: 'club', orgVerified: true, orgSafeguardingCertified: true, userId: 'usr-owner', scoutName: 'Owner', scoutRole: 'Head of Recruitment', type: 'contact', message: 'Hi Xavier.', status: 'accepted', createdAt: 2001, respondedAt: 4000, respondedBy: 'player', routedTo: 'player', guardianId: null, contactId: 'rct-4', contactChannel: null },
   ];
-  openStore(RESTORE_DIR).save({ idCounter: 500, db });
+  writeFixture(RESTORE_DIR, db, { idCounter: 500 });
   const L0 = ledger(RESTORE_DIR);
   // S8c: the rows are read back from the tables, every key and value identical, the keys in the stored shape's order (the
   // documented table-read property; m23DecisionPersistence compares the same way since S8b) — key-order-insensitive here.
@@ -151,7 +152,7 @@ const RESTORE_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-cp-restore-'));
   const before = stable(rows);
 
   const s = await bootOn(RESTORE_DIR, PORT);
-  ok(s.up, 'the server boots on the restored snapshot');
+  ok(s.up, 'the server boots on the fixture');
   if (!s.up) { console.error(`   the server did not come up; its log ends:\n${s.log().slice(-1500)}`); process.exit(1); }
   const health = (await s.j('GET', '/healthz')).body;
   ok(health.schemaVersion === LATEST_SCHEMA, 'and reports the current schema');
@@ -185,32 +186,30 @@ const CORRUPT_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-cp-corrupt-'));
   // defects a typed row CAN carry (a delivered contact with no recipient, a contact answered but never delivered, a row
   // of another organisation, a player disagreeing with its case) are still planted and still judged on read.
   const REQ = { playerId: 'pl-x', playerName: 'Xavier Adult', orgId: 'org-x', orgName: 'X FC', orgType: 'club', orgVerified: true, orgSafeguardingCertified: true, userId: 'usr-owner', scoutName: 'Owner', scoutRole: 'Head of Recruitment', type: 'contact', message: 'Hi Xavier.', status: 'pending', createdAt: 2001, routedTo: 'player', guardianId: null, contactChannel: null };
-  // Since §4.2 a snapshot is written straight into the tables (store.mjs, snapshot mode): the save itself refuses such a
-  // file, names the entry, and writes nothing; there is no blob for a later boot to import.
-  // What a fresh file holds (the migrations' reference rows only, by id: their timestamps are the time of creation):
-  // the yardstick for "nothing was written".
+  // A fixture is written through the repositories in one unit of work: a record they cannot hold is refused, naming the
+  // entry, and nothing of the fixture is written. What a new directory holds then (the migrations' reference rows and
+  // the first installation's organisation and player, by id) is the yardstick for "nothing was written".
   const rowIds = (db) => JSON.stringify(Object.fromEntries(Object.entries(db).map(([k, rows]) => [k, rows.map((r) => r?.id ?? JSON.stringify(r))])));
-  const FRESH_DB = rowIds(openStore(mkdtempSync(path.join(tmpdir(), 'sbx-cp-fresh-'))).load().db);
+  const FRESH_DB = (() => { const { orgs, players, guardians } = baseDb(); return rowIds(readRecords(writeFixture(mkdtempSync(path.join(tmpdir(), 'sbx-cp-fresh-')), { orgs, players, guardians }))); })();
   const refusedAtCutover = async (label, port, contacts, requests, pattern) => {
     const dir = mkdtempSync(path.join(tmpdir(), 'sbx-cp-refused-'));
     const fixture = baseDb(); fixture.recruitmentContacts = contacts; fixture.requests = requests;
     let refused = null;
-    try { openStore(dir).save({ savedAt: Date.now(), idCounter: 500, db: fixture }); } catch (err) { refused = err; }
+    try { writeFixture(dir, fixture, { idCounter: 500 }); } catch (err) { refused = err; }
     const msg = String(refused?.message ?? '');
-    neg(!!refused && pattern.test(msg), `${label}: the save refuses the snapshot and names the entry (${(pattern.exec(msg) ?? ['NOT named'])[0]})`);
+    neg(!!refused && pattern.test(msg), `${label}: the write is refused and names the entry (${(pattern.exec(msg) ?? ['NOT named'])[0]})`);
     if (!refused || !pattern.test(msg)) console.error(`   ${label}: refused=${!!refused}; ${msg.slice(0, 700)}`);
-    // Rewritten in S14a: load() returned null when no blob existed; now the file must hold exactly what a fresh one does.
-    neg(rowIds(openStore(dir).load().db) === FRESH_DB, `${label}: nothing was written — nothing imported, dropped or repaired`);
+    neg(rowIds(readRecords(dir)) === FRESH_DB, `${label}: nothing was written — nothing imported, dropped or repaired`);
     if (port) {
       const s = await bootOn(dir, port);
-      neg(s.up, `${label}: a server started on the directory boots from its seed (the refused snapshot left nothing behind)`);
+      neg(s.up, `${label}: a server started on the directory boots (the refused fixture left nothing behind)`);
       if (s.up) await s.stop();
     }
   };
   const req1 = [{ ...REQ, id: 'req-1', contactId: 'rct-1' }];
-  await refusedAtCutover('a null entry', PORT + 4, [soundContact(), null], req1, /recruitmentContacts entry #1 is not an object \(null\)/);
-  await refusedAtCutover('a duplicated id', PORT + 5, [soundContact(), soundContact({ id: 'rct-1', requestId: null })], req1, /duplicates the id of an earlier entry \(rct-1\)/);
-  await refusedAtCutover('a request that is not in the file', PORT + 6, [soundContact({ requestId: 'req-ghost' })], [], /CONTACTS_OFFERS_REFERENCE_MISSING[^\n]*rct-1 → recruitment_requests/);
+  await refusedAtCutover('a null entry', PORT + 4, [soundContact(), null], req1, /CONTACTS_OFFERS_INPUT_INVALID: recruitmentContacts is not an object \(null\)/);
+  await refusedAtCutover('a duplicated id', PORT + 5, [soundContact(), soundContact({ id: 'rct-1', requestId: null })], req1, /CONTACTS_OFFERS_DUPLICATE: recruitment_contacts rct-1 already exists/);
+  await refusedAtCutover('a request that is not in the file', PORT + 6, [soundContact({ requestId: 'req-ghost' })], [], /FOREIGN KEY constraint failed/); // recruitment_contacts.request_id → recruitment_requests
   await refusedAtCutover('an unknown status word', null, [soundContact({ id: 'rct-badstatus', status: 'sent', requestId: null })], [], /rct-badstatus\.status must be one of draft\|delivered/);
   await refusedAtCutover('a history that is not a list', null, [soundContact({ id: 'rct-nohist', history: 'not-a-list', requestId: null })], [], /rct-nohist\.history must be a list/);
   await refusedAtCutover('a timestamp that is not an instant', null, [soundContact({ id: 'rct-badts', deliveredAt: 'yesterday', requestId: null })], [], /rct-badts\.deliveredAt must be an integer or null/);
@@ -244,7 +243,7 @@ const CORRUPT_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-cp-corrupt-'));
   neg(contactIntegrity(soundContact({ id: 'rct-wrongplayer', playerId: 'pl-other' }), { orgId: 'org-x', caseId: 'case-x' }).length === 0, 'a row whose player disagrees with its case is structurally sound — the case check, not the shape check, is where that is caught (below)');
   ok(contactIntegrity(db.recruitmentContacts[5]).length === 0, 'a sound draft with an unknown history event is not corrupt — the event is simply not a milestone');
 
-  openStore(CORRUPT_DIR).save({ savedAt: Date.now(), idCounter: 500, db });
+  writeFixture(CORRUPT_DIR, db, { idCounter: 500 });
   const canon = (v) => (Array.isArray(v) ? v.map(canon) : v && typeof v === 'object' ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, canon(v[k])])) : v);
   const before = JSON.stringify(canon(db.recruitmentContacts));
   const s = await bootOn(CORRUPT_DIR, PORT + 1);
@@ -288,7 +287,7 @@ const CORRUPT_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-cp-corrupt-'));
 section('§100 — clean boot: empty store, first write, restart');
 const CLEAN_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-cp-clean-'));
 {
-  openStore(CLEAN_DIR).save({ savedAt: Date.now(), idCounter: 500, db: baseDb() });
+  writeFixture(CLEAN_DIR, baseDb(), { idCounter: 500 });
   const s = await bootOn(CLEAN_DIR, PORT + 2);
   ok(s.up, 'boot on an empty contacts store');
   const owner = (await s.j('POST', '/auth/org/login', { orgId: 'org-x', scoutName: 'Owner', role: 'Head of Recruitment' })).body;

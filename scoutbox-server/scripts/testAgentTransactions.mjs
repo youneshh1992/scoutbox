@@ -8,15 +8,15 @@
 // names an evaluation of its own context; a withdrawn binding is final and one binding per (role, agent) is live; a
 // document version is superseded once; the lists page newest first by cursor and the agent's counts are SQL; the
 // duplicate rule's candidates are indexed; an account deletion keeps ids and loses the person; a rolled-back unit
-// leaves nothing; and the snapshot write types every record, keeps the omitted collections,
-// refuses a row naming a missing context and reads back what it wrote. Temporary databases only. Run with: npm test
+// leaves nothing; and a fixture written through the repositories is typed, refuses a row naming a
+// missing context and reads back what it wrote. Temporary databases only. Run with: npm test
 
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { attachDataLayer, DATA_MIGRATIONS, TABLE_BACKED, readTableBacked } from '../repositories/index.mjs';
-import { openStore } from '../store.mjs';
+import { DATA_MIGRATIONS, TABLE_BACKED } from '../repositories/index.mjs';
+import { openLayer, readRecords, writeFixture } from './dataLayerFixture.mjs';
 import { NOW, TTL, tempDir } from './coreIdentityTestFixtures.mjs';
-import { saveFixture, ORG, SCOUT } from './recruitmentTestFixtures.mjs';
+import { saveFixture, fixtureDb, ORG, SCOUT } from './recruitmentTestFixtures.mjs';
 import {
   AGENT_TRANSACTIONS_MIGRATION as MIGRATION, AGENT_TRANSACTIONS_TABLES as TABLES, AGENT_TRANSACTIONS_COLLECTIONS as COLLECTIONS,
   typeTransaction, typeRepresentation, typeDocument,
@@ -76,13 +76,10 @@ const doc = (over = {}) => {
 };
 
 function serverOpen(dir) {
-  const store = openStore(dir, { tableBacked: TABLE_BACKED });
-  const db = {}; // S14a: a fixture-saved file is not a first installation, so there is nothing to hand in
-  const layer = attachDataLayer({ db, store, nextId, persist: () => {}, sessionTtlMs: TTL, now: () => NOW, warn: () => {} });
-  const snapshot = () => ({ savedAt: NOW, idCounter: 1000, db });
+  const { store, layer, unit, close } = openLayer(dir, { nextId, sessionTtlMs: TTL, now: () => NOW });
   const contexts = layer.complianceRecords.contexts;
   const withContext = (id = 'ctx-1', tx = 'atx-1') => { contexts.create(context(id, tx)); return contexts.recordEvaluation(id, result, { parties: [], representations: [], proposed: null }, entry(nextId('aud'), 'compliance_context_evaluated', { outcome: 'CLEAR', reasonCodes: ['FACET_VERIFIED'], policyVersions: result.policyVersions })); };
-  return { store, db, repo: layer.agentTransactions, withContext, unit: (w) => store.unitOfWork(w, { snapshot }), close: () => store.sqlite.close() };
+  return { store, repo: layer.agentTransactions, withContext, unit, close };
 }
 
 // ------------------------------------------------------------- schema
@@ -91,7 +88,7 @@ test('[schema] 0029 is registered after 0028 and creates the sixteen STRICT tabl
   assert.equal(ids.indexOf(MIGRATION), ids.indexOf('0028_compliance_records') + 1);
   assert.equal(TABLES.length, 16);
   for (const n of COLLECTIONS) assert.ok(TABLE_BACKED.includes(n), `${n} is table-backed`);
-  const dir = tempDir('s11c-empty'); const s = openStore(dir).sqlite;
+  const dir = tempDir('s11c-empty'); const s = openLayer(dir).sqlite;
   for (const t of TABLES) {
     assert.match(s.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?").get(t).sql, /STRICT\s*$/, `${t} is STRICT`);
     assert.equal(s.prepare(`SELECT count(*) AS n FROM ${t}`).get().n, 0);
@@ -248,26 +245,41 @@ test('[units] a rolled-back unit leaves nothing', () => {
   } finally { s.close(); rm(dir); }
 });
 
-test('[snapshot] the snapshot write types every record, keeps the omitted collections, refuses junk and a row naming a missing context, and reads back what it wrote', () => {
-  const dir = tempDir('s11c-snapshot'); saveFixture(dir);
-  const store = openStore(dir);
+// The fixture writes these the way the routes do: a context is opened and then evaluated (recordEvaluation); a new
+// document version names the one it replaces, which is then marked superseded (update).
+const WRITERS = {
+  complianceContexts: (L, records) => {
+    for (const { evaluations = [], ...c } of records) {
+      const entries = c.history.filter((h) => h.action === 'compliance_context_evaluated');
+      L.complianceRecords.contexts.create({ ...c, history: c.history.filter((h) => h.action !== 'compliance_context_evaluated') });
+      evaluations.forEach(({ snapshotOf, ...r }, i) => L.complianceRecords.contexts.recordEvaluation(c.id, r, snapshotOf, entries[i]));
+    }
+  },
+  transactionDocuments: (L, records) => {
+    const D = L.agentTransactions.documents;
+    for (const d of records) {
+      D.create(d);
+      if (d.supersedes) D.update(d.supersedes, (x) => { x.supersededBy = d.id; x.history.push(entry(`aud-sup-${d.id}`, 'transaction_document_superseded', { version: x.version })); });
+    }
+  },
+};
+const fixture = (dir, collections) => writeFixture(dir, fixtureDb(collections), { now: NOW, writers: WRITERS });
+
+test('[fixtures] records written through the repository are typed, junk and a row naming a missing context are refused (nothing written), and they read back as written', () => {
+  const dir = tempDir('s11c-fix');
   try {
     const ctx = { ...context(), history: [...context().history, entry('aud-e1', 'compliance_context_evaluated', { outcome: 'CLEAR', reasonCodes: ['FACET_VERIFIED'], policyVersions: result.policyVersions })], evaluations: [{ ...result, snapshotOf: { parties: [], representations: [], proposed: null } }] };
     const tx = transaction({ compliance: { evaluationId: 'ctx-1#1', gate: null, evaluatedAt: NOW, pendingReason: 'PARTIES_NOT_CONFIRMED', verificationFreshness: 'VERIFIED', partyRevision: REV } });
-    store.save({ db: { complianceContexts: [ctx], agentTransactions: [tx], transactionRepresentations: [rep()], transactionDocuments: [doc({ supersededBy: 'txd-2' }), doc({ id: 'txd-2', version: 2, supersedes: 'txd-1', history: undefined })] } });
-    const back = readTableBacked(store.sqlite);
+    fixture(dir, { complianceContexts: [ctx], agentTransactions: [tx], transactionRepresentations: [rep()], transactionDocuments: [doc(), doc({ id: 'txd-2', version: 2, supersedes: 'txd-1', history: undefined })] });
+    const back = readRecords(dir);
     assert.deepEqual(back.agentTransactions[0].compliance, tx.compliance); assert.equal(back.transactionRepresentations.length, 1);
     assert.deepEqual(back.transactionDocuments.map((d) => [d.id, d.supersedes, d.supersededBy]), [['txd-1', null, 'txd-2'], ['txd-2', 'txd-1', null]], 'the version chain reads back both ways');
-    store.save({ db: { transactionDocuments: [] } });
-    const kept = readTableBacked(store.sqlite);
-    assert.equal(kept.agentTransactions.length, 1); assert.equal(kept.transactionRepresentations.length, 1); assert.equal(kept.transactionDocuments.length, 0, 'the omitted collections are kept');
-    store.save({ db: { complianceContexts: [ctx] } });
-    assert.equal(readTableBacked(store.sqlite).agentTransactions.length, 1, 'rewriting the compliance records keeps the transactions that name them');
-    refused(() => store.save({ db: { complianceContexts: [] } }), /REFERENCE_MISSING/, 'a context a transaction names cannot go');
-    refused(() => store.save({ db: { agentTransactions: [transaction({ id: 'atx-9', contextId: 'ctx-gone' })] } }), /AGENT_TRANSACTIONS_REFERENCE_MISSING/);
-    refused(() => store.save({ db: { agentTransactions: [{ ...tx, status: 'HALF_WRITTEN' }] } }), /AGENT_TRANSACTIONS_IMPORT_BLOCKED.*atx-1\.status/);
-    assert.equal(readTableBacked(store.sqlite).agentTransactions[0].status, 'DRAFT', 'a refused save wrote nothing');
-  } finally { store.sqlite.close(); rm(dir); }
+    const bad = [tempDir('s11c-fix-ctx'), tempDir('s11c-fix-status')];
+    refused(() => fixture(bad[0], { agentTransactions: [transaction({ id: 'atx-9', contextId: 'ctx-gone' })] }), /AGENT_TRANSACTIONS_REFERENCE_MISSING: agent_transactions atx-9 names a row that is not there/, 'a row naming a missing context');
+    refused(() => fixture(bad[1], { complianceContexts: [ctx], agentTransactions: [{ ...tx, status: 'HALF_WRITTEN' }] }), /AGENT_TRANSACTIONS_INPUT_INVALID.*atx-1\.status/, 'a status the machine does not know');
+    for (const d of bad) { const r = readRecords(d); assert.deepEqual([r.complianceContexts.length, r.agentTransactions.length], [0, 0], 'a refused fixture wrote nothing'); }
+    rm(...bad);
+  } finally { rm(dir); }
 });
 
 console.log(`\nagent transactions repository: ${passed} checks passed`);

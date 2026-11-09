@@ -3,16 +3,17 @@
 // total attempt-shape CHECK, the unique provider message id, the address of an e-mail dispatch that is not skipped);
 // the repository's writes (create, recordAttempt, patch: typed input, unknown fields and wrong types refused by field
 // and id) and SQL reads (fresh frozen records, the sweep's queries, the organisation's page newest first, the
-// counts); units of work (all or nothing, no mirror and no db.dispatches); the snapshot path.
+// counts); units of work (all or nothing, no mirror and no db.dispatches); fixtures written through the repository.
 // Temporary databases only; nothing touches DATA_DIR. Run with: npm test
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { attachDataLayer, TABLE_BACKED } from '../repositories/index.mjs';
-import { createDispatchesRepository, DISPATCHES_TABLE, DISPATCH_STATUSES } from '../repositories/dispatches.mjs';
+import { createDispatchesRepository, DISPATCH_STATUSES } from '../repositories/dispatches.mjs';
 import { openStore } from '../store.mjs';
 import { NOW, TTL, tempDir, openRaw, FIXTURE, ORGS, USERS, hasBlobTable } from './coreIdentityTestFixtures.mjs';
+import { writeFixture, readRecords } from './dataLayerFixture.mjs';
 
 let passed = 0;
 const only = process.env.TEST_ONLY || '';
@@ -34,16 +35,13 @@ const email = (over = {}) => ({
 const inApp = (over = {}) => email({ channel: 'in_app', to: 'org_user:usr-1', provider: 'in_app', status: 'delivered', deliveredAt: NOW, ...over });
 const forPlayer = (over = {}) => email({ audience: { kind: 'player', id: 'pl-adult' }, orgId: null, to: 'adult@example.test', ...over });
 
-/** A fully migrated file holding the fixture's identity, organisation and staff (a snapshot-mode save). */
-function fixtureFile(dir, extra = {}) {
-  const tool = openStore(dir); tool.save({ idCounter: 1000, db: { ...FIXTURE(), orgs: ORGS(), users: USERS(), ...extra } }); tool.sqlite.close();
-}
+/** A fully migrated file holding the fixture's identity, organisation and staff (written through the repositories). */
+function fixtureFile(dir, extra = {}) { writeFixture(dir, { ...FIXTURE(), orgs: ORGS(), users: USERS(), ...extra }, { now: NOW, idCounter: 1000 }); }
 /** A live server-mode store with the data layer attached, as the server runs it. */
 function live(dir) {
   const store = openStore(dir, { tableBacked: TABLE_BACKED });
-  const db = {};
-  const layer = attachDataLayer({ db, store, nextId, sessionTtlMs: TTL, now: () => NOW, warn: () => {} });
-  return { store, db, layer, repo: layer.dispatches, close: () => store.sqlite.close() };
+  const layer = attachDataLayer({ store, nextId, sessionTtlMs: TTL, now: () => NOW, warn: () => {} });
+  return { store, layer, repo: layer.dispatches, close: () => store.sqlite.close() };
 }
 const bare = (s) => createDispatchesRepository({ sqlite: s, now: () => NOW });
 const refuses = (fn, re) => assert.throws(fn, re);
@@ -137,7 +135,6 @@ test('the sweep\'s and the screens\' queries: due() returns queued, retrying and
 // ============================================================= units of work and the server's attachment
 test('in the server: no mirror and no db.dispatches (the name throws, naming the repository); writes inside a unit commit together or not at all, and reads inside the unit see its writes; a staff dispatch naming an organisation that is not stored is refused at the unit\'s COMMIT', () => {
   const dir = tempDir('dsp-unit'); fixtureFile(dir); const L = live(dir);
-  assert.equal(Object.keys(L.db).includes('dispatches'), false);
   L.store.unitOfWork(() => { L.repo.create(email({ id: 'u-1' })); L.repo.recordAttempt('u-1', { at: NOW, ok: true, error: null }); assert.equal(L.repo.byId('u-1').attempts.length, 1, 'a read inside the unit sees its writes'); });
   assert.deepEqual(rowsOf(dir, "SELECT id FROM dispatches").map((r) => r.id), ['u-1'], 'committed');
   assert.throws(() => L.store.unitOfWork(() => { L.repo.patch('u-1', { status: 'accepted', providerMessageId: 'fm_u' }); L.repo.create(email({ id: 'u-2' })); throw new Error('refused later in the unit'); }), /refused later/);
@@ -148,20 +145,16 @@ test('in the server: no mirror and no db.dispatches (the name throws, naming the
   L.close(); rm(dir);
 });
 
-// ============================================================= the snapshot path
-test('snapshot mode: a tool round-trips every dispatch with its attempts in order; an entry the table cannot hold (an unknown field, an unknown status, a missing address, a duplicate id) refuses the whole save, naming the entry; before the organisation prune, so a snapshot that drops an organisation a dispatch still names is refused', () => {
-  const dir = tempDir('dsp-snap'); fixtureFile(dir);
+// ============================================================= fixtures
+test('fixtures: a dispatch written through the repository reads back with its attempts in order; an entry the table cannot hold (an unknown field, an unknown status, a missing address, a duplicate id) refuses the whole fixture, naming the entry, and writes nothing', () => {
+  const dir = tempDir('dsp-fix'); fixtureFile(dir);
   const rows = [email({ id: 's-1', attempts: [{ at: NOW, note: 'quiet hours re-check' }, { at: NOW + 1, ok: true, error: null }], status: 'accepted', providerMessageId: 'fm_s1' }), inApp({ id: 's-2' }), forPlayer({ id: 's-3', status: 'skipped', skipReason: 'guardian_routed', to: null })];
-  { const tool = openStore(dir); tool.save({ idCounter: 1000, db: { dispatches: rows } }); tool.sqlite.close(); }
-  { const s = second(dir); assert.deepEqual(plain(DISPATCHES_TABLE.read(s)), plain(rows)); s.close(); }
-  for (const [bad, re] of [[[email({ id: 'x', extra: 1 })], /entry #0: unknown field/], [[email({ id: 'x', status: 'gone' })], /status must be one of/], [[email({ id: 'x', to: null })], /needs its address/], [[email({ id: 'x' }), email({ id: 'x' })], /entry #1: duplicates the id x/]]) {
-    const tool = openStore(dir); assert.throws(() => tool.save({ idCounter: 1000, db: { dispatches: bad } }), re); tool.sqlite.close();
+  writeFixture(dir, { dispatches: rows }, { now: NOW });
+  assert.deepEqual(plain(readRecords(dir).dispatches), plain(rows));
+  for (const [bad, re] of [[[email({ id: 'x', extra: 1 })], /DISPATCH_RECORD_INVALID[\s\S]*unknown field/], [[email({ id: 'x', status: 'gone' })], /status must be one of/], [[email({ id: 'x', to: null })], /needs its address/], [[email({ id: 'x' }), email({ id: 'x' })], /DISPATCH_DUPLICATE: dispatches x already exists/]]) {
+    assert.throws(() => writeFixture(dir, { dispatches: bad }, { now: NOW }), re);
   }
-  { const s = second(dir); assert.equal(DISPATCHES_TABLE.read(s).length, 3, 'a refused save writes nothing'); s.close(); }
-  const other = { ...ORGS()[0], id: 'org-b', name: 'Other FC' };
-  let tool = openStore(dir); assert.throws(() => tool.save({ idCounter: 1000, db: { orgs: [other], users: [] } }), /no longer lists organisation org-pro but other records still reference it/, 'the kept dispatch s-1 still names org-pro'); tool.sqlite.close();
-  tool = openStore(dir); tool.save({ idCounter: 1000, db: { orgs: [other], users: [], dispatches: [inApp({ id: 's-4', audience: { kind: 'player', id: 'pl-adult' }, orgId: null })] } }); tool.sqlite.close();
-  { const s = second(dir); assert.deepEqual(DISPATCHES_TABLE.read(s).map((d) => d.id), ['s-4'], 'dropping the dispatches with the organisation is accepted'); s.close(); }
+  assert.deepEqual(readRecords(dir).dispatches.map((d) => d.id), ['s-1', 's-2', 's-3'], 'a refused fixture writes nothing');
   rm(dir);
 });
 

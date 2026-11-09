@@ -57,7 +57,7 @@ import { EVENT_REGISTRY, EVENT_NAMES } from '../../domains/platform/eventRegistr
 import { TYPE_CATEGORY, CATEGORIES } from '../../domains/platform/notificationPrefs.mjs';
 import { DATA_MIGRATIONS, TABLE_BACKED } from '../../repositories/index.mjs';
 import { RATE_LIMIT_POLICY } from '../../domains/platform/rateLimit.mjs';
-import { openStore } from '../../store.mjs';
+import { readRecords, writeFixture } from '../../scripts/dataLayerFixture.mjs';
 
 const SCHEMA_VERSION = Number(DATA_MIGRATIONS.map((m) => m.id).sort().at(-1).slice(0, 4));
 
@@ -355,11 +355,9 @@ const key = () => `k-${Math.random().toString(36).slice(2, 10)}`;
 let server = await boot();
 await stop(server);
 {
-  const store = openStore(DATA_DIR);
-  const snap = store.load();
-  snap.db.orgs.push({ ...structuredClone(snap.db.orgs.find((o) => o.type === 'agency')), id: 'org-southgate', name: 'Southgate Sports Management' });
-  store.save(snap);
-  ok(snap.db.orgs.filter((o) => o.type === 'agency').length === 2, 'fixture: two agencies exist, so a foreign agent is a different thing from a colleague');
+  const { password: _password, ...agency } = readRecords(DATA_DIR).orgs.find((o) => o.type === 'agency');
+  writeFixture(DATA_DIR, { orgs: [{ ...agency, id: 'org-southgate', name: 'Southgate Sports Management' }] });
+  ok(readRecords(DATA_DIR).orgs.filter((o) => o.type === 'agency').length === 2, 'fixture: two agencies exist, so a foreign agent is a different thing from a colleague');
 }
 server = await boot();
 

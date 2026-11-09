@@ -7,15 +7,16 @@
 // never change, only grows the trail and refuses itself from inside itself; a review is unique per organisation, brief
 // and player, an item per decision cycle; a reconciliation replaces the membership, appends only unseen transitions and
 // records its clock; the watchlist list and its transitions page; a rolled-back unit leaves nothing; the db.* names
-// throw; and the snapshot write types, names a missing reference and reads back what it wrote. Temporary databases
+// throw; and a fixture written through the repository is typed, names a missing reference and reads back what it wrote. Temporary databases
 // only; nothing touches DATA_DIR. Run with: npm test
 
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { attachDataLayer, DATA_MIGRATIONS, TABLE_BACKED, readTableBacked } from '../repositories/index.mjs';
+import { attachDataLayer, DATA_MIGRATIONS, TABLE_BACKED } from '../repositories/index.mjs';
+import { openLayer, readRecords, writeFixture } from './dataLayerFixture.mjs';
 import { openStore } from '../store.mjs';
 import { NOW, TTL, tempDir } from './coreIdentityTestFixtures.mjs';
-import { saveFixture, ORG, SCOUT, p4bInvitation, minorInvitation, acceptedRequest, scheduledTrial, legacyTrialRequest } from './recruitmentTestFixtures.mjs';
+import { fixtureDb, ORG, SCOUT, p4bInvitation, minorInvitation, acceptedRequest, scheduledTrial, legacyTrialRequest } from './recruitmentTestFixtures.mjs';
 import { S8B_FIX } from './recruitmentCasesTestFixtures.mjs';
 import {
   DISCOVERY_MIGRATION as MIGRATION, DISCOVERY_TABLES as TABLES, DISCOVERY_COLLECTIONS as COLLECTIONS,
@@ -103,21 +104,32 @@ const event = (w, playerId, transition, reason, at, over = {}) => ({
 
 function serverOpen(dir) {
   const store = openStore(dir, { tableBacked: TABLE_BACKED });
-  const db = {}; // S14a: a fixture-saved file is not a first installation, so there is nothing to hand in
-  const layer = attachDataLayer({ db, store, nextId, persist: () => {}, sessionTtlMs: TTL, now: () => NOW, warn: () => {} });
-  const snapshot = () => ({ savedAt: NOW, idCounter: 1000, db });
-  return { store, db, repo: layer.discovery, unit: (w) => store.unitOfWork(w, { snapshot }), close: () => store.sqlite.close() };
+  const layer = attachDataLayer({ store, nextId, sessionTtlMs: TTL, now: () => NOW, warn: () => {} });
+  return { store, repo: layer.discovery, unit: (w) => store.unitOfWork(w), close: () => store.sqlite.close() };
 }
 /** The S8b graph (case-1, the room of pl-adult at org-pro, with decisions rdec-1 and its head rdec-2) and the requests and trial it links. */
 const CASES_FIX = () => ({ notifications: [], dispatches: [], requests: [acceptedRequest(p4bInvitation(), 'trial-1'), minorInvitation(), legacyTrialRequest()], trials: [scheduledTrial()], ...S8B_FIX() });
-const seeded = (label) => { const dir = tempDir(label); saveFixture(dir, CASES_FIX()); return { dir, s: serverOpen(dir) }; };
+/** A watchlist is created unreconciled; its membership and transitions come from a reconciliation (needing the whole fixture). */
+const writersFor = (fix) => ({
+  dynamicWatchlists: (L, records) => {
+    for (const { members = [], lastCriteriaVersion = null, lastBriefVersion = null, lastReconciledAt = null, ...w } of records) {
+      L.discovery.watchlists.create({ ...w, lastCriteriaVersion: null, lastBriefVersion: null, lastReconciledAt: null });
+      const events = (fix.watchlistHistory ?? []).filter((e) => e.watchlistId === w.id);
+      if (lastReconciledAt !== null) L.discovery.watchlists.reconcile(w.id, { at: lastReconciledAt, criteriaVersion: lastCriteriaVersion, briefVersion: lastBriefVersion, members, events });
+      else if (events.length) throw new Error(`dynamic_watchlists ${w.id}: transitions come from a reconciliation`);
+    }
+  },
+  watchlistHistory: () => {}, // with their watchlist's reconciliation, above
+});
+const write = (dir, records) => writeFixture(dir, records, { now: NOW, writers: writersFor(records) });
+const seeded = (label) => { const dir = tempDir(label); write(dir, fixtureDb(CASES_FIX())); return { dir, s: serverOpen(dir) }; };
 
 // ------------------------------------------------------------- schema
 test('[schema] 0032 is registered after 0031 and creates the STRICT tables (no JSON column), empty', () => {
   const ids = DATA_MIGRATIONS.map((m) => m.id);
   assert.equal(ids.indexOf(MIGRATION), ids.indexOf('0031_box_cam') + 1);
   for (const n of COLLECTIONS) assert.ok(TABLE_BACKED.includes(n), `${n} is table-backed`);
-  const dir = tempDir('s12c-empty'); const s = openStore(dir).sqlite;
+  const dir = tempDir('s12c-empty'); const s = openLayer(dir).sqlite;
   for (const t of TABLES) {
     const sql = s.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?").get(t).sql;
     assert.match(sql, /STRICT\s*$/, `${t} is STRICT`);
@@ -288,7 +300,7 @@ test('[watchlists] a reconciliation replaces the membership, appends only unseen
   s.close(); rm(dir);
 });
 
-// ------------------------------------------------------------- units, the db.* names, the snapshot path
+// ------------------------------------------------------------- units, the db.* names, fixtures
 test('[unit] a rolled-back unit leaves nothing', () => {
   const { dir, s } = seeded('s12c-unit');
   assert.throws(() => s.unit(() => { s.repo.briefs.create(brief()); s.repo.watchlists.create(watchlist()); throw new Error('boom'); }), /boom/);
@@ -296,26 +308,27 @@ test('[unit] a rolled-back unit leaves nothing', () => {
   s.close(); rm(dir);
 });
 
-test('[snapshot] the write types every record, names a missing reference, and reads back what it wrote', () => {
-  const dir = tempDir('s12c-snapshot');
+test('[fixtures] a record written through the repository is typed, a missing reference is named, a refused write leaves nothing, and the records read back as written', () => {
+  const dir = tempDir('s12c-fix');
   const w = watchlist();
-  saveFixture(dir, {
+  write(dir, fixtureDb({
     ...CASES_FIX(),
     recruitmentBriefs: [brief()], nobodyMissedReviews: [review()], secondLookItems: [item()],
     dynamicWatchlists: [{ ...w, lastReconciledAt: NOW, lastCriteriaVersion: w.criteriaVersion, members: [{ playerId: 'pl-a', required: [] }] }],
     watchlistHistory: [event(w, 'pl-a', 'entered', 'first_evaluation', NOW, { id: 'wlh-1' })],
-  });
-  const store = openStore(dir); // snapshot mode: a save writes the table-backed collections into their tables
-  const back = readTableBacked(store.sqlite);
+  }));
+  const back = readRecords(dir);
   assert.deepEqual(plain(back.recruitmentBriefs), [plain(brief())]);
   assert.deepEqual(back.dynamicWatchlists[0].members, [{ playerId: 'pl-a', required: [] }]);
   assert.deepEqual(back.watchlistHistory.map((e) => e.id), ['wlh-1']);
-  const snap = store.load();
-  refused(() => store.save({ ...snap, db: { ...snap.db, secondLookItems: [item({ id: 'slk-9', decisionId: 'rdec-none' })] } }), /DISCOVERY_REFERENCE_MISSING|decisionId → room_decisions rdec-none/);
-  refused(() => store.save({ ...snap, db: { ...snap.db, secondLookItems: [item({ triggerType: 'trust_change' })] } }), /DISCOVERY_IMPORT_BLOCKED.*triggerType/, 'the journey battery\'s old planted trigger is refused');
-  refused(() => store.save({ ...snap, db: { ...snap.db, recruitmentBriefs: [brief(), brief()] } }), /duplicates an earlier entry \(brf-1\)/);
-  assert.deepEqual(readTableBacked(store.sqlite).secondLookItems.map((i) => i.id), ['slk-1'], 'a refused write changed nothing');
-  store.sqlite.close(); rm(dir);
+  // the mutual links read back as the literals: a case's requests and trials, a decision chain
+  assert.deepEqual(back.recruitmentCases.map((c) => c.links), S8B_FIX().recruitmentCases.map((c) => plain(c.links)));
+  assert.deepEqual(back.roomDecisions.map((d) => [d.id, d.supersedes, d.supersededById]), [['rdec-1', null, 'rdec-2'], ['rdec-2', 'rdec-1', null]]);
+  refused(() => write(dir, { secondLookItems: [item({ id: 'slk-9', decisionId: 'rdec-none' })] }), /DISCOVERY_REFERENCE_MISSING.*rdec-none/);
+  refused(() => write(dir, { secondLookItems: [item({ id: 'slk-8', triggerType: 'trust_change' })] }), /DISCOVERY_INPUT_INVALID.*triggerType/, 'the journey battery\'s old planted trigger is refused');
+  refused(() => write(dir, { recruitmentBriefs: [brief()] }), /DISCOVERY_DUPLICATE.*brf-1/);
+  assert.deepEqual(readRecords(dir).secondLookItems.map((i) => i.id), ['slk-1'], 'a refused write changed nothing');
+  rm(dir);
 });
 
 console.log(`\n${passed} discovery checks passed`);

@@ -22,7 +22,8 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
-import { openStore } from '../../store.mjs';
+import { DatabaseSync } from 'node:sqlite';
+import { openLayer, readRecords, writeFixture } from '../../scripts/dataLayerFixture.mjs';
 import { DATA_MIGRATIONS, TABLE_BACKED } from '../../repositories/index.mjs';
 import { signingIntegrity } from '../../domains/recruitment/signings/signing.mjs';
 const LATEST_SCHEMA = Number(DATA_MIGRATIONS.map((m) => m.id).sort().at(-1).slice(0, 4)); // S14a: the latest table migration's number
@@ -68,13 +69,13 @@ async function bootOn(dataDir, port) {
   const stop = async () => {
     proc.kill('SIGTERM');
     for (let i = 0; i < 60 && proc.exitCode == null; i += 1) await sleep(100);
-    return openStore(dataDir).load()?.db ?? null;
+    return readRecords(dataDir);
   };
   return { up, j, stop, log: () => log };
 }
 
 // The table-migration ledger of a stopped server's file: every id with the time it was applied.
-const ledger = (dir) => { const st = openStore(dir); try { return st.sqlite.prepare('SELECT id, applied_at FROM data_migrations ORDER BY id').all().map((r) => `${r.id}@${r.applied_at}`); } finally { st.sqlite.close(); } };
+const ledger = (dir) => { const st = new DatabaseSync(path.join(dir, 'scoutbox.db'), { readOnly: true }); try { return st.prepare('SELECT id, applied_at FROM data_migrations ORDER BY id').all().map((r) => `${r.id}@${r.applied_at}`); } finally { st.close(); } };
 
 const PORT = 5700 + Math.floor(Math.random() * 200);
 const T0 = Date.now();
@@ -97,17 +98,16 @@ section('1 — the migration: fresh boot at schema 39 with the signing tables on
   const db1 = await s1.stop();
   const L1 = ledger(DIR);
   ok(fresh && L1.length === DATA_MIGRATIONS.length && L1.filter((e) => e.startsWith('0018_signings_follow_ups@')).length === 1, '1.3 a fresh store boots at schema 39 with the signing step applied once');
-  ok(Array.isArray(db1.signingPackages) && db1.signingPackages.length === 0, '1.4 the snapshot carries an empty signingPackages list');
+  ok(Array.isArray(db1.signingPackages) && db1.signingPackages.length === 0, '1.4 the stopped file holds no signing package');
   // A legacy world: a case at signed with a legacy signing row, and a player under_contract with no signing at all.
   const maria = db1.users.find((u) => u.orgId === 'org-eastport' && u.name === 'Maria Keane');
   // The whole case literal the Room route writes (the typed table refuses a partial one), moved to signed long ago.
   const legacyCase = { id: 'case-legacy-signed', orgId: 'org-eastport', playerId: 'pl-svensson', playerName: 'Elias Svensson', vacancyId: null, ownerUserId: maria?.id ?? null, ownerName: 'Maria Keane', stage: 'closed', priority: 'medium', deadline: null, restricted: false, assignments: [], tasks: [], approvals: [], decision: null, createdAt: T0 - 30 * DAY, room: { status: 'signed', priority: 'normal', tags: [], leadScoutUserId: null, sourceContext: 'direct', sourceRef: null, openedBy: { userId: maria?.id ?? null, name: 'Maria Keane' }, updatedAt: T0 - 29 * DAY, archivedAt: null, closedAt: null, rev: 3, revAt: T0 - 29 * DAY, revBy: null, reopened: null }, history: [{ id: 'aud-legacy-1', at: T0 - 29 * DAY, action: 'room_status_changed', detail: { from: 'offer_made', to: 'signed' }, byKind: 'org', byId: maria?.id ?? null, byName: 'Legacy Lead' }], links: { requestIds: [], trialIds: [], signingId: 'sign-legacy-p7' }, decisionDraft: null, transactionHandoff: null, budget: null, subjectRemovedAt: null };
-  db1.recruitmentCases.push(legacyCase);
-  db1.signings.push({ id: 'sign-legacy-p7', playerId: 'pl-svensson', playerName: 'Elias Svensson', orgId: 'org-eastport', orgName: 'Eastport FC', userId: maria?.id ?? null, scoutName: 'Legacy Lead', ts: T0 - 29 * DAY, insideAttributionWindow: false });
-  const kim = db1.players.find((p) => p.id === 'pl-kim'); kim.contractStatus = 'under_contract';
-  const casesBefore = JSON.stringify(db1.recruitmentCases.map((c) => [c.id, c.room?.status ?? null]));
-  const signingsBefore = JSON.stringify(db1.signings);
-  openStore(DIR).save({ db: db1 });
+  const legacySigning = { id: 'sign-legacy-p7', playerId: 'pl-svensson', playerName: 'Elias Svensson', orgId: 'org-eastport', orgName: 'Eastport FC', userId: maria?.id ?? null, scoutName: 'Legacy Lead', ts: T0 - 29 * DAY, insideAttributionWindow: false };
+  const casesBefore = JSON.stringify([...db1.recruitmentCases, legacyCase].map((c) => [c.id, c.room?.status ?? null]));
+  const signingsBefore = JSON.stringify([...db1.signings, legacySigning]);
+  // Planted between boots through the repositories, in one unit: the case, its legacy row, and Kim under contract.
+  { const L = openLayer(DIR); try { L.unit(() => { L.layer.recruitmentCases.cases.create(legacyCase); L.layer.signingsFollowUps.signings.record(legacySigning); L.layer.players.update('pl-kim', (p) => { p.contractStatus = 'under_contract'; }); }); } finally { L.close(); } }
   const s2 = await bootOn(DIR, PORT);
   ok(s2.up && (await s2.j('GET', '/healthz')).body.schemaVersion === LATEST_SCHEMA, '1.5 the planted legacy file boots at the latest schema');
   const m = (await s2.j('POST', '/auth/org/login', { orgId: 'org-eastport', scoutName: 'Maria Keane', role: 'Head of Recruitment' })).body;
@@ -221,7 +221,7 @@ const R = {};
   ok(R.before.theoStatusAt.before === 'READY' && R.before.theoStatusAt.after === 'EXPIRED', '2.8 Martin\'s package reads READY before and EXPIRED at its instant — derived');
 
   const db = await s.stop();
-  ok(Array.isArray(db.signingPackages) && db.signingPackages.length === 6, '2.9 SIGTERM: the snapshot holds six packages');
+  ok(Array.isArray(db.signingPackages) && db.signingPackages.length === 6, '2.9 SIGTERM: the file holds six packages');
   const stored = Object.fromEntries(db.signingPackages.map((p) => [p.id, p]));
   ok(stored[R.kola.SID].status === 'DRAFT' && stored[R.kim.SID].status === 'COMPLETED' && stored[R.chi.SID].status === 'CANCELLED' && stored[R.sven.SID].status === 'VOIDED' && stored[R.tan.SID].status === 'IN_PROGRESS' && stored[R.theo.SID].status === 'READY', '2.10 stored statuses: DRAFT, COMPLETED, CANCELLED, VOIDED, IN_PROGRESS, READY (EXPIRED is never stored)');
   ok(stored[R.tan.SID].revisions.length === 2 && stored[R.tan.SID].revisions[0].status === 'SUPERSEDED' && stored[R.tan.SID].revisions[0].requiredParties[0].status === 'COMPLETED' && stored[R.tan.SID].revisions[1].document.sha256 === SHA2, '2.11 Tanaka: revision 1 SUPERSEDED with his old signature kept as history; revision 2 carries the new digest');
@@ -291,16 +291,15 @@ section('4 — planted corruption is named, refused, omitted, never repaired; a 
   const c8 = open(clone('spk-t8', { offerId: R.chi.OID })); // #5 an Offer that names another player (Okafor's)
   const c9 = open(clone('spk-t9', { caseId: R.chi.RID })); // #6 a case that names another player
   const c10 = open(clone('spk-t10', { offerRevisionId: 'rofr-stale' })); // #7 bound to an Offer revision the Offer does not hold
-  // S8d: each planted row goes in its own save; a row the typed columns cannot hold is REFUSED there, naming the id
-  // (nothing lands); the rows the columns can hold land and are named on read, as before
+  // S8d: each planted row goes in its own write (the repository's insert); a row the typed columns cannot hold is
+  // REFUSED there, naming the id (nothing lands); the rows the columns can hold land and are named on read, as before
   const refusedAtSave = new Map(); const planted = [];
   for (const c of [c1, c2, c3, c4, c5, c6, c7, c8, c9, c10]) {
-    const st = openStore(DIR); const snap = st.load(); snap.db.signingPackages.push(c);
-    try { st.save({ ...snap, db: snap.db }); planted.push(c.id); } catch (err) { refusedAtSave.set(c.id, String(err?.message ?? err)); }
+    try { writeFixture(DIR, { signingPackages: [c] }); planted.push(c.id); } catch (err) { refusedAtSave.set(c.id, String(err?.message ?? err)); }
   }
-  neg([...refusedAtSave.entries()].every(([id, m]) => /SIGNINGS_(IMPORT_BLOCKED|UNIQUENESS|REFERENCE_MISSING)/.test(m) && m.includes(id)), `4.0 (S8d) the rows the columns cannot hold are refused at the save, each naming its id: ${[...refusedAtSave.keys()].join(', ') || 'none'}; landed: ${planted.join(', ')}`);
+  neg([...refusedAtSave.entries()].every(([id, m]) => /SIGNINGS_(INPUT_INVALID|UNIQUENESS|REFERENCE_MISSING)/.test(m) && m.includes(id)), `4.0 (S8d) the rows the columns cannot hold are refused by the insert, each naming its id: ${[...refusedAtSave.keys()].join(', ') || 'none'}; landed: ${planted.join(', ')}`);
   neg(refusedAtSave.has('spk-t1') && refusedAtSave.has('spk-t2'), '4.0b (S8d) an unknown status word and a COMPLETED package without its completion record cannot be stored at all');
-  { const st = openStore(DIR); const snap = st.load(); db.signingPackages = snap.db.signingPackages; }
+  db.signingPackages = readRecords(DIR).signingPackages;
   const rowsBefore = JSON.stringify(db.signingPackages.filter((p) => /^spk-t/.test(p.id)));
   const signingsBefore = JSON.stringify(db.signings);
   const chiStage = db.recruitmentCases.find((c) => c.id === R.chi.RID).room.status;
@@ -310,7 +309,7 @@ section('4 — planted corruption is named, refused, omitted, never repaired; a 
   const maria = (await j('POST', '/auth/org/login', { orgId: 'org-eastport', scoutName: 'Maria Keane', role: 'Head of Recruitment' })).body;
   const kim = (await j('POST', '/auth/player/login', { playerId: 'pl-kim' })).body.token;
   for (const [id, why] of [['spk-t1', 'an unknown status word'], ['spk-t2', 'COMPLETED without its completion record'], ['spk-t3', 'a PLAYER party completed by an org actor'], ['spk-t4', 'a pointer at a non-latest revision'], ['spk-t5', 'a party completed before the revision was presented'], ['spk-t6', 'a COMPLETED package on a case that is not signed'], ['spk-t7', 'presented without a document'], ['spk-t8', 'an Offer that names another player'], ['spk-t9', 'a case that names another player'], ['spk-t10', 'a stale Offer revision']]) {
-    if (refusedAtSave.has(id)) { neg(true, `4.2 ${id} (${why}): never stored — the save refused it (${refusedAtSave.get(id).slice(0, 80)}…)`); continue; }
+    if (refusedAtSave.has(id)) { neg(true, `4.2 ${id} (${why}): never stored — the insert refused it (${refusedAtSave.get(id).slice(0, 80)}…)`); continue; }
     const r = await j('GET', `/org/signings/${id}`, undefined, maria.token);
     neg(r.status === 500 && r.body.error === 'SIGNING_STATE_UNKNOWN' && !has(r.body, 'revisions') && !has(r.body, 'stack'), `4.2 ${id} (${why}): 500 SIGNING_STATE_UNKNOWN, nothing internal in the body`);
     const m = await j('POST', `/org/signings/${id}/complete`, { expectedRev: 1, clientKey: key() }, maria.token);
@@ -331,18 +330,18 @@ section('4 — planted corruption is named, refused, omitted, never repaired; a 
 section('5 — P7.1: bytes, rows and evidence edited on disk fail closed after a restart; a completion interrupted by a restart converges');
 {
   const db = R.db; // after section 4's stop: the seven planted rows are still there (never repaired), the genuine ones sound
-  const store = openStore(DIR);
   const mediaFile = (mediaId) => path.join(DIR, 'media', `${mediaId}.bin`);
   const kimEv = (db.verEvidence ?? []).find((e) => e && e.meta?.signingPackageId === R.kim.SID && e.meta?.signingDocumentKind === 'signing');
   ok(!!kimEv?.mediaId && existsSync(mediaFile(kimEv.mediaId)), '5.0 Kim\'s signed document sits in the vault on disk');
   const originalBytes = readFileSync(mediaFile(kimEv.mediaId));
   const kimRow = db.signings.find((x) => x.signingPackageId === R.kim.SID);
   const login = async (j) => (await j('POST', '/auth/org/login', { orgId: 'org-eastport', scoutName: 'Maria Keane', role: 'Head of Recruitment' })).body.token;
-  // S8d: a planted row the typed columns cannot hold is REFUSED at the save (nothing lands); `refused` carries the error into the check
+  // S8d: a planted row the typed columns cannot hold is REFUSED by its repository write (nothing lands); `refused`
+  // carries the error into the check. `plant(layer, L)` writes between boots, in one unit of work (null: nothing).
   let refused = null;
-  const cycle = async (label, mutate, check) => {
-    const snap = store.load(); await mutate(snap.db); refused = null;
-    try { store.save({ ...snap, db: snap.db }); } catch (err) { refused = err; }
+  const cycle = async (label, plant, check) => {
+    refused = null;
+    if (plant) { const L = openLayer(DIR); try { L.unit(() => plant(L.layer, L)); } catch (err) { refused = err; } finally { L.close(); } }
     const s = await bootOn(DIR, PORT);
     ok(s.up, `5.${label} the server boots`);
     const tok = await login(s.j);
@@ -350,7 +349,6 @@ section('5 — P7.1: bytes, rows and evidence edited on disk fail closed after a
     const after = await s.stop();
     return after;
   };
-  const refusedNaming = (...ids) => !!refused && /SIGNINGS_(IMPORT_BLOCKED|UNIQUENESS|REFERENCE_MISSING|STILL_REFERENCED)/.test(refused.message) && ids.every((id) => refused.message.includes(id));
   // 5.1 the vault bytes swapped after a restart: the document is not served, the completed record and package still read
   await cycle('1a', () => { writeFileSync(mediaFile(kimEv.mediaId), DOC2); }, async (s, tok) => {
     const kim = (await s.j('POST', '/auth/player/login', { playerId: 'pl-kim' })).body.token;
@@ -362,38 +360,40 @@ section('5 — P7.1: bytes, rows and evidence edited on disk fail closed after a
     ok(d?.file && sha256(Buffer.from(d.file.base64, 'base64')) === SHA, '5.1c the original bytes back: served again, nothing was repaired');
   });
   // 5.2 a duplicate completion row on disk
-  await cycle('2', (d) => { d.signings.push({ ...kimRow, id: 'sign-dup-p' }); }, async (s, tok) => {
-    neg(refusedNaming(R.kim.SID) && (await s.j('GET', `/org/signings/${R.kim.SID}`, undefined, tok, at(T0 + 3 * H))).status === 200 && (await s.j('GET', `/org/rooms/${R.kim.RID}/signing`, undefined, tok, at(T0 + 3 * H))).body.packages.find((p) => p.id === R.kim.SID)?.integrity.length === 0, `5.2 (S8d) a second row for one package is refused at the save, naming the package; the one row reads sound (${String(refused?.message).slice(0, 70)}…)`);
+  await cycle('2', (L) => { L.signingsFollowUps.signings.record({ ...kimRow, id: 'sign-dup-p' }); }, async (s, tok) => {
+    neg(/UNIQUE constraint failed: signings\.(offer_id|signing_package_id)/.test(String(refused?.message)) && (await s.j('GET', `/org/signings/${R.kim.SID}`, undefined, tok, at(T0 + 3 * H))).status === 200 && (await s.j('GET', `/org/rooms/${R.kim.RID}/signing`, undefined, tok, at(T0 + 3 * H))).body.packages.find((p) => p.id === R.kim.SID)?.integrity.length === 0, `5.2 (S8d) a second row for one package is refused by the table's one-row-per-offer/package key; the one row reads sound (${String(refused?.message).slice(0, 70)}…)`);
   });
-  await cycle('2b', (d) => { d.signings = d.signings.filter((x) => x.id !== 'sign-dup-p'); }, async (s, tok) => { ok(!refused && (await s.j('GET', `/org/signings/${R.kim.SID}`, undefined, tok, at(T0 + 3 * H))).status === 200, '5.2b still readable (nothing to remove)'); });
+  await cycle('2b', null, async (s, tok) => { ok(!refused && (await s.j('GET', `/org/signings/${R.kim.SID}`, undefined, tok, at(T0 + 3 * H))).status === 200, '5.2b still readable (nothing to remove)'); });
   // 5.3 corrupted party evidence on disk
   let kimBackup = null; // S8d: the backup lives here (an unknown field on the record is not a column)
-  await cycle('3', (d) => { const p = d.signingPackages.find((x) => x.id === R.kim.SID); kimBackup = JSON.stringify(p); p.revisions[0].requiredParties[0].evidenceRef.documentSha256 = SHA2; }, async (s, tok) => {
+  await cycle('3', (L) => { const p = L.signingsFollowUps.signingPackages.byId(R.kim.SID); const party = p.revisions[0].requiredParties[0]; kimBackup = JSON.stringify(party.evidenceRef); L.signingsFollowUps.signingPackages.setParty(p.id, p.revisions[0].id, party.partyType, { evidenceRef: { ...party.evidenceRef, documentSha256: SHA2 } }); }, async (s, tok) => {
     neg((await s.j('GET', `/org/signings/${R.kim.SID}`, undefined, tok, at(T0 + 3 * H))).body?.error === 'SIGNING_STATE_UNKNOWN', '5.3 an evidence reference edited to another digest: corruption');
   });
-  await cycle('3b', (d) => { const p = d.signingPackages.find((x) => x.id === R.kim.SID); const bk = JSON.parse(kimBackup); for (const k of Object.keys(p)) delete p[k]; Object.assign(p, bk); }, async (s, tok) => { ok((await s.j('GET', `/org/signings/${R.kim.SID}`, undefined, tok, at(T0 + 3 * H))).status === 200, '5.3b restored'); });
+  await cycle('3b', (L) => { const p = L.signingsFollowUps.signingPackages.byId(R.kim.SID); const party = p.revisions[0].requiredParties[0]; L.signingsFollowUps.signingPackages.setParty(p.id, p.revisions[0].id, party.partyType, { evidenceRef: JSON.parse(kimBackup) }); }, async (s, tok) => { ok((await s.j('GET', `/org/signings/${R.kim.SID}`, undefined, tok, at(T0 + 3 * H))).status === 200, '5.3b restored'); });
   // 5.4 a completed package whose row is gone
-  await cycle('4', (d) => { d.signings = d.signings.filter((x) => x.id !== kimRow.id); }, async (s, tok) => {
-    neg(refusedNaming(R.kim.SID, kimRow.id) && (await s.j('GET', `/org/signings/${R.kim.SID}`, undefined, tok, at(T0 + 3 * H))).status === 200 && (await s.j('GET', `/org/rooms/${R.kim.RID}/journey`, undefined, tok)).body.outcome.signing?.id === kimRow.id, `5.4 (S8d) a COMPLETED package cannot lose its row: the save is refused with the package and the row named; the journey still shows it (${String(refused?.message).slice(0, 70)}…)`);
+  // S14: no repository operation removes a completed package's row (the snapshot save's refusal of that departure is gone with the snapshot tool)
+  await cycle('4', null, async (s, tok) => {
+    neg((await s.j('GET', `/org/signings/${R.kim.SID}`, undefined, tok, at(T0 + 3 * H))).status === 200 && (await s.j('GET', `/org/rooms/${R.kim.RID}/journey`, undefined, tok)).body.outcome.signing?.id === kimRow.id, '5.4 a COMPLETED package keeps its row: the package reads and the journey shows it');
     neg((await s.j('POST', `/org/signings/${R.kim.SID}/complete`, { expectedRev: 99, clientKey: key() }, tok, at(T0 + 3 * H))).status >= 400 && (await s.j('GET', `/org/rooms/${R.kim.RID}/journey`, undefined, tok)).body.outcome.signing?.id === kimRow.id, '5.4b a "completion" of the completed package writes no second row');
   });
-  await cycle('4b', () => {}, async (s, tok) => { ok((await s.j('GET', `/org/rooms/${R.kim.RID}/journey`, undefined, tok)).body.outcome.signing?.id === kimRow.id, '5.4c the one row stands'); });
+  await cycle('4b', null, async (s, tok) => { ok((await s.j('GET', `/org/rooms/${R.kim.RID}/journey`, undefined, tok)).body.outcome.signing?.id === kimRow.id, '5.4c the one row stands'); });
   // 5.5 a row naming a package that never completed (Kola's DRAFT)
-  await cycle('5', (d) => { d.signings.push({ ...kimRow, id: 'sign-forged-p', signingPackageId: R.kola.SID, playerId: 'pl-adeyemi', caseId: R.kola.RID, offerId: R.kola.OID }); }, async (s, tok) => {
+  await cycle('5', (L) => { L.signingsFollowUps.signings.record({ ...kimRow, id: 'sign-forged-p', signingPackageId: R.kola.SID, playerId: 'pl-adeyemi', caseId: R.kola.RID, offerId: R.kola.OID }); }, async (s, tok) => {
     neg((await s.j('GET', `/org/signings/${R.kola.SID}`, undefined, tok)).body?.error === 'SIGNING_STATE_UNKNOWN' && (await s.j('GET', `/org/rooms/${R.kola.RID}/signing`, undefined, tok)).body.packages.find((p) => p.id === R.kola.SID)?.integrity.includes('ROW_WITHOUT_COMPLETION'), '5.5 a row for a DRAFT package: ROW_WITHOUT_COMPLETION, corruption');
     const rev = (await s.j('GET', `/org/rooms/${R.kola.RID}/journey`, undefined, tok)).body.case.rev;
     neg((await s.j('POST', `/org/rooms/${R.kola.RID}/lifecycle`, { action: 'confirmSignedOutcome', expectedRev: rev }, tok)).status === 422 && (await s.j('GET', `/org/rooms/${R.kola.RID}/journey`, undefined, tok)).body.lifecycle.currentStage === 'offer_accepted', '5.5b the forged row is not evidence for signed: the case stays at offer_accepted');
   });
-  await cycle('5b', (d) => { d.signings = d.signings.filter((x) => x.id !== 'sign-forged-p'); d.followUps = (d.followUps ?? []).filter((f) => f.signingId !== 'sign-forged-p'); d.outcomeReports = (d.outcomeReports ?? []).filter((r) => r.signingId !== 'sign-forged-p'); }, async (s, tok) => { ok((await s.j('GET', `/org/signings/${R.kola.SID}`, undefined, tok)).status === 200, '5.5c removed: readable'); });
+  // Raw SQL: no repository operation deletes a signing row (a forged one is a state only a test plants), so its removal is SQL.
+  await cycle('5b', (_, L) => { for (const t of ['outcome_reports', 'follow_ups']) L.sqlite.prepare(`DELETE FROM ${t} WHERE signing_id = ?`).run('sign-forged-p'); L.sqlite.prepare('DELETE FROM signings WHERE id = ?').run('sign-forged-p'); }, async (s, tok) => { ok((await s.j('GET', `/org/signings/${R.kola.SID}`, undefined, tok)).status === 200, '5.5c removed: readable'); });
   // 5.6 lazy expiry across the restart: the stored word is still READY, the read is EXPIRED
   {
-    const snap = store.load();
-    ok(snap.db.signingPackages.find((p) => p.id === R.theo.SID).status === 'READY', '5.6 Martin\'s package is stored READY through every restart (EXPIRED is never written)');
+    const back = readRecords(DIR);
+    ok(back.signingPackages.find((p) => p.id === R.theo.SID).status === 'READY', '5.6 Martin\'s package is stored READY through every restart (EXPIRED is never written)');
   }
   // 5.7 a completion interrupted by a restart: (a) before persistence → nothing; (b) after persistence, before the effects → converged on replay
   const playerTok = async (j, id) => (await j('POST', '/auth/player/login', { playerId: id })).body.token;
   let N = null;
-  await cycle('7a', () => {}, async (s, tok) => {
+  await cycle('7a', null, async (s, tok) => {
     const { j } = s;
     const journey = async (RID) => (await j('GET', `/org/rooms/${RID}/journey?limit=200`, undefined, tok)).body;
     const lifecycle = async (RID, action) => j('POST', `/org/rooms/${RID}/lifecycle`, { action, expectedRev: (await journey(RID)).case.rev }, tok);
@@ -419,21 +419,21 @@ section('5 — P7.1: bytes, rows and evidence edited on disk fail closed after a
     const boom = await j('POST', `/org/signings/${SID}/complete`, { expectedRev: N.rev, clientKey: N.KC }, tok, at(T0 + 5 * H));
     neg(boom.status === 500 && boom.body.error === 'SIGNING_STATE_UNKNOWN', '5.7a the completion fails after the lifecycle moved (before persistence) — and the server is now stopped by SIGTERM with the rolled-back state');
   });
-  await cycle('7b', () => {}, async (s, tok) => {
+  await cycle('7b', null, async (s, tok) => {
     ok((await s.j('GET', `/org/signings/${N.SID}`, undefined, tok, at(T0 + 5 * H))).body.signing.status === 'IN_PROGRESS' && (await s.j('GET', '/org/signings', undefined, tok)).body.items.every((x) => x.signingPackageId !== N.SID) && (await s.j('GET', `/org/rooms/${N.RID}/journey`, undefined, tok)).body.lifecycle.currentStage === 'offer_accepted', '5.7b after the restart: IN_PROGRESS, no row, offer_accepted — the interrupted completion left nothing behind');
     await s.j('POST', '/__faults', { rules: 'internal:signing.complete.effects:1' });
     const done = await s.j('POST', `/org/signings/${N.SID}/complete`, { expectedRev: (await s.j('GET', `/org/signings/${N.SID}`, undefined, tok)).body.signing.rev, clientKey: N.KC }, tok, at(T0 + 5 * H));
     ok(done.status === 200 && done.body.signing.status === 'COMPLETED', '5.7c the same key completes; the after-effects fail (simulated) — the authoritative writes were already persisted');
   });
-  await cycle('7c', () => {}, async (s, tok) => {
+  await cycle('7c', null, async (s, tok) => {
     const replay = await s.j('POST', `/org/signings/${N.SID}/complete`, { expectedRev: 999, clientKey: N.KC }, tok, at(T0 + 5 * H));
     ok(replay.status === 200 && replay.body.idempotent === true && (await s.j('GET', '/org/signings', undefined, tok)).body.items.filter((x) => x.signingPackageId === N.SID).length === 1 && (await s.j('GET', `/org/rooms/${N.RID}/journey`, undefined, tok)).body.lifecycle.currentStage === 'signed', '5.7d after another restart the key replays, one row, the case signed: converged');
     neg((await s.j('POST', `/org/signings/${N.SID}/complete`, { expectedRev: 999, clientKey: key() }, tok, at(T0 + 5 * H))).body.error === 'SIGNING_ALREADY_COMPLETED', '5.7e a fresh completion is refused');
   });
   // 5.8 planted corruption from section 4 is STILL there and still refused: nothing repaired it across five restarts
   {
-    const snap = store.load();
-    neg(snap.db.signingPackages.filter((p) => /^spk-t/.test(p.id)).length === 10 - R.refusedAtSave.size, `5.8 the ${10 - R.refusedAtSave.size} planted rows that the columns could hold survived every restart untouched — never repaired, never dropped (S8d: ${R.refusedAtSave.size} never landed)`);
+    const back = readRecords(DIR);
+    neg(back.signingPackages.filter((p) => /^spk-t/.test(p.id)).length === 10 - R.refusedAtSave.size, `5.8 the ${10 - R.refusedAtSave.size} planted rows that the columns could hold survived every restart untouched — never repaired, never dropped (S8d: ${R.refusedAtSave.size} never landed)`);
   }
 }
 

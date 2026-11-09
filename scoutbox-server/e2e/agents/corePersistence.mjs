@@ -1,12 +1,12 @@
 // M23 P5.6B — persistence, migration and restart audit for the Agent core.
 // S11a: the profiles, affiliations and agreements are typed tables (migration 0026), and a snapshot save types every
-// record. S14a: the blob store and its snapshot registry (step 2305) are retired; schema checks read data_migrations.
+// record. S14 last: fixtures are written through the repositories. S14a: the blob store and its snapshot registry (step 2305) are retired; schema checks read data_migrations.
 //
 //   1  migration 0026: registered once; a clean database holds no agent record, and reopening it changes nothing
 //   2  a database of staff with no agent rows: nothing is bootstrapped or mirrored (no staff exist before their login)
 //   3  a real boot over that database: the first member into the agency becomes its administrator and can administer
-//   4  clean boot → a full relationship → stop → snapshot → reboot: bytes survive (keys, revs, provenance, history)
-//   5  junk is refused by the typed save, naming the record; an odd row a typed table CAN hold (an active agreement
+//   4  clean boot → a full relationship → stop → read back → reboot: bytes survive (keys, revs, provenance, history)
+//   5  junk is refused by the typed write, naming the record; an odd row a typed table CAN hold (an active agreement
 //      nobody confirmed) grants nothing and is never "repaired" on boot
 //
 // Nothing is rewritten, re-ordered or "repaired" on boot.
@@ -16,7 +16,8 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { openStore } from '../../store.mjs';
+import { DatabaseSync } from 'node:sqlite';
+import { readRecords, writeFixture } from '../../scripts/dataLayerFixture.mjs';
 import { effectiveFacetState, agreementGrantsAccess, clientTransitionAllowed, agentTransitionAllowed, verificationGap, newFacets } from '../../domains/agents/core/shared.mjs';
 import { DATA_MIGRATIONS, TABLE_BACKED } from '../../repositories/index.mjs';
 import { AGENT_CORE_MIGRATION } from '../../repositories/agentCore.mjs';
@@ -57,7 +58,7 @@ async function bootOn(dataDir, port) {
   const stop = async () => {
     proc.kill('SIGTERM');
     for (let i = 0; i < 60 && proc.exitCode == null; i += 1) await sleep(100);
-    return openStore(dataDir).load()?.db ?? null;
+    return readRecords(dataDir);
   };
   return { up, j, stop, log: () => log };
 }
@@ -66,12 +67,15 @@ const PORT = pickPort(6500, 200, [0, 1, 3]); // TH-6: never a fetch-blocked port
 const SCHEMA_VERSION = Number(DATA_MIGRATIONS.map((m) => m.id).sort().at(-1).slice(0, 4));
 /** The table migrations recorded in a data directory's file, with when each ran. */
 const appliedMigrations = (dir) => {
-  const st = openStore(dir);
-  try { return st.sqlite.prepare('SELECT id, applied_at FROM data_migrations ORDER BY id').all().map((r) => ({ id: r.id, at: r.applied_at })); } finally { st.sqlite.close(); }
+  const st = new DatabaseSync(path.join(dir, 'scoutbox.db'), { readOnly: true });
+  try { return st.prepare('SELECT id, applied_at FROM data_migrations ORDER BY id').all().map((r) => ({ id: r.id, at: r.applied_at })); } finally { st.close(); }
 };
 const T0 = 1_700_000_000_000; // 2023-11-14 — firmly in the past, so createdAt-based windows have started
 
 // ------------------------------------------------------------- fixtures
+
+// A removed staff member is created and then removed, as the team route does (the shared users writer creates only).
+const fixture = (dir, collections) => writeFixture(dir, collections);
 
 /** One club, one agency with three staff (one lead, one removed), two agencies, two adult players; no agent rows. */
 function staffSnapshot() {
@@ -106,11 +110,11 @@ section('1 — migration 0026: registered once; a clean database holds no agent 
   ok(ids.filter((id) => id === AGENT_CORE_MIGRATION).length === 1 && SCHEMA_VERSION >= 26, `${AGENT_CORE_MIGRATION} is registered once, and the schema has only moved forward since (now ${SCHEMA_VERSION})`);
   neg(new Set(ids.map((id) => id.slice(0, 4))).size === ids.length && ids.every((id) => Number(id.slice(0, 4)) <= SCHEMA_VERSION), `every schema version is reached by exactly one migration, none above the reported schema (${SCHEMA_VERSION})`);
   const freshDir = mkdtempSync(path.join(tmpdir(), 'sbx-m24p1-'));
-  const fresh = openStore(freshDir).load().db;
+  const fresh = readRecords(freshDir);
   ok(fresh.agentProfiles.length === 0 && fresh.agencyAffiliations.length === 0 && fresh.representationAgreements.length === 0, 'a clean database holds no agent record: the agent core is tables (migration 0026)');
   neg(!['agentAuth', 'agentSessions', 'agentUsers', 'offers'].some((n) => TABLE_BACKED.includes(n)), 'no agent auth database and no offers store exists');
   const recordsBefore = appliedMigrations(freshDir);
-  ok(stableJson(openStore(freshDir).load().db) === stableJson(fresh) && stableJson(appliedMigrations(freshDir)) === stableJson(recordsBefore), 'reopening the file changes no table and records no migration again');
+  ok(stableJson(readRecords(freshDir)) === stableJson(fresh) && stableJson(appliedMigrations(freshDir)) === stableJson(recordsBefore), 'reopening the file changes no table and records no migration again');
   for (const s2 of ['agentProfiles', 'agencyAffiliations', 'representationAgreements']) ok(TABLE_BACKED.includes(s2), `${s2} is a table of the agent core, not a collection`);
 }
 
@@ -119,8 +123,8 @@ section('2 — a database of staff: nothing bootstrapped, nothing mirrored');
 {
   const dir = mkdtempSync(path.join(tmpdir(), 'sbx-m24p2-'));
   const db = staffSnapshot();
-  openStore(dir).save({ db });
-  const back = openStore(dir).load().db;
+  fixture(dir, db);
+  const back = readRecords(dir);
   neg(back.agencyAffiliations.length === 0 && back.agentProfiles.length === 0 && back.representationAgreements.length === 0, 'no agent record is created: staff exist only from their first login');
   const mirror = { id: 'rep-x', agentUserId: null, clientId: 'pl-a', status: 'active', confirmedAt: T0 + 10, startAt: T0 + 10, endAt: T0 + 400 * 24 * 3600 * 1000 };
   neg(!agreementGrantsAccess(mirror, null, T0 + 20) && !agreementGrantsAccess(mirror, 'usr-lead', T0 + 20) && !agreementGrantsAccess(mirror, undefined, T0 + 20), 'an ACTIVE agreement naming no agent grants access to nobody — null, the admin, undefined');
@@ -133,7 +137,7 @@ section('3 — a real boot over it: the first member becomes the administrator')
 {
   const dir = mkdtempSync(path.join(tmpdir(), 'sbx-m24p3-'));
   const db = staffSnapshot();
-  openStore(dir).save({ db });
+  fixture(dir, db);
   const s = await bootOn(dir, PORT);
   ok(s.up, 'the server boots over a database of staff with no agent rows');
   if (s.up) {
@@ -159,7 +163,7 @@ section('3 — a real boot over it: the first member becomes the administrator')
 }
 
 // ======================================================= 4 — clean boot round trip
-section('4 — clean boot → relationship → stop → snapshot → reboot');
+section('4 — clean boot → relationship → stop → read back → reboot');
 {
   const dir = mkdtempSync(path.join(tmpdir(), 'sbx-m24p4-'));
   const port = PORT + 1;
@@ -184,7 +188,7 @@ section('4 — clean boot → relationship → stop → snapshot → reboot');
   };
   const snap = await s.stop();
   const recordsAtStop = appliedMigrations(dir);
-  ok(snap && Number(recordsAtStop.at(-1)?.id.slice(0, 4)) === SCHEMA_VERSION && snap.representationAgreements.length === 1 && snap.agentProfiles.length === 1 && snap.agencyAffiliations.length === 2, 'the snapshot holds one agreement, one profile, two affiliations (read from the tables)');
+  ok(snap && Number(recordsAtStop.at(-1)?.id.slice(0, 4)) === SCHEMA_VERSION && snap.representationAgreements.length === 1 && snap.agentProfiles.length === 1 && snap.agencyAffiliations.length === 2, 'the database holds one agreement, one profile, two affiliations (read from the tables)');
   const row = snap.representationAgreements[0];
   ok(row.keys.request.key === 'rt-1' && row.keys.confirm.key === 'rt-c' && row.rev === 2 && row.history.length === 2 && row.confirmedBy?.id === 'pl-adeyemi', 'keys, rev, history and confirmation are on disk');
   ok(snap.agentProfiles[0].facets.fifa_licence.provenance.provider === 'local-synthetic-test-provider', 'provenance is on disk');
@@ -207,7 +211,7 @@ section('4 — clean boot → relationship → stop → snapshot → reboot');
 }
 
 // ======================================================= 5 — corruption
-section('5 — junk is refused by the typed save; what a typed row can hold is judged on read, never repaired');
+section('5 — junk is refused by the typed write; what a typed row can hold is judged on read, never repaired');
 {
   const dir = mkdtempSync(path.join(tmpdir(), 'sbx-m24p5-'));
   const db = staffSnapshot();
@@ -227,19 +231,20 @@ section('5 — junk is refused by the typed save; what a typed row can hold is j
   neg(verificationGap(profile, 'INT', T0)?.state === 'MANUAL_REVIEW_REQUIRED', 'and is a verification gap');
   neg(!agreementGrantsAccess(signed, 'usr-lead', T0 + 1), 'an agreement with status "signed" grants NO access');
   neg(!clientTransitionAllowed(signed, 'active', T0 + 1) && !agentTransitionAllowed(signed, 'terminated_by_agent', T0 + 1), 'and moves nowhere');
-  // S11a: the typed save refuses both, naming the record; nothing is written.
+  // S11a: the repository's typed create refuses both, naming the record; nothing is written.
   let refused = null;
-  try { openStore(dir).save({ db: { ...db, agentProfiles: [profile] } }); } catch (e) { refused = e; }
-  neg(refused?.code === 'AGENT_CORE_IMPORT_BLOCKED' && /agp-x/.test(refused.message) && /state/.test(refused.message), `a facet state the table does not know is refused by the save, naming the profile (${refused?.message ?? 'saved'})`);
+  const junkDir = () => mkdtempSync(path.join(tmpdir(), 'sbx-m24p5-junk-'));
+  try { fixture(junkDir(), { ...db, agentProfiles: [profile] }); } catch (e) { refused = e; }
+  neg(refused?.code === 'AGENT_CORE_INPUT_INVALID' && /agp-x/.test(refused.message) && /state/.test(refused.message), `a facet state the table does not know is refused by the repository, naming the profile (${refused?.message ?? 'saved'})`);
   refused = null;
-  try { openStore(dir).save({ db: { ...db, representationAgreements: [signed] } }); } catch (e) { refused = e; }
-  neg(refused?.code === 'AGENT_CORE_IMPORT_BLOCKED' && /rep-x/.test(refused.message) && /status/.test(refused.message), `an agreement status the table does not know is refused by the save, naming the agreement (${refused?.message ?? 'saved'})`);
+  try { fixture(junkDir(), { ...db, representationAgreements: [signed] }); } catch (e) { refused = e; }
+  neg(refused?.code === 'AGENT_CORE_INPUT_INVALID' && /rep-x/.test(refused.message) && /status/.test(refused.message), `an agreement status the table does not know is refused by the repository, naming the agreement (${refused?.message ?? 'saved'})`);
   // An odd row a typed table CAN hold: an ACTIVE agreement nobody confirmed (a dispute of a proposal reinstated by review).
   const unconfirmed = { ...signed, id: 'rep-y', status: 'active', confirmedAt: null, confirmedBy: null, endAt: Date.now() + 1e10 };
   db.agentProfiles = [{ ...profile, facets: newFacets(), userId: 'usr-lead' }];
   db.representationAgreements = [unconfirmed];
-  openStore(dir).save({ db });
-  const stored = stableJson(openStore(dir).load().db.representationAgreements.find((r) => r.id === 'rep-y'));
+  fixture(dir, db);
+  const stored = stableJson(readRecords(dir).representationAgreements.find((r) => r.id === 'rep-y'));
   const s = await bootOn(dir, PORT + 3);
   ok(s.up, 'the server boots over the odd row');
   if (s.up) {
@@ -269,7 +274,7 @@ section('6 — the sweep tells a current member once that a relationship is endi
   });
   db.agencyAffiliations = [aff('aff-lead', 'usr-lead'), aff('aff-staff', 'usr-staff', { endedAt: T0 + 5, endedReason: 'left' })];
   db.representationAgreements = [ending('rep-live', 'usr-lead', 'pl-a'), ending('rep-left', 'usr-staff', 'pl-b')];
-  openStore(dir).save({ db });
+  fixture(dir, db);
   const s = await bootOn(dir, PORT + 4);
   ok(s.up, 'the server boots over two relationships ending within 30 days');
   if (s.up) {

@@ -6,12 +6,13 @@
 // whole; an update keeps the pack, owner and period, only adds grants (a revocation happens once) and only grows the
 // history; a reference code is stored only as its hash, found by the code as typed, single use and unique; the club,
 // sweep and T&S queries answer what the routes need; a rolled-back unit leaves nothing; db.transitionCases and
-// db.vouches throw; and the snapshot write types, names a missing organisation and reads back
-// what it wrote. Temporary databases only; nothing touches DATA_DIR. Run with: npm test
+// db.vouches throw; and a fixture written through the repository is typed, refuses a missing organisation (nothing
+// written) and reads back what it wrote. Temporary databases only; nothing touches DATA_DIR. Run with: npm test
 
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { attachDataLayer, DATA_MIGRATIONS, TABLE_BACKED, readTableBacked } from '../repositories/index.mjs';
+import { attachDataLayer, DATA_MIGRATIONS, TABLE_BACKED } from '../repositories/index.mjs';
+import { openLayer, readRecords } from './dataLayerFixture.mjs';
 import { openStore } from '../store.mjs';
 import { NOW, TTL, tempDir } from './coreIdentityTestFixtures.mjs';
 import { saveFixture, ORG } from './recruitmentTestFixtures.mjs';
@@ -52,10 +53,8 @@ const vouch = (over = {}) => ({
 
 function serverOpen(dir) {
   const store = openStore(dir, { tableBacked: TABLE_BACKED });
-  const db = {}; // S14a: a fixture-saved file is not a first installation, so there is nothing to hand in
-  const layer = attachDataLayer({ db, store, nextId, persist: () => {}, sessionTtlMs: TTL, now: () => NOW, warn: () => {} });
-  const snapshot = () => ({ savedAt: NOW, idCounter: 1000, db });
-  return { store, db, repo: layer.transitionsVouches, unit: (w) => store.unitOfWork(w, { snapshot }), close: () => store.sqlite.close() };
+  const layer = attachDataLayer({ store, nextId, sessionTtlMs: TTL, now: () => NOW, warn: () => {} });
+  return { store, repo: layer.transitionsVouches, unit: (w) => store.unitOfWork(w), close: () => store.sqlite.close() };
 }
 
 // ------------------------------------------------------------- schema
@@ -63,7 +62,7 @@ test('[schema] 0025 is registered after 0024 and creates the five STRICT tables 
   const ids = DATA_MIGRATIONS.map((m) => m.id);
   assert.equal(ids.indexOf(MIGRATION), ids.indexOf('0024_passport') + 1);
   for (const n of COLLECTIONS) assert.ok(TABLE_BACKED.includes(n), `${n} is table-backed`);
-  const dir = tempDir('s10c-empty'); const s = openStore(dir).sqlite;
+  const dir = tempDir('s10c-empty'); const s = openLayer(dir).sqlite;
   for (const t of TABLES) {
     assert.match(s.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?").get(t).sql, /STRICT\s*$/, `${t} is STRICT`);
     assert.equal(s.prepare(`SELECT count(*) AS n FROM ${t}`).get().n, 0);
@@ -178,21 +177,28 @@ test('[units] a rolled-back unit leaves nothing; db.transitionCases and db.vouch
   } finally { s.close(); rm(dir); }
 });
 
-test('[snapshot] the snapshot write types every record, names a grant to a missing organisation, and reads back what it wrote', () => {
-  const dir = tempDir('s10c-snap');
+test('[fixtures] a fixture written through the repository is typed (a plain code refused, nothing written), a grant to a missing organisation is refused, and the records read back as written', () => {
+  const dir = tempDir('s10c-fix');
   const placed = transition({
     id: 'trn-2', status: 'placed', recipients: [grant({ revokedAt: NOW + 5 })], placement: { orgId: ORG.id, orgName: ORG.name, at: NOW + 5, note: null }, followUp: { dueAt: NOW + 60 * DAY, notifiedAt: null },
     history: [hist('aud-2', 'opened', { items: 1 }), hist('aud-3', 'placed', { orgId: ORG.id })],
   });
   saveFixture(dir, { transitionCases: [transition(), placed], vouches: [vouch()] });
-  const store = openStore(dir);
   try {
-    const back = readTableBacked(store.sqlite);
+    const back = readRecords(dir);
     assert.deepEqual(back.transitionCases, [{ ...transition(), caseOwner: PLAYER }, { ...placed, caseOwner: PLAYER }]);
     assert.deepEqual(back.vouches, [{ ...vouch(), verificationMethod: 'email_code', identityVerified: false }]);
-    refused(() => store.save({ savedAt: NOW, idCounter: 1000, db: { ...store.load().db, transitionCases: [transition({ recipients: [grant({ orgId: 'org-none' })] })] } }), /TRANSITIONS_REFERENCE_MISSING.*trn-1/, 'missing organisation');
-    refused(() => store.save({ savedAt: NOW, idCounter: 1000, db: { ...store.load().db, vouches: [vouch({ code: 'ABCD2345' })] } }), /TRANSITIONS_IMPORT_BLOCKED.*vch-1.*code/, 'a plain code');
-  } finally { store.sqlite.close(); rm(dir); }
+  } finally { rm(dir); }
+  const refusedFixture = (label, db, re) => {
+    const d = tempDir(`s10c-fix-${label}`);
+    try {
+      refused(() => saveFixture(d, { transitionCases: [transition({ id: 'trn-ok' })], ...db }), re, label);
+      const back = readRecords(d);
+      assert.equal(back.transitionCases.length + back.vouches.length, 0, `${label}: a refused fixture wrote nothing`);
+    } finally { rm(d); }
+  };
+  refusedFixture('org', { transitionCases: [transition(), transition({ id: 'trn-3', recipients: [grant({ orgId: 'org-none' })] })] }, /FOREIGN KEY constraint failed/);
+  refusedFixture('code', { vouches: [vouch({ code: 'ABCD2345' })] }, /TRANSITIONS_INPUT_INVALID: vouches vch-1 .*code/);
 });
 
 console.log(`\ntransitions and references repository: ${passed} checks passed`);

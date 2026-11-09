@@ -6,23 +6,19 @@
 // reminder markers). Synthetic ids and names only. Shared by testRecruitment.mjs,
 // testRecruitmentServer.mjs and the handoff bench.
 import { NOW, FIXTURE, USERS, SESSIONS, ORGS } from './coreIdentityTestFixtures.mjs';
-import { openStore } from '../store.mjs';
+import { writeFixture } from './dataLayerFixture.mjs';
 
 /**
- * A test database written the way fixtures are written now: a snapshot-mode save
- * (openStore(dir).save), which migrates the file and writes every table-backed
- * collection into its tables. `db` is laid over the core fixture (staff, sessions,
- * organisations, players (their trial reports are the trials': S14h, no copy on the record), guardians).
- * Returns the directory.
+ * A test database written the way the server writes one: every record through its repository, in one unit of work
+ * (scripts/dataLayerFixture.mjs). `db` is laid over the core fixture (staff, sessions, organisations, players (their
+ * trial reports are the trials': S14h, no copy on the record), guardians). Returns the directory.
  */
 export const fixtureDb = (db = {}) => {
   const players = FIXTURE().players;
   return { users: USERS(), sessions: SESSIONS(), orgs: ORGS(), players, guardians: FIXTURE().guardians, ledger: [], ...db };
 };
-export function saveFixture(dir, db = {}, { savedAt = NOW, idCounter = 1000 } = {}) {
-  const store = openStore(dir);
-  try { store.save({ savedAt, idCounter, db: fixtureDb(db) }); } finally { store.sqlite.close(); }
-  return dir;
+export function saveFixture(dir, db = {}, { idCounter = 1000, writers = {} } = {}) {
+  return writeFixture(dir, fixtureDb(db), { now: NOW, idCounter, writers });
 }
 
 const MIN = 60_000; const HOUR = 60 * MIN; const DAY = 24 * HOUR;

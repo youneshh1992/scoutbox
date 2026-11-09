@@ -5,15 +5,16 @@
 // history and selections, never created by a read, and the position history only grows; create/update return fresh,
 // deep-frozen records and refuse identity changes, duplicates and nested updates; a share's views count up and the
 // token hash is unique; the T&S lists page by cursor; a rolled-back unit leaves nothing; there is no db.* view; and the
-// snapshot write types, names a missing organisation and reads back what it wrote.
+// fixture written through the repository is typed, refuses a missing organisation and reads back what it wrote.
 // Temporary databases only; nothing touches DATA_DIR. Run with: npm test
 
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { attachDataLayer, DATA_MIGRATIONS, TABLE_BACKED, readTableBacked } from '../repositories/index.mjs';
+import { attachDataLayer, DATA_MIGRATIONS, TABLE_BACKED } from '../repositories/index.mjs';
+import { openLayer, readRecords, writeFixture } from './dataLayerFixture.mjs';
 import { openStore } from '../store.mjs';
 import { NOW, TTL, tempDir } from './coreIdentityTestFixtures.mjs';
-import { saveFixture, ORG } from './recruitmentTestFixtures.mjs';
+import { saveFixture, fixtureDb, ORG } from './recruitmentTestFixtures.mjs';
 import {
   PASSPORT_MIGRATION as MIGRATION, PASSPORT_TABLES as TABLES, PASSPORT_COLLECTIONS as COLLECTIONS,
   typePrefs, typeCareerEntry, typeAchievement,
@@ -44,10 +45,8 @@ const correction = (over = {}) => ({ id: 'pcor-1', playerId: PID, targetType: 'c
 
 function serverOpen(dir) {
   const store = openStore(dir, { tableBacked: TABLE_BACKED });
-  const db = {}; // S14a: a fixture-saved file is not a first installation, so there is nothing to hand in
-  const layer = attachDataLayer({ db, store, nextId, persist: () => {}, sessionTtlMs: TTL, now: () => NOW, warn: () => {} });
-  const snapshot = () => ({ savedAt: NOW, idCounter: 1000, db });
-  return { store, db, repo: layer.passport, unit: (w) => store.unitOfWork(w, { snapshot }), close: () => store.sqlite.close() };
+  const layer = attachDataLayer({ store, nextId, sessionTtlMs: TTL, now: () => NOW, warn: () => {} });
+  return { store, repo: layer.passport, unit: (w) => store.unitOfWork(w), close: () => store.sqlite.close() };
 }
 
 // ------------------------------------------------------------- schema
@@ -55,7 +54,7 @@ test('[schema] 0024 is registered after 0023 and creates the nine STRICT tables 
   const ids = DATA_MIGRATIONS.map((m) => m.id);
   assert.equal(ids.indexOf(MIGRATION), ids.indexOf('0023_verification') + 1);
   for (const n of COLLECTIONS) assert.ok(TABLE_BACKED.includes(n), `${n} is table-backed`);
-  const dir = tempDir('s10b-empty'); const s = openStore(dir).sqlite;
+  const dir = tempDir('s10b-empty'); const s = openLayer(dir).sqlite;
   for (const t of TABLES) {
     assert.match(s.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?").get(t).sql, /STRICT\s*$/, `${t} is STRICT`);
     assert.equal(s.prepare(`SELECT count(*) AS n FROM ${t}`).get().n, 0);
@@ -167,19 +166,28 @@ test('[units] a rolled-back unit leaves nothing; db.passport* names throw naming
   } finally { s.close(); rm(dir); }
 });
 
-test('[snapshot] the snapshot write types every record, names a confirmation by a missing organisation, and reads back what it wrote', () => {
-  const dir = tempDir('s10b-snap');
+/** The shared loader's passportPrefs writer passes an object; the repository's save takes a change function. */
+const fixture = (dir, db) => writeFixture(dir, fixtureDb(db), { now: NOW, idCounter: 1000 });
+
+test('[fixtures] a fixture written through the repository is typed (junk refused naming the field, nothing written), a confirmation by a missing organisation is refused, and the records read back as written', () => {
+  const dir = tempDir('s10b-fix');
   const prefs = { playerId: PID, bio: 'Forward.', positions: { primary: 'ST', secondary: [] }, positionHistory: [{ id: 'ppos-1', from: '2019-09', primary: 'RW', secondary: [], submittedBy: 'guardian', recordedAt: NOW }], availability: 'not_looking', availableFrom: null, publicSelections: ['pev:x'], updatedAt: NOW };
-  saveFixture(dir, { passportPrefs: [prefs], passportCareerEntries: [entry()], passportAchievements: [achievement()], passportShares: [share()], passportCorrections: [correction()] });
-  const store = openStore(dir);
+  fixture(dir, { passportPrefs: [prefs], passportCareerEntries: [entry()], passportAchievements: [achievement()], passportShares: [share()], passportCorrections: [correction()] });
   try {
-    const back = readTableBacked(store.sqlite);
+    const back = readRecords(dir);
     assert.deepEqual(back.passportPrefs, [prefs]);
     assert.deepEqual(back.passportCareerEntries, [entry()]);
     assert.deepEqual(back.passportCorrections, [{ ...correction(), resolvedAt: null }]);
-    refused(() => store.save({ savedAt: NOW, idCounter: 1000, db: { ...store.load().db, passportCareerEntries: [entry({ from: 'last spring' })] } }), /PASSPORT_IMPORT_BLOCKED.*pcar-1.*from must be a date/, 'junk date');
-    refused(() => store.save({ savedAt: NOW, idCounter: 1000, db: { ...store.load().db, passportAchievements: [achievement({ confirmation: { provenance: 'verified_club_confirmed', orgId: 'org-none', orgName: 'N', byName: null, at: NOW } })] } }), /PASSPORT_REFERENCE_MISSING.*pach-1/, 'missing organisation');
-  } finally { store.sqlite.close(); rm(dir); }
+  } finally { rm(dir); }
+  const refusedFixture = (label, db, re) => {
+    const d = tempDir(`s10b-fix-${label}`);
+    try {
+      refused(() => fixture(d, { passportShares: [share()], ...db }), re, label);
+      assert.deepEqual(readRecords(d).passportShares, [], `${label}: a refused fixture wrote nothing`);
+    } finally { rm(d); }
+  };
+  refusedFixture('date', { passportCareerEntries: [entry({ from: 'last spring' })] }, /PASSPORT_INPUT_INVALID.*pcar-1.*from must be a date/);
+  refusedFixture('org', { passportAchievements: [achievement({ confirmation: { provenance: 'verified_club_confirmed', orgId: 'org-none', orgName: 'N', byName: null, at: NOW } })] }, /FOREIGN KEY constraint failed/);
 });
 
 console.log(`\npassport repository: ${passed} checks passed`);

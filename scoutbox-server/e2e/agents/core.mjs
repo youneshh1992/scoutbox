@@ -57,7 +57,8 @@ import { RATE_LIMIT_POLICY } from '../../domains/platform/rateLimit.mjs';
 import { TYPE_CATEGORY, CATEGORIES } from '../../domains/platform/notificationPrefs.mjs';
 import { DATA_MIGRATIONS } from '../../repositories/index.mjs';
 import { AGENT_CORE_MIGRATION } from '../../repositories/agentCore.mjs';
-import { openStore } from '../../store.mjs';
+import { DatabaseSync } from 'node:sqlite';
+import { readRecords } from '../../scripts/dataLayerFixture.mjs';
 import { TABLE_BACKED } from '../../repositories/index.mjs';
 
 const SCHEMA_VERSION = Number(DATA_MIGRATIONS.map((m) => m.id).sort().at(-1).slice(0, 4));
@@ -743,7 +744,7 @@ section('R — Trust & Safety: read-only; NO route lets the shared key adjudicat
 // ============================================================ S — subsystems untouched
 section('S — the subsystems Agent must not touch');
 {
-  const before = openStore(DATA_DIR).load()?.db;
+  const before = readRecords(DATA_DIR);
   neg((before.signings ?? []).length === 0 || before.signings === undefined, 'S1 no signing was written by any agent action');
   neg(!(before.ledger ?? []).some((l) => /offer|signed/.test(l.type) && l.orgId === 'org-northstar'), 'S2 no offer_made / offer_accepted / offer_declined / signed ledger row for the agency');
   neg((before.representations ?? []).length === 0, 'S3 the legacy M13 representations store was not written by P5.6B');
@@ -794,7 +795,7 @@ let DELETED_REL;
   ok(del.status === 200 && del.body.deleted === true, 'U2 Elias deletes their account');
   const after = await j('GET', `/org/agent/clients/${DELETED_REL}`, undefined, ANA.token);
   neg(after.status === 200 && after.body.client.removed === true && after.body.client.name === null && typeof after.body.relationship.subjectRemovedAt === 'number' && after.body.access === false, 'U3 the agent\'s record survives as an id-only tombstone: no name, no access');
-  const db = openStore(DATA_DIR).load()?.db;
+  const db = readRecords(DATA_DIR);
   const row = db.representationAgreements.find((a) => a.id === DELETED_REL);
   neg(row.disputeReason === null && !JSON.stringify(row).includes('SECRET_DISPUTE_TEXT') && row.history.filter((h) => h.by?.kind === 'player').every((h) => h.by.name === null && h.by.userId === null), 'U4 the stored row lost the dispute reason and every player attribution');
   neg(!db.players.some((p) => p.id === 'pl-svensson'), 'U5 the player is gone');
@@ -820,9 +821,9 @@ section('W — restart: everything survives the process dying');
   neg((await j('GET', `/org/agent/clients/${DELETED_REL}`, undefined, ana2.token)).body.client.removed === true, 'W8 the tombstone is still a tombstone');
   const h = await j('GET', '/healthz');
   ok(h.body.schemaVersion === SCHEMA_VERSION, `W9 schema ${h.body.schemaVersion} after restart; no step ran twice`);
-  const st = openStore(DATA_DIR);
-  ok(st.sqlite.prepare('SELECT COUNT(*) AS n FROM data_migrations WHERE id = ?').get(AGENT_CORE_MIGRATION).n === 1, `W10 exactly one ${AGENT_CORE_MIGRATION} migration record`);
-  st.sqlite.close();
+  const st = new DatabaseSync(path.join(DATA_DIR, 'scoutbox.db'), { readOnly: true });
+  ok(st.prepare('SELECT COUNT(*) AS n FROM data_migrations WHERE id = ?').get(AGENT_CORE_MIGRATION).n === 1, `W10 exactly one ${AGENT_CORE_MIGRATION} migration record`);
+  st.close();
 }
 
 // ============================================================ E2 — error contract

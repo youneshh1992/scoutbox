@@ -17,7 +17,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
-import { openStore } from '../store.mjs';
+import { openLayer } from './dataLayerFixture.mjs';
 
 let passed = 0;
 const only = process.env.TEST_ONLY || '';
@@ -225,7 +225,7 @@ await test('empty database: a restored directory whose scoutbox.db is 0 bytes st
 
 // ------------------------------------------------------------- the store's copy
 await test('store.copyTo: refused while a transaction is open (its writes are not committed) and over an existing file (left untouched); outside a transaction it writes a standalone copy of what is committed', () => {
-  const dir = tempDir('copyto'); const store = openStore(dir);
+  const dir = tempDir('copyto'); const { store } = openLayer(dir); // server mode, the migrations run
   try {
     const target = path.join(dir, 'copy.db');
     store.sqlite.exec("INSERT INTO meta (key, value) VALUES ('synthetic', 'committed')");

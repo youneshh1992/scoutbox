@@ -19,6 +19,7 @@ import * as m0002 from '../repositories/migrations/0002_core_identity_shadow.mjs
 import * as m0003 from '../repositories/migrations/0003_sessions_live.mjs';
 import * as m0004 from '../repositories/migrations/0004_orgs_live.mjs';
 import { openStore } from '../store.mjs';
+import { writeFixture, readRecords } from './dataLayerFixture.mjs';
 // The checks below that drive the runner on a raw connection are about the S2/S3
 // steps (0001–0004): they run exactly those. The S4a steps that follow them
 // (0005 core identity, 0006 media deletions) have their own suites
@@ -45,7 +46,7 @@ const openRaw = (dir) => { const s = new DatabaseSync(path.join(dir, 'scoutbox.d
 const dump = (sqlite) => Object.fromEntries(sqlite.prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").all().map(({ name }) => [name, sqlite.prepare(`SELECT * FROM "${name}" ORDER BY rowid`).all().map((r) => ({ ...r }))]));
 const fileDigest = (dir) => { const s = new DatabaseSync(path.join(dir, 'scoutbox.db')); s.exec('PRAGMA wal_checkpoint(TRUNCATE)'); s.close(); return sha256(fs.readFileSync(path.join(dir, 'scoutbox.db'))); };
 
-/** Organisation records in every shape the application writes (the snapshot form: a record plus its password hash). */
+/** Organisation records in every shape the application writes (the fixture form: a record plus its password hash). */
 const ORGS = () => [
   // The seed's shape: a pro club with location and a verified domain, password-protected.
   { id: 'org-pro', name: 'Eastport FC', type: 'club', level: 'pro', location: { lat: 51.889, lng: 1.02, city: 'Eastport' }, plan: 'Pro', trustedPartner: true, country: 'GB', verified: true, verifiedDomain: 'eastportfc.example', safeguardingContractSigned: true, password: 'scrypt$00$11' },
@@ -232,12 +233,10 @@ test('reads are SQL: the sign-in filters, a page by cursor, a name lookup, the g
   s.close();
 });
 
-test('units of work: an organisation write joins the open unit — a failure later in it leaves no organisation row, a read inside it sees its write, and db.orgs throws naming the repository', () => {
+test('units of work: an organisation write joins the open unit — a failure later in it leaves no organisation row, and a read inside it sees its write', () => {
   const dir = tempDir('s14g-unit');
   const store = openStore(dir, { tableBacked: TABLE_BACKED });
-  const db = {};
-  const layer = attachDataLayer({ db, seed: { orgs: ORGS(), guardians: [], players: [] }, store, nextId, persist: () => {}, sessionTtlMs: TTL });
-  assert.ok(!Object.keys(db).includes('orgs'), 'not enumerable');
+  const layer = attachDataLayer({ seed: { orgs: ORGS(), guardians: [], players: [] }, store, nextId, sessionTtlMs: TTL });
   assert.throws(() => store.unitOfWork(() => {
     const o = layer.orgs.create({ name: 'Unit FC', type: 'club', plan: 'Pro' });
     layer.users.create({ orgId: o.id, name: 'Pat', role: 'Manager' });
@@ -256,13 +255,13 @@ test('initialisation is explicit state, never a row count — a genuine first in
   // (a) Through the data layer: a first installation imports the seed once; afterwards the table is authoritative.
   const dirB = tempDir('s3-c3b');
   let store = openStore(dirB, { tableBacked: TABLE_BACKED });
-  let layer = attachDataLayer({ db: {}, seed: { orgs: ORGS(), guardians: [], players: [] }, store, nextId, persist: () => {}, sessionTtlMs: TTL });
+  let layer = attachDataLayer({ seed: { orgs: ORGS(), guardians: [], players: [] }, store, nextId, sessionTtlMs: TTL });
   assert.deepEqual(layer.boot.orgs, { engine: 'sqlite', rows: 3, imported: 3 });
   assert.equal(layer.orgs.initState(), 'done');
   assert.ok(Number.isSafeInteger(layer.orgs.byId('org-pro').createdAt), 'the seed is stamped at its import');
   store.sqlite.close();
   store = openStore(dirB, { tableBacked: TABLE_BACKED });
-  layer = attachDataLayer({ db: {}, seed: { orgs: [...ORGS(), { id: 'org-late', name: 'Late', type: 'club', plan: 'Pro' }], guardians: [], players: [] }, store, nextId, persist: () => {}, sessionTtlMs: TTL });
+  layer = attachDataLayer({ seed: { orgs: [...ORGS(), { id: 'org-late', name: 'Late', type: 'club', plan: 'Pro' }], guardians: [], players: [] }, store, nextId, sessionTtlMs: TTL });
   assert.deepEqual(layer.boot.orgs, { engine: 'sqlite', rows: 3, imported: 0 }, 'initialised once, then the table');
   assert.equal(layer.orgs.byId('org-late'), null);
   store.sqlite.close(); fs.rmSync(dirB, { recursive: true, force: true });
@@ -304,65 +303,38 @@ test('initialise refuses a collection that is not an array — an object, null, 
     assert.equal(JSON.stringify(input ?? null), before, 'the input is untouched'); assert.equal(s.isTransaction, false);
   }
   const dir = tempDir('s3-init-shape'); const store = openStore(dir, { tableBacked: TABLE_BACKED });
-  assert.throws(() => attachDataLayer({ db: {}, seed: { orgs: { id: 'not-an-array' }, guardians: [], players: [] }, store, nextId, persist: () => {}, sessionTtlMs: TTL }), /organisations as an array/);
+  assert.throws(() => attachDataLayer({ seed: { orgs: { id: 'not-an-array' }, guardians: [], players: [] }, store, nextId, sessionTtlMs: TTL }), /organisations as an array/);
   assert.equal(store.sqlite.prepare("SELECT value FROM meta WHERE key = 'orgsInit'").get().value, 'pending');
   store.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
   assert.deepEqual(r.initialize(ORGS()), { engine: 'sqlite', rows: 3, imported: 3 }); assert.equal(r.initState(), 'done');
   s.close();
 });
 
-// ------------------------------------------------------------- snapshot tools
-test('snapshot mode: a fixture saved into a new directory goes into the table and reads back typed (with its hash); junk, unknown fields and a removed organisation still referenced reject the whole save', () => {
-  const dir = tempDir('s3-snap');
-  let tool = openStore(dir);
-  tool.save({ idCounter: 1000, db: { orgs: ORGS(), users: fixtureUsers(), sessions: fixtureSessions(), players: [PLAYER_1()], guardians: [] } });
-  assert.equal(hasBlobTable(tool.sqlite), false, 'no blob');
-  assert.equal(tool.sqlite.prepare('SELECT COUNT(*) AS n FROM orgs').get().n, 3);
-  tool.sqlite.close();
-  tool = openStore(dir); let snap = tool.load();
-  const createdAt = snap.db.orgs[0].createdAt;
-  assert.ok(Number.isSafeInteger(createdAt), 'an absent creation time is the save\'s');
-  assert.deepEqual(snap.db.orgs, ORGS().map((o) => ({ ...recordOf(o, o.createdAt ?? createdAt), password: o.password ?? null })), 'the table, rendered as typed records');
-  const before = tool.load();
-  const beforeDump = dump(tool.sqlite);
-  const untouched = () => {
-    const now = tool.load();
-    assert.deepEqual(now.db.orgs, before.db.orgs, 'organisations unchanged');
-    assert.equal(JSON.stringify(now.db.users), JSON.stringify(before.db.users), 'staff unchanged');
-    assert.equal(JSON.stringify(now.db.sessions), JSON.stringify(before.db.sessions), 'sessions unchanged');
-    assert.equal(now.db.players[0].name, 'P', 'the unrelated change was rolled back');
-    assert.deepEqual(dump(tool.sqlite), beforeDump, 'nothing was written');
-  };
-  const attempt = (mutate, pattern) => { const x = tool.load(); x.db.players[0].name = 'Changed'; mutate(x); assert.throws(() => tool.save(x), pattern); untouched(); };
-  attempt((x) => { x.db.orgs = { id: 'obj' }; }, /orgs: the snapshot collection must be an array/);
-  attempt((x) => { x.db.orgs = null; }, /orgs: the snapshot collection must be an array/);
-  attempt((x) => { x.db.orgs[0].level = 'agent'; }, /ORGS_IMPORT_BLOCKED: .*organisation org-pro: level must be one of/);
-  attempt((x) => { x.db.orgs.push({ ...x.db.orgs[0] }); }, /duplicates organisation org-pro/);
-  attempt((x) => { x.db.orgs.push({ id: 'org-x', name: 7, type: 'club', plan: 'Pro' }); }, /organisation org-x: name must be text/);
-  attempt((x) => { x.db.orgs[1].tags = ['ST']; }, /organisation org-grass: unknown field tags/);
-  attempt((x) => { x.db.orgs = x.db.orgs.filter((o) => o.id !== 'org-grass'); }, /orgs: the snapshot no longer lists organisation org-grass but other records still reference it/);
-  attempt((x) => { x.db.users.push({ id: 'usr-x', orgId: 'org-none', name: 'X', role: 'Scout', createdAt: 1 }); }, /FOREIGN KEY/);
-  // A valid write: a change, a new organisation, an organisation removed together with its staff and their sessions.
-  const ok = tool.load();
-  ok.db.orgs[0].suspended = true;
-  ok.db.orgs.push({ id: 'org-tool', name: 'Tool FC', type: 'club', level: 'academy', plan: 'Academy' });
-  ok.db.orgs = ok.db.orgs.filter((o) => o.id !== 'org-agency'); ok.db.users = ok.db.users.filter((u) => u.orgId !== 'org-agency');
-  ok.db.players[0].name = 'Renamed';
-  tool.save(ok);
-  const after = tool.load();
-  assert.deepEqual(after.db.orgs.map((o) => o.id), ['org-pro', 'org-grass', 'org-tool']);
-  assert.equal(after.db.orgs[0].suspended, true); assert.equal(after.db.orgs[0].password, 'scrypt$00$11');
-  assert.equal(after.db.players[0].name, 'Renamed');
-  assert.ok(!after.db.users.some((u) => u.orgId === 'org-agency'));
-  // An omitted orgs collection is a partial snapshot.
-  const partial = tool.load(); delete partial.db.orgs; partial.db.players[0].name = 'Again'; tool.save(partial);
-  assert.deepEqual(tool.load().db.orgs.map((o) => o.id), ['org-pro', 'org-grass', 'org-tool']); assert.equal(tool.load().db.players[0].name, 'Again');
-  tool.sqlite.close();
-  // The server reads the tool's result.
+// ------------------------------------------------------------- fixtures
+test('[fixtures] a fixture written into a new directory puts its organisations in the table and they read back typed (with their hash); a later organisation that is junk, a duplicate, carries an unknown field or staff naming no organisation is refused whole, nothing written', () => {
+  const dir = tempDir('s3-fix');
+  writeFixture(dir, { orgs: ORGS(), users: fixtureUsers(), sessions: fixtureSessions(), players: [PLAYER_1()], guardians: [] }, { idCounter: 1000 });
+  const db = path.join(dir, 'scoutbox.db');
+  const read = () => { const s = new DatabaseSync(db, { readOnly: true }); try { return dump(s); } finally { s.close(); } };
+  { const s = new DatabaseSync(db, { readOnly: true }); assert.equal(hasBlobTable(s), false, 'no blob'); assert.equal(s.prepare('SELECT COUNT(*) AS n FROM orgs').get().n, 3); s.close(); }
+  const back = readRecords(dir);
+  const createdAt = back.orgs[0].createdAt;
+  assert.ok(Number.isSafeInteger(createdAt), 'an absent creation time is the import\'s');
+  assert.deepEqual(back.orgs, ORGS().map((o) => ({ ...recordOf(o, o.createdAt ?? createdAt), password: o.password ?? null })), 'the table, rendered as typed records');
+  const beforeDump = read();
+  const attempt = (orgs, pattern, extra = {}) => { assert.throws(() => writeFixture(dir, { orgs, ...extra }), pattern); assert.deepEqual(read(), beforeDump, 'nothing was written'); };
+  attempt([{ id: 'org-x', name: 'X FC', type: 'club', level: 'agent', plan: 'Pro' }], /ORG_RECORD_INVALID: organisation org-x: level must be one of/);
+  attempt([{ id: 'org-pro', name: 'Again FC', type: 'club', plan: 'Pro' }], /ORG_EXISTS: organisation org-pro already exists/);
+  attempt([{ id: 'org-x', name: 7, type: 'club', plan: 'Pro' }], /organisation org-x: name must be text/);
+  attempt([{ id: 'org-x', name: 'X FC', type: 'club', plan: 'Pro', tags: ['ST'] }], /organisation org-x: unknown field tags/);
+  attempt([{ id: 'org-x', name: 'X FC', type: 'club', plan: 'Pro' }], /STAFF_ORG_MISSING: org_users usr-x: organisation org-none does not exist/, { users: [{ id: 'usr-x', orgId: 'org-none', name: 'X', role: 'Scout', createdAt: 1 }] });
+  // A valid addition commits.
+  writeFixture(dir, { orgs: [{ id: 'org-tool', name: 'Tool FC', type: 'club', level: 'academy', plan: 'Academy' }] });
+  // The server reads the result.
   const store = openStore(dir, { tableBacked: TABLE_BACKED });
-  const layer = attachDataLayer({ db: {}, store, nextId, persist: () => {}, sessionTtlMs: TTL });
-  assert.deepEqual(layer.orgs.list().map((o) => o.id), ['org-pro', 'org-grass', 'org-tool']); assert.equal(layer.orgs.byId('org-pro').suspended, true);
-  assert.ok(layer.sessions.byToken('legacy-maria-token') && layer.sessions.byToken('legacy-sam-token'), 'staff sessions survived every refused and accepted save');
+  const layer = attachDataLayer({ store, nextId, sessionTtlMs: TTL });
+  assert.deepEqual(layer.orgs.list().map((o) => o.id), ['org-pro', 'org-grass', 'org-agency', 'org-tool']); assert.equal(layer.orgs.passwordHashOf('org-pro'), 'scrypt$00$11');
+  assert.ok(layer.sessions.byToken('legacy-maria-token') && layer.sessions.byToken('legacy-sam-token'), 'staff sessions survived every refused write');
   store.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
 });
 
@@ -376,8 +348,8 @@ await atest('server: a fixture database boots; registration, settings, suspensio
   // see the organisation on every boot (regression: it ran
   // before the data layer attached and called every Room an orphan).
   seed.recruitmentCases = [{ id: 'case-s3', orgId: 'org-eastport', playerId: seed.players[0].id, playerName: seed.players[0].name, ownerUserId: 'usr-legacy', ownerName: 'Maria Keane', stage: 'identified', priority: 'medium', deadline: null, restricted: false, assignments: [], tasks: [], approvals: [], decision: null, links: { requestIds: [], trialIds: [], signingId: null }, createdAt: 1, history: [], room: { status: 'watching', priority: 'normal', tags: [], leadScoutUserId: 'usr-legacy', sourceContext: 'direct', sourceRef: null, openedBy: { userId: 'usr-legacy', name: 'Maria Keane' }, updatedAt: 1, archivedAt: null, closedAt: null, rev: 1, revAt: 1, revBy: { userId: 'usr-legacy', name: 'Maria Keane' } } }]; // S8b: the case literal the room route writes
-  // The fixture, saved by the snapshot store into the tables.
-  { const t = openStore(dir); t.save({ idCounter: 1000, db: seed }); t.sqlite.close(); }
+  // The fixture, written through the repositories.
+  writeFixture(dir, seed, { idCounter: 1000 });
   const port = await freePort();
   const boot = () => new Promise((resolve, reject) => {
     const proc = spawnChild(process.execPath, [path.join(HERE, '..', 'server.mjs')], { env: { ...process.env, PORT: String(port), DATA_DIR: dir, M13_QUIET_LOGS: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });

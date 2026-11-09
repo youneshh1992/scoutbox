@@ -13,10 +13,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
-import { openStore } from '../store.mjs';
+import { writeFixture } from './dataLayerFixture.mjs';
 import { buildSeed } from '../seed.mjs';
 import { freePort } from './testPort.mjs';
-import { NOW, tempDir, adult, child, gSignup, FIXTURE, ORGS, USERS, EXTRA, freshFile, migrate, openRaw, hasBlobTable, dump } from './coreIdentityTestFixtures.mjs';
+import { NOW, tempDir, adult, child, gSignup, FIXTURE, ORGS, USERS, EXTRA, freshFile, migrate, openRaw, hasBlobTable } from './coreIdentityTestFixtures.mjs';
 import { SUBRECORD_TABLES } from '../repositories/playerSubrecords.mjs';
 
 let passed = 0;
@@ -50,8 +50,8 @@ const qAll = (dir, sql, ...p) => { const s = raw(dir); try { return s.prepare(sq
 /** Whether the data directory's file still has the retired blob table (rewritten in S14a: the blob-name checks described the blob). */
 const blobTable = (dir) => { const s = raw(dir); try { return hasBlobTable(s); } finally { s.close(); } };
 const identityCounts = (dir) => ({ players: q1(dir, 'SELECT COUNT(*) AS n FROM players').n, guardians: q1(dir, 'SELECT COUNT(*) AS n FROM guardians').n, links: q1(dir, 'SELECT COUNT(*) AS n FROM guardian_children').n });
-/** A saved database, as a tool or fixture writes one: a snapshot-mode save (openStore(dir) without options), which writes the table-backed collections into their tables. */
-function savedFile(dir, { players = FIXTURE().players, guardians = FIXTURE().guardians } = {}) { const t = openStore(dir); t.save({ savedAt: NOW, idCounter: 1000, db: { orgs: ORGS(), users: USERS(), players, guardians, ...EXTRA() } }); t.sqlite.close(); }
+/** A saved database, as a fixture writes one: the records written through their repositories (the identity pair as the first installation's). */
+function savedFile(dir, { players = FIXTURE().players, guardians = FIXTURE().guardians } = {}) { writeFixture(dir, { orgs: ORGS(), users: USERS(), players, guardians, ...EXTRA() }, { now: NOW, idCounter: 1000 }); }
 const SEED = buildSeed();
 const seedCounts = { players: SEED.players.length, guardians: SEED.guardians.length, links: SEED.guardians.reduce((n, g) => n + g.childIds.length, 0) };
 const orgLogin = async (S, orgId, scoutName = 'Maria Keane', role = 'Head of Recruitment', platform) => { const r = await S.j('POST', '/auth/org/login', { orgId, scoutName, role, ...(platform ? { platform } : {}) }); assert.equal(r.status, 200, `org login ${orgId}: ${JSON.stringify(r.body)}`); return r.body.token; };
@@ -89,10 +89,10 @@ await test('new installation: the seed is initialised once (never again), served
 });
 
 // ------------------------------------------------------------- a previously saved file (the cutover at boot)
-await test('previously saved file: a database a snapshot save wrote (the seed in its tables) boots without initialising — rows and links served, no identity blob — and a restart attaches to the tables; a file a tool wrote from other records boots the same way (no seed fallback)', async () => {
+await test('previously saved file: a database a fixture wrote (the seed in its tables) boots without initialising — rows and links served, no identity blob — and a restart attaches to the tables; a file a tool wrote from other records boots the same way (no seed fallback)', async () => {
   const dir = tempDir('s4srv-saved');
-  openStore(dir).save({ savedAt: NOW, idCounter: 2000, db: SEED });
-  assert.equal(blobTable(dir), false, 'the snapshot save wrote the tables');
+  writeFixture(dir, SEED, { now: NOW, idCounter: 2000 });
+  assert.equal(blobTable(dir), false, 'the fixture wrote the tables');
   let S = await boot(dir, await freePort());
   assert.doesNotMatch(S.log(), /initialised from the first installation/); // S14a: the 'snapshot loaded … table-backed' boot line went with the blob
   let cap = (await S.j('GET', '/capabilities')).body;
@@ -122,7 +122,7 @@ await test('previously saved file: a database a snapshot save wrote (the seed in
 // ------------------------------------------------------------- intentionally empty
 await test('intentionally empty: a saved file whose players and guardians are empty arrays stays empty through every restart — the seed is never imported into it', async () => {
   const dir = tempDir('s4srv-empty');
-  openStore(dir).save({ savedAt: NOW, idCounter: 2000, db: { ...SEED, players: [], guardians: [] } });
+  writeFixture(dir, { ...SEED, players: [], guardians: [] }, { now: NOW, idCounter: 2000 });
   for (let i = 0; i < 2; i++) {
     const S = await boot(dir, await freePort());
     const cap = (await S.j('GET', '/capabilities')).body;
@@ -166,13 +166,12 @@ await test('stale blobs: a players/guardians blob row put by hand into a saved f
 });
 
 // ------------------------------------------------------------- the Founder's rule
-await test('the legacy-minor rule: a snapshot save holding a minor who has no guardian link is refused with the reason (ids, never records) and writes nothing; the database still boots as a first installation', async () => {
+await test('the legacy-minor rule: a first installation holding a minor who has no guardian link is refused with the reason (ids, never records) and writes nothing; the database still boots as a first installation', async () => {
   const orphan = tempDir('s4srv-orphan'); const fx = FIXTURE(); fx.players.push(child('pl-orphan', null, '2013-04-04'));
-  const t = openStore(orphan); const before = dump(t.sqlite);
-  let err = null; try { t.save({ savedAt: NOW, idCounter: 1000, db: { orgs: ORGS(), users: USERS(), ...fx } }); } catch (e) { err = e; }
-  assert.ok(err, 'the save is refused'); assert.match(err.message, /pl-orphan/); assert.equal(err.message.includes('2013-04-04'), false, 'ids, not records');
-  assert.equal(t.sqlite.prepare('SELECT COUNT(*) AS n FROM players').get().n, 0, 'nothing written'); assert.equal(dump(t.sqlite), before, 'nothing written anywhere (rewritten in S14a: it compared the save sequence)');
-  t.sqlite.close();
+  let err = null; try { writeFixture(orphan, { orgs: ORGS(), users: USERS(), ...fx }, { now: NOW, idCounter: 1000 }); } catch (e) { err = e; }
+  assert.ok(err, 'the import is refused'); assert.equal(err.code, 'CORE_IDENTITY_CUTOVER_BLOCKED'); assert.match(err.message, /pl-orphan/); assert.equal(err.message.includes('2013-04-04'), false, 'ids, not records');
+  assert.deepEqual(identityCounts(orphan), { players: 0, guardians: 0, links: 0 }, 'nothing written');
+  assert.equal(q1(orphan, "SELECT value FROM meta WHERE key = 'coreIdentityInit'").value, 'pending', 'the initialisation stays pending');
   const S = await boot(orphan, await freePort());
   assert.match(S.log(), /initialised from the first installation's records/, 'never mistaken for a saved file');
   await S.stop(); rm(orphan);
@@ -574,7 +573,7 @@ await test('S5 sub-records through the real routes: clips (a file and a null url
 // ------------------------------------------------------------- review of 132eda2, finding 2: a report filed for a legacy-shaped account appears at once
 await test('a trial report filed through the real route for an accepted LEGACY-shaped account — a record saved without any trialReports key, and one saved with null — appears on /player/me, in the CV and on the club\'s view at once, without a restart, exactly as for an ordinary sign-up (trialReports: []); a restart serves the same', async () => {
   const dir = tempDir('s5srv-legacy-report');
-  // A saved file whose adults were written without the key and with null (a snapshot save accepts both).
+  // A saved file whose adults were written without the key and with null (the first installation's import accepts both).
   const noKey = { ...adult(), id: 'pl-legacy-absent', name: 'Legacy Absent', password: null }; delete noKey.trialReports;
   const nullKey = { ...adult(), id: 'pl-legacy-null', name: 'Legacy Null', password: null, trialReports: null };
   savedFile(dir, { players: [noKey, nullKey], guardians: [] });

@@ -6,12 +6,13 @@
 // back whole, the derived parts (a calibration's required checks, the experimental note, default preferences) worked
 // out on read; recordBatch appends observations in order and closes the open pause; an update keeps the fields that
 // never change and only grows the integrity history; the queries answer what the routes need (the dispute queue pages);
-// a rolled-back unit leaves nothing; and the snapshot write types, names a missing reference and
-// reads back what it wrote. Temporary databases only; nothing touches DATA_DIR. Run with: npm test
+// a rolled-back unit leaves nothing; and a fixture written through the repository is typed, refuses a missing
+// reference (nothing written) and reads back what it wrote. Temporary databases only; nothing touches DATA_DIR. Run with: npm test
 
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { attachDataLayer, DATA_MIGRATIONS, TABLE_BACKED, readTableBacked } from '../repositories/index.mjs';
+import { attachDataLayer, DATA_MIGRATIONS, TABLE_BACKED } from '../repositories/index.mjs';
+import { openLayer, readRecords, writeFixture } from './dataLayerFixture.mjs';
 import { openStore } from '../store.mjs';
 import { NOW, TTL, tempDir } from './coreIdentityTestFixtures.mjs';
 import { saveFixture, ORG, SCOUT } from './recruitmentTestFixtures.mjs';
@@ -85,10 +86,8 @@ const cvResult = (over = {}) => ({
 
 function serverOpen(dir) {
   const store = openStore(dir, { tableBacked: TABLE_BACKED });
-  const db = {}; // S14a: a fixture-saved file is not a first installation, so there is nothing to hand in
-  const layer = attachDataLayer({ db, store, nextId, persist: () => {}, sessionTtlMs: TTL, now: () => NOW, warn: () => {} });
-  const snapshot = () => ({ savedAt: NOW, idCounter: 1000, db });
-  return { store, db, repo: layer.boxCam, unit: (w) => store.unitOfWork(w, { snapshot }), close: () => store.sqlite.close() };
+  const layer = attachDataLayer({ store, nextId, sessionTtlMs: TTL, now: () => NOW, warn: () => {} });
+  return { store, repo: layer.boxCam, unit: (w) => store.unitOfWork(w), close: () => store.sqlite.close() };
 }
 function seeded(label) {
   const dir = tempDir(label); saveFixture(dir);
@@ -102,7 +101,7 @@ test('[schema] 0031 is registered after 0030 and creates the STRICT tables (no J
   const ids = DATA_MIGRATIONS.map((m) => m.id);
   assert.equal(ids.indexOf(MIGRATION), ids.indexOf('0030_development') + 1);
   for (const n of COLLECTIONS) assert.ok(TABLE_BACKED.includes(n), `${n} is table-backed`);
-  const dir = tempDir('s12b-empty'); const s = openStore(dir).sqlite;
+  const dir = tempDir('s12b-empty'); const s = openLayer(dir).sqlite;
   for (const t of TABLES) {
     const sql = s.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?").get(t).sql;
     assert.match(sql, /STRICT\s*$/, `${t} is STRICT`);
@@ -235,22 +234,22 @@ test('[queries] the dispute queue pages oldest first; a rolled-back unit leaves 
   s.close(); rm(dir);
 });
 
-test('[layer] the snapshot write types, names a missing reference and reads back what it wrote', () => {
-  const { s, dir } = seeded('s12b-snapshot');
+test('[layer] a fixture written through the repository is typed, refuses a missing reference (nothing written), and the records read back as written', () => {
+  const { s, dir } = seeded('s12b-fix');
   s.repo.sessions.recordBatch('boxs-1', { lastSeq: 1, observations: [{ kind: 'presence', fromMs: 0, toMs: 10, quality: 'good', atMs: null, confidence: null }] });
   s.close();
-  const store = openStore(dir); // snapshot mode (tools, fixtures, the persistence batteries)
-  const read = readTableBacked(store.sqlite);
+  const read = readRecords(dir);
   assert.deepEqual(read.boxSessions[0].obs.presence, [{ fromMs: 0, toMs: 10, quality: 'good' }]);
   assert.equal(read.boxChallenges.length, 2);
-  const save = (db) => store.save({ savedAt: NOW, idCounter: 1000, db: { ...store.load().db, ...db } });
-  refused(() => save({ boxSessions: [...read.boxSessions, session({ id: 'boxs-2', nonceHash: 'plain' })] }), /BOX_CAM_IMPORT_BLOCKED.*nonceHash/);
-  refused(() => save({ combineAttempts: [attempt({ boxSessionId: 'boxs-404' })] }), /BOX_CAM_REFERENCE_MISSING.*boxs-404/);
-  save({ combineAttempts: [attempt()] });
-  const again = readTableBacked(store.sqlite);
+  const write = (db) => writeFixture(dir, db, { now: NOW });
+  refused(() => write({ boxSessions: [session({ id: 'boxs-2', nonceHash: 'plain' })] }), /BOX_CAM_INPUT_INVALID: boxSessions boxs-2\.nonceHash/);
+  refused(() => write({ boxSessions: [session({ id: 'boxs-3' })], combineAttempts: [attempt({ boxSessionId: 'boxs-404' })] }), /BOX_CAM_REFERENCE_MISSING: combine_attempts catt-1: boxSessionId names no session/);
+  assert.deepEqual(readRecords(dir).boxSessions.map((x) => x.id), ['boxs-1'], 'a refused fixture wrote nothing');
+  write({ combineAttempts: [attempt()] });
+  const again = readRecords(dir);
   assert.equal(again.combineAttempts[0].id, 'catt-1');
-  assert.deepEqual(again.boxSessions[0].obs.presence, [{ fromMs: 0, toMs: 10, quality: 'good' }], 'a kept collection keeps its observations');
-  store.sqlite.close(); rm(dir);
+  assert.deepEqual(again.boxSessions[0].obs.presence, [{ fromMs: 0, toMs: 10, quality: 'good' }], 'the stored session keeps its observations');
+  rm(dir);
 });
 
 console.log(`${passed} Box Cam checks passed`);

@@ -5,18 +5,19 @@
 // the typers refuse junk with the field named; a tactical re-save diffs roles by id (a kept role
 // keeps its vacancies and shadow entries, a dropped one leaves them with no role); a role of another club is refused;
 // the squad and shadow uniqueness rules hold and the two lists are separate; a rolled-back unit leaves nothing; the
-// vacancy list pages by cursor; and the snapshot write types, names missing references and uniqueness with ids, and
-// reads back what it wrote.
+// vacancy list pages by cursor; and a fixture written through the repository is typed, refuses missing references,
+// uniqueness and junk (nothing written), and reads back what it wrote.
 // Temporary databases only; nothing touches DATA_DIR. Run with: npm test
 
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
-import { attachDataLayer, DATA_MIGRATIONS, TABLE_BACKED, readTableBacked } from '../repositories/index.mjs';
+import { attachDataLayer, DATA_MIGRATIONS, TABLE_BACKED } from '../repositories/index.mjs';
+import { readRecords, writeFixture } from './dataLayerFixture.mjs';
 import { runDataMigrations } from '../repositories/database.mjs';
 import { openStore } from '../store.mjs';
 import { NOW, TTL, tempDir } from './coreIdentityTestFixtures.mjs';
-import { saveFixture, fixtureDb, ORG } from './recruitmentTestFixtures.mjs';
+import { saveFixture, ORG } from './recruitmentTestFixtures.mjs';
 import {
   CLUB_SETUP_MIGRATION as MIGRATION, CLUB_SETUP_TABLES as TABLES, CLUB_SETUP_COLLECTIONS as COLLECTIONS,
   typeTacticalSetup, typeSquadMember, typeShadowPlayer, typeLookingFor, typeFederationCheck, typeVacancy,
@@ -49,10 +50,8 @@ const federation = (over = {}) => ({ orgId: ORG.id, federation: 'Manchester FA',
 
 function serverOpen(dir) {
   const store = openStore(dir, { tableBacked: TABLE_BACKED });
-  const db = {}; // S14a: a fixture-saved file is not a first installation, so there is nothing to hand in
-  const layer = attachDataLayer({ db, store, nextId, persist: () => {}, sessionTtlMs: TTL, now: () => NOW, warn: () => {} });
-  const snapshot = () => ({ savedAt: NOW, idCounter: 1000, db });
-  return { store, db, repo: layer.clubSetup, layer, unit: (w) => store.unitOfWork(w, { snapshot }), close: () => store.sqlite.close() };
+  const layer = attachDataLayer({ store, nextId, sessionTtlMs: TTL, now: () => NOW, warn: () => {} });
+  return { store, repo: layer.clubSetup, layer, unit: (w) => store.unitOfWork(w), close: () => store.sqlite.close() };
 }
 
 // ------------------------------------------------------------- schema
@@ -117,7 +116,7 @@ test('[orgs] an organisation carries no retired facet, a record carrying one is 
       refused(() => o.layer.orgs.update(ORG.id, (d) => { d[k] = []; }), /no longer an organisation field: write it through the clubSetup repository/, `writing org.${k}`);
     }
     refused(() => o.layer.orgs.create({ ...OTHER, squad: [] }), /squad is no longer an organisation field/);
-    refused(() => openStore(tempDir('s9c-orgs-snap')).save({ savedAt: NOW, idCounter: 1000, db: fixtureDb({ orgs: [{ id: ORG.id, name: ORG.name, type: 'club', level: 'pro', plan: 'Pro', lookingFor: ['ST'] }] }) }), /lookingFor is no longer an organisation field/);
+    refused(() => o.layer.orgs.create({ ...OTHER, lookingFor: ['ST'] }), /lookingFor is no longer an organisation field/);
   } finally { o.close(); rm(dir); }
 });
 
@@ -189,42 +188,35 @@ test('[reads] the vacancy list pages newest first by cursor', () => {
   } finally { o.close(); rm(dir); }
 });
 
-// ------------------------------------------------------------- snapshot
-test('[snapshot] a snapshot save writes the collections typed and reads them back; missing references, uniqueness and junk are refused with ids', () => {
-  const dir = saveFixture(tempDir('s9c-snap'), {
-    tacticalSetups: [setup()], squadMembers: [squadRow(), squadRow({ id: 'sq-off', playerId: null, name: 'Big Trev' })], shadowPlayers: [shadowRow({ playerId: 'pl-child1', name: 'Child' })],
-    lookingFor: [{ orgId: ORG.id, positions: ['ST'] }], federationChecks: [federation()], vacancies: [vacancy()],
-  });
-  const s = openStore(dir);
+// ------------------------------------------------------------- fixtures
+const write = (dir, collections) => writeFixture(dir, collections, { now: NOW });
+
+test('[fixtures] a fixture written through the repository is typed and reads back; missing references, uniqueness and junk are refused with ids, nothing written', () => {
+  const dir = saveFixture(tempDir('s9c-fix'), { squadMembers: [squadRow(), squadRow({ id: 'sq-off', playerId: null, name: 'Big Trev' })] });
+  // The shadow entry and the vacancy name a role, so they are written after the setup that holds it.
+  write(dir, { tacticalSetups: [setup()], lookingFor: [{ orgId: ORG.id, positions: ['ST'] }], federationChecks: [federation()] });
+  write(dir, { shadowPlayers: [shadowRow({ playerId: 'pl-child1', name: 'Child' })], vacancies: [vacancy()] });
   try {
-    const back = readTableBacked(s.sqlite);
+    const back = readRecords(dir);
     assert.deepEqual(back.tacticalSetups, [setup()]);
     assert.deepEqual(back.squadMembers.map((m) => m.id), ['sq-1', 'sq-off']);
     assert.deepEqual(back.shadowPlayers, [shadowRow({ playerId: 'pl-child1', name: 'Child' })]);
     assert.deepEqual(back.lookingFor, [{ orgId: ORG.id, positions: ['ST'] }]);
     assert.deepEqual(back.federationChecks, [federation()]);
     assert.deepEqual(back.vacancies, [vacancy()]);
-    // A supplied collection is the whole final collection; an omitted one is kept.
-    s.save({ savedAt: NOW, idCounter: 1000, db: fixtureDb({ squadMembers: [] }) });
-    const after = readTableBacked(s.sqlite);
-    assert.deepEqual(after.squadMembers, []); assert.equal(after.vacancies.length, 1, 'the omitted vacancies are kept');
-  } finally { s.sqlite.close(); }
-  const refusedSave = (db, re) => { const st = openStore(dir); try { refused(() => st.save({ savedAt: NOW, idCounter: 1000, db: fixtureDb(db) }), re); } finally { st.sqlite.close(); } };
-  { // A role a snapshot moves to another club's setup moves with it (never lost from both).
-    const st = openStore(dir);
+  } finally { rm(dir); }
+  const refusedFixture = (label, db, re) => {
+    const d = tempDir(`s9c-fix-${label}`);
     try {
-      const orgs = [...fixtureDb().orgs, { id: OTHER.id, name: OTHER.name, type: 'club', level: 'grassroots', plan: 'Grassroots', country: 'GB' }];
-      st.save({ savedAt: NOW, idCounter: 1000, db: fixtureDb({ orgs, vacancies: [], shadowPlayers: [], tacticalSetups: [setup({ orgId: OTHER.id }), setup({ roles: [] })] }) });
-      assert.deepEqual(readTableBacked(st.sqlite).tacticalSetups.map((t) => [t.orgId, t.roles.map((r) => r.id)]), [[ORG.id, []], [OTHER.id, ['role-1']]]);
-      st.save({ savedAt: NOW, idCounter: 1000, db: fixtureDb({ orgs: fixtureDb().orgs, tacticalSetups: [setup()], vacancies: [vacancy()] }) });
-    } finally { st.sqlite.close(); }
-  }
-  refusedSave({ squadMembers: [squadRow({ orgId: 'org-ghost' })] }, /CLUB_SETUP_REFERENCE_MISSING.*squadMembers sq-1 → orgs org-ghost/);
-  refusedSave({ squadMembers: [squadRow(), squadRow({ id: 'sq-2' })] }, /CLUB_SETUP_UNIQUENESS.*sq-1/);
-  refusedSave({ squadMembers: [squadRow({ source: 'shadow' })] }, /CLUB_SETUP_IMPORT_BLOCKED.*source/);
-  refusedSave({ vacancies: [vacancy({ roleId: 'role-ghost' })] }, /role-ghost|KEY_VIOLATION|FOREIGN KEY/);
-  const st = openStore(dir); try { assert.equal(readTableBacked(st.sqlite).vacancies.length, 1, 'a refused save changed nothing'); } finally { st.sqlite.close(); }
-  rm(dir);
+      refused(() => saveFixture(d, db), re, label);
+      const back = readRecords(d);
+      assert.equal(back.squadMembers.length + back.vacancies.length, 0, `${label}: a refused fixture wrote nothing`);
+    } finally { rm(d); }
+  };
+  refusedFixture('org', { squadMembers: [squadRow({ orgId: 'org-ghost' })] }, /FOREIGN KEY constraint failed/);
+  refusedFixture('unique', { squadMembers: [squadRow(), squadRow({ id: 'sq-2' })] }, /already has player pl-adult on its squad/);
+  refusedFixture('junk', { squadMembers: [squadRow({ source: 'shadow' })] }, /CLUB_SETUP_INPUT_INVALID.*source/);
+  refusedFixture('role', { squadMembers: [squadRow()], vacancies: [vacancy({ roleId: 'role-ghost' })] }, /role-ghost|FOREIGN KEY/);
 });
 
 console.log(`\n${passed} club setup checks passed`);

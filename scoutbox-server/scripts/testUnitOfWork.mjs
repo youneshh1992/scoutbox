@@ -35,11 +35,10 @@ const fixtureSeed = () => ({ orgs: ORGS(), guardians: [], players: [{ id: 'pl-1'
 /** A first installation with the fixture seeded and one staff member; returns everything a test needs. */
 function boot(dir, seed = fixtureSeed()) {
   const store = openStore(dir, { tableBacked: TABLE_BACKED });
-  const db = {};
-  const layer = attachDataLayer({ db, seed, store, nextId, persist: () => {}, sessionTtlMs: TTL });
+  const layer = attachDataLayer({ seed, store, nextId, sessionTtlMs: TTL });
   layer.users.create({ orgId: 'org-pro', name: 'Maria', role: 'Head of Recruitment' });
   const raw = (sql, ...p) => store.sqlite.prepare(sql).get(...p);
-  return { store, layer, db, raw, unit: (fn) => store.unitOfWork(fn) };
+  return { store, layer, raw, unit: (fn) => store.unitOfWork(fn) };
 }
 /** Count the BEGINs the store issues while `fn` runs: one per transaction. */
 function begins(t, fn) {
@@ -152,8 +151,7 @@ await test('unit of work: a process killed before COMMIT leaves the pre-operatio
   assert.equal(r.signal, 'SIGKILL', `the child must die by SIGKILL: status ${r.status} signal ${r.signal} ${r.stderr.slice(-300)}`);
   assert.match(r.stdout, /ABOUT_TO_CRASH/);
   const again = openStore(dir, { tableBacked: TABLE_BACKED });
-  const db2 = {};
-  const layer2 = attachDataLayer({ db: db2, store: again, nextId, persist: () => {}, sessionTtlMs: TTL });
+  const layer2 = attachDataLayer({ store: again, nextId, sessionTtlMs: TTL });
   assert.equal(layer2.orgs.byId('org-crash'), null); assert.equal(layer2.orgs.count(), 3);
   assert.equal(layer2.players.byId('pl-1').city, 'Start');
   assert.equal(layer2.orgs.byId('org-pro').suspended, false);
@@ -222,13 +220,6 @@ await test('unit of work: an after-commit callback that fails does not undo the 
   assert.equal(state.afterCommitFailures, 1); assert.match(state.lastAfterCommitError.message, /push gateway down/);
   let ran = false; t.store.afterCommit(() => { ran = true; }); assert.equal(ran, true, 'outside a unit the callback runs immediately');
   t.store.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
-});
-
-await test('unit of work: snapshot mode refuses it (a tool writes whole snapshots, it does not run operations)', () => {
-  const dir = tempDir('uow-snap');
-  const tool = openStore(dir);
-  assert.throws(() => tool.unitOfWork(() => {}), /server mode/);
-  tool.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
 });
 
 // ------------------------------------------------------------- review corrections (independent review of the first foundation commit)
@@ -319,7 +310,7 @@ await test('an organisation updated twice inside a unit: the second update sees 
   assert.throws(() => t.layer.orgs.update('org-pro', () => { t.layer.orgs.update('org-pro', (d) => { d.suspended = false; }); }), /already being updated/);
   t.store.sqlite.close();
   const again = openStore(dir, { tableBacked: TABLE_BACKED });
-  const layer2 = attachDataLayer({ db: {}, store: again, nextId, persist: () => {}, sessionTtlMs: TTL });
+  const layer2 = attachDataLayer({ store: again, nextId, sessionTtlMs: TTL });
   const pro2 = layer2.orgs.byId('org-pro');
   assert.equal(pro2.name, 'Eastport FC (renamed)'); assert.equal(pro2.suspended, true);
   again.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });

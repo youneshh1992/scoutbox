@@ -15,7 +15,8 @@ import { mkdtempSync, readdirSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { openStore } from '../../store.mjs';
+import { DatabaseSync } from 'node:sqlite';
+import { writeFixture } from '../../scripts/dataLayerFixture.mjs';
 import { isFetchBlockedPort, pickPort } from '../../scripts/testPort.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -79,29 +80,30 @@ const tFresh = await orgLogin();
 const ticket = (await j('POST', '/events/ticket', {}, tExpired)).body?.ticket;
 ok(!!ticket, 'setup: a ticket minted while the session was still live');
 await stop(S);
-// S2 of the data-layer plan: the snapshot's sessions carry a token HASH, never
-// the token, so the planted rows are found by hash. A row whose creation time
-// is missing or malformed cannot be represented in the sessions table at all,
-// and (S2 review corrections) a snapshot save that carries one is REFUSED as a
-// whole — nothing is dropped or coerced — so such a session never reaches the
-// store. Fail-closed here means "never stored": the bearer path answers 401
-// because the token names nothing, and the untouched sessions stay honoured.
+// The sessions table holds a token HASH, never the token, so the planted rows
+// are found by hash. A row whose creation time is missing or malformed cannot
+// be represented in the sessions table at all (NOT NULL, a STRICT integer
+// column): a write that tries is refused and changes nothing, so such a
+// session never reaches the store. Fail-closed here means "never stored": the
+// bearer path answers 401 because the token names nothing, and the untouched
+// sessions stay honoured. No repository operation back-dates a session, so the
+// expired sessions are planted with plain SQL on the stopped server's file.
 const sessionHash = (token) => crypto.createHash('sha256').update(token).digest('hex');
+const DB_FILE = path.join(DATA, 'scoutbox.db');
+const TTL_MS = 30 * DAY;
+/** The stored sessions (read-only, plain SQL): `{ tokenHash, createdAt }`. */
+const storedSessions = () => { const s = new DatabaseSync(DB_FILE, { readOnly: true }); try { return s.prepare('SELECT token_hash, created_at FROM sessions ORDER BY sid').all().map((r) => ({ tokenHash: r.token_hash, createdAt: r.created_at })); } finally { s.close(); } };
+/** Run `fn` on a writable connection to the stopped server's file. */
+const onFile = (fn) => { const s = new DatabaseSync(DB_FILE); s.exec('PRAGMA foreign_keys = ON;'); try { return fn(s); } finally { s.close(); } };
+const backdate = (token, createdAt, ttl = TTL_MS) => onFile((s) => s.prepare('UPDATE sessions SET created_at = ?, expires_at = ? WHERE token_hash = ?').run(createdAt, createdAt + ttl, sessionHash(token)).changes);
 {
-  const store = openStore(DATA);
-  const sessionsBefore = JSON.stringify(store.load().db.sessions);
-  let snap = store.load();
-  const n = snap.db.sessions.find((x) => x.tokenHash === sessionHash(tNoBirth)); delete n.createdAt;
-  let refused = false; try { store.save(snap); } catch (err) { refused = /createdAt is not a positive integer timestamp/.test(err.message) && !err.message.includes(tNoBirth); }
-  neg(refused && JSON.stringify(store.load().db.sessions) === sessionsBefore, 'S4 a snapshot that strips a session\'s creation time is refused whole (no token in the error); the stored sessions are untouched');
-  snap = store.load();
-  snap.db.sessions.push({ token: 'tok-garbage-birth', sid: 'sidgarbage01', kind: 'org', refId: 'org-eastport', userId: 'usr-1', createdAt: 'yesterday' });
-  refused = false; try { store.save(snap); } catch (err) { refused = /sid sidgarbage01 .*createdAt is not a positive integer timestamp/.test(err.message) && !err.message.includes('tok-garbage-birth'); }
-  neg(refused && JSON.stringify(store.load().db.sessions) === sessionsBefore, 'S4b a snapshot that adds a session with a malformed creation time is refused whole and names the sid, never the token');
-  snap = store.load();
-  const e = snap.db.sessions.find((x) => x.tokenHash === sessionHash(tExpired)); e.createdAt = Date.now() - 31 * DAY;
-  store.save(snap);
-  ok(store.load().db.sessions.find((x) => x.tokenHash === sessionHash(tExpired)).createdAt === e.createdAt, 'setup: an expired but well-formed session can be planted');
+  const sessionsBefore = JSON.stringify(storedSessions());
+  let refused = false; try { onFile((s) => s.prepare('UPDATE sessions SET created_at = NULL WHERE token_hash = ?').run(sessionHash(tNoBirth))); } catch (err) { refused = /NOT NULL constraint failed: sessions\.created_at/.test(err.message); }
+  neg(refused && JSON.stringify(storedSessions()) === sessionsBefore, 'S4 stripping a stored session\'s creation time is refused by the sessions table; the stored sessions are untouched');
+  refused = false; try { onFile((s) => s.prepare("INSERT INTO sessions (token_hash, sid, kind, ref_id, org_user_id, created_at, expires_at) VALUES (?, 'sidgarbage01', 'player', 'pl-adeyemi', NULL, 'yesterday', ?)").run(sessionHash('tok-garbage-birth'), Date.now())); } catch (err) { refused = /cannot store TEXT value in INTEGER column sessions\.created_at/.test(err.message); }
+  neg(refused && JSON.stringify(storedSessions()) === sessionsBefore, 'S4b a session with a malformed creation time is refused by the sessions table and never stored');
+  const at = Date.now() - 31 * DAY;
+  ok(backdate(tExpired, at) === 1 && storedSessions().find((x) => x.tokenHash === sessionHash(tExpired)).createdAt === at, 'setup: an expired but well-formed session can be planted');
 }
 S = await boot();
 ok(S.up, 'setup: rebooted on the planted store (an expired session, one fresh; the unrepresentable rows never reached it)');
@@ -109,7 +111,7 @@ ok(S.up, 'setup: rebooted on the planted store (an expired session, one fresh; t
   const r1 = await j('GET', '/org/notifications', undefined, tExpired);
   neg(r1.status === 401, `S3 a session older than the lifetime (31 days > 30) is refused on the bearer path (${r1.status} ${r1.body?.error})`);
   const r2 = await j('GET', '/player/me', undefined, tNoBirth);
-  ok(r2.status === 200, `S4c the session whose creation time a refused save tried to strip is still intact and honoured (${r2.status})`);
+  ok(r2.status === 200, `S4c the session whose creation time a refused write tried to strip is still intact and honoured (${r2.status})`);
   const r3 = await j('GET', '/org/notifications', undefined, 'tok-garbage-birth');
   neg(r3.status === 401, `S4d the token of the never-stored row names nothing (${r3.status})`);
   const r4 = await j('POST', '/events/ticket', {}, tExpired);
@@ -120,31 +122,24 @@ ok(S.up, 'setup: rebooted on the planted store (an expired session, one fresh; t
 }
 await stop(S);
 {
-  const db = openStore(DATA).load().db;
-  neg(!db.sessions.some((x) => x.tokenHash === sessionHash(tExpired)) && !db.sessions.some((x) => x.tokenHash === sessionHash('tok-garbage-birth')),
+  const sessions = storedSessions();
+  neg(!sessions.some((x) => x.tokenHash === sessionHash(tExpired)) && !sessions.some((x) => x.tokenHash === sessionHash('tok-garbage-birth')),
     'S7 the expired session was removed from the store when it was presented; the malformed row was never stored');
-  ok(db.sessions.some((x) => x.tokenHash === sessionHash(tNoBirth)), 'S7b the session a refused save tried to damage is still stored, unchanged');
+  ok(sessions.some((x) => x.tokenHash === sessionHash(tNoBirth)), 'S7b the session a refused write tried to damage is still stored, unchanged');
 }
 // S8: an expired session nobody presents is pruned at the next login.
-{
-  const store = openStore(DATA); const snap = store.load();
-  snap.db.sessions.push({ token: 'tok-stale-unused', sid: 'sidstaleunus', kind: 'player', refId: 'pl-kim', createdAt: Date.now() - 40 * DAY });
-  store.save(snap);
-}
+writeFixture(DATA, { sessions: [{ token: 'tok-stale-unused', sid: 'sidstaleunus', kind: 'player', refId: 'pl-kim', createdAt: Date.now() - 40 * DAY }] });
+ok(storedSessions().some((x) => x.tokenHash === sessionHash('tok-stale-unused')), 'setup: a stale session nobody presents is planted');
 S = await boot();
 await playerLogin('pl-kim');
 await stop(S);
 {
-  const db = openStore(DATA).load().db;
-  neg(!db.sessions.some((x) => x.tokenHash === sessionHash('tok-stale-unused')), 'S8 an expired session nobody presents is pruned at the next login');
-  ok(db.sessions.some((x) => x.tokenHash === sessionHash(tFresh)), 'S8b a live session survives the prune');
+  const sessions = storedSessions();
+  neg(!sessions.some((x) => x.tokenHash === sessionHash('tok-stale-unused')), 'S8 an expired session nobody presents is pruned at the next login');
+  ok(sessions.some((x) => x.tokenHash === sessionHash(tFresh)), 'S8b a live session survives the prune');
 }
 // S9: the lifetime is configurable; a short lifetime expires a session that is only hours old.
-{
-  const store = openStore(DATA); const snap = store.load();
-  const f = snap.db.sessions.find((x) => x.tokenHash === sessionHash(tFresh)); f.createdAt = Date.now() - 2 * DAY;
-  store.save(snap);
-}
+backdate(tFresh, Date.now() - 2 * DAY);
 S = await boot({ SESSION_TTL_DAYS: '1' });
 {
   const r = await j('GET', '/org/notifications', undefined, tFresh);

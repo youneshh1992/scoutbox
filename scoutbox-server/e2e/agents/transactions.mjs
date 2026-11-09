@@ -48,7 +48,7 @@ import { RATE_LIMIT_POLICY } from '../../domains/platform/rateLimit.mjs';
 import { TYPE_CATEGORY, CATEGORIES } from '../../domains/platform/notificationPrefs.mjs';
 import { DATA_MIGRATIONS, TABLE_BACKED } from '../../repositories/index.mjs';
 import { AGENT_TRANSACTIONS_MIGRATION, AGENT_TRANSACTIONS_TABLES } from '../../repositories/agentTransactions.mjs';
-import { openStore } from '../../store.mjs';
+import { openLayer, readRecords, writeFixture } from '../../scripts/dataLayerFixture.mjs';
 
 const PORT = 6900 + Math.floor(Math.random() * 200);
 const BASE = `http://localhost:${PORT}`;
@@ -248,11 +248,11 @@ section('pure AA/AC/AD — stores, migration, events, notifications, rate polici
   ok(DATA_MIGRATIONS.filter((m) => m.id === AGENT_TRANSACTIONS_MIGRATION).length === 1, `AA2 exactly one migration creates the transaction tables (${AGENT_TRANSACTIONS_MIGRATION})`);
   neg(!AGENT_TRANSACTIONS_TABLES.some((t) => /offer|signing|recruitment_case|compliance_context/.test(t)), 'AA4 the migration reinterprets no existing record as a transaction and creates no offer or signing table (§3, §5)');
   const freshDir = mkdtempSync(path.join(tmpdir(), 'sbx-m26-fresh-'));
-  const fresh = openStore(freshDir).load().db;
+  const fresh = readRecords(freshDir);
   ok(fresh.agentTransactions.length === 0 && fresh.transactionRepresentations.length === 0 && fresh.transactionDocuments.length === 0, 'AA5 a clean database holds no transaction: the migration backfills nothing');
-  const reopened = openStore(freshDir);
-  ok(reopened.load().db.agentTransactions.length === 0 && reopened.sqlite.prepare('SELECT COUNT(*) AS n FROM data_migrations WHERE id = ?').get(AGENT_TRANSACTIONS_MIGRATION).n === 1, 'AA6 reopening the file records the migration once and creates nothing');
-  reopened.sqlite.close();
+  const reopened = openLayer(freshDir);
+  ok(readRecords(freshDir).agentTransactions.length === 0 && reopened.sqlite.prepare('SELECT COUNT(*) AS n FROM data_migrations WHERE id = ?').get(AGENT_TRANSACTIONS_MIGRATION).n === 1, 'AA6 reopening the file records the migration once and creates nothing');
+  reopened.close();
   const EVENTS = ['agent_transaction_created', 'agent_transaction_party_changed', 'agent_transaction_compliance_updated', 'agent_transaction_status_changed', 'agent_transaction_document_added', 'agent_transaction_message_linked', 'agent_transaction_held', 'agent_transaction_cancelled', 'agent_transaction_closed'];
   for (const e of EVENTS) {
     const reg = EVENT_REGISTRY[e];
@@ -320,21 +320,20 @@ const collect = (label, r) => { if (r.status >= 400) ERROR_BODIES.push({ label, 
 
 // A SECOND agency has to exist for "a foreign agency guesses an id" to be a real
 // test rather than a colleague test. There is no route that creates an
-// organisation, so it is seeded into the snapshot between two boots — the same
+// organisation, so it is written through the repositories between two boots — the same
 // fixture technique the compliance persistence suite uses.
 let server = await boot();
 await stop(server);
 {
-  const store = openStore(DATA_DIR);
-  const snap = store.load();
-  snap.db.orgs.push({ ...structuredClone(snap.db.orgs.find((o) => o.type === 'agency')), id: 'org-southgate', name: 'Southgate Sports Management' });
+  const { password: _password, ...agency } = readRecords(DATA_DIR).orgs.find((o) => o.type === 'agency');
+  writeFixture(DATA_DIR, { orgs: [{ ...agency, id: 'org-southgate', name: 'Southgate Sports Management' }] });
   // The releasing club has to be a VERIFIED organisation, because root
   // verification authority — the recorded club signatory — only exists inside
   // one (M14). The seeded academy is unverified, so the fixture verifies it.
-  const harbour = snap.db.orgs.find((o) => o.id === 'org-harbour');
-  harbour.verified = true; harbour.verifiedDomain = 'harbourtownacademy.example';
-  store.save(snap);
-  ok(snap.db.orgs.some((o) => o.id === 'org-southgate' && o.type === 'agency') && harbour.verified === true, 'fixture: a second agency exists (so "foreign agency" is not "same-agency colleague") and the releasing club is verified (so it can hold a signatory)');
+  const L = openLayer(DATA_DIR);
+  try { L.unit(() => L.layer.orgs.update('org-harbour', (d) => { d.verified = true; d.verifiedDomain = 'harbourtownacademy.example'; })); } finally { L.close(); }
+  const orgs = readRecords(DATA_DIR).orgs;
+  ok(orgs.some((o) => o.id === 'org-southgate' && o.type === 'agency') && orgs.find((o) => o.id === 'org-harbour').verified === true, 'fixture: a second agency exists (so "foreign agency" is not "same-agency colleague") and the releasing club is verified (so it can hold a signatory)');
 }
 server = await boot();
 
@@ -845,11 +844,8 @@ section('AI/§92 — a corrupt row is contained and named by its effect, never r
   const before = (await j('GET', '/org/agent/transactions', undefined, ANA.token)).body.items.length;
   ok(before >= 2, `AI1 ${before} transactions are readable before the corruption fixture`);
   await stop(server);
-  const store = openStore(DATA_DIR);
-  const snap = store.load();
-  const db = snap.db;
-  // S11c: a status the machine does not know is not a row the typed table can hold — the save refuses it, naming it,
-  // and writes nothing. A typed row can still carry no compliance snapshot at all; that one is planted and judged on read.
+  // S11c: a status the machine does not know is not a row the typed table can hold — the repository refuses it, naming
+  // it, and writes nothing. A typed row can still carry no compliance snapshot at all; that one is planted and judged on read.
   const party = { id: 'txp-ai1', partyRole: 'individual', subjectKind: 'player', subjectId: 'pl-adeyemi', addedAt: T0, addedBy: { kind: 'org', userId: ANA_ID, name: 'Ana Costa' }, removed: false, removedAt: null, confirmedAt: T0, confirmedBy: { kind: 'player', userId: 'pl-adeyemi', name: 'Kola Adeyemi' }, subjectRemovedAt: null };
   const row = (over) => ({
     id: 'atx-corrupt', agencyOrgId: 'org-northstar', agentUserId: ANA_ID, type: 'transfer', jurisdictions: ['ENG'],
@@ -858,14 +854,12 @@ section('AI/§92 — a corrupt row is contained and named by its effect, never r
     holdReasonCode: null, holdReason: null, heldAt: null, cancelReasonCode: null, cancelledAt: null, closeReasonCode: null, closedAt: null, archivedAt: null,
     initiatedBy: { kind: 'org', userId: ANA_ID, name: 'Ana Costa' }, createdAt: T0, updatedAt: T0, keys: {}, rev: 1, revAt: T0, revBy: null, history: [], ...over,
   });
-  const context = { id: 'ctx-ai1', agencyOrgId: 'org-northstar', agentUserId: ANA_ID, type: 'transfer', jurisdictions: ['ENG'], parties: [], representations: [], resolvedFacts: [], reEvaluationPending: false, reviewRejectedAt: null, status: 'open', origin: 'transaction', transactionId: 'atx-corrupt', openedAt: T0, closedAt: null, keys: {}, rev: 1, revAt: T0, revBy: null, history: [], evaluations: [] };
+  const context = { id: 'ctx-ai1', agencyOrgId: 'org-northstar', agentUserId: ANA_ID, type: 'transfer', jurisdictions: ['ENG'], parties: [], representations: [], resolvedFacts: [], reEvaluationPending: false, reviewRejectedAt: null, status: 'open', origin: 'transaction', transactionId: 'atx-corrupt', openedAt: T0, closedAt: null, keys: {}, rev: 1, revAt: T0, revBy: null, history: [] };
   let refusedStatus = null;
-  try { store.save({ ...snap, db: { ...db, complianceContexts: [...db.complianceContexts, context], agentTransactions: [...db.agentTransactions, row({})] } }); } catch (e) { refusedStatus = e; }
-  neg(refusedStatus?.code === 'AGENT_TRANSACTIONS_IMPORT_BLOCKED' && /atx-corrupt\.status/.test(refusedStatus.message), 'AI2 a row with a status nobody wrote is refused by the save, naming it — nothing is repaired and nothing is written');
+  try { writeFixture(DATA_DIR, { complianceContexts: [context], agentTransactions: [row({})] }); } catch (e) { refusedStatus = e; }
+  neg(refusedStatus?.code === 'AGENT_TRANSACTIONS_INPUT_INVALID' && /atx-corrupt\.status/.test(refusedStatus.message) && !readRecords(DATA_DIR).complianceContexts.some((c) => c.id === 'ctx-ai1'), `AI2 a row with a status nobody wrote is refused by the repository, naming it — nothing is repaired and nothing is written (${refusedStatus?.message})`);
   neg(!actorTransitionAllowed('SOMETHING_NOBODY_WROTE', 'ACTIVE') && !ALL_TRANSITIONS.some((t) => t.from === 'SOMETHING_NOBODY_WROTE'), 'AI3 …and no transition exists from a status the machine does not know');
-  db.complianceContexts.push(context);
-  db.agentTransactions.push(row({ status: 'READY' }));
-  store.save(snap);
+  writeFixture(DATA_DIR, { complianceContexts: [context], agentTransactions: [row({ status: 'READY' })] });
   server = await boot();
   const read = await j('GET', '/org/agent/transactions/atx-corrupt', undefined, ANA.token);
   ok(read.status === 200 && read.body.transaction.status === 'READY', 'AI4 a row with no compliance snapshot reads back as it is on disk — nothing is repaired on boot');

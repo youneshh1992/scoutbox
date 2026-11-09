@@ -23,7 +23,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import { DATA_MIGRATIONS } from '../../repositories/index.mjs';
-import { openStore } from '../../store.mjs';
+import { openLayer, readRecords } from '../../scripts/dataLayerFixture.mjs';
 import { ROOM_STATUSES, ROOM_TRANSITIONS, TERMINAL_ROOM_STATUSES, STATUS_EVIDENCE_REQUIRED } from '../../domains/recruitment/rooms/shared.mjs';
 import {
   currentContactForCase, currentTrialForCase, currentOfferForCase, currentSigningForOffer, currentDecisionForCase, currentAssessmentForCase,
@@ -88,19 +88,30 @@ async function j(method, url, body, token, extra = {}) {
   let data = null; try { data = await r.json(); } catch { /* non-json */ }
   return { status: r.status, body: data, text: data === null ? null : JSON.stringify(data) };
 }
-/** Stop (SIGTERM, which saves), edit the store offline, boot again. */
+/**
+ * Stop, edit the store offline, boot again. `mutate(db, L)` reads the stored records (`db`, plain copies) and writes
+ * through `L` (the data layer, `L.layer`, and its SQLite) in one unit of work: the tables hold typed columns only, so a
+ * planted value a column cannot hold is REFUSED (nothing lands); the refusal is returned and the server comes back on
+ * the untouched file.
+ */
 async function offline(mutate) {
   await down(server, 'SIGTERM');
-  const store = openStore(DATA_DIR); const snap = store.load();
-  await mutate(snap.db, snap);
-  // S8d: the signing tables hold typed columns only, so a planted value a column cannot hold is REFUSED at the save
-  // (nothing lands); the refusal is returned and the server comes back on the untouched file.
+  const db = readRecords(DATA_DIR);
+  const L = openLayer(DATA_DIR);
   let refused = null;
-  try { store.save({ ...snap, db: snap.db }); } catch (err) { refused = err; }
+  try { L.unit(() => mutate(db, L)); } catch (err) { refused = err; } finally { L.close(); }
   server = await boot();
   await relogin();
   return refused;
 }
+// Undoing a plant: no repository operation removes a trial, request, contact or offer (the records are kept for good),
+// so a test that resets its own plant deletes the rows by SQL, the rows that refuse a removal (the case links, the
+// histories) first.
+const removeRows = (L, steps) => { for (const [sql, id] of steps) L.sqlite.prepare(sql).run(id); };
+const removeTrial = (L, id) => removeRows(L, [['DELETE FROM case_trial_links WHERE trial_id = ?', id], ['DELETE FROM trials WHERE id = ?', id]]);
+const removeRequest = (L, id) => removeRows(L, [['DELETE FROM case_request_links WHERE request_id = ?', id], ['DELETE FROM recruitment_requests WHERE id = ?', id]]);
+const removeContact = (L, id) => removeRows(L, [['DELETE FROM contact_history WHERE contact_id = ?', id], ['DELETE FROM recruitment_contacts WHERE id = ?', id]]);
+const removeOffer = (L, id) => removeRows(L, [['DELETE FROM offer_history WHERE offer_id = ?', id], ['DELETE FROM recruitment_offers WHERE id = ?', id]]);
 /**
  * S8c (typed since §4.3): a contact or an offer planted offline is the writers' whole literal — the tables refuse a
  * partial record. Every field is valid; what the plant makes wrong is the STATE (drift against the case), not the shape.
@@ -542,21 +553,21 @@ const G = {};
   // Four planted live cases: evidence ahead of the lifecycle in four shapes; one lifecycle-ahead claim.
   const mk = async (pid) => { const RID = await reviewed(maria.token, pid); return RID; };
   G.contact = await mk('pl-alvarez'); G.trial = await mk('pl-nowak'); G.offer = await mk('pl-mensah'); G.accepted = await mk('pl-imani');
-  await offline((db) => {
+  await offline((db, { layer }) => {
     const now = Date.now();
     const kase = (id) => db.recruitmentCases.find((k) => k.id === id);
     // G1: a delivered Contact on a case whose history never reached contacted (status under_review).
     const k1 = kase(G.contact);
-    db.recruitmentContacts = [...db.recruitmentContacts, plantedContact(db, k1, 'rct-drift-1', now)];
+    layer.recruitmentContactsOffers.contacts.create(plantedContact(db, k1, 'rct-drift-1', now));
     // G2: a completed Trial on a case whose history never reached trial_completed.
     const k2 = kase(G.trial);
     // S8a: the trial and its accepted request are the writers' whole literals (planted request first: the trial names it by a real key).
-    db.requests.push({ ...plantedRequest(db, k2, 'req-drift-2', now - 4 * H), trialId: 'trial-drift-2' });
-    db.trials.push(plantedCompletedTrial(db, k2, 'trial-drift-2', 'req-drift-2', 's-d2', now));
+    layer.recruitment.requests.create({ ...plantedRequest(db, k2, 'req-drift-2', now - 4 * H), trialId: 'trial-drift-2' });
+    layer.recruitment.trials.create(plantedCompletedTrial(db, k2, 'trial-drift-2', 'req-drift-2', 's-d2', now));
     // G3: an ISSUED revision on a case whose history never reached offer_made.
-    db.recruitmentOffers = [...db.recruitmentOffers, plantedOffer(db, kase(G.offer), 'ISSUED', false, now)];
+    layer.recruitmentContactsOffers.offers.create(plantedOffer(db, kase(G.offer), 'ISSUED', false, now));
     // G4: an ACCEPTED revision on a case whose history never reached offer_accepted.
-    db.recruitmentOffers = [...db.recruitmentOffers, plantedOffer(db, kase(G.accepted), 'ACCEPTED', true, now)];
+    layer.recruitmentContactsOffers.offers.create(plantedOffer(db, kase(G.accepted), 'ACCEPTED', true, now));
   });
   const g1 = await jb(G.contact); const g2 = await jb(G.trial); const g3 = await jb(G.offer); const g4 = await jb(G.accepted);
   neg(g1.classification === 'integrity_error' && g1.integrity.includes('EVIDENCE_AHEAD_OF_LIFECYCLE') && g1.nextAction.blockedBy.includes('INTEGRITY_ERROR'), 'G1 a delivered Contact the lifecycle never recorded: EVIDENCE_AHEAD_OF_LIFECYCLE, the act named and blocked');
@@ -610,7 +621,7 @@ section('H — rollback: no partial authoritative state after a writer failure (
   ok(okc.status === 200 && (await stage(RID)) === 'signed' && (await signings()).length === rowsBefore + 1 && (await j('GET', `/org/players/${pid}`, undefined, maria.token)).body.contractStatus === 'under_contract', 'H4 without the fault the completion succeeds once: one row, signed, under_contract');
   // H5: the Offer answer seam — persisted, then a failure; the retry replays.
   const pid5 = 'pl-nowak'; const T5 = T0 + 7 * DAY;
-  await offline((db) => { const k = db.recruitmentCases.find((x) => x.id === G.trial); db.trials = db.trials.filter((t) => t.id !== 'trial-drift-2'); db.requests = db.requests.filter((r) => r.id !== 'req-drift-2'); void k; });
+  await offline((db, L) => { removeTrial(L, 'trial-drift-2'); removeRequest(L, 'req-drift-2'); });
   const R5 = G.trial;
   const c5 = await contacted(R5, pid5); await respondContact(c5.REQID, pid5);
   await trialInvited(R5, T5); const TID5 = await trialAccepted(R5, pid5, T5); await trialCompleted(R5, TID5, T5); await assessed(pid5, TID5); await decided(R5);
@@ -631,7 +642,7 @@ section('H — rollback: no partial authoritative state after a writer failure (
 section('I — a block inserted mid-stage stops what comes next and erases nothing (§17)');
 {
   const pid = 'pl-alvarez'; const RID = G.contact;
-  await offline((db) => { db.recruitmentContacts = db.recruitmentContacts.filter((c) => c.id !== 'rct-drift-1'); });
+  await offline((db, L) => { removeContact(L, 'rct-drift-1'); });
   const lift = async () => { const bl = (await j('GET', '/admin/blocks?limit=100', undefined, undefined, ADMIN)).body.items; for (const b of bl.filter((x) => x.playerId === pid && x.orgId === 'org-eastport')) await j('POST', `/admin/blocks/${b.id}/lift`, {}, undefined, ADMIN); };
   const block = () => j('POST', '/player/block', { orgId: 'org-eastport', reason: 'test' }, P[pid].token);
   if ((await stage(RID)) !== 'contact_planned') await lifecycle(RID, 'planContact');
@@ -810,15 +821,15 @@ section('M — minors through the chain; malformed DOB fails closed (§23, §24)
   neg(s.status === 200 && (gInbox ?? []).some((r) => r.type === 'contact') && !(kInbox ?? []).some((r) => r.orgId === 'org-eastport' && r.type === 'contact' && r.routedTo === 'player'), 'M2 a Contact to a minor routes to the guardian, never to the child');
   const gj = await j('GET', '/guardian/children/pl-guni/journeys', undefined, amara.token);
   neg(gj.status === 200 && !has(gj.body, 'offer') || gj.status === 200, 'M4 the guardian\'s view of the child carries no Offer (none may exist)');
-  // S4a: a malformed DOB can no longer be STORED. Players are table-backed and the snapshot write validates every
-  // record, so the offline edit that used to plant `dob: 'not-a-date'` is refused as a whole (the save rolls back
+  // S4a: a malformed DOB can no longer be STORED. Players are table-backed and the players repository types every
+  // write, so the offline edit that used to plant `dob: 'not-a-date'` is refused as a whole (the unit rolls back
   // naming the player and the field; the stored record stays the readable minor it was). The route-level claims
   // (an unreadable age is never an adult) are kept by the sign-up refusals of §24 and by the wall below.
   await down(server, 'SIGTERM');
   let refusal = null;
-  { const store = openStore(DATA_DIR); const snap = store.load(); snap.db.players.find((x) => x.id === 'pl-guni').dob = 'not-a-date'; try { store.save({ ...snap, db: snap.db }); } catch (e) { refusal = e; } store.sqlite.close(); }
+  { const L = openLayer(DATA_DIR); try { L.unit(() => L.layer.players.update('pl-guni', (pl) => { pl.dob = 'not-a-date'; })); } catch (e) { refusal = e; } finally { L.close(); } }
   server = await boot(); await relogin();
-  neg(/players pl-guni: dob must be a YYYY-MM-DD date/.test(String(refusal?.message)) && (await j('GET', '/guardian/children', undefined, amara.token)).body.find((k) => k.id === 'pl-guni')?.dob === '2012-02-10', 'M8a (S4a) a malformed DOB cannot be stored: the snapshot save is refused naming the player and the field, the stored date is unchanged');
+  neg(refusal?.code === 'PLAYER_RECORD_INVALID' && /player pl-guni\): dob must be a YYYY-MM-DD date/.test(String(refusal?.message)) && (await j('GET', '/guardian/children', undefined, amara.token)).body.find((k) => k.id === 'pl-guni')?.dob === '2012-02-10', 'M8a (S4a) a malformed DOB cannot be stored: the write is refused naming the player and the field, the stored date is unchanged');
   const wall2 = await j('GET', '/org/players/pl-guni', undefined, alex.token);
   neg(wall2.status === 403 && wall2.body?.error === 'UNDER_18_WALL', 'M8 the wall for an agency holds (the minor is still a minor)');
   const av = await j('POST', '/player/availability', { availability: 'available_now' }, P['pl-guni'].token);
@@ -935,21 +946,21 @@ section('R — corrupt current pointers and unknown states fail closed (§35, §
 {
   const Hh = globalThis.__H; const K = globalThis.__K;
   // S8d: the package's status is a CHECKed column — the unknown word is refused at the save, naming the package; it is planted in its own save so the two other corruptions land
-  let bogusPkg = null; const bogus = await offline((db) => { const pkg = db.signingPackages.find((p) => p.caseId === Hh.R5); bogusPkg = pkg?.id ?? null; if (pkg) pkg.status = 'BOGUS'; });
+  let bogusPkg = null; const bogus = await offline((db, { layer }) => { const pkg = db.signingPackages.find((p) => p.caseId === Hh.R5); bogusPkg = pkg?.id ?? null; if (pkg) layer.signingsFollowUps.signingPackages.patch(pkg.id, { status: 'BOGUS' }); });
   // S8c (typed since §4.3): a current-revision pointer naming a revision the Offer does not hold is refused at the
   // save, naming the Offer (planted in its own save, like R2); the Offer reads as before.
-  let gone = null; const goneRefused = await offline((db) => { const o = db.recruitmentOffers.find((x) => x.id === K.OID); gone = o ?? null; db.recruitmentOffers = db.recruitmentOffers.map((x) => (x.id === K.OID ? { ...x, currentRevisionId: 'rofr-gone' } : x)); });
+  let gone = null; const goneRefused = await offline((db, { layer }) => { const o = db.recruitmentOffers.find((x) => x.id === K.OID); gone = o ?? null; layer.recruitmentContactsOffers.offers.update(K.OID, (x) => { x.currentRevisionId = 'rofr-gone'; }); });
   // S8b (typed since §4.3): the room status is a CHECKed column — an unknown word is refused at the save, naming the
   // case (planted in its own save, like R1 and R2); the case reads as before.
-  let r4Status = null; const unknownRefused = await offline((db) => {
-    const k = db.recruitmentCases.find((x) => x.id === globalThis.__B.R4); r4Status = k?.room?.status ?? null; if (k) k.room.status = 'SIGNEDX';
+  let r4Status = null; const unknownRefused = await offline((db, { layer }) => {
+    const k = db.recruitmentCases.find((x) => x.id === globalThis.__B.R4); r4Status = k?.room?.status ?? null; if (k) layer.recruitmentCases.cases.update(k.id, (c) => { c.room.status = 'SIGNEDX'; });
   });
   const jK = await jb(K.RID);
   neg(gone && goneRefused && goneRefused.message.includes(`${K.OID}.currentRevisionId names rofr-gone, not a revision of this offer`) && jK.resources.offerId === K.OID && jK.classification !== 'integrity_error', `R1 an Offer whose current-revision pointer names a missing revision cannot be stored: the save refuses it, naming the Offer; the case reads as before (${String(goneRefused?.message ?? 'no refusal').slice(0, 100)}…)`);
   const issue = await j('POST', `/org/offers/${K.OID}/issue`, { expectedRev: 1, clientKey: key() }, maria.token, at(T0));
   neg(issue.status >= 400, `R1b the domain route still answers by its own rules (${issue.status} ${issue.body?.error})`);
   const jN = await jb(Hh.R5);
-  neg(bogusPkg === null || (bogus && /SIGNINGS_IMPORT_BLOCKED/.test(bogus.message) && bogus.message.includes(bogusPkg) && bogus.message.includes('status must be one of') && jN.classification !== 'integrity_error'), `R2 (S8d) an unknown status word cannot be stored: the save refuses it, naming the package; the package reads as before (${bogusPkg ?? 'no package'}: ${String(bogus?.message ?? 'no refusal').slice(0, 80)}…)`);
+  neg(bogusPkg === null || (bogus && /SIGNINGS_INPUT_INVALID/.test(bogus.message) && bogus.message.includes(bogusPkg) && bogus.message.includes('status must be one of') && jN.classification !== 'integrity_error'), `R2 (S8d) an unknown status word cannot be stored: the save refuses it, naming the package; the package reads as before (${bogusPkg ?? 'no package'}: ${String(bogus?.message ?? 'no refusal').slice(0, 80)}…)`);
   const j4 = await jb(globalThis.__B.R4);
   neg(unknownRefused && /RECRUITMENT_CASES_INPUT_INVALID/.test(unknownRefused.message) && unknownRefused.message.includes(`${globalThis.__B.R4}.room.status must be one of`) && j4.classification !== 'integrity_error', `R3 an unknown lifecycle word cannot be stored: the save refuses it, naming the case; the case reads as before (${String(unknownRefused?.message ?? 'no refusal').slice(0, 80)}…)`);
   const verdict = canTransitionRecruitmentCase({ id: globalThis.__B.R4, room: { status: 'SIGNEDX' }, history: [] }, 'startReview', { role: 'recruitment_admin' });
@@ -962,25 +973,23 @@ section('S — partial legacy / canonical mixes: nothing invented (§37)');
 {
   const mk = async (pid) => reviewed(maria.token, pid);
   const S1 = await mk('pl-imani'); // will carry the drift Offer from G; reset it
-  await offline((db) => { db.recruitmentOffers = db.recruitmentOffers.filter((o) => o.caseId !== S1); });
+  await offline((db, L) => { for (const o of db.recruitmentOffers.filter((x) => x.caseId === S1)) removeOffer(L, o.id); });
   const S2 = globalThis.__C.NEW; // Tanaka's second case (under_review)
   const trialMilestonesBefore = (await playerJourneys(P['pl-tanaka'].token)).items.filter((x) => x.club.id === 'org-eastport').reduce((n, x) => n + x.journey.timeline.filter((e) => /^trial_/.test(e.kind)).length, 0);
-  await offline((db) => {
-    const plant = (id, chain, extraLast = {}) => {
-      const k = db.recruitmentCases.find((x) => x.id === id);
+  await offline((db, { layer }) => {
+    const plant = (id, chain, extraLast = {}) => layer.recruitmentCases.cases.update(id, (k) => {
       let prev = k.room.status; let tt = Math.max(Date.now(), ...(k.history ?? []).map((h) => Number(h.at) || 0));
       for (const to of chain) { tt += H; k.history.push({ id: `hist-p81-${Math.random().toString(36).slice(2, 8)}`, at: tt, action: 'room_status_changed', byKind: 'org', byId: 'legacy', byName: 'Legacy', detail: { from: prev, to, ...(to === chain[chain.length - 1] ? extraLast : {}) } }); prev = to; }
       k.room.status = chain[chain.length - 1]; k.room.rev = (k.room.rev ?? 1) + chain.length;
-      return k;
-    };
+    });
     // S1: legacy contacted + a canonical completed Trial (a Trial row that names the case, with an accepted request).
     const k1 = plant(S1, ['contacted', 'trial_requested', 'trial_scheduled', 'trial_completed'], { trialId: 'trial-p81-s1' });
     const now = Date.now();
-    db.requests.push({ ...plantedRequest(db, k1, 'req-p81-s1', now - 4 * H), trialId: 'trial-p81-s1' }); // S8a: the writers' whole literals, as above
-    db.trials.push(plantedCompletedTrial(db, k1, 'trial-p81-s1', 'req-p81-s1', 's-s1', now));
+    layer.recruitment.requests.create({ ...plantedRequest(db, k1, 'req-p81-s1', now - 4 * H), trialId: 'trial-p81-s1' }); // S8a: the writers' whole literals, as above
+    layer.recruitment.trials.create(plantedCompletedTrial(db, k1, 'trial-p81-s1', 'req-p81-s1', 's-s1', now));
     // S2: canonical Contact lifecycle claim + legacy trial_completed (no Trial).
     const k2 = plant(S2, ['contact_planned', 'contacted', 'trial_requested', 'trial_scheduled', 'trial_completed']);
-    db.recruitmentContacts = [...db.recruitmentContacts, plantedContact(db, k2, 'rct-p81-s2', now - 6 * H)];
+    layer.recruitmentContactsOffers.contacts.create(plantedContact(db, k2, 'rct-p81-s2', now - 6 * H));
   });
   const s1 = await jb(S1); const s2 = await jb(S2); const j1 = await journey(S1); const j2 = await journey(S2);
   ok(s1.classification === 'partially_canonical' && done(s1).includes('contact:lifecycle') && done(s1).includes('trial:canonical') && s1.resources.trialId === 'trial-p81-s1' && j1.contact.contacts.length === 0, 'S1 legacy contacted + canonical Trial: partially_canonical, the Trial current, no Contact invented');
@@ -1072,7 +1081,7 @@ section('V — idempotency: a key is never a cross-stage or post-authority capab
   const RID = I.RID;
   if ((await stage(RID)) !== 'contact_planned') { /* the Alvarez case is at trial stage now; use a fresh case */ }
   const pid = 'pl-imani'; const R = await reviewed(maria.token, pid);
-  await offline((db) => { const k = db.recruitmentCases.find((x) => x.id === R); k.room.status = 'under_review'; k.history = k.history.filter((h) => !String(h.id).startsWith('hist-p81')); db.trials = db.trials.filter((t) => t.id !== 'trial-p81-s1'); db.requests = db.requests.filter((r) => r.id !== 'req-p81-s1'); });
+  await offline((db, L) => { L.layer.recruitmentCases.cases.update(R, (k) => { k.room.status = 'under_review'; k.history = k.history.filter((h) => !String(h.id).startsWith('hist-p81')); }); removeTrial(L, 'trial-p81-s1'); removeRequest(L, 'req-p81-s1'); });
   await lifecycle(R, 'planContact');
   const d = await j('POST', `/org/rooms/${R}/contacts`, { subject: 'Interest', body: 'Talk?', clientKey: key() }, maria.token);
   const k1 = key();

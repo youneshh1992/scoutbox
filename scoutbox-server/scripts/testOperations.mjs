@@ -8,16 +8,17 @@
 // candidates are prefiltered by position, foot, country and availability and skip removed staff; an invoice is one per
 // signing, stored in minor units, and pages newest first; callback ids are remembered once and the oldest 1,000 go past
 // 5,000; injected failures are added and used up one at a time; the demo reputation rows are imported once with a first
-// installation's seed and never otherwise; a rolled-back unit leaves nothing; the snapshot write
-// types, names a missing reference and reads back what it wrote; and the plans the orgs table accepts are exactly the
+// installation's seed and never otherwise; a rolled-back unit leaves nothing; a fixture written through the repository
+// is typed, names a missing reference and reads back what it wrote; and the plans the orgs table accepts are exactly the
 // catalogue's. Temporary databases only. Run with: npm test
 
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { attachDataLayer, DATA_MIGRATIONS, TABLE_BACKED, readTableBacked } from '../repositories/index.mjs';
+import { attachDataLayer, DATA_MIGRATIONS, TABLE_BACKED } from '../repositories/index.mjs';
+import { openLayer, readRecords, writeFixture } from './dataLayerFixture.mjs';
 import { openStore } from '../store.mjs';
 import { NOW, TTL, tempDir, USERS, ORGS } from './coreIdentityTestFixtures.mjs';
-import { saveFixture } from './recruitmentTestFixtures.mjs';
+import { fixtureDb } from './recruitmentTestFixtures.mjs';
 import { legacySigning } from './signingsFollowUpsTestFixtures.mjs';
 import {
   OPERATIONS_MIGRATION as MIGRATION, OPERATIONS_TABLES as TABLES, OPERATIONS_COLLECTIONS as COLLECTIONS, OPERATIONS_SINGLETONS as SINGLETONS,
@@ -58,21 +59,36 @@ const invoice = (over = {}) => ({
   amountMinor: 150_000, currency: 'EUR', status: 'issued', provider: 'dev-ledger', ...over,
 });
 
-function serverOpen(dir, db0 = {}) {
+/**
+ * Records written the way the routes write them: a staff account is created, then removed; an upload session is
+ * opened, then each chunk received, then finalised or aborted; a provider callback id is marked seen.
+ */
+const WRITERS = {
+  uploadSessions: (L, records) => {
+    for (const { received = [], status, finalisedMediaId = null, ...u } of records) {
+      L.operations.uploads.open({ ...u, status: 'open', finalisedMediaId: null });
+      for (const c of received) L.operations.uploads.receiveChunk(u.id, c);
+      if (status === 'finalised') L.operations.uploads.finalise(u.id, finalisedMediaId);
+      else if (status === 'aborted') L.operations.uploads.abort(u.id);
+      else if (status !== 'open') throw new Error(`upload_sessions ${u.id}: a fixture cannot write a ${status} session`);
+    }
+  },
+  deliveryCallbacksSeen: (L, ids, { now }) => { for (const id of ids) L.operations.delivery.markSeen(id, now); },
+};
+const write = (dir, records) => writeFixture(dir, records, { now: NOW, writers: WRITERS });
+function serverOpen(dir) {
   const store = openStore(dir, { tableBacked: TABLE_BACKED });
-  const db = {};
-  // S14a: a first installation's records are the `seed` (imported only while the file is new); a fixture-saved file ignores it.
-  const layer = attachDataLayer({ db, seed: { players: [], guardians: [], ...db0 }, store, nextId, sessionTtlMs: TTL, now: () => NOW, warn: () => {} });
-  return { store, db, repo: layer.operations, unit: (w) => store.unitOfWork(w), close: () => store.sqlite.close() };
+  const layer = attachDataLayer({ store, nextId, sessionTtlMs: TTL, now: () => NOW, warn: () => {} });
+  return { store, repo: layer.operations, unit: (w) => store.unitOfWork(w), close: () => store.sqlite.close() };
 }
-const seeded = (label) => { const dir = tempDir(label); saveFixture(dir, FIX()); return { dir, s: serverOpen(dir) }; };
+const seeded = (label) => { const dir = tempDir(label); write(dir, fixtureDb(FIX())); return { dir, s: serverOpen(dir) }; };
 
 // ------------------------------------------------------------- schema
 test('[schema] 0038 is registered after 0037 and creates the STRICT tables (no JSON column), with only the delivery centre\'s rows', () => {
   const ids = DATA_MIGRATIONS.map((m) => m.id);
   assert.equal(ids.indexOf(MIGRATION), ids.indexOf('0037_grassroots') + 1);
   for (const n of COLLECTIONS) assert.ok(TABLE_BACKED.includes(n), `${n} is table-backed`);
-  const dir = tempDir('s13e-empty'); const s = openStore(dir).sqlite;
+  const dir = tempDir('s13e-empty'); const s = openLayer(dir).sqlite;
   for (const t of TABLES) {
     const sql = s.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?").get(t).sql;
     assert.match(sql, /STRICT\s*$/, `${t} is STRICT`);
@@ -87,7 +103,7 @@ test('[schema] 0038 is registered after 0037 and creates the STRICT tables (no J
 
 test('[schema] the plans an organisation can be on are exactly the catalogue\'s, and the orgs table\'s CHECK says the same', () => {
   assert.deepEqual([...ORG_PLANS].sort(), Object.keys(PLANS).sort());
-  const dir = tempDir('s13e-plans'); const s = openStore(dir).sqlite;
+  const dir = tempDir('s13e-plans'); const s = openLayer(dir).sqlite;
   const sql = s.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'orgs'").get().sql;
   const listed = /plan\s+TEXT NOT NULL CHECK \(plan IN \(([^)]*)\)\)/.exec(sql)[1].split(',').map((v) => v.trim().replace(/'/g, ''));
   assert.deepEqual(listed.sort(), Object.keys(PLANS).sort());
@@ -216,14 +232,15 @@ test('[delivery] callback ids are remembered once and pruned past 5,000; injecte
 test('[reputation] the demo rows are imported once with a first installation\'s seed, and never otherwise', () => {
   const rows = [{ scoutName: 'Maria Keane', orgName: 'Eastport FC', discoveries: 14, successRatePct: 64, avgResaleMultiple: 3.1, seeded: true }];
   const fresh = tempDir('s13e-rep-fresh');
-  const first = serverOpen(fresh, { orgs: [], users: [], reputationSeed: rows });
-  assert.deepEqual(plain(first.repo.reputationSeed.all()), rows, 'a first installation imports its seed');
+  // A first installation's records are the `seed` (imported only while the database is new).
+  const first = openLayer(fresh, { seed: { orgs: [], users: [], players: [], guardians: [], reputationSeed: rows }, now: () => NOW, nextId });
+  assert.deepEqual(plain(first.layer.operations.reputationSeed.all()), rows, 'a first installation imports its seed');
   first.close();
-  const again = serverOpen(fresh, { reputationSeed: [{ ...rows[0], scoutName: 'Someone Else' }] });
-  assert.deepEqual(plain(again.repo.reputationSeed.all()), rows, 'a later boot never imports from memory');
+  const again = openLayer(fresh, { seed: { players: [], guardians: [], reputationSeed: [{ ...rows[0], scoutName: 'Someone Else' }] }, now: () => NOW, nextId });
+  assert.deepEqual(plain(again.layer.operations.reputationSeed.all()), rows, 'a later boot never imports from memory');
   again.close(); rm(fresh);
   const { dir, s } = seeded('s13e-rep-saved');
-  assert.deepEqual(s.repo.reputationSeed.all(), [], 'a saved database is not a first installation');
+  assert.deepEqual(s.repo.reputationSeed.all(), [], 'a database written without demo rows has none');
   s.close(); rm(dir);
 });
 
@@ -240,26 +257,25 @@ test('[unit] a rolled-back unit leaves nothing, the reads cannot write', () => {
   s.close(); rm(dir);
 });
 
-// ------------------------------------------------------------- snapshot
-test('[snapshot] the write types every record, names a missing reference, and reads back what it wrote', () => {
-  const dir = tempDir('s13e-snapshot');
+// ------------------------------------------------------------- fixtures
+test('[fixtures] a record written through the repository is typed, a missing reference is named, a refused write leaves nothing, and the records read back as written', () => {
+  const dir = tempDir('s13e-fix');
   const up = { ...upload({ status: 'finalised', finalisedMediaId: 'media-1' }), received: [0, 1] };
   const rep = { scoutName: 'A', orgName: 'B', discoveries: 1, successRatePct: 50, avgResaleMultiple: 2.5, seeded: true };
-  saveFixture(dir, { ...FIX(), uploadSessions: [up], savedSearches: [search()], invoices: [invoice()], reputationSeed: [rep], deliveryCallbacksSeen: ['cb-a', 'cb-b'] });
-  const store = openStore(dir);
-  const back = readTableBacked(store.sqlite);
+  write(dir, fixtureDb({ ...FIX(), uploadSessions: [up], savedSearches: [search()], invoices: [invoice()], reputationSeed: [rep], deliveryCallbacksSeen: ['cb-a', 'cb-b'] }));
+  const back = readRecords(dir);
   assert.deepEqual(plain(back.uploadSessions), [plain(up)]);
   assert.deepEqual(plain(back.savedSearches), [{ ...search(), scoutName: 'Maria' }]);
   assert.deepEqual(plain(back.invoices), [invoice()]);
-  assert.deepEqual(plain(back.reputationSeed), [rep]);
+  assert.deepEqual(plain(back.reputationSeed), [rep], 'a new database\'s fixture is its first installation');
   assert.deepEqual(back.deliveryCallbacksSeen, ['cb-a', 'cb-b']);
-  for (const n of SINGLETONS) assert.equal(Object.hasOwn(back, n), false, `${n} is a row, not a snapshot collection`);
-  const snap = store.load();
-  refused(() => store.save({ ...snap, db: { ...snap.db, invoices: [invoice({ signingId: 'sign-none' })] } }), /OPERATIONS_REFERENCE_MISSING.*sign-none/);
-  refused(() => store.save({ ...snap, db: { ...snap.db, invoices: [{ ...invoice(), amount: 1500 }] } }), /OPERATIONS_IMPORT_BLOCKED.*does not store: amount/);
-  refused(() => store.save({ ...snap, db: { ...snap.db, deliveryCallbacksSeen: [7] } }), /OPERATIONS_IMPORT_BLOCKED.*not a callback id/);
-  assert.deepEqual(plain(readTableBacked(store.sqlite).invoices), [invoice()], 'a refused write changed nothing');
-  store.sqlite.close(); rm(dir);
+  for (const n of SINGLETONS) assert.equal(Object.hasOwn(back, n), false, `${n} is a row, not a collection`);
+  refused(() => write(dir, { invoices: [invoice({ id: 'inv-2', signingId: 'sign-none' })] }), /OPERATIONS_REFERENCE_MISSING.*sign-none/);
+  refused(() => write(dir, { invoices: [{ ...invoice({ id: 'inv-3', signingId: 'sign-b' }), amount: 1500 }] }), /OPERATIONS_INPUT_INVALID.*does not store: amount/);
+  refused(() => write(dir, { deliveryCallbacksSeen: [7] }), /OPERATIONS_INPUT_INVALID.*a callback id is 1 to/);
+  const after = readRecords(dir);
+  assert.deepEqual([plain(after.invoices), after.deliveryCallbacksSeen], [[invoice()], ['cb-a', 'cb-b']], 'a refused write changed nothing');
+  rm(dir);
 });
 
 console.log(`\n${passed} operations checks passed`);

@@ -3,17 +3,18 @@
 // vocabulary and length CHECKs, an address on every outbox row, one row per device token); the repository's writes
 // (append, markDelivered, register: typed input, unknown fields and wrong types refused by field, never by address,
 // text or token) and SQL reads (frozen records, pages newest first by cursor, a person's tokens); units of work; no
-// mirror and no db.outbox / db.pushLog / db.pushTokens; the snapshot path.
+// mirror and no db.outbox / db.pushLog / db.pushTokens; fixtures written through the repository.
 // Temporary databases only; nothing touches DATA_DIR. Run with: npm test
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { attachDataLayer, TABLE_BACKED, DATA_MIGRATIONS } from '../repositories/index.mjs';
-import { createOutboxPushRepository, OUTBOX_TABLE, PUSH_LOG_TABLE, PUSH_TOKENS_TABLE, OUTBOX_PUSH_MIGRATION } from '../repositories/outboxPush.mjs';
+import { createOutboxPushRepository, OUTBOX_PUSH_MIGRATION } from '../repositories/outboxPush.mjs';
 import { DISPATCHES_MIGRATION } from '../repositories/dispatches.mjs';
 import { openStore } from '../store.mjs';
 import { NOW, TTL, tempDir, openRaw, FIXTURE, ORGS, USERS, hasBlobTable } from './coreIdentityTestFixtures.mjs';
+import { writeFixture, readRecords } from './dataLayerFixture.mjs';
 
 let passed = 0;
 const only = process.env.TEST_ONLY || '';
@@ -28,12 +29,11 @@ const delivery = (over = {}) => ({ id: `mail-${++counter}`, at: NOW, channel: 'e
 const push = (over = {}) => ({ id: `push-${++counter}`, ts: NOW, audience: { kind: 'player', id: 'pl-adult' }, title: 'ScoutBox', body: 'Eastport FC sent a message.', transport: 'dev-log', ...over });
 const token = (over = {}) => ({ kind: 'player', refId: 'pl-adult', token: 'ExponentPushToken[synthetic-1]', ts: NOW, ...over });
 
-function fixtureFile(dir, extra = {}) { const tool = openStore(dir); tool.save({ idCounter: 1000, db: { ...FIXTURE(), orgs: ORGS(), users: USERS(), ...extra } }); tool.sqlite.close(); }
+function fixtureFile(dir, extra = {}) { writeFixture(dir, { ...FIXTURE(), orgs: ORGS(), users: USERS(), ...extra }, { now: NOW, idCounter: 1000 }); }
 function live(dir) {
   const store = openStore(dir, { tableBacked: TABLE_BACKED });
-  const db = {};
-  const layer = attachDataLayer({ db, store, nextId, sessionTtlMs: TTL, now: () => NOW, warn: () => {} });
-  return { store, db, layer, repo: layer.outboxPush, close: () => store.sqlite.close() };
+  const layer = attachDataLayer({ store, nextId, sessionTtlMs: TTL, now: () => NOW, warn: () => {} });
+  return { store, layer, repo: layer.outboxPush, close: () => store.sqlite.close() };
 }
 const bare = (s) => createOutboxPushRepository({ sqlite: s, now: () => NOW });
 
@@ -120,17 +120,17 @@ test('in the server: no mirror and no db.outbox, db.pushLog or db.pushTokens (ea
   L.close(); rm(dir);
 });
 
-// ============================================================= the snapshot path
-test('snapshot mode: a tool round-trips every outbox record (both literals), push record and token; an entry the tables cannot hold (an unknown field, a missing address, a staff token, a token listed twice) refuses the whole save, naming the entry; an omitted collection leaves its table alone', () => {
-  const dir = tempDir('obx-snap'); fixtureFile(dir);
-  const db = { outbox: [mail({ id: 'mail-1' }), delivery({ id: 'mail-2' })], pushLog: [push({ id: 'push-1' })], pushTokens: [token(), token({ kind: 'guardian', refId: 'gd-primary', token: 'tok-g' })] };
-  { const tool = openStore(dir); tool.save({ idCounter: 1000, db }); tool.sqlite.close(); }
-  { const s = second(dir); assert.deepEqual(plain({ outbox: OUTBOX_TABLE.read(s), pushLog: PUSH_LOG_TABLE.read(s), pushTokens: PUSH_TOKENS_TABLE.read(s) }), plain(db)); s.close(); }
-  for (const [bad, re] of [[{ outbox: [mail({ id: 'x', extra: 1 })] }, /outbox snapshot collection — entry #0: an outbox mailer record carries unknown field/], [{ outbox: [delivery({ id: 'x', to: null })] }, /to must be an address/], [{ pushTokens: [token({ kind: 'org' })] }, /kind must be one of/], [{ pushTokens: [token(), token({ refId: 'pl-other' })] }, /entry #1: duplicates an earlier entry's token/]]) {
-    const tool = openStore(dir); assert.throws(() => tool.save({ idCounter: 1000, db: bad }), re); tool.sqlite.close();
+// ============================================================= fixtures
+test('fixtures: every outbox record (both literals), push record and token written through the repository reads back as written; an entry the tables cannot hold (an unknown field, a missing address, a staff token) refuses the whole fixture, naming the entry, and writes nothing', () => {
+  const dir = tempDir('obx-fix'); fixtureFile(dir);
+  const records = { outbox: [mail({ id: 'mail-1' }), delivery({ id: 'mail-2' })], pushLog: [push({ id: 'push-1' })], pushTokens: [token(), token({ kind: 'guardian', refId: 'gd-primary', token: 'tok-g' })] };
+  writeFixture(dir, records, { now: NOW });
+  const back = () => { const r = readRecords(dir); return plain({ outbox: r.outbox, pushLog: r.pushLog, pushTokens: r.pushTokens }); };
+  assert.deepEqual(back(), plain(records));
+  for (const [bad, re] of [[{ outbox: [mail({ id: 'x', extra: 1 })] }, /an outbox mailer record carries unknown field/], [{ outbox: [delivery({ id: 'x', to: null })] }, /to must be an address/], [{ pushTokens: [token({ kind: 'org', token: 'tok-x' })] }, /kind must be one of/]]) {
+    assert.throws(() => writeFixture(dir, bad, { now: NOW }), re);
   }
-  { const tool = openStore(dir); tool.save({ idCounter: 1000, db: { pushLog: [] } }); tool.sqlite.close(); }
-  { const s = second(dir); assert.equal(OUTBOX_TABLE.read(s).length, 2, 'the outbox was omitted: kept'); assert.equal(PUSH_LOG_TABLE.read(s).length, 0); assert.equal(PUSH_TOKENS_TABLE.read(s).length, 2); s.close(); }
+  assert.deepEqual(back(), plain(records), 'a refused fixture writes nothing');
   rm(dir);
 });
 

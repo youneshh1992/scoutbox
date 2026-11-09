@@ -19,7 +19,8 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { openStore } from '../../store.mjs';
+import { DatabaseSync } from 'node:sqlite';
+import { readRecords, writeFixture } from '../../scripts/dataLayerFixture.mjs';
 import { DATA_MIGRATIONS, TABLE_BACKED } from '../../repositories/index.mjs';
 import { offerIntegrity } from '../../domains/recruitment/offers/offer.mjs';
 import { pickPort } from '../../scripts/testPort.mjs';
@@ -62,7 +63,7 @@ async function bootOn(dataDir, port) {
   const stop = async () => {
     proc.kill('SIGTERM');
     for (let i = 0; i < 60 && proc.exitCode == null; i += 1) await sleep(100);
-    return openStore(dataDir).load()?.db ?? null;
+    return readRecords(dataDir);
   };
   return { up, j, stop, log: () => log };
 }
@@ -75,7 +76,7 @@ const S_NOTE = 'PRIVATE_NOTE_PERSISTS_9911';
 
 // ------------------------------------------------------------- 1 — schema
 // 1.1, 1.2, 1.4 and 1.6 rewritten in S14a: they described the blob's schema numbers and the store contract.
-const ledger = (dir) => { const st = openStore(dir); try { return JSON.stringify(st.sqlite.prepare('SELECT id, applied_at FROM data_migrations ORDER BY id').all()); } finally { st.sqlite.close(); } };
+const ledger = (dir) => { const st = new DatabaseSync(path.join(dir, 'scoutbox.db'), { readOnly: true }); try { return JSON.stringify(st.prepare('SELECT id, applied_at FROM data_migrations ORDER BY id').all()); } finally { st.close(); } };
 section('1 — no Offer migration of its own: schema 39, the offers are their tables, a file with none boots empty');
 {
   ok(DATA_MIGRATIONS.length === LATEST_SCHEMA && DATA_MIGRATIONS.filter((m) => /offer/i.test(m.id)).map((m) => m.id).join() === '0017_recruitment_contacts_offers', '1.1 every table migration; the only one naming an Offer is 0017 (contacts and offers)');
@@ -87,11 +88,9 @@ section('1 — no Offer migration of its own: schema 39, the offers are their ta
   ok(h.schemaVersion === LATEST_SCHEMA, `1.4 and reports schema ${h.schemaVersion}`);
   const db1 = await s1.stop();
   const L1 = ledger(DIR);
-  ok(Array.isArray(db1.recruitmentOffers) && db1.recruitmentOffers.length === 0, '1.5 the persisted snapshot carries an empty recruitmentOffers list');
+  ok(Array.isArray(db1.recruitmentOffers) && db1.recruitmentOffers.length === 0, '1.5 the stopped file holds no Offer');
   // A file with no Offers: boot must reinterpret nothing.
-  delete db1.recruitmentOffers;
   const casesBefore = JSON.stringify(db1.recruitmentCases.map((c) => [c.id, c.room?.status ?? null]));
-  openStore(DIR).save({ db: db1 });
   const s2 = await bootOn(DIR, PORT);
   ok(s2.up && ledger(DIR) === L1 && JSON.parse(L1).length === DATA_MIGRATIONS.length, '1.6 the file boots with no migration applied (the ledger is unchanged)');
   const maria = (await s2.j('POST', '/auth/org/login', { orgId: 'org-eastport', scoutName: 'Maria Keane', role: 'Head of Recruitment' })).body;
@@ -183,7 +182,7 @@ const R = {};
   ok(Object.entries(R.before.stages).every(([w, st]) => R.before[`${w}_stage`] === st), '2.6 the five cases sit where the workflow put them');
 
   const db = await s.stop();
-  ok(Array.isArray(db.recruitmentOffers) && db.recruitmentOffers.length === 5, '2.7 SIGTERM: the snapshot holds five Offers');
+  ok(Array.isArray(db.recruitmentOffers) && db.recruitmentOffers.length === 5, '2.7 SIGTERM: the file holds five Offers');
   neg((db.signings ?? []).every((x) => x.playerId !== 'pl-kim'), '2.8 and no signing for the player who accepted (§83)');
   neg(!db.recruitmentCases.some((c) => c.room?.status === 'signed'), '2.9 no case is signed');
   const stored = Object.fromEntries(db.recruitmentOffers.map((o) => [o.id, o]));
@@ -236,20 +235,19 @@ section('3 — after the reboot: identical views, keys replay, immutability and 
 section('4 — a corrupt Offer row is named and refused, never repaired, and never moves a case');
 {
   const db = R.db;
-  // S8c (typed since §4.3): an Offer with no revision is a row the tables cannot hold. The save REFUSES it, naming the
+  // S8c (typed since §4.3): an Offer with no revision is a row the tables cannot hold. Its create REFUSES it, naming the
   // row, and writes nothing — the directory keeps the five sound rows. An ACCEPTED row with no response is a typed row
   // (every field valid) whose states disagree: it is still planted, and still judged on read.
   const corrupt = { ...structuredClone(db.recruitmentOffers.find((o) => o.id === R.sven.OID)), id: 'rof-corrupt', revisions: [], currentRevisionId: 'rofr-none', status: 'ISSUED' };
-  const stored = JSON.stringify(openStore(DIR).load().db.recruitmentOffers);
-  let refused = null; try { openStore(DIR).save({ db: { ...db, recruitmentOffers: [...db.recruitmentOffers, corrupt] } }); } catch (e) { refused = e; }
-  neg(!!refused && /rof-corrupt\.revisions must hold at least one revision/.test(refused.message) && JSON.stringify(openStore(DIR).load().db.recruitmentOffers) === stored, `4.2 an Offer with no revision cannot be stored: the save refuses it, naming the row, and nothing was written (${String(refused?.message ?? 'no refusal').slice(0, 120)})`);
+  const stored = JSON.stringify(readRecords(DIR).recruitmentOffers);
+  let refused = null; try { writeFixture(DIR, { recruitmentOffers: [corrupt] }); } catch (e) { refused = e; }
+  neg(refused?.code === 'CONTACTS_OFFERS_INPUT_INVALID' && /rof-corrupt\.revisions must hold at least one revision/.test(refused.message) && JSON.stringify(readRecords(DIR).recruitmentOffers) === stored, `4.2 an Offer with no revision cannot be stored: its create refuses it, naming the row, and nothing was written (${String(refused?.message ?? 'no refusal').slice(0, 120)})`);
   const kolaOffer = db.recruitmentOffers.find((o) => o.id === R.kola.OID);
   const { discardedByResponseId: _d, ...kolaRev } = structuredClone(kolaOffer.revisions[0]);
   const fake = { ...structuredClone(kolaOffer), id: 'rof-fake-accepted', status: 'ACCEPTED', currentRevisionId: 'rofr-f1', revisions: [{ ...kolaRev, id: 'rofr-f1', revisionNumber: 1, status: 'ACCEPTED', documents: [], issuedAt: T0, expiresAt: T0 + DAY, respondedAt: null, response: null, supersedesRevisionId: null, supersededByRevisionId: null, supersededAt: null }], responses: [], readReceipts: [], history: [], keys: { create: null, issue: [], withdraw: [], revise: [] }, agentShare: null, lifecycle: null, createdAt: T0, rev: 1 };
-  db.recruitmentOffers.push(fake);
   const kolaCase = db.recruitmentCases.find((c) => c.id === R.kola.RID);
   const kolaStage = kolaCase.room.status;
-  openStore(DIR).save({ db, idCounter: openStore(DIR).load().idCounter }); // keep the id counter: a save without one restarts the server's ids at 1000
+  writeFixture(DIR, { recruitmentOffers: [fake] }); // additive: the five sound rows stay as the server left them
   const s = await bootOn(DIR, PORT);
   ok(s.up, '4.1 the server boots with a corrupt row present — corruption is not fatal to the process');
   const { j } = s;
@@ -295,19 +293,18 @@ section('5 — P6.1: lazy expiry, temporal corruption, unknown statuses, legacy 
   const legacyCase = db.recruitmentCases.find((c) => c.id === R.kim.RID);
   void legacyCase;
   const martinCase = { ...structuredClone(svenCase), id: 'case-legacy-made', playerId: 'pl-martin', room: { ...structuredClone(svenCase.room), status: 'offer_made' }, history: [], decisionDraft: null, transactionHandoff: null };
-  db.recruitmentCases.push(martinCase);
   // S8c (typed since §4.3): an unknown Offer status, an unknown revision status and a revision number below 1 are
-  // values the columns cannot hold — each save is REFUSED, naming the row, and the directory is unchanged. The other
+  // values the columns cannot hold — each create is REFUSED, naming the row, and the directory is unchanged. The other
   // planted rows are typed rows whose values disagree (time order, bounds, pointers, the case): judged on read.
-  const storedNow = JSON.stringify(openStore(DIR).load().db.recruitmentOffers);
+  const storedNow = JSON.stringify(readRecords(DIR).recruitmentOffers);
   for (const [row, pattern, why] of [[tUnknownStatus, /rof-t4[ .][^;]*status must be one of DRAFT\|ISSUED/, 'an unknown Offer status'], [tRevisionUnknown, /rof-t5 revisions\[0\]\.status must be one of DRAFT\|ISSUED/, 'an unknown revision status'], [tNegativeNumber, /rof-t7 revisions\[0\]\.revisionNumber must be at least 1/, 'a revision number below 1']]) {
-    let refusal = null; try { openStore(DIR).save({ db: { ...db, recruitmentOffers: [...db.recruitmentOffers, row] } }); } catch (e) { refusal = e; }
-    neg(!!refusal && pattern.test(refusal.message) && JSON.stringify(openStore(DIR).load().db.recruitmentOffers) === storedNow, `5.0 ${row.id} (${why}) cannot be stored: the save refuses it, naming the row, nothing written (${String(refusal?.message ?? 'no refusal').slice(0, 120)})`);
+    let refusal = null; try { writeFixture(DIR, { recruitmentOffers: [row] }); } catch (e) { refusal = e; }
+    neg(refusal?.code === 'CONTACTS_OFFERS_INPUT_INVALID' && pattern.test(refusal.message) && JSON.stringify(readRecords(DIR).recruitmentOffers) === storedNow, `5.0 ${row.id} (${why}) cannot be stored: its create refuses it, naming the row, nothing written (${String(refusal?.message ?? 'no refusal').slice(0, 120)})`);
   }
-  db.recruitmentOffers.push(lazy, tIssuedBeforeCreated, tExpiryBound, tRespondedBeforeIssued, tPointer, disagree);
-  const rowsBefore = JSON.stringify(db.recruitmentOffers);
-  const casesBefore = JSON.stringify(db.recruitmentCases.map((c) => [c.id, c.room?.status ?? null]));
-  openStore(DIR).save({ db, idCounter: openStore(DIR).load().idCounter }); // keep the id counter (the planted rows' history ids must not be reissued)
+  const plantedRows = [lazy, tIssuedBeforeCreated, tExpiryBound, tRespondedBeforeIssued, tPointer, disagree];
+  const rowsBefore = JSON.stringify([...db.recruitmentOffers, ...plantedRows]);
+  const casesBefore = JSON.stringify([...db.recruitmentCases, martinCase].map((c) => [c.id, c.room?.status ?? null]));
+  writeFixture(DIR, { recruitmentCases: [martinCase], recruitmentOffers: plantedRows }); // additive, one unit
   const s = await bootOn(DIR, PORT);
   ok(s.up && !/applied/.test(s.log()), '5.1 the server boots over six planted rows and a legacy case — no migration, no crash');
   const { j } = s;

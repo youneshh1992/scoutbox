@@ -1,9 +1,9 @@
 // S6a — one-time codes (repositories/oneTimeCodes.mjs, migration 0008): the
-// snapshot save's refusals; the repository (hashing, expiry,
+// fixture's refusals (the entry typing the repository exports); the repository (hashing, expiry,
 // attempts, reissue, sweep, hash-free views); the two consumption operations
 // inside units of work under injected failures and real COMMIT faults, read
-// back through an independent connection; concurrent redemption; the snapshot
-// dispatcher (legacy versus stored format, final-state checks). Temporary
+// back through an independent connection; concurrent redemption; codes read
+// back in their stored form (legacy versus stored format). Temporary
 // databases and directories only; nothing touches DATA_DIR. Run with: npm test
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -12,12 +12,13 @@ import { DatabaseSync } from 'node:sqlite';
 import { transaction } from '../repositories/database.mjs';
 import { attachDataLayer, TABLE_BACKED } from '../repositories/index.mjs';
 import {
-  createOneTimeCodesRepository, hashCode, normaliseCode, validateCodeRows, validateEmailChallengeRow, EMAIL_CHALLENGE_MAX_ATTEMPTS, EMAIL_CHALLENGE_TTL_MS, PAIRING_CODE_TTL_MS,
+  createOneTimeCodesRepository, hashCode, normaliseCode, validateCodeRows, validateEmailChallengeRow, assertPairingCodesConsistent, EMAIL_CHALLENGE_MAX_ATTEMPTS, EMAIL_CHALLENGE_TTL_MS, PAIRING_CODE_TTL_MS,
   CODE_ALPHABET, randomCode,
 } from '../repositories/oneTimeCodes.mjs';
 import { openStore } from '../store.mjs';
 import { createMailer, OUTBOX_SECRET_PLACEHOLDER } from '../adapters.mjs';
 import { NOW, TTL, tempDir, FIXTURE, ORGS, USERS, SESSIONS, openRaw, dump, hasBlobTable } from './coreIdentityTestFixtures.mjs';
+import { writeFixture } from './dataLayerFixture.mjs';
 
 let passed = 0;
 const only = process.env.TEST_ONLY || '';
@@ -36,28 +37,51 @@ const suspendedOf = (dir) => rowsOf(dir, 'orgs').find((o) => o.id === 'org-pro')
 const legacyChallenge = (over = {}) => ({ orgId: 'org-pro', email: 'recruitment@eastport.test', code: 'CHAL22', expiresAt: NOW + 20 * MIN, ...over });
 const legacyPairing = (over = {}) => ({ code: 'PAIR22', playerId: 'pl-child1', expiresAt: NOW + 10 * MIN, ...over });
 /**
+ * The code fixtures' writers: the entries typed whole by the repository's own validation (either format: a legacy
+ * plain code is hashed, the plain value stored nowhere), then planted as hashed rows (an issue operation mints its
+ * own code, so a fixture's code cannot go through it). A challenge names an organisation (its key); a pairing code a
+ * live player (PAIRING_CODE_PLAYER_MISSING).
+ */
+const CODE_WRITERS = {
+  emailChallenges: (L, records) => {
+    const ins = L.sqlite.prepare('INSERT INTO email_challenges (org_id, email, code_hash, expires_at, attempts) VALUES (@orgId, @email, @codeHash, @expiresAt, @attempts)');
+    for (const r of validateCodeRows('emailChallenges', records).rows) ins.run(r);
+  },
+  pairingCodes: (L, records) => {
+    const ins = L.sqlite.prepare('INSERT INTO pairing_codes (code_hash, player_id, expires_at) VALUES (@codeHash, @playerId, @expiresAt)');
+    for (const r of validateCodeRows('pairingCodes', records).rows) ins.run(r);
+    assertPairingCodesConsistent(L.sqlite, { label: 'the fixture' });
+  },
+};
+const writeCodes = (dir, collections) => writeFixture(dir, collections, { now: NOW, writers: CODE_WRITERS });
+/**
  * A saved fixture: every migration applied and the fixture's staff, sessions,
- * organisations, players and guardians written through a snapshot-mode save
- * (the tables, never blobs). Code collections given here go through the same
- * save, so a malformed one is refused by it.
+ * organisations, players and guardians written through the repositories. Code
+ * collections given here are written after them, in a fixture of their own, so
+ * a malformed one is refused with nothing of it written.
  */
 function s5File(dir, { emailChallenges, pairingCodes } = {}) {
-  const db = { users: USERS(), sessions: SESSIONS(), orgs: ORGS(), ...FIXTURE(), requests: [], ledger: [] };
-  if (emailChallenges !== undefined) db.emailChallenges = emailChallenges;
-  if (pairingCodes !== undefined) db.pairingCodes = pairingCodes;
-  const tool = openStore(dir);
-  try { tool.save({ idCounter: 1000, db }); } finally { tool.sqlite.close(); }
+  writeFixture(dir, { users: USERS(), sessions: SESSIONS(), orgs: ORGS(), ...FIXTURE(), requests: [], ledger: [] }, { now: NOW, idCounter: 1000 });
+  const codes = {};
+  if (emailChallenges !== undefined) codes.emailChallenges = emailChallenges;
+  if (pairingCodes !== undefined) codes.pairingCodes = pairingCodes;
+  if (Object.keys(codes).length) writeCodes(dir, codes);
 }
+const fileDump = (dir) => { const s = second(dir); try { return dump(s); } finally { s.close(); } };
+/** The codes in their stored form, read on a second connection (opening the data layer would sweep the fixture's codes at the real clock). */
+const storedCodes = (dir) => ({
+  pairingCodes: rowsOf(dir, 'pairing_codes').sort((a, b) => a.player_id.localeCompare(b.player_id)).map((r) => ({ codeHash: r.code_hash, playerId: r.player_id, expiresAt: r.expires_at })),
+  emailChallenges: rowsOf(dir, 'email_challenges').sort((a, b) => a.org_id.localeCompare(b.org_id)).map((r) => ({ orgId: r.org_id, email: r.email, codeHash: r.code_hash, expiresAt: r.expires_at, attempts: r.attempts })),
+});
 /** A live server-mode store with the data layer attached at `now`. */
 function live(dir, { now = () => NOW } = {}) {
   const store = openStore(dir, { tableBacked: TABLE_BACKED });
-  const db = {};
-  const layer = attachDataLayer({ db, store, nextId, persist: () => {}, sessionTtlMs: TTL, now, warn: () => {} });
-  return { store, db, layer, codes: layer.codes, close: () => store.sqlite.close() };
+  const layer = attachDataLayer({ store, nextId, sessionTtlMs: TTL, now, warn: () => {} });
+  return { store, layer, codes: layer.codes, close: () => store.sqlite.close() };
 }
 
-// ============================================================= the snapshot save refuses junk
-test('snapshot save refusals: an entry with both code and codeHash, with neither, an unknown field, a malformed hash, a non-integer expiry, negative attempts, a missing owner, a duplicate organisation or child, a duplicate code, a collection that is not an array, a live challenge for an organisation that does not exist, a live code for a player that does not exist — each refuses the whole save (entry and reason, never a code) and writes nothing: no player, no organisation, no staff, no session, no code', () => {
+// ============================================================= a fixture refuses junk
+test('fixture refusals: an entry with both code and codeHash, with neither, an unknown field, a malformed hash, a non-integer expiry, negative attempts, a missing owner, a duplicate organisation or child, a duplicate code, a live challenge for an organisation that does not exist, a live code for a player that does not exist — each refuses the whole fixture (entry and reason, never a code) and writes nothing', () => {
   const cases = [
     ['both formats', { pairingCodes: [{ ...legacyPairing(), codeHash: hashCode('PAIR22') }] }, /entry #0: carries both code and codeHash/],
     ['neither format', { pairingCodes: [{ playerId: 'pl-child1', expiresAt: NOW + MIN }] }, /entry #0: has neither code/],
@@ -69,20 +93,19 @@ test('snapshot save refusals: an entry with both code and codeHash, with neither
     ['a duplicate child', { pairingCodes: [legacyPairing(), legacyPairing({ code: 'OTHER2' })] }, /entry #1: a second entry for playerId pl-child1/],
     ['a duplicate organisation', { emailChallenges: [legacyChallenge(), legacyChallenge({ code: 'NEWONE' })] }, /entry #1: a second entry for orgId org-pro/],
     ['a duplicate code', { pairingCodes: [legacyPairing(), legacyPairing({ playerId: 'pl-child2', code: 'pair22' })] }, /entry #1: duplicates the code of an earlier entry/],
-    ['a non-array collection', { pairingCodes: { code: 'PAIR22' } }, /pairingCodes: the snapshot collection must be an array/],
-    ['an unknown organisation', { emailChallenges: [legacyChallenge({ orgId: 'org-nowhere' })] }, /EMAIL_CHALLENGE_ORG_MISSING/],
+    ['an unknown organisation', { emailChallenges: [legacyChallenge({ orgId: 'org-nowhere' })] }, /FOREIGN KEY constraint failed/],
     ['an unknown player', { pairingCodes: [legacyPairing({ playerId: 'pl-nowhere' })] }, /PAIRING_CODE_PLAYER_MISSING.*pl-nowhere/],
   ];
+  const dir = tempDir('otc-refuse'); s5File(dir);
+  const before = fileDump(dir);
   for (const [label, collections, re] of cases) {
-    const dir = tempDir('otc-refuse');
-    let err = null; try { s5File(dir, collections); } catch (e) { err = e; }
+    let err = null; try { writeCodes(dir, collections); } catch (e) { err = e; }
     assert.ok(err, `${label}: must refuse`); assert.match(err.message, re, `${label}: ${err.message}`);
     assert.doesNotMatch(err.message, /PAIR22|CHAL22|OTHER2|NEWONE/i, `${label}: the refusal never carries a code`);
-    const s = openRaw(dir);
-    // (Rewritten in S14a: the save revision is gone; the staff and session tables are checked as well.)
-    for (const t of ['players', 'orgs', 'org_users', 'sessions', 'email_challenges', 'pairing_codes']) assert.equal(s.prepare(`SELECT COUNT(*) AS n FROM ${t}`).get().n, 0, `${label}: nothing written to ${t}`);
-    s.close(); rm(dir);
+    assert.equal(fileDump(dir), before, `${label}: nothing written`);
+    for (const tb of ['email_challenges', 'pairing_codes']) assert.equal(rowsOf(dir, tb).length, 0, `${label}: nothing written to ${tb}`);
   }
+  rm(dir);
 });
 
 // ============================================================= the repository
@@ -332,34 +355,27 @@ test('player deletion revokes the pairing code inside the deletion unit: a failu
   L.close(); rm(dir);
 });
 
-// ============================================================= snapshots (backups, restores, persistence suites)
-test('snapshot dispatcher: a tool reads the codes in their stored form (codeHash, never a code) and writes them back through the tables; a legacy plain-code entry written by a tool is hashed on the way in; a malformed stored entry, a duplicate, a challenge for an unknown organisation, or a whole-snapshot player rewrite that drops a player a retained code names refuses the WHOLE save (nothing written)', () => {
-  const dir = tempDir('otc-snap'); s5File(dir);
+// ============================================================= the codes read back (backups, restores, persistence suites)
+test('read back: the tables hold the codes in their stored form (codeHash, never a code); a legacy plain-code entry in a fixture is hashed on the way in; a malformed stored entry, a second code for a child, a challenge for an unknown organisation or a code for a player that does not exist refuses the WHOLE fixture (nothing written)', () => {
+  const dir = tempDir('otc-read'); s5File(dir);
   { const s = openRaw(dir); const c = createOneTimeCodesRepository({ sqlite: s, now: () => NOW, newCode: () => 'LIVE22' }); c.issuePairingCode('pl-child1'); c.issueEmailChallenge('org-pro', 'x@eastport.test'); s.close(); }
-  const tool = openStore(dir);
-  let snap = tool.load();
-  assert.deepEqual(snap.db.pairingCodes, [{ codeHash: hashCode('LIVE22'), playerId: 'pl-child1', expiresAt: NOW + PAIRING_CODE_TTL_MS }]);
-  assert.equal(snap.db.emailChallenges[0].codeHash, hashCode('LIVE22')); assert.equal(snap.db.emailChallenges[0].attempts, 0);
-  // A legacy entry from a fabricated snapshot: hashed, the plain value stored nowhere.
-  snap.db.pairingCodes.push({ code: 'FIXT33', playerId: 'pl-child2', expiresAt: NOW + MIN });
-  tool.save(snap);
-  assert.deepEqual(tool.sqlite.prepare('SELECT player_id, code_hash FROM pairing_codes ORDER BY player_id').all().map((r) => [r.player_id, r.code_hash]), [['pl-child1', hashCode('LIVE22')], ['pl-child2', hashCode('FIXT33')]]);
-  assert.doesNotMatch(dump(tool.sqlite), /FIXT33/); assert.equal(hasBlobTable(tool.sqlite), false, 'never a blob');
-  const before = dump(tool.sqlite);
-  const refused = (label, mutate, re) => {
-    // (Rewritten in S14a: the unrelated edit was a blob collection, which a snapshot can no longer carry; it is a player rename now.)
-    const s2 = tool.load(); s2.db.players.find((p) => p.id === 'pl-child1').name = 'Unrelated Change'; mutate(s2.db);
-    assert.throws(() => tool.save(s2), re, label);
-    assert.equal(tool.sqlite.isTransaction, false); assert.equal(dump(tool.sqlite), before, `${label}: nothing changed, the unrelated edit included`);
+  const back = storedCodes(dir);
+  assert.deepEqual(back.pairingCodes, [{ codeHash: hashCode('LIVE22'), playerId: 'pl-child1', expiresAt: NOW + PAIRING_CODE_TTL_MS }]);
+  assert.equal(back.emailChallenges[0].codeHash, hashCode('LIVE22')); assert.equal(back.emailChallenges[0].attempts, 0);
+  // A legacy entry in a fixture: hashed, the plain value stored nowhere.
+  writeCodes(dir, { pairingCodes: [{ code: 'FIXT33', playerId: 'pl-child2', expiresAt: NOW + MIN }] });
+  assert.deepEqual(rowsOf(dir, 'pairing_codes').map((r) => [r.player_id, r.code_hash]).sort(), [['pl-child1', hashCode('LIVE22')], ['pl-child2', hashCode('FIXT33')]]);
+  assert.doesNotMatch(fileDump(dir), /FIXT33/); { const s = second(dir); assert.equal(hasBlobTable(s), false, 'never a blob'); s.close(); }
+  const before = fileDump(dir);
+  const refused = (label, collections, re) => {
+    assert.throws(() => writeCodes(dir, collections), re, label);
+    assert.equal(fileDump(dir), before, `${label}: nothing changed`);
   };
-  refused('a malformed stored hash', (d) => { d.pairingCodes[0].codeHash = 'not-a-hash'; }, /ONE_TIME_CODES_IMPORT_BLOCKED.*codeHash must be 64/);
-  refused('an unknown field on a stored entry', (d) => { d.pairingCodes[0].code = 'LIVE22'; }, /carries both code and codeHash/);
-  refused('a duplicate child', (d) => { d.pairingCodes.push({ codeHash: hashCode('ANOTHR'), playerId: 'pl-child1', expiresAt: NOW + MIN }); }, /second entry for playerId pl-child1/);
-  refused('a challenge for an unknown organisation', (d) => { d.emailChallenges[0].orgId = 'org-nowhere'; }, /EMAIL_CHALLENGE_ORG_MISSING/);
-  refused('a code for a player not in the snapshot', (d) => { d.pairingCodes.push({ codeHash: hashCode('GHOST2'), playerId: 'pl-ghost', expiresAt: NOW + MIN }); }, /PAIRING_CODE_PLAYER_MISSING.*pl-ghost/);
-  refused('a player rewrite that drops a player a retained code names', (d) => { delete d.pairingCodes; d.players = d.players.filter((p) => p.id !== 'pl-child2'); d.guardians.forEach((g) => { g.childIds = (g.childIds ?? []).filter((id) => id !== 'pl-child2'); }); }, /PAIRING_CODE_PLAYER_MISSING.*pl-child2/);
-  refused('a non-array collection', (d) => { d.pairingCodes = { codeHash: 'x' }; }, /pairingCodes: the snapshot collection must be an array/);
-  tool.sqlite.close();
+  refused('a malformed stored hash', { pairingCodes: [{ codeHash: 'not-a-hash', playerId: 'pl-adult', expiresAt: NOW + MIN }] }, /ONE_TIME_CODES_IMPORT_BLOCKED.*codeHash must be 64/);
+  refused('both formats', { pairingCodes: [{ codeHash: hashCode('ANOTHR'), code: 'ANOTHR', playerId: 'pl-adult', expiresAt: NOW + MIN }] }, /carries both code and codeHash/);
+  refused('a second code for a child', { pairingCodes: [{ codeHash: hashCode('ANOTHR'), playerId: 'pl-child1', expiresAt: NOW + MIN }] }, /UNIQUE constraint failed: pairing_codes\.player_id/);
+  refused('a challenge for an unknown organisation', { emailChallenges: [{ orgId: 'org-nowhere', email: 'a@b.test', codeHash: hashCode('ORGX22'), expiresAt: NOW + MIN, attempts: 0 }] }, /FOREIGN KEY constraint failed/);
+  refused('a code for a player that does not exist', { pairingCodes: [{ codeHash: hashCode('GHOST2'), playerId: 'pl-ghost', expiresAt: NOW + MIN }] }, /PAIRING_CODE_PLAYER_MISSING.*pl-ghost/);
   rm(dir);
 });
 
@@ -372,7 +388,7 @@ test('boot: a stale code array handed in with the seed is never imported — the
   // (S14a: server mode has nothing to load; the stale array is handed in as part of the seed, which an initialised file ignores.)
   const seed = { pairingCodes: [{ code: 'STALE2', playerId: 'pl-adult', expiresAt: NOW + 99 * MIN }] };
   const warnings = [];
-  const layer = attachDataLayer({ db: {}, seed, store, nextId, persist: () => {}, sessionTtlMs: TTL, now: () => NOW + 2 * MIN, warn: (m) => warnings.push(m) });
+  const layer = attachDataLayer({ seed, store, nextId, sessionTtlMs: TTL, now: () => NOW + 2 * MIN, warn: (m) => warnings.push(m) });
   assert.deepEqual(layer.boot.codes.swept, { emailChallenges: 0, pairingCodes: 1 }, 'the expired code was swept at attach');
   assert.equal(layer.codes.peekPairingCode('STALE2'), null, 'the stale array was not imported');
   const report = JSON.stringify(layer.report());
@@ -409,7 +425,7 @@ test('validation is format-exact and never coerces: validateCodeRows reports the
 });
 
 // ============================================================= review of e020aba
-test('stored attempts: a stored-format challenge must carry an explicit attempt count from 0 to 9 (missing, null, negative, fractional, nonnumeric, unsafe, at or above the limit are refused); a legacy challenge carries none and starts at 0; a snapshot save refuses such an entry whole (nothing written, the unrelated edit included); a legitimate count survives the snapshot round trip', () => {
+test('stored attempts: a stored-format challenge must carry an explicit attempt count from 0 to 9 (missing, null, negative, fractional, nonnumeric, unsafe, at or above the limit are refused); a legacy challenge carries none and starts at 0; a fixture refuses such an entry whole (nothing written); a legitimate count is written and read back', () => {
   const stored = (over = {}) => ({ orgId: 'org-pro', email: 'a@b.test', codeHash: hashCode('GOOD22'), expiresAt: NOW + MIN, attempts: 0, ...over });
   const missing = stored(); delete missing.attempts;
   for (const [label, entry, re] of [
@@ -425,20 +441,16 @@ test('stored attempts: a stored-format challenge must carry an explicit attempt 
   assert.equal(validateEmailChallengeRow(stored({ attempts: 9 })).row.attempts, 9, 'nine is a valid count');
   assert.equal(validateEmailChallengeRow(legacyChallenge()).row.attempts, 0, 'a legacy entry starts at 0');
   assert.match(validateEmailChallengeRow({ ...legacyChallenge(), attempts: 3 }).reason, /unknown field\(s\) attempts for the legacy format/, 'a legacy entry never carries a count');
-  // A snapshot save refuses whole: nothing written, the unrelated edit included.
-  const dir = tempDir('otc-f2-snap'); s5File(dir);
-  { const s = openRaw(dir); createOneTimeCodesRepository({ sqlite: s, now: () => NOW }).issueEmailChallenge('org-pro', 'x@eastport.test'); s.close(); }
-  const tool = openStore(dir);
-  const before = dump(tool.sqlite);
-  for (const [label, mutate] of [['missing', (c) => { delete c.attempts; }], ['exhausted', (c) => { c.attempts = 10; }], ['nonnumeric', (c) => { c.attempts = 'many'; }]]) {
-    // (Rewritten in S14a: the unrelated edit is a player rename, not a blob collection.)
-    const snap = tool.load(); mutate(snap.db.emailChallenges[0]); snap.db.players[0].name = 'Unrelated Change';
-    assert.throws(() => tool.save(snap), /ONE_TIME_CODES_IMPORT_BLOCKED.*attempts/, label);
-    assert.equal(tool.sqlite.isTransaction, false); assert.equal(dump(tool.sqlite), before, `${label}: nothing changed, the unrelated edit included`);
+  // A fixture refuses such an entry whole: nothing written.
+  const dir = tempDir('otc-f2-fix'); s5File(dir);
+  const before = fileDump(dir);
+  for (const [label, entry] of [['missing', missing], ['exhausted', stored({ attempts: 10 })], ['nonnumeric', stored({ attempts: 'many' })]]) {
+    assert.throws(() => writeCodes(dir, { emailChallenges: [entry] }), /ONE_TIME_CODES_IMPORT_BLOCKED.*attempts/, label);
+    assert.equal(fileDump(dir), before, `${label}: nothing changed`);
   }
-  const snap = tool.load(); snap.db.emailChallenges[0].attempts = 9; tool.save(snap);
-  assert.equal(tool.load().db.emailChallenges[0].attempts, 9, 'a legitimate count round-trips through the snapshot');
-  tool.sqlite.close(); rm(dir);
+  writeCodes(dir, { emailChallenges: [stored({ attempts: 9 })] });
+  assert.equal(storedCodes(dir).emailChallenges[0].attempts, 9, 'a legitimate count is written and read back');
+  rm(dir);
 });
 
 test('runtime: an exhausted row that somehow exists (planted directly) is never redeemed — check answers none, consumption returns nothing and deletes nothing, a wrong code counts nothing, it is not outstanding, and the sweep removes it; at nine attempts the tenth wrong code cancels a valid challenge', () => {

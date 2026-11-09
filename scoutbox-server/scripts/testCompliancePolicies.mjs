@@ -6,13 +6,13 @@
 // person); a reviewer is created and revoked once, and their identity never changes; a version is proposed, published
 // once by a different reviewer and never changes after; `supersedes` names an existing version of the same
 // jurisdiction; the published set is re-read when it changes (and after a rolled-back unit); and
-// the snapshot write types every record and reads back what it wrote. Temporary databases only; nothing touches
+// a fixture written through the repository is typed and reads back what it wrote. Temporary databases only; nothing touches
 // DATA_DIR. Run with: npm test
 
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { attachDataLayer, DATA_MIGRATIONS, TABLE_BACKED, readTableBacked } from '../repositories/index.mjs';
-import { openStore } from '../store.mjs';
+import { DATA_MIGRATIONS, TABLE_BACKED } from '../repositories/index.mjs';
+import { openLayer, readRecords } from './dataLayerFixture.mjs';
 import { NOW, TTL, tempDir } from './coreIdentityTestFixtures.mjs';
 import { saveFixture } from './recruitmentTestFixtures.mjs';
 import {
@@ -54,11 +54,8 @@ const proposal = (over = {}) => ({
 });
 
 function serverOpen(dir) {
-  const store = openStore(dir, { tableBacked: TABLE_BACKED });
-  const db = {}; // S14a: a fixture-saved file is not a first installation, so there is nothing to hand in
-  const layer = attachDataLayer({ db, store, nextId, persist: () => {}, sessionTtlMs: TTL, now: () => NOW, warn: () => {} });
-  const snapshot = () => ({ savedAt: NOW, idCounter: 1000, db });
-  return { store, db, repo: layer.compliancePolicies, unit: (w) => store.unitOfWork(w, { snapshot }), close: () => store.sqlite.close() };
+  const L = openLayer(dir, { nextId, sessionTtlMs: TTL, now: () => NOW });
+  return { store: L.store, repo: L.layer.compliancePolicies, unit: L.unit, close: L.close };
 }
 
 // ------------------------------------------------------------- schema
@@ -67,13 +64,13 @@ test('[schema] 0027 is registered after 0026, creates the ten STRICT tables (no 
   assert.equal(ids.indexOf(MIGRATION), ids.indexOf('0026_agent_core') + 1);
   assert.equal(TABLES.length, 10);
   for (const n of COLLECTIONS) assert.ok(TABLE_BACKED.includes(n), `${n} is table-backed`);
-  const dir = tempDir('s11b1-empty'); const s = openStore(dir).sqlite;
+  const dir = tempDir('s11b1-empty'); const s = openLayer(dir).sqlite;
   for (const t of TABLES) {
     assert.match(s.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?").get(t).sql, /STRICT\s*$/, `${t} is STRICT`);
     assert.ok(!s.prepare(`PRAGMA table_info(${t})`).all().some((c) => /_json$/.test(c.name)), `${t}: no JSON column`);
   }
   assert.equal(s.prepare('SELECT count(*) AS n FROM ts_reviewers').get().n, 0, 'no reviewer is invented');
-  const back = readTableBacked(s).jurisdictionPolicies;
+  const back = readRecords(dir).jurisdictionPolicies;
   assert.deepEqual(back.map((p) => p.id), SEEDED_POLICY_VERSIONS.map((v) => v.id));
   for (const v of SEEDED_POLICY_VERSIONS) {
     const p = back.find((x) => x.id === v.id);
@@ -198,24 +195,29 @@ test('[units] a rolled-back unit leaves nothing (and the published set follows t
   } finally { s.close(); rm(dir); }
 });
 
-test('[snapshot] the snapshot write types every record, refuses a reviewer the table cannot hold (naming it), and reads back what it wrote', () => {
-  const dir = tempDir('s11b1-snapshot');
-  const store = openStore(dir);
+test('[fixtures] a record written through the repository is typed, refuses a reviewer the table cannot hold (naming it) and a missing superseded version, and reads back what it wrote', () => {
+  const dir = tempDir('s11b1-fix');
   try {
-    const seeded = seededPolicyRecords(NOW);
-    const a = reviewer(); const b = reviewer({ id: 'tsr-b', name: 'Léa', status: 'revoked', revokedAt: NOW, revokedBy: { id: 'tsr-a', name: 'Priya' } });
-    store.save({ db: { tsReviewers: [b, a], jurisdictionPolicies: [...seeded, proposal({ supersedes: 'jp-eng-2026-27-1' })] } });
-    const back = readTableBacked(store.sqlite);
-    assert.deepEqual(back.tsReviewers.map((r) => [r.id, r.status, r.revokedBy?.id ?? null]), [['tsr-b', 'revoked', 'tsr-a'], ['tsr-a', 'active', null]], 'a revoker listed after the revoked row is fine');
-    assert.deepEqual(back.tsReviewers[1], typeReviewer(a).record);
-    assert.equal(back.jurisdictionPolicies.length, 4);
-    const e = refused(() => store.save({ db: { tsReviewers: [a, reviewer({ id: 'tsr-odd', status: 'enabled' })] } }), /COMPLIANCE_POLICIES_IMPORT_BLOCKED.*tsr-odd\.status/);
-    assert.equal(e.code, 'COMPLIANCE_POLICIES_IMPORT_BLOCKED');
-    refused(() => store.save({ db: { jurisdictionPolicies: [proposal({ supersedes: 'jp-eng-2026-27-1' })] } }), /supersedes → jp-eng-2026-27-1/, 'a superseded version missing from the snapshot');
-    assert.equal(readTableBacked(store.sqlite).tsReviewers.length, 2, 'a refused save wrote nothing');
-    store.save({ db: { jurisdictionPolicies: [] } });
-    assert.equal(readTableBacked(store.sqlite).jurisdictionPolicies.length, 0, 'an emptied policy collection is written as such (the boot never re-seeds it)');
-  } finally { store.sqlite.close(); rm(dir); }
+    const a = reviewer(); const b = reviewer({ id: 'tsr-b', name: 'Léa' });
+    saveFixture(dir, { tsReviewers: [a, b], jurisdictionPolicies: [proposal({ supersedes: 'jp-eng-2026-27-1' })] });
+    const s = serverOpen(dir); // a reviewer is created active; the revocation is the route's update
+    try {
+      s.unit(() => s.repo.reviewers.update('tsr-b', (d) => {
+        d.status = 'revoked'; d.revokedAt = NOW; d.revokedBy = { id: 'tsr-a', name: 'Priya' }; d.rev = 2; d.revAt = NOW; d.revBy = { userId: 'tsr-a', name: 'Priya Shah' };
+        d.history.push({ id: 'aud-rv', at: NOW, action: 'reviewer_revoked', by: byReviewer('tsr-a'), detail: { reason: null } });
+      }));
+    } finally { s.close(); }
+    const back = readRecords(dir);
+    assert.deepEqual(back.tsReviewers.map((r) => [r.id, r.status, r.revokedBy?.id ?? null]).sort(), [['tsr-a', 'active', null], ['tsr-b', 'revoked', 'tsr-a']]);
+    assert.deepEqual(back.tsReviewers.find((r) => r.id === 'tsr-a'), typeReviewer(a).record);
+    assert.equal(back.jurisdictionPolicies.length, 4, 'the three seeded versions and the proposal');
+    const bad = [tempDir('s11b1-fix-odd'), tempDir('s11b1-fix-sup')];
+    const e = refused(() => saveFixture(bad[0], { tsReviewers: [a, reviewer({ id: 'tsr-odd', status: 'enabled' })] }), /COMPLIANCE_POLICIES_INPUT_INVALID.*tsr-odd\.status/);
+    assert.equal(e.code, 'COMPLIANCE_POLICIES_INPUT_INVALID');
+    refused(() => saveFixture(bad[1], { tsReviewers: [a], jurisdictionPolicies: [proposal({ supersedes: 'jp-eng-none' })] }), /jp-eng-2027-1: supersedes must name an existing version of ENG/, 'a superseded version that does not exist');
+    for (const d of bad) { const r = readRecords(d); assert.equal(r.tsReviewers.length, 0, 'a refused fixture wrote nothing'); assert.equal(r.jurisdictionPolicies.length, 3); }
+    rm(...bad);
+  } finally { rm(dir); }
 });
 
 console.log(`\ncompliance policies repository: ${passed} checks passed`);

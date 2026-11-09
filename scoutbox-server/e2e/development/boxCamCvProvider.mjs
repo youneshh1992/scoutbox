@@ -554,7 +554,7 @@ section('§116–§122 — migration, clean boot, upgrade and restart');
   // upgrade from an M21-era snapshot (§119) is gone with the blob store (no compatibility with old dev files).
   const { DATA_MIGRATIONS } = await import('../../repositories/index.mjs');
   const { BOX_CAM_MIGRATION } = await import('../../repositories/boxCam.mjs');
-  const { openStore } = await import('../../store.mjs');
+  const { openLayer } = await import('../../scripts/dataLayerFixture.mjs');
   const SCHEMA_VERSION = Number(DATA_MIGRATIONS.map((m) => m.id).sort().at(-1).slice(0, 4));
 
   ok(DATA_MIGRATIONS.filter((m) => m.id === BOX_CAM_MIGRATION).length === 1, `§116. the Box Cam migration (${BOX_CAM_MIGRATION}) is registered once`);
@@ -564,7 +564,7 @@ section('§116–§122 — migration, clean boot, upgrade and restart');
   // repositories/boxCam.mjs — with no frame, pixel or video column — asserted on a real store.
   const freshDir = mkdtempSync(path.join(tmpdir(), 'sbx-m22-table-'));
   {
-    const store = openStore(freshDir);
+    const store = openLayer(freshDir);
     const tables = store.sqlite.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((r) => r.name);
     neg(!tables.some((t) => /frame|pixel/.test(t)), '§117. no migration creates a frame or pixel table (cvFrames does not exist)');
     neg(!tables.includes('collections'), '§117. and there is no blob store to hide one in');
@@ -577,7 +577,7 @@ section('§116–§122 — migration, clean boot, upgrade and restart');
 
   // §120 — restart idempotency.
   {
-    const recorded = () => { const st = openStore(freshDir); try { return st.sqlite.prepare('SELECT id, applied_at FROM data_migrations ORDER BY id').all().map((r) => `${r.id}@${r.applied_at}`).join(); } finally { st.sqlite.close(); } };
+    const recorded = () => { const st = openLayer(freshDir); try { return st.sqlite.prepare('SELECT id, applied_at FROM data_migrations ORDER BY id').all().map((r) => `${r.id}@${r.applied_at}`).join(); } finally { st.sqlite.close(); } };
     const first = recorded();
     neg(recorded() === first && first.split(',').length === DATA_MIGRATIONS.length, '§120. a second open runs no migration step');
     const caps = (await j('GET', '/capabilities')).body;

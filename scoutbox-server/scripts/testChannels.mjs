@@ -4,10 +4,10 @@
 // deleteForPlayer: typed input, unknown fields and wrong types refused by field and id, references checked) and its
 // SQL reads (fresh frozen records, the organisation's and the admin pages most recently active first, the filters,
 // the counts); units of work (all or nothing, reads inside a unit see its writes, no mirror and no db.channels);
-// the snapshot path and its final-state check (D-A, D-B).
+// fixtures written through the repository (the thread's references checked as it is opened).
 // Temporary databases only; nothing touches DATA_DIR. Run with: npm test
 //
-// Fixtures are written by a snapshot-mode save (openStore(dir).save), which runs every migration first.
+// Fixtures are written through the repositories (scripts/dataLayerFixture.mjs); the threads through `channels.open`.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -16,6 +16,7 @@ import { attachDataLayer, DATA_MIGRATIONS, TABLE_BACKED } from '../repositories/
 import { createChannelsRepository, MESSAGE_LIMITS } from '../repositories/channels.mjs';
 import { openStore } from '../store.mjs';
 import { NOW, TTL, tempDir, openRaw, dump, FIXTURE, ORGS, USERS, SESSIONS, hasBlobTable } from './coreIdentityTestFixtures.mjs';
+import { writeFixture, readRecords } from './dataLayerFixture.mjs';
 
 let passed = 0;
 const only = process.env.TEST_ONLY || '';
@@ -35,7 +36,7 @@ const plain = (v) => JSON.parse(JSON.stringify(v));
 const channel = (over = {}) => ({ id: 'chan-1', requestId: 'req-1', playerId: 'pl-adult', playerName: 'Adult Signup', orgId: 'org-pro', orgName: 'Eastport FC', orgVerified: true, scoutName: 'Maria', scoutRole: 'Head of Recruitment', counterparty: 'player', guardianId: null, createdAt: NOW - 2 * MIN, messages: [], readBy: { org: null, counterparty: null }, ...over });
 /** A guardian thread (the fixture's gd-primary, child pl-child1, request req-g). */
 const guardianChannel = (over = {}) => channel({ id: 'chan-g', requestId: 'req-g', playerId: 'pl-child1', playerName: 'Child pl-child1', counterparty: 'guardian', guardianId: 'gd-primary', ...over });
-/** A guardian thread naming the fixture's CHILDLESS guardian gd-signup (removing that guardian is valid for the identity snapshot itself, so the channel check is what refuses). */
+/** A guardian thread naming the fixture's CHILDLESS guardian gd-signup. */
 const soloChannel = (over = {}) => channel({ id: 'chan-solo', requestId: 'req-solo', playerId: 'pl-child2', playerName: 'Child pl-child2', counterparty: 'guardian', guardianId: 'gd-signup', ...over });
 /** The message literal, as postMessage writes it (`clientMsgId` present only when given). The staff sender is the fixture's usr-1. */
 const message = (over = {}) => ({ id: `msg-${++counter}`, ts: NOW - MIN, sender: { kind: 'org_user', id: 'usr-1', name: 'Maria · Head of Recruitment · Eastport FC' }, text: 'Synthetic message text.', attachment: null, ...over });
@@ -47,18 +48,20 @@ const trialReport = (over = {}) => ({ kind: 'trial_report', reportId: 'rep-1', o
 const REQ = (id, playerId, contactChannel, over = {}) => ({ id, playerId, playerName: playerId === 'pl-adult' ? 'Adult Signup' : `Child ${playerId}`, orgId: 'org-pro', orgName: 'Eastport FC', orgType: 'club', orgVerified: true, orgSafeguardingCertified: true, trustedPartner: false, userId: 'usr-1', scoutName: 'Maria', scoutRole: 'Head of Recruitment', type: 'trial', message: 'Synthetic invitation.', trialDetails: { proposedDate: '2026-11-01', altSlots: [], venue: 'Eastport Ground', notes: '' }, status: 'accepted', createdAt: NOW - 3 * MIN, routedTo: 'player', guardianId: null, contactChannel, ...over });
 const REQUESTS = () => [REQ('req-1', 'pl-adult', 'chan-1'), REQ('req-g', 'pl-child1', 'chan-g'), REQ('req-free', 'pl-adult', null), REQ('req-solo', 'pl-child2', 'chan-solo'), REQ('req-2', 'pl-adult', null), REQ('req-3', 'pl-adult', null)];
 
-/** A fully migrated file holding the fixture's identity, organisation and staff, the requests and the given threads, written by a snapshot-mode save. */
+/** The threads' fixture writer: each thread opened through the repository, with its messages and receipts (after the requests it names). */
+/** Write `collections` (additive) through the repositories, the threads included. */
+const write = (dir, collections) => writeFixture(dir, collections, { now: NOW, idCounter: 1000 });
+/** A fully migrated file holding the fixture's identity, organisation and staff, the requests and the given threads, written through the repositories. */
 function fixtureFile(dir, { channels, requests = REQUESTS(), extra = {} } = {}) {
   const db = { ...FIXTURE(), orgs: ORGS(), users: USERS(), sessions: SESSIONS(), requests, ...extra };
   if (channels !== undefined) db.channels = channels;
-  const tool = openStore(dir); tool.save({ idCounter: 1000, db }); tool.sqlite.close();
+  write(dir, db);
 }
 /** A live server-mode store with the data layer attached, as the server runs it. */
 function live(dir) {
   const store = openStore(dir, { tableBacked: TABLE_BACKED });
-  const db = {};
-  const layer = attachDataLayer({ db, store, nextId, sessionTtlMs: TTL, now: () => NOW, warn: () => {} });
-  return { store, db, layer, repo: layer.channels, close: () => store.sqlite.close() };
+  const layer = attachDataLayer({ store, nextId, sessionTtlMs: TTL, now: () => NOW, warn: () => {} });
+  return { store, layer, repo: layer.channels, close: () => store.sqlite.close() };
 }
 /** A repository on a bare connection (a tool, a test): its own transaction per write. */
 const bare = (s) => createChannelsRepository({ sqlite: s, now: () => NOW });
@@ -237,64 +240,41 @@ test('units of work: the threads join the open unit; a failure anywhere in it (a
   L.close(); rm(dir);
 });
 
-// ============================================================= the snapshot path and its final-state check
-test('snapshot path: a tool that loads and saves the whole file round-trips every thread (typed records, both attachment shapes, order and ties) byte for byte; an unknown field or a wrong-typed value refuses the whole save by field and id, never quoting a text; an omitted collection is left alone; a non-array refuses; an empty array clears the threads', () => {
-  const dir = tempDir('ch-snap');
+// ============================================================= fixtures and the references a thread names
+test('fixtures: every thread written through the repository (typed records, both attachment shapes, order and ties) reads back as written; an unknown field or a wrong-typed value refuses the whole fixture by field and id, never quoting a text, and nothing of it lands', () => {
+  const dir = tempDir('ch-fix');
   const g = guardianChannel({ scoutName: null, messages: [fromGuardian({ id: 'm-g', attachment: trialReport() })] });
-  fixtureFile(dir, { channels: [channel({ messages: [message({ id: 'm-1', ts: NOW }), fromPlayer({ id: 'm-2', ts: NOW, attachment: clip(), clientMsgId: 'c' })] }), g] });
-  const tool = openStore(dir); const snap = tool.load();
-  assert.equal(snap.db.channels.length, 2); assert.equal(snap.db.channels[1].scoutName, null); assert.equal(snap.db.channels[0].lastActivityAt, NOW, 'the activity time is the newest message\'s');
-  const text0 = JSON.stringify(snap.db.channels);
-  tool.save(snap);
-  assert.equal(JSON.stringify(tool.load().db.channels), text0, 'round-tripped through replace');
-  const beforeDump = dump(tool.sqlite);
-  const refuses = (channels, re, label) => { assert.throws(() => tool.save({ ...snap, db: { ...snap.db, channels } }), re, label); assert.deepEqual(dump(tool.sqlite), beforeDump, `${label}: nothing of the save landed`); };
-  const withUnknown = plain(snap.db.channels); withUnknown[0].orgUserIdForNotify = 'usr-legacy';
-  refuses(withUnknown, /CHANNELS_IMPORT_BLOCKED[\s\S]*\(chan-1\): unknown field orgUserIdForNotify/, 'an unknown field');
-  const nestedUnknown = plain(snap.db.channels); nestedUnknown[0].messages[1].attachment.extra = 'x';
-  refuses(nestedUnknown, /\(m-2\): unknown field attachment\.extra/, 'an unknown nested field');
-  refuses({ id: 'x' }, /channels: the snapshot collection must be an array/, 'a non-array');
+  const written = [channel({ messages: [message({ id: 'm-1', ts: NOW }), fromPlayer({ id: 'm-2', ts: NOW, attachment: clip(), clientMsgId: 'c' })] }), g];
+  fixtureFile(dir, { channels: written });
+  const back = readRecords(dir).channels;
+  assert.equal(back.length, 2); assert.equal(back[1].scoutName, null); assert.equal(back[0].lastActivityAt, NOW, 'the activity time is the newest message\'s');
+  assert.deepEqual(plain(back), plain([{ ...written[0], lastActivityAt: NOW }, { ...g, lastActivityAt: NOW - MIN }]), 'read back as written');
+  const beforeDump = fileDump(dir);
+  const refuses = (channels, re, label) => { assert.throws(() => write(dir, { channels }), re, label); assert.deepEqual(fileDump(dir), beforeDump, `${label}: nothing of the fixture landed`); };
+  // New threads on the fixture's free requests (req-free, req-2, req-3), so only the refusal under test applies.
+  const fresh = (over = {}) => channel({ id: 'chan-n', requestId: 'req-free', ...over });
+  refuses([fresh({ orgUserIdForNotify: 'usr-legacy' })], /CHANNEL_RECORD_INVALID[\s\S]*\(chan-n\): unknown field orgUserIdForNotify/, 'an unknown field');
+  refuses([fresh({ messages: [fromPlayer({ id: 'm-n', attachment: { ...clip(), extra: 'x' } })] })], /\(m-n\): unknown field attachment\.extra/, 'an unknown nested field');
   const SECRET = 'SECRET-MESSAGE-TEXT-77';
-  refuses([channel({ messages: [message({ text: SECRET, sender: { kind: 'admin', id: 'a', name: 'b' } })] })], (e) => /CHANNELS_IMPORT_BLOCKED/.test(e.message) && /sender\.kind/.test(e.message) && !e.message.includes(SECRET), 'a wrong sender kind');
-  refuses([channel({ scoutRole: { secret: SECRET } })], (e) => /\(chan-1\): scoutRole must be text or null/.test(e.message) && !e.message.includes(SECRET), 'a wrong-typed value');
-  refuses([channel({ messages: [message({ sender: { kind: 'org_user', id: 'usr-nobody', name: 'x' } })] })], /CHANNEL_SENDER_MISSING/, 'a staff sender that does not exist');
-  refuses([channel({ messages: [message({ id: 'same' })] }), guardianChannel({ messages: [message({ id: 'same' })] })], /message same is also in an earlier thread/, 'a message id in two threads');
-  const { channels: _omit, ...without } = snap.db;
-  tool.save({ ...snap, db: { ...without, players: without.players.map((p) => (p.id === 'pl-adult' ? { ...p, name: 'Renamed Adult' } : p)) } });
-  assert.deepEqual(channelIds(dir), ['chan-1', 'chan-g'], 'an omitted collection leaves its tables alone'); assert.equal(rowsOf(dir, 'players').find((p) => p.id === 'pl-adult').name, 'Renamed Adult');
-  tool.save({ ...snap, db: { ...snap.db, channels: [] } }); assert.deepEqual(channelIds(dir), []); assert.deepEqual(messageRows(dir), []);
-  tool.sqlite.close(); rm(dir);
+  refuses([fresh({ messages: [message({ text: SECRET, sender: { kind: 'admin', id: 'a', name: 'b' } })] })], (e) => /CHANNEL_RECORD_INVALID/.test(e.message) && /sender\.kind/.test(e.message) && !e.message.includes(SECRET), 'a wrong sender kind');
+  refuses([fresh({ scoutRole: { secret: SECRET } })], (e) => /\(chan-n\): scoutRole must be text or null/.test(e.message) && !e.message.includes(SECRET), 'a wrong-typed value');
+  refuses([fresh({ messages: [message({ sender: { kind: 'org_user', id: 'usr-nobody', name: 'x' } })] })], /CHANNEL_SENDER_MISSING/, 'a staff sender that does not exist');
+  refuses([fresh({ messages: [message({ id: 'same' })] }), fresh({ id: 'chan-n2', requestId: 'req-2', messages: [message({ id: 'same' })] })], /UNIQUE constraint failed: messages\.id/, 'a message id in two threads');
+  rm(dir);
 });
 
-test('the final-state check, every direction: channels supplied with requests omitted (an orphan refuses: CHANNEL_REQUEST_MISSING); requests supplied with channels omitted (a request removed under a retained thread refuses); both supplied (a coordinated removal passes, an invalid one refuses); the guardian cases (a guardian removed under its thread refuses, CHANNEL_GUARDIAN_MISSING; removed together passes); the organisation; nothing changes on a refusal', () => {
-  const dir = tempDir('ch-final');
+test('the references a thread names, checked as it is opened: a request that does not exist (CHANNEL_REQUEST_MISSING), a guardian that does not exist (CHANNEL_GUARDIAN_MISSING), an organisation that does not exist (CHANNEL_ORG_MISSING), a second thread for one request (CHANNEL_DUPLICATE); nothing changes on a refusal', () => {
+  const dir = tempDir('ch-refs');
   fixtureFile(dir, { channels: [channel({ messages: [message({ id: 'm-1', ts: NOW }), message({ id: 'm-2', ts: NOW })] }), guardianChannel({ messages: [fromGuardian({ id: 'm-g' })] }), soloChannel()] });
-  const tool = openStore(dir); const snap = tool.load(); const base = { ...snap.db };
   const ALL = ['chan-1', 'chan-g', 'chan-solo'];
-  const unchangedAfter = (fn, re, code, label) => { const before = dump(tool.sqlite); assert.throws(fn, (e) => re.test(e.message) && (!code || e.code === code), label); assert.deepEqual(dump(tool.sqlite), before, `${label}: nothing changed`); };
-  const save = (db) => tool.save({ ...snap, db });
-  const { requests: _r1, ...noRequests } = base;
-  save({ ...noRequests, channels: [...base.channels] }); assert.deepEqual(channelIds(dir), ALL, 'valid against the retained requests');
-  unchangedAfter(() => save({ ...noRequests, channels: [...base.channels, channel({ id: 'chan-o', requestId: 'req-orphan' })] }), /CHANNEL_REQUEST_MISSING/, undefined, 'an orphan thread against the retained requests');
-  const { channels: _c1, ...noChannels } = base;
-  unchangedAfter(() => save({ ...noChannels, requests: base.requests.filter((r) => r.id !== 'req-g') }), /CHANNEL_REQUEST_MISSING[^;]*chan-g/, 'CHANNEL_REQUEST_MISSING', 'a request removed under a retained thread');
-  save({ ...noChannels, requests: [...base.requests, REQ('req-new', 'pl-adult', null, { status: 'pending' })] }); assert.equal(rowsOf(dir, 'recruitment_requests').length, base.requests.length + 1, 'a request set that keeps every referenced id passes');
-  unchangedAfter(() => save({ ...noChannels, requests: [] }), /CHANNEL_REQUEST_MISSING/, 'CHANNEL_REQUEST_MISSING', 'an empty requests array under retained threads');
-  save({ ...base, requests: base.requests.filter((r) => r.id !== 'req-g'), channels: base.channels.filter((c) => c.id !== 'chan-g') }); assert.deepEqual(channelIds(dir), ['chan-1', 'chan-solo'], 'a coordinated removal passes');
-  unchangedAfter(() => save({ ...base, requests: base.requests.filter((r) => !['req-g', 'req-1'].includes(r.id)), channels: base.channels.filter((c) => c.id !== 'chan-g') }), /CHANNEL_REQUEST_MISSING/, 'CHANNEL_REQUEST_MISSING', 'an invalid combination');
-  save({ ...base }); assert.deepEqual(channelIds(dir), ALL);
-  const { channels: _c2, requests: _r2, ...identityOnly } = base;
-  const textBefore = JSON.stringify(tool.load().db.channels);
-  const withoutSolo = base.guardians.filter((g) => g.id !== 'gd-signup'); assert.equal(withoutSolo.length, base.guardians.length - 1);
-  unchangedAfter(() => save({ ...identityOnly, players: base.players, guardians: withoutSolo }), /CHANNEL_GUARDIAN_MISSING[^;]*chan-solo/, 'CHANNEL_GUARDIAN_MISSING', 'the identity pair only, a referenced guardian removed');
-  save({ ...identityOnly, players: base.players, guardians: base.guardians }); assert.equal(JSON.stringify(tool.load().db.channels), textBefore, 'the identity pair only, every guardian kept: the threads unchanged');
-  save({ ...identityOnly, players: base.players, guardians: withoutSolo, channels: base.channels.filter((c) => c.id !== 'chan-solo'), requests: base.requests.filter((r) => r.id !== 'req-solo') }); assert.deepEqual(channelIds(dir), ['chan-1', 'chan-g'], 'a guardian and its thread removed together');
-  save({ ...base }); assert.deepEqual(channelIds(dir), ALL);
-  unchangedAfter(() => save({ ...identityOnly, players: base.players, guardians: withoutSolo, channels: base.channels }), /CHANNEL_GUARDIAN_MISSING[^;]*chan-solo/, 'CHANNEL_GUARDIAN_MISSING', 'a guardian removed, its thread kept');
-  unchangedAfter(() => save({ ...noRequests, channels: [...base.channels, guardianChannel({ id: 'chan-bad', requestId: 'req-free', guardianId: 'gd-missing' })] }), /CHANNEL_GUARDIAN_MISSING/, undefined, 'a thread naming a guardian that does not exist');
-  unchangedAfter(() => save({ ...noChannels, orgs: [] }), /no longer lists organisation org-pro but other records still reference it|RECRUITMENT_ORG_MISSING[\s\S]*organisations org-pro/, undefined, 'an organisation removed under its threads');
-  save({ ...base, orgs: [], users: [], sessions: [], channels: [], requests: [] }); assert.deepEqual(channelIds(dir), []); assert.equal(rowsOf(dir, 'orgs').length, 0, 'an organisation removed together with its threads, staff, sessions and requests');
-  tool.sqlite.close(); rm(dir);
+  const unchangedAfter = (channels, re, code, label) => { const before = fileDump(dir); assert.throws(() => write(dir, { channels }), (e) => re.test(e.message) && (!code || e.code === code), label); assert.deepEqual(fileDump(dir), before, `${label}: nothing changed`); };
+  assert.deepEqual(channelIds(dir), ALL);
+  unchangedAfter([channel({ id: 'chan-o', requestId: 'req-orphan' })], /CHANNEL_REQUEST_MISSING[\s\S]*req-orphan/, 'CHANNEL_REQUEST_MISSING', 'an orphan thread');
+  unchangedAfter([guardianChannel({ id: 'chan-bad', requestId: 'req-free', guardianId: 'gd-missing' })], /CHANNEL_GUARDIAN_MISSING[\s\S]*gd-missing/, 'CHANNEL_GUARDIAN_MISSING', 'a thread naming a guardian that does not exist');
+  unchangedAfter([channel({ id: 'chan-x', requestId: 'req-free', orgId: 'org-nowhere' })], /CHANNEL_ORG_MISSING|FOREIGN KEY constraint failed/, undefined, 'a thread naming an organisation that does not exist');
+  unchangedAfter([channel({ id: 'chan-2' })], /CHANNEL_DUPLICATE[\s\S]*req-1 already opened thread chan-1/, 'CHANNEL_DUPLICATE', 'a second thread for one request');
+  write(dir, { channels: [channel({ id: 'chan-free', requestId: 'req-free' })] }); assert.deepEqual(channelIds(dir), [...ALL, 'chan-free'], 'a thread on a free request is opened');
+  rm(dir);
 });
 
 console.log(`\n${passed} channel checks passed`);

@@ -26,7 +26,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 const SCHEMA_VERSION = Number(DATA_MIGRATIONS.map((m) => m.id).sort().at(-1).slice(0, 4)); // the latest table migration's number
-import { openStore } from '../../store.mjs';
+import { DatabaseSync } from 'node:sqlite';
+import { openLayer, readRecords } from '../../scripts/dataLayerFixture.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SERVER = path.join(HERE, '..', '..', 'server.mjs');
@@ -71,7 +72,7 @@ async function bootOn(dataDir, port) {
   const stop = async () => {
     proc.kill('SIGTERM');
     for (let i = 0; i < 60 && proc.exitCode == null; i += 1) await sleep(100);
-    return openStore(dataDir).load()?.db ?? null;
+    return readRecords(dataDir);
   };
   return { up, j, stop, log: () => log };
 }
@@ -79,7 +80,9 @@ async function bootOn(dataDir, port) {
 let S = await bootOn(DATA, PORT);
 ok(S.up, `boot 1 on an empty store (schema ${SCHEMA_VERSION})`);
 // The table-migration ledger (id and time applied), read beside the running server.
-const ledger = () => { const st = openStore(DATA); try { return JSON.stringify(st.sqlite.prepare('SELECT id, applied_at FROM data_migrations ORDER BY id').all()); } finally { st.sqlite.close(); } };
+const ledger = () => { const sq = new DatabaseSync(path.join(DATA, 'scoutbox.db'), { readOnly: true }); try { return JSON.stringify(sq.prepare('SELECT id, applied_at FROM data_migrations ORDER BY id').all()); } finally { sq.close(); } };
+// With the server stopped, plant state through the repositories in one unit of work (`work` gets the data layer).
+const plantOn = (work) => { const L = openLayer(DATA); try { return L.unit(() => work(L.layer)); } finally { L.close(); } };
 const LEDGER1 = ledger();
 let maria; let kola;
 const login = async () => {
@@ -179,7 +182,7 @@ section('2 — after the final reboot: agreement, uniqueness, nothing fabricated
   const pj = await playerJourney();
   ok(pj.journey.stage === 'signed' && pj.journey.nextAction.code === 'NONE' && (await S.j('GET', '/org/players/pl-adeyemi', undefined, maria.token)).body.contractStatus === 'under_contract', 'the player\'s journey says signed; the player is under contract');
   neg((await S.j('POST', '/player/availability', { contractStatus: 'free_agent' }, kola.token)).status === 409, 'the canonical contract still owns the word after the reboot');
-  const store = openStore(DATA).load().db;
+  const store = readRecords(DATA);
   neg(!('recruitmentJourneys' in store) && !('recruitmentJourneyStates' in store), 'no journey store appeared on disk');
 }
 
@@ -189,19 +192,19 @@ section('3 — legacy and corrupt cases across five restarts: untouched, never r
   const mk = async (playerId) => { const rr = await S.j('POST', '/org/rooms', { playerId, sourceContext: 'search' }, maria.token); const id = rr.status === 201 ? rr.body.room.roomId : rr.body?.existingRoomId; await lifecycle(id, 'startReview'); return id; };
   const LEG = await mk('pl-okafor'); const BAD = await mk('pl-svensson'); const LSIGN = await mk('pl-tanaka');
   let db = await S.stop();
-  const plant = (id, chain, extraLast = {}) => {
-    const k = db.recruitmentCases.find((x) => x.id === id);
+  const plant = (layer, id, chain, extraLast = {}, edit = () => {}) => layer.recruitmentCases.cases.update(id, (k) => {
     let prev = k.room.status; let tt = Math.max(Date.now(), ...(k.history ?? []).map((h) => Number(h.at) || 0));
     for (const to of chain) { tt += H; k.history.push({ id: `hist-p8p-${Math.random().toString(36).slice(2, 8)}`, at: tt, action: 'room_status_changed', byKind: 'org', byId: 'legacy', byName: 'Legacy', detail: { from: prev, to, reasonCodes: [], ...(to === chain[chain.length - 1] ? extraLast : {}) } }); prev = to; }
     k.room.status = chain[chain.length - 1]; k.stage = chain[chain.length - 1] === 'signed' ? 'closed' : 'review'; k.room.rev = (k.room.rev ?? 1) + chain.length;
-    return k;
-  };
-  plant(LEG, ['contacted', 'trial_requested', 'trial_scheduled', 'trial_completed']);
-  plant(BAD, ['contacted'], { contactId: 'rct-missing', trigger: 'contact:rct-missing' });
-  const k3 = plant(LSIGN, ['offer_consideration', 'offer_made', 'signed']);
-  db.signings.push({ id: 'sign-p8p-legacy', orgId: 'org-eastport', playerId: 'pl-tanaka', ts: Date.now() - DAY, method: 'LEGACY_RECORDED', contract: null, scoutUserId: 'legacy', scoutName: 'Legacy', insideAttributionWindow: false });
-  k3.links.signingId = 'sign-p8p-legacy';
-  const st0 = openStore(DATA); const snap = st0.load(); snap.db = db; st0.save(snap);
+    edit(k);
+  });
+  plantOn((layer) => {
+    plant(layer, LEG, ['contacted', 'trial_requested', 'trial_scheduled', 'trial_completed']);
+    plant(layer, BAD, ['contacted'], { contactId: 'rct-missing', trigger: 'contact:rct-missing' });
+    layer.signingsFollowUps.signings.record({ id: 'sign-p8p-legacy', orgId: 'org-eastport', playerId: 'pl-tanaka', ts: Date.now() - DAY, method: 'LEGACY_RECORDED', contract: null, scoutUserId: 'legacy', scoutName: 'Legacy', insideAttributionWindow: false });
+    plant(layer, LSIGN, ['offer_consideration', 'offer_made', 'signed'], {}, (k) => { k.links.signingId = 'sign-p8p-legacy'; });
+  });
+  db = readRecords(DATA); // what the plant wrote: the restarts below must leave it exactly so
   const snapshot = (kase) => JSON.stringify({ status: kase.room.status, stage: kase.stage, rev: kase.room.rev, history: kase.history.length, links: kase.links });
   const fps = {};
   for (let i = 1; i <= 5; i += 1) {
@@ -249,23 +252,22 @@ section('5 — P8.1: stale pointers, cross-case, legacy mixes, a signed mismatch
   const SP = await mk('pl-martin'); await lifecycle(SP, 'startReview');
   let db = await S.stop();
   {
-    const k = db.recruitmentCases.find((x) => x.id === SP); let tt = Math.max(Date.now(), ...(k.history ?? []).map((h) => Number(h.at) || 0));
-    for (const to of ['contacted', 'trial_requested', 'trial_scheduled', 'trial_completed', 'offer_consideration', 'offer_made']) { tt += H; k.history.push({ id: `hist-p81p-${Math.random().toString(36).slice(2, 8)}`, at: tt, action: 'room_status_changed', byKind: 'org', byId: 'legacy', byName: 'Legacy', detail: { from: k.room.status, to, reasonCodes: [] } }); k.room.status = to; }
-    k.room.rev = (k.room.rev ?? 1) + 6;
+    const advance = (k) => { let tt = Math.max(Date.now(), ...(k.history ?? []).map((h) => Number(h.at) || 0));
+      for (const to of ['contacted', 'trial_requested', 'trial_scheduled', 'trial_completed', 'offer_consideration', 'offer_made']) { tt += H; k.history.push({ id: `hist-p81p-${Math.random().toString(36).slice(2, 8)}`, at: tt, action: 'room_status_changed', byKind: 'org', byId: 'legacy', byName: 'Legacy', detail: { from: k.room.status, to, reasonCodes: [] } }); k.room.status = to; }
+      k.room.rev = (k.room.rev ?? 1) + 6; };
     // A REAL Offer (Kola's, cloned) re-homed on this case with its current-revision pointer stale: every field is sound,
     // only the pointer is behind — it names revision 1 while revision 2 is out. (S8c, typed since §4.3: a pointer naming
-    // a revision the Offer does not hold at all is a row the tables cannot hold; that save is REFUSED, naming the row.)
+    // a revision the Offer does not hold at all is a row the tables cannot hold; that write is REFUSED, naming the row.)
     const src = db.recruitmentOffers.find((o) => o.id === OID);
     const clone = JSON.parse(JSON.stringify(src));
     const { discardedByResponseId: _d, ...r0 } = clone.revisions[0];
     const rev1 = { ...r0, id: 'rofr-p81p-1', revisionNumber: 1, status: 'ISSUED', documents: [], response: null, respondedAt: null, supersedesRevisionId: null, supersededByRevisionId: null, supersededAt: null, recipientSnapshot: r0.recipientSnapshot ? { ...r0.recipientSnapshot, playerId: 'pl-martin' } : null };
     Object.assign(clone, { id: 'rof-p81p-stale', caseId: SP, playerId: 'pl-martin', status: 'ISSUED', responses: [], readReceipts: [], history: [], agentShare: null, lifecycle: null, keys: { create: null, issue: [], withdraw: [], revise: [] }, revisions: [rev1, { ...rev1, id: 'rofr-p81p-2', revisionNumber: 2 }], currentRevisionId: 'rofr-missing' });
-    const st0 = openStore(DATA); const snap = st0.load(); const onDisk = JSON.stringify(snap.db.recruitmentOffers);
-    let refused = null; try { st0.save({ ...snap, db: { ...db, recruitmentOffers: [...db.recruitmentOffers, clone] } }); } catch (e) { refused = e; }
-    neg(!!refused && /rof-p81p-stale\.currentRevisionId names rofr-missing, not a revision of this offer/.test(refused.message) && JSON.stringify(openStore(DATA).load().db.recruitmentOffers) === onDisk, `5.2 a pointer at a revision the Offer does not hold cannot be stored: the save refuses it, naming the row (${String(refused?.message ?? 'no refusal').slice(0, 100)})`);
+    const onDisk = JSON.stringify(readRecords(DATA).recruitmentOffers);
+    let refused = null; try { plantOn((layer) => { layer.recruitmentCases.cases.update(SP, advance); layer.recruitmentContactsOffers.offers.create(clone); }); } catch (e) { refused = e; }
+    neg(!!refused && /rof-p81p-stale\.currentRevisionId names rofr-missing, not a revision of this offer/.test(refused.message) && JSON.stringify(readRecords(DATA).recruitmentOffers) === onDisk, `5.2 a pointer at a revision the Offer does not hold cannot be stored: the write refuses it, naming the row (${String(refused?.message ?? 'no refusal').slice(0, 100)})`);
     clone.currentRevisionId = 'rofr-p81p-1';
-    db.recruitmentOffers.push(clone);
-    snap.db = db; st0.save(snap);
+    plantOn((layer) => { layer.recruitmentCases.cases.update(SP, advance); layer.recruitmentContactsOffers.offers.create(clone); });
   }
   S = await bootOn(DATA, PORT); ok(S.up, '5.2 booted on the planted store'); await login();
   const spFps = [];
@@ -293,12 +295,11 @@ section('5 — P8.1: stale pointers, cross-case, legacy mixes, a signed mismatch
   const sm = await S.j('POST', `/org/rooms/${MIX}/contacts/${dm.body.contact.id}/send`, { expectedRev: dm.body.contact.rev, clientKey: key() }, maria.token);
   ok(sm.status === 200, '5.4 a canonical Contact delivered on the second case');
   db = await S.stop();
-  {
-    const k = db.recruitmentCases.find((x) => x.id === MIX); let tt = Math.max(Date.now(), ...(k.history ?? []).map((h) => Number(h.at) || 0));
+  plantOn((layer) => layer.recruitmentCases.cases.update(MIX, (k) => {
+    let tt = Math.max(Date.now(), ...(k.history ?? []).map((h) => Number(h.at) || 0));
     for (const to of ['trial_requested', 'trial_scheduled', 'trial_completed']) { tt += H; k.history.push({ id: `hist-p81p-${Math.random().toString(36).slice(2, 8)}`, at: tt, action: 'room_status_changed', byKind: 'org', byId: 'legacy', byName: 'Legacy', detail: { from: k.room.status, to, reasonCodes: [] } }); k.room.status = to; }
     k.room.rev = (k.room.rev ?? 1) + 3;
-    const st0 = openStore(DATA); const snap = st0.load(); snap.db = db; st0.save(snap);
-  }
+  }));
   S = await bootOn(DATA, PORT); ok(S.up, '5.4 booted'); await login();
   const okafor = (await S.j('POST', '/auth/player/login', { playerId: 'pl-okafor' })).body;
   const mixJ = await journey(MIX);
@@ -311,12 +312,11 @@ section('5 — P8.1: stale pointers, cross-case, legacy mixes, a signed mismatch
   // 5.5 a signed mismatch: a case at `signed` whose link names a missing row is integrity_error and stays so; the player is never told signed by it.
   const SM = await mk('pl-imani'); await lifecycle(SM, 'startReview');
   db = await S.stop();
-  {
-    const k = db.recruitmentCases.find((x) => x.id === SM); let tt = Math.max(Date.now(), ...(k.history ?? []).map((h) => Number(h.at) || 0));
+  plantOn((layer) => layer.recruitmentCases.cases.update(SM, (k) => {
+    let tt = Math.max(Date.now(), ...(k.history ?? []).map((h) => Number(h.at) || 0));
     for (const to of ['offer_consideration', 'offer_made', 'signed']) { tt += H; k.history.push({ id: `hist-p81p-${Math.random().toString(36).slice(2, 8)}`, at: tt, action: 'room_status_changed', byKind: 'org', byId: 'legacy', byName: 'Legacy', detail: { from: k.room.status, to, reasonCodes: [] } }); k.room.status = to; }
     k.room.rev = (k.room.rev ?? 1) + 3; k.stage = 'closed'; k.links ??= {}; k.links.signingId = 'sign-p81p-missing';
-    const st0 = openStore(DATA); const snap = st0.load(); snap.db = db; st0.save(snap);
-  }
+  }));
   S = await bootOn(DATA, PORT); ok(S.up, '5.5 booted'); await login();
   const imani = (await S.j('POST', '/auth/player/login', { playerId: 'pl-imani' })).body;
   const smJ = await journey(SM);

@@ -17,7 +17,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import { tempDir } from './coreIdentityTestFixtures.mjs';
-import { SAFETY_AUDIT_SNAPSHOT } from '../repositories/safetyAudit.mjs';
+import { createSafetyAuditRepository } from '../repositories/safetyAudit.mjs';
 
 let passed = 0;
 const only = process.env.TEST_ONLY || '';
@@ -55,7 +55,7 @@ const qAll = (dir, sql, ...p) => { const s = new DatabaseSync(path.join(dir, 'sc
 // S13e: the delivery centre's bookkeeping is rows of repositories/operations.mjs (rewritten: the blob reads described the old storage).
 const seenIds = (dir) => qAll(dir, 'SELECT callback_id FROM delivery_callbacks_seen ORDER BY rowid').map((r) => r.callback_id);
 const injected = (dir) => Object.fromEntries(qAll(dir, 'SELECT channel, remaining FROM delivery_fail_injections').map((r) => [r.channel, r.remaining]));
-const auditRows = (dir, name) => { const s = new DatabaseSync(path.join(dir, 'scoutbox.db'), { readOnly: true }); try { return SAFETY_AUDIT_SNAPSHOT.read(s)?.[name] ?? null; } finally { s.close(); } };
+const auditRows = (dir, name) => { const s = new DatabaseSync(path.join(dir, 'scoutbox.db'), { readOnly: true }); try { return createSafetyAuditRepository({ sqlite: s }).exportAll()[name] ?? null; } finally { s.close(); } };
 /** The webhook deliveries as the DATABASE holds them (S13a: rows of webhook_deliveries, the payload typed, attempts counted). */
 const webhookRows = (dir) => qAll(dir, "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'webhook_deliveries'").length
   ? qAll(dir, 'SELECT d.id, d.type, d.endpoint_id, d.subject_id, (SELECT COUNT(*) FROM webhook_delivery_attempts a WHERE a.delivery_id = d.id) AS attempts FROM webhook_deliveries d ORDER BY d.rowid')

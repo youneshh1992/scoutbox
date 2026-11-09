@@ -6,8 +6,8 @@
 // before any module registers, and a boot on a database that holds nothing but one organisation must answer its
 // first requests. This battery checks:
 //
-//   part 1  the file — the table migrations, the counter, no blob, a snapshot save refusing what has no table, the
-//           catalogue constants, and every lifecycle state projecting as itself;
+//   part 1  the file — the table migrations, the counter, no blob, the catalogue constants, and every lifecycle
+//           state projecting as itself;
 //   part 2  the server — composition order (every module registers before the socket opens), the first requests on
 //           a bare database, and a restart that changes nothing.
 import { spawn } from 'node:child_process';
@@ -17,7 +17,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { PLANS, ARCHETYPES } from '../../catalogue.mjs';
 import { ORG_PLANS } from '../../repositories/orgs.mjs';
-import { openStore } from '../../store.mjs';
+import { DatabaseSync } from 'node:sqlite';
+import { openLayer, writeFixture } from '../../scripts/dataLayerFixture.mjs';
 import { DATA_MIGRATIONS, TABLE_BACKED } from '../../repositories/index.mjs';
 import { createIdCounter } from '../../repositories/counters.mjs';
 import { ROOM_STATUSES, ROOM_STATUS_LABELS, TERMINAL_ROOM_STATUSES, stageForRoomStatus } from '../../domains/recruitment/rooms/shared.mjs';
@@ -55,7 +56,7 @@ const LEGACY_PLAYER = { id: 'pl-legacy', name: 'Legacy Player', dob: '2000-05-05
 section('§1 — a new database file: every table migration, no blob');
 {
   const dir = tempDir('fresh');
-  const store = openStore(dir); // snapshot mode migrates the file as it opens it, exactly as a boot would
+  const store = openLayer(dir); // server mode migrates the file as it opens it, exactly as a boot would
   const tables = tableNames(store.sqlite);
   neg(!tables.includes('collections'), 'there is no `collections` table: the blob store is retired (S14a)');
   const applied = store.sqlite.prepare('SELECT id FROM data_migrations ORDER BY id').all().map((r) => r.id);
@@ -67,22 +68,12 @@ section('§1 — a new database file: every table migration, no blob');
   store.sqlite.close();
 }
 
-section('§2 — a whole-file save writes tables only, and refuses what has no table');
+section('§2 — the records are table rows and the id counter is a row of counters');
 {
   const dir = tempDir('save');
-  const store = openStore(dir);
-  store.save({ idCounter: 4200, db: { orgs: [LEGACY_ORG], players: [], guardians: [] } });
-  ok(store.sqlite.prepare("SELECT value FROM counters WHERE name = 'id'").get().value === 4200, 'the id counter a tool hands over is written to counters');
-  const before = store.sqlite.prepare('SELECT COUNT(*) AS n FROM orgs').get().n;
-  let refused = null;
-  try { store.save({ db: { orgs: [LEGACY_ORG, { ...LEGACY_ORG, id: 'org-two', name: 'Two FC' }], players: [], guardians: [], notes: [{ id: 'n1' }] } }); } catch (err) { refused = err; }
-  neg(refused?.code === 'SNAPSHOT_COLLECTION_UNKNOWN' && /notes/.test(refused.message), 'a collection with no table is refused, by name');
-  neg(store.sqlite.prepare('SELECT COUNT(*) AS n FROM orgs').get().n === before, 'and nothing of that save landed (the organisation it also carried included)');
-  store.save({ idCounter: 10, db: { orgs: [LEGACY_ORG], players: [], guardians: [] } });
-  neg(store.sqlite.prepare("SELECT value FROM counters WHERE name = 'id'").get().value === 4200, 'a lower counter never lowers the stored one');
-  let noDb = null;
-  try { store.save(null); } catch (err) { noDb = err; }
-  neg(noDb instanceof TypeError && /nothing was written/.test(noDb.message), 'a save without a db is refused plainly, nothing written');
+  writeFixture(dir, { orgs: [LEGACY_ORG], players: [], guardians: [] }, { idCounter: 4200 });
+  const store = openLayer(dir);
+  ok(store.sqlite.prepare("SELECT value FROM counters WHERE name = 'id'").get().value === 4200 && store.sqlite.prepare('SELECT COUNT(*) AS n FROM orgs').get().n === 1, 'the organisation is a row and the id counter is written to counters');
   store.sqlite.prepare("DELETE FROM counters WHERE name = 'id'").run();
   let missing = null;
   try { createIdCounter({ sqlite: store.sqlite }); } catch (err) { missing = err; }
@@ -234,21 +225,22 @@ const firstRequestProbe = async (base) => {
   return { login: true, lifecycle: lifecycle.status, lifecycleBody: await lifecycle.json().catch(() => null), reviewQueue: reviewQueue.status, notes: notes.status };
 };
 
+const readOnly = (dir) => new DatabaseSync(path.join(dir, 'scoutbox.db'), { readOnly: true });
 const tableContent = (dir) => {
-  const store = openStore(dir);
+  const sqlite = readOnly(dir);
   try {
     const out = {};
-    for (const t of tableNames(store.sqlite).sort()) {
+    for (const t of tableNames(sqlite).sort()) {
       if (t === 'sessions' || t === 'counters') continue; // a login writes a session and mints ids
-      out[t] = store.sqlite.prepare(`SELECT * FROM "${t}" ORDER BY rowid`).all().map((r) => ({ ...r }));
+      out[t] = sqlite.prepare(`SELECT * FROM "${t}" ORDER BY rowid`).all().map((r) => ({ ...r }));
     }
-    return { json: JSON.stringify(out), counter: Number(store.sqlite.prepare("SELECT value FROM counters WHERE name = 'id'").get().value) };
-  } finally { store.sqlite.close(); }
+    return { json: JSON.stringify(out), counter: Number(sqlite.prepare("SELECT value FROM counters WHERE name = 'id'").get().value) };
+  } finally { sqlite.close(); }
 };
 
 const PORT_BASE = 5200 + Math.floor(Math.random() * 300);
 const BARE_DIR = tempDir('bare');
-openStore(BARE_DIR).save({ idCounter: 400, db: { orgs: [LEGACY_ORG], players: [LEGACY_PLAYER], guardians: [] } });
+writeFixture(BARE_DIR, { orgs: [LEGACY_ORG], players: [LEGACY_PLAYER], guardians: [] }, { idCounter: 400 });
 
 section('§7 — a bare database: the first requests answer');
 const first = await bootOnce(BARE_DIR, { port: PORT_BASE, probe: firstRequestProbe });
@@ -263,9 +255,9 @@ const first = await bootOnce(BARE_DIR, { port: PORT_BASE, probe: firstRequestPro
   ok(first.health?.schemaVersion === LATEST && first.header === String(LATEST), `/healthz and X-ScoutBox-Schema state schema ${LATEST}`);
   ok(first.caps?.schema?.upToDate === true && first.caps.schema.migrationsApplied === DATA_MIGRATIONS.length, 'and /capabilities reports every table migration applied');
   neg(first.caps?.integrity?.ok === true && !('stores' in (first.caps?.integrity ?? {})), 'integrity is clean, and there is no store inventory left to report');
-  const s = openStore(BARE_DIR);
-  neg(!tableNames(s.sqlite).includes('collections'), 'and the file the server wrote has no blob table');
-  s.sqlite.close();
+  const s = readOnly(BARE_DIR);
+  neg(!tableNames(s).includes('collections'), 'and the file the server wrote has no blob table');
+  s.close();
 }
 
 section('§8 — a restart changes nothing');

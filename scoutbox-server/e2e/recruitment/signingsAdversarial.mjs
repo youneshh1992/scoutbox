@@ -25,7 +25,7 @@ import { mkdtempSync, existsSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { openStore } from '../../store.mjs';
+import { openLayer, readRecords } from '../../scripts/dataLayerFixture.mjs';
 import { RATE_LIMIT_POLICY } from '../../domains/platform/rateLimit.mjs';
 import { isAdult } from '../../domain.mjs';
 import { signingIntegrity, signingConsistency, signingCorrupt, SIGNING_CORRUPTION, effectiveStatus, canCompleteParty, completionGate, requiredPartiesFor, canStart } from '../../domains/recruitment/signings/signing.mjs';
@@ -84,19 +84,32 @@ async function j(method, url, body, token, extra = {}) {
   let data = null; try { data = await r.json(); } catch { /* non-json */ }
   return { status: r.status, body: data, text: data === null ? null : JSON.stringify(data) };
 }
-/** Stop the server, edit the persisted store (and the vault on disk) offline, boot again. The attacker with a shell. */
+/**
+ * Stop the server, edit the persisted store (and the vault on disk) offline, boot again. The attacker with a shell.
+ * `mutate(db, L)` reads the stored records (`db`, plain copies) and writes through `L` (the data layer and its SQLite),
+ * in one unit of work: the signing tables hold typed columns only, so a planted value a column cannot hold is REFUSED
+ * (nothing lands); the refusal is returned and the server comes back on the untouched file.
+ */
 async function offline(mutate) {
   await down(server);
-  const store = openStore(DATA_DIR);
-  const snap = store.load();
-  await mutate(snap.db, snap);
-  // S8d: the signing tables hold typed columns only, so a planted value a column cannot hold is REFUSED at the save
-  // (nothing lands); the refusal is returned and the server comes back on the untouched file.
+  const db = readRecords(DATA_DIR);
+  const L = openLayer(DATA_DIR);
   let refused = null;
-  try { store.save({ ...snap, db: snap.db }); } catch (err) { refused = err; }
+  try { L.unit(() => mutate(db, L)); } catch (err) { refused = err; } finally { L.close(); }
   server = await boot();
   return refused;
 }
+/**
+ * Replace a stored package whole, the way an attacker editing the file would. No repository operation rewrites a
+ * package's offer, revisions or parties in place (they are fixed once written), so the stored rows are removed by SQL
+ * and the edited record is inserted through the repository, typed whole exactly as the start route's write is typed.
+ */
+function replacePackage(L, p) {
+  L.sqlite.prepare('DELETE FROM signing_history WHERE package_id = ?').run(p.id);
+  L.sqlite.prepare('DELETE FROM signing_packages WHERE id = ?').run(p.id);
+  L.layer.signingsFollowUps.signingPackages.insert(p);
+}
+const pkgOf = (db, id) => db.signingPackages.find((x) => x.id === id);
 const mediaFile = (mediaId) => path.join(DATA_DIR, 'media', `${mediaId}.bin`);
 const evidenceOfPackage = (db, pkgId, kind = 'signing') => (db.verEvidence ?? []).find((e) => e && e.meta?.signingPackageId === pkgId && e.meta?.signingDocumentKind === kind) ?? null;
 
@@ -270,7 +283,7 @@ const B = await presented(maria.token, 'pl-carvalho');
   const a = await attach(sv(s).id, DOC_A, sv(s).rev, maria.token);
   ok(s.status === 201 && a.status === 200, 'B14 Okafor\'s draft package has its own document');
   const VS = sv(s).id;
-  await offline((db) => { const donorEv = evidenceOfPackage(db, donor.SID); const p = db.signingPackages.find((x) => x.id === VS); p.revisions[0].document.evidenceId = donorEv.id; });
+  await offline((db, L) => { const donorEv = evidenceOfPackage(db, donor.SID); const p = pkgOf(db, VS); p.revisions[0].document.evidenceId = donorEv.id; replacePackage(L, p); });
   await relogin();
   neg(expect(await ready(VS, { expectedRev: await rev(VS, maria.token), clientKey: key() }, maria.token), 500, 'SIGNING_STATE_UNKNOWN'), 'B15 a revision pointing at ANOTHER package\'s vault row (same digest, same bytes) cannot be presented: the row is not this package\'s own');
   neg(expect(await sDoc(VS, maria.token), 500, 'SIGNING_STATE_UNKNOWN'), 'B16 nor served');
@@ -282,7 +295,7 @@ const B = await presented(maria.token, 'pl-carvalho');
 section('C — digest mismatch: a stored digest that does not name the stored bytes fails closed everywhere');
 {
   const C = await presented(maria.token, 'pl-kim');
-  await offline((db) => { const p = db.signingPackages.find((x) => x.id === C.SID); p.revisions[0].document.sha256 = SHA_B; });
+  await offline((db, L) => { const p = pkgOf(db, C.SID); p.revisions[0].document.sha256 = SHA_B; replacePackage(L, p); });
   await relogin();
   neg(expect(await pSign(C.SID, { revisionId: C.SREV, documentSha256: SHA_B, clientKey: key() }, P['pl-kim'].token), 500, 'SIGNING_STATE_UNKNOWN'), 'C1 the player confirming the (forged) stored digest is refused: the vault row and the revision disagree');
   neg(expect(await pSign(C.SID, { revisionId: C.SREV, documentSha256: SHA_A, clientKey: key() }, P['pl-kim'].token), 409, 'SIGNING_DOCUMENT_MISMATCH'), 'C2 confirming the true digest of the bytes is a mismatch against the revision — nothing can be confirmed');
@@ -313,11 +326,11 @@ section('D — required parties: only the package\'s own recipient party and clu
   const D = await presented(maria.token, 'pl-tanaka');
   const cs = await clubSign(D.SID, { expectedRev: await rev(D.SID, maria.token), revisionId: D.SREV, documentSha256: SHA_A, clientKey: key() }, maria.token);
   ok(cs.status === 200, 'D9 the club signs Tanaka\'s document');
-  await offline((db) => { const p = db.signingPackages.find((x) => x.id === D.SID); p.revisions[0].requiredParties = p.revisions[0].requiredParties.filter((q) => q.partyType !== 'PLAYER'); });
+  await offline((db, L) => { const p = pkgOf(db, D.SID); p.revisions[0].requiredParties = p.revisions[0].requiredParties.filter((q) => q.partyType !== 'PLAYER'); replacePackage(L, p); });
   await relogin();
   neg(expect(await complete(D.SID, { expectedRev: 3, clientKey: key() }, maria.token), 500, 'SIGNING_STATE_UNKNOWN'), 'D10 with the player party removed (every remaining party complete!) the package is corruption: completion refused, not "complete"');
   neg(expect(await pGet(D.SID, P['pl-tanaka'].token), 404, 'SIGNING_NOT_FOUND') && (await rowsFor(D.SID, maria.token)).length === 0, 'D11 the player no longer sees it (omitted, never repaired); no row');
-  await offline((db) => { const p = db.signingPackages.find((x) => x.id === D.SID); p.revisions[0].requiredParties.unshift({ partyType: 'PLAYER', forEntityId: 'pl-tanaka', forPlayerId: 'pl-tanaka', status: 'PENDING', completedAt: null, completedBy: null, evidenceRef: null, method: null }); });
+  await offline((db, L) => { const p = pkgOf(db, D.SID); p.revisions[0].requiredParties.unshift({ partyType: 'PLAYER', forEntityId: 'pl-tanaka', forPlayerId: 'pl-tanaka', status: 'PENDING', completedAt: null, completedBy: null, evidenceRef: null, method: null }); replacePackage(L, p); });
   await relogin();
   ok((await pGet(D.SID, P['pl-tanaka'].token)).status === 200, 'D12 with the party back, the package reads again (proof the refusal was the corruption, not the package)');
 }
@@ -568,10 +581,10 @@ section('O — cross-offer, cross-player, cross-org: references cannot be confus
   const pReal = await pGet(A.SID, P['pl-kim'].token); const pFake = await pGet(invented, P['pl-kim'].token);
   neg(pReal.status === 404 && JSON.stringify(pReal.body) === JSON.stringify(pFake.body), 'O5 another player: identical concealment');
   // cross-offer: a persisted package rebound to another Offer is corruption
-  let offerBackup = null; await offline((db) => { const p = db.signingPackages.find((x) => x.id === A.SID); offerBackup = p.offerId; p.offerId = globalThis.__G.OID; });
+  let offerBackup = null; await offline((db, L) => { const p = pkgOf(db, A.SID); offerBackup = p.offerId; p.offerId = globalThis.__G.OID; replacePackage(L, p); });
   await relogin();
   neg(expect(await sGet(A.SID, maria.token), 500, 'SIGNING_STATE_UNKNOWN') && expect(await pGet(A.SID, P['pl-alvarez'].token), 404, 'SIGNING_NOT_FOUND'), 'O6 a package rebound to another Offer (Kola\'s) is corruption to the club and invisible to the player');
-  await offline((db) => { const p = db.signingPackages.find((x) => x.id === A.SID); p.offerId = offerBackup; });
+  await offline((db, L) => { const p = pkgOf(db, A.SID); p.offerId = offerBackup; replacePackage(L, p); });
   await relogin();
   ok((await sGet(A.SID, maria.token)).status === 200, 'O7 rebound back: readable again, nothing repaired');
 }
@@ -586,38 +599,40 @@ section('P — case/signing/contract consistency: contradictions are named, neve
   // self-declarable, and no word replaces it while the canonical contract stands. A divergence that
   // reaches the store some other way is still detected, never repaired.
   neg(expect(await j('POST', '/player/availability', { contractStatus: 'free_agent' }, P['pl-adeyemi'].token), 409, 'CONTRACT_STATUS_CANONICAL') && (await orgPlayer('pl-adeyemi', maria.token)).contractStatus === 'under_contract', 'P2 Kola cannot declare himself a free agent while his ScoutBox contract stands (409 CONTRACT_STATUS_CANONICAL); nothing changed');
-  await offline((db) => { db.players.find((x) => x.id === 'pl-adeyemi').contractStatus = 'free_agent'; });
+  await offline((db, L) => { L.layer.players.update('pl-adeyemi', (pl) => { pl.contractStatus = 'free_agent'; }); });
   await relogin();
   const room1 = await sRoom(G.RID, maria.token);
   neg(room1.body.packages.find((p) => p.id === G.SID)?.integrity.includes('PLAYER_CONTRACT_STATUS_DIVERGED') && (await sGet(G.SID, maria.token)).status === 200 && (await orgPlayer('pl-adeyemi', maria.token)).contractStatus === 'free_agent', 'P3 a divergence planted in the store: the club surface names PLAYER_CONTRACT_STATUS_DIVERGED; the package still reads; nothing overwrote the stored value');
   neg(expect(await j('POST', '/player/availability', { contractStatus: 'under_contract' }, P['pl-adeyemi'].token), 403, 'CONTRACT_STATUS_NOT_SELF_DECLARABLE'), 'P4 under_contract cannot be self-declared either (403): only the completed-signing writer says it');
-  await offline((db) => { db.players.find((x) => x.id === 'pl-adeyemi').contractStatus = 'under_contract'; });
+  await offline((db, L) => { L.layer.players.update('pl-adeyemi', (pl) => { pl.contractStatus = 'under_contract'; }); });
   await relogin();
   ok((await sRoom(G.RID, maria.token)).body.packages.find((p) => p.id === G.SID)?.integrity.length === 0 && (await j('POST', '/player/availability', { availability: 'not_seeking' }, P['pl-adeyemi'].token)).status === 200, 'P4b restored: consistent; availability stays the player\'s own to declare');
   // (b) the completed record disappears: the package is corruption
   let rowBackup = null;
   // S8d: the completed row cannot disappear under its package — signing_packages.completion_signing_id is a real key, so
-  // the save that removes the row is refused, naming the package and the row; nothing lands (P5–P7 are unreachable states now).
-  const rowGone = await offline((db) => { const i = db.signings.findIndex((s) => s.signingPackageId === G.SID); rowBackup = db.signings[i]; db.signings.splice(i, 1); });
+  // removing the row (no repository operation does; the attacker deletes it by SQL) is refused by the key; nothing lands
+  // (P5–P7 are unreachable states now).
+  const rowGone = await offline((db, L) => { rowBackup = db.signings.find((s) => s.signingPackageId === G.SID); L.sqlite.prepare('DELETE FROM signings WHERE id = ?').run(rowBackup.id); });
   await relogin();
-  neg(rowGone && /SIGNINGS_REFERENCE_MISSING|SIGNINGS_STILL_REFERENCED/.test(rowGone.message) && rowGone.message.includes(G.SID) && rowGone.message.includes(rowBackup.id), `P5 (S8d) a COMPLETED package cannot lose its db.signings row: the save is refused with the ids (${String(rowGone?.message).slice(0, 90)}…)`);
+  neg(rowGone && /FOREIGN KEY constraint failed/.test(rowGone.message), `P5 (S8d) a COMPLETED package cannot lose its signings row: the removal is refused by the key (${String(rowGone?.message).slice(0, 90)}…)`);
   neg((await sGet(G.SID, maria.token)).status === 200 && (await sRoom(G.RID, maria.token)).body.packages.find((p) => p.id === G.SID)?.integrity.length === 0 && (await stage(G.RID, maria.token)) === 'signed' && (await journey(G.RID, maria.token)).outcome.signing?.id === rowBackup.id, 'P6 (S8d) nothing landed: the package, the case and the journey read exactly as before the attempt');
   neg(expect(await complete(G.SID, { expectedRev: 999, clientKey: key() }, maria.token), 409, 'SIGNING_ALREADY_COMPLETED') && (await signings(maria.token)).filter((s) => s.signingPackageId === G.SID).length === 1, 'P7 a "completion" of the completed package writes no second row');
   ok((await sGet(G.SID, maria.token)).status === 200 && (await journey(G.RID, maria.token)).outcome.signing?.id === rowBackup.id, 'P8 consistent: the one row stands');
   // (c) a row that names a package that never completed
   const F = globalThis.__F;
-  await offline((db) => { db.signings.push({ ...rowBackup, id: 'sign-forged', signingPackageId: F.SID, playerId: 'pl-alvarez', offerId: F.OID, caseId: F.RID }); });
+  await offline((db, L) => { L.layer.signingsFollowUps.signings.record({ ...rowBackup, id: 'sign-forged', signingPackageId: F.SID, playerId: 'pl-alvarez', offerId: F.OID, caseId: F.RID }); });
   await relogin();
   neg(expect(await sGet(F.SID, maria.token), 500, 'SIGNING_STATE_UNKNOWN') && expect(await pGet(F.SID, P['pl-alvarez'].token), 404, 'SIGNING_NOT_FOUND') && (await sRoom(F.RID, maria.token)).body.packages.find((p) => p.id === F.SID)?.integrity.includes('ROW_WITHOUT_COMPLETION'), 'P9 a db.signings row for a package that never completed: ROW_WITHOUT_COMPLETION, the package is corruption, the player sees nothing');
   neg((await stage(F.RID, maria.token)) === 'offer_accepted' && expect(await lifecycle(F.RID, 'confirmSignedOutcome', maria.token), 422, 'LIFECYCLE_EVIDENCE_REQUIRED') && (await stage(F.RID, maria.token)) === 'offer_accepted', 'P10 the forged row does not move the case by itself, and the club naming signed by hand is refused: a row that names a package is evidence only when that package completed with it (H-P71-2)');
-  // the removal takes the forged row's follow-ups with it (S8d: follow_ups.signing_id is a real key; a dangling follow-up is refused)
-  const forgedGone = await offline((db) => { db.signings = db.signings.filter((s) => s.id !== 'sign-forged'); db.followUps = db.followUps.filter((f) => f.signingId !== 'sign-forged'); db.outcomeReports = (db.outcomeReports ?? []).filter((r) => r.signingId !== 'sign-forged'); });
+  // the removal (by SQL: no repository operation removes a signing) takes the forged row's follow-ups and outcome reports
+  // with it (S8d: follow_ups.signing_id is a real key; a dangling follow-up is refused)
+  const forgedGone = await offline((db, L) => { for (const t of ['outcome_reports', 'follow_ups']) L.sqlite.prepare(`DELETE FROM ${t} WHERE signing_id = ?`).run('sign-forged'); L.sqlite.prepare('DELETE FROM signings WHERE id = ?').run('sign-forged'); });
   await relogin();
   ok(!forgedGone && (await sGet(F.SID, maria.token)).status === 200, `P11 forged row removed: readable again${forgedGone ? ` (refused: ${forgedGone.message.slice(0, 80)})` : ''}`);
-  // (d) duplicate completion records — S8d: one row per package / per offer are partial unique indexes, so the second row is refused at the save, naming the package
-  const dupRefused = await offline((db) => { db.signings.push({ ...rowBackup, id: 'sign-dup' }); });
+  // (d) duplicate completion records — S8d: one row per package / per offer are partial unique indexes, so the second row is refused by the index
+  const dupRefused = await offline((db, L) => { L.layer.signingsFollowUps.signings.record({ ...rowBackup, id: 'sign-dup' }); });
   await relogin();
-  neg(dupRefused && /SIGNINGS_UNIQUENESS/.test(dupRefused.message) && dupRefused.message.includes(G.SID) && (await sGet(G.SID, maria.token)).status === 200 && (await sRoom(G.RID, maria.token)).body.packages.find((p) => p.id === G.SID)?.integrity.length === 0, `P12 (S8d) a second row for one package is refused at the save with the package id; the one row stands (${String(dupRefused?.message).slice(0, 80)}…)`);
+  neg(dupRefused && /UNIQUE constraint failed: signings\./.test(dupRefused.message) && (await sGet(G.SID, maria.token)).status === 200 && (await sRoom(G.RID, maria.token)).body.packages.find((p) => p.id === G.SID)?.integrity.length === 0, `P12 (S8d) a second row for one package is refused by the one-row-per-package/offer index; the one row stands (${String(dupRefused?.message).slice(0, 80)}…)`);
   ok((await signings(maria.token)).filter((s) => s.signingPackageId === G.SID).length === 1, 'P13 one row: consistent');
   neg(SIGNING_CORRUPTION.includes('COMPLETED_WITHOUT_ROW') && SIGNING_CORRUPTION.includes('ROW_WITHOUT_COMPLETION') && SIGNING_CORRUPTION.includes('DUPLICATE_SIGNING_ROWS') && !SIGNING_CORRUPTION.includes('PLAYER_CONTRACT_STATUS_DIVERGED'), 'P14 (pure) the row contradictions are corruption; the player\'s declared status is a warning');
   neg(signingCorrupt(signingConsistency({ id: 'x', orgId: 'o', playerId: 'p', caseId: 'c', offerId: 'f', offerRevisionId: 'r', status: 'COMPLETED', completion: { signingId: 's1', completedAt: T0 }, revisions: [] }, { offer: null, kase: null, rows: [{ id: 's2', signingPackageId: 'x' }] }, T0)) && signingConsistency({ id: 'x', orgId: 'o', playerId: 'p', caseId: 'c', offerId: 'f', offerRevisionId: 'r', status: 'COMPLETED', completion: { signingId: 's1', completedAt: T0 }, revisions: [] }, { offer: null, kase: null, rows: [{ id: 's2', signingPackageId: 'x' }] }, T0).includes('COMPLETION_ROW_MISMATCH'), 'P15 (pure) a completion that names a row id the store does not hold for it → COMPLETION_ROW_MISMATCH');
@@ -673,18 +688,18 @@ section('R — persisted corruption: every malformed row fails closed on read an
   ];
   let backup = null;
   for (const [why, mut] of plant) {
-    if (backup) await offline((db) => { const p = db.signingPackages.find((x) => x.id === F.SID); Object.assign(p, JSON.parse(backup)); }); // S8d: the previous plant (if it landed) is undone in its own save, so a refused plant leaves the genuine row
-    const refused = await offline((db) => { const p = db.signingPackages.find((x) => x.id === F.SID); backup ??= JSON.stringify(p); mut(p); });
+    if (backup) await offline((db, L) => { replacePackage(L, JSON.parse(backup)); }); // S8d: the previous plant (if it landed) is undone in its own write, so a refused plant leaves the genuine row
+    const refused = await offline((db, L) => { const p = pkgOf(db, F.SID); backup ??= JSON.stringify(p); mut(p); replacePackage(L, p); });
     await relogin();
     const r = await sGet(F.SID, maria.token); const w = await complete(F.SID, { expectedRev: 1, clientKey: key() }, maria.token); const pr = await pGet(F.SID, P['pl-alvarez'].token);
     if (refused) {
-      // S8d: the typed columns refuse the plant at the save, naming the package; nothing landed, so the genuine row still reads for both sides and completes as before the plant
-      neg(/SIGNINGS_(IMPORT_BLOCKED|UNIQUENESS|REFERENCE_MISSING)/.test(refused.message) && refused.message.includes(F.SID) && r.status === 200 && pr.status === 200 && !has(r.body, 'stack'), `R ${why}: the columns refuse the plant at the save (${String(refused.message).slice(0, 100)}…); the genuine row reads for both sides — nothing landed`);
+      // S8d: the typed write refuses the plant, naming the package (or the key it breaks); nothing landed, so the genuine row still reads for both sides and completes as before the plant
+      neg((/SIGNINGS_(INPUT_INVALID|UNIQUENESS|REFERENCE_MISSING)/.test(refused.message) && refused.message.includes(F.SID) || /UNIQUE constraint failed: signing_/.test(refused.message)) && r.status === 200 && pr.status === 200 && !has(r.body, 'stack'), `R ${why}: the typed write refuses the plant (${String(refused.message).slice(0, 100)}…); the genuine row reads for both sides — nothing landed`);
       continue;
     }
     neg((r.status === 500 && r.body.error === 'SIGNING_STATE_UNKNOWN' || r.status === 404) && (w.status === 500 || w.status === 404) && pr.status === 404 && !has(r.body, 'stack') && !has(r.body, 'revisions'), `R ${why}: read ${r.status} ${r.body?.error}, write ${w.status}, player 404 — fails closed, no internals`);
   }
-  await offline((db) => { const p = db.signingPackages.find((x) => x.id === F.SID); Object.assign(p, JSON.parse(backup)); });
+  await offline((db, L) => { replacePackage(L, JSON.parse(backup)); });
   await relogin();
   ok((await sGet(F.SID, maria.token)).status === 200 && (await pGet(F.SID, P['pl-alvarez'].token)).status === 200, 'R restored: the genuine row reads for both sides (nothing was rewritten during the corruption)');
   ok(JSON.stringify(sv(await sGet(F.SID, maria.token))) !== '{}' && (await rowsFor(F.SID, maria.token)).length === 0, 'R no row was ever written for Alvarez through any of the corrupt states');
@@ -708,10 +723,10 @@ section('S — temporal corruption: malformed or impossible instants never widen
   neg(expect(await start(globalThis.__B.OID, { clientKey: key(), contract: { startDate: '2027-07-01', endDate: '2027-06-30' } }, maria.token), 409, 'SIGNING_ALREADY_COMPLETED') || true, 'S10 (start > end is refused at start by validateContractDates — proven in P7 A13/Y3; here the Offer already carries a completed signing)');
   // future stored timestamps on a real package: an evidence instant in the future is refused at completion by the gate's temporal order? no — it is corruption on the record
   const F = globalThis.__F;
-  let fBackup = null; await offline((db) => { const p = db.signingPackages.find((x) => x.id === F.SID); fBackup = JSON.stringify(p); p.revisions[0].requiredParties[0].completedAt = T0 + 365 * DAY; });
+  let fBackup = null; await offline((db, L) => { const p = pkgOf(db, F.SID); fBackup = JSON.stringify(p); p.revisions[0].requiredParties[0].completedAt = T0 + 365 * DAY; replacePackage(L, p); });
   await relogin();
   neg(expect(await sGet(F.SID, maria.token), 500, 'SIGNING_STATE_UNKNOWN'), 'S11 a party instant that disagrees with its evidence (edited into the future) is corruption: refused');
-  await offline((db) => { const p = db.signingPackages.find((x) => x.id === F.SID); const bk = JSON.parse(fBackup); for (const k of Object.keys(p)) delete p[k]; Object.assign(p, bk); });
+  await offline((db, L) => { replacePackage(L, JSON.parse(fBackup)); });
   await relogin();
   ok((await sGet(F.SID, maria.token)).status === 200, 'S12 restored');
 }
@@ -780,12 +795,12 @@ section('W — legacy: the direct route defers to the canonical workflow; a sign
   neg(expect(await j('POST', '/org/players/pl-alvarez/signing', { note: 'legacy' }, maria.token), 409, 'SIGNING_CANONICAL_REQUIRED'), 'W2 and one with a live package');
   const F = globalThis.__F;
   let heldStatus = null; // the status to put back (a case row has no field for it)
-  await offline((db) => { const k = db.recruitmentCases.find((c) => c.id === F.RID); heldStatus = k.room.status; k.room.status = 'signed'; });
+  await offline((db, L) => { L.layer.recruitmentCases.cases.update(F.RID, (k) => { heldStatus = k.room.status; k.room.status = 'signed'; }); });
   await relogin();
   const room = await sRoom(F.RID, maria.token);
   neg(room.status === 200 && room.body.packages.find((p) => p.id === F.SID)?.integrity.includes('LIVE_SIGNING_CASE_NOT_AT_OFFER_ACCEPTED') && room.body.legacySigning === null && (await signings(maria.token)).every((s) => s.signingPackageId !== F.SID), 'W3 a case edited to signed with a live package and no row: the surface names the contradiction, reports no legacy signing, writes nothing');
   neg(expect(await pSign(F.SID, { revisionId: F.SREV, documentSha256: SHA_A, clientKey: key() }, P['pl-alvarez'].token), 409, 'SIGNING_LIFECYCLE_CONFLICT') || expect(await pSign(F.SID, { revisionId: F.SREV, documentSha256: SHA_A, clientKey: key() }, P['pl-alvarez'].token), 409, 'SIGNING_PARTY_ALREADY_COMPLETED'), 'W4 nobody can sign into a case that claims to be signed');
-  await offline((db) => { const k = db.recruitmentCases.find((c) => c.id === F.RID); k.room.status = heldStatus; });
+  await offline((db, L) => { L.layer.recruitmentCases.cases.update(F.RID, (k) => { k.room.status = heldStatus; }); });
   await relogin();
   ok((await sRoom(F.RID, maria.token)).body.packages.find((p) => p.id === F.SID)?.integrity.length === 0, 'W5 restored: consistent');
 }

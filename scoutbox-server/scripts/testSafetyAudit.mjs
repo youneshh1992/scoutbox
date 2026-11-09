@@ -1,7 +1,7 @@
 // S6b, explicit since S14b — the eight audit collections as typed tables (repositories/safetyAudit.mjs, migration
 // 0013_safety_audit amended in place). Q4: the five player references (blocks, reports, org notes, ledger, source
 // changes) carry no key and an unresolved id is counted, never refused. Q4b: the ID-check queue names an existing
-// guardian, checked on every write and every snapshot. Q5: lifting a block deletes its row.
+// guardian, checked on every write. Q5: lifting a block deletes its row.
 //
 // Covered: the schema (typed columns, vocabulary CHECKs, organisation and staff RESTRICT keys, no key on a player or
 // guardian id, the ledger details as typed columns by type); the repository's explicit writes (each record typed — an
@@ -10,15 +10,16 @@
 // deep-frozen reads); the queries the routes use (blocks, the report triage order and its cursor, the reporter's
 // list, the ledger's lists, counts and paging, the source-change cap); units of work (a write joins the open unit and
 // rolls back with it; a read inside the unit sees its writes); no db.<collection> name (each throws, naming the
-// repository); the snapshot path (round trip, refusals by id, the final-state guardian check in both directions).
+// repository); fixtures written through the repository (round trip, refusals by id, nothing written).
 // Temporary databases only; nothing touches DATA_DIR. Run with: npm test
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { runDataMigrations } from '../repositories/database.mjs';
 import { attachDataLayer, DATA_MIGRATIONS, TABLE_BACKED } from '../repositories/index.mjs';
-import { createSafetyAuditRepository, SAFETY_AUDIT_SNAPSHOT, AUDIT_COLLECTIONS, LEDGER_TYPES, LEDGER_DETAIL } from '../repositories/safetyAudit.mjs';
+import { createSafetyAuditRepository, AUDIT_COLLECTIONS, LEDGER_TYPES, LEDGER_DETAIL } from '../repositories/safetyAudit.mjs';
 import { openStore } from '../store.mjs';
 import { NOW, TTL, tempDir, openRaw, applied, dump, FIXTURE, ORGS, USERS, SESSIONS, hasBlobTable } from './coreIdentityTestFixtures.mjs';
+import { writeFixture, readRecords } from './dataLayerFixture.mjs';
 
 let passed = 0;
 const only = process.env.TEST_ONLY || '';
@@ -42,9 +43,9 @@ const ops = (over = {}) => ({ id: 'ops-1', at: T, kind: 'backup_created', detail
 const srcc = (over = {}) => ({ id: 'srcc-1', playerId: 'pl-adult', type: 'position_changed', sourceSystem: 'passport_prefs', sourceId: 'pl-adult:ST', occurredAt: T, detail: { to: 'ST', submittedBy: 'player' }, ...over });
 const idv = (over = {}) => ({ id: 'idv-1', guardianId: 'gd-primary', guardianName: 'Primary Parent', documentType: 'passport', documentRef: '4567', provider: 'dev-attestation', reference: 'idv_0123456789abcdef', ts: T, status: 'approved', ...over });
 
-/** The fixture's identity, organisation and staff with the given audit collections, as a snapshot-mode save writes them. */
+/** The fixture's identity, organisation and staff with the given audit collections, written through the repositories. */
 const fixtureDb = (audit = {}) => ({ ...FIXTURE(), orgs: ORGS(), users: USERS(), sessions: SESSIONS(), ...audit });
-function fixtureFile(dir, audit = {}) { const tool = openStore(dir); tool.save({ idCounter: 1000, db: fixtureDb(audit) }); tool.sqlite.close(); }
+function fixtureFile(dir, audit = {}) { writeFixture(dir, fixtureDb(audit), { now: NOW, idCounter: 1000 }); }
 const migrate = (s) => runDataMigrations(s, DATA_MIGRATIONS, { now: NOW, context: { sessionTtlMs: TTL } });
 /** A repository on a bare migrated connection holding the fixture. */
 function bare(tag, audit = {}) {
@@ -54,9 +55,8 @@ function bare(tag, audit = {}) {
 /** A live server-mode store with the data layer attached, as the server runs it. */
 function live(dir) {
   const store = openStore(dir, { tableBacked: TABLE_BACKED });
-  const db = {};
-  const layer = attachDataLayer({ db, store, nextId, persist: () => {}, sessionTtlMs: TTL, now: () => NOW, warn: () => {} });
-  return { store, db, layer, repo: layer.safetyAudit, close: () => store.sqlite.close() };
+  const layer = attachDataLayer({ store, nextId, sessionTtlMs: TTL, now: () => NOW, warn: () => {} });
+  return { store, layer, repo: layer.safetyAudit, close: () => store.sqlite.close() };
 }
 const ids = (s, table) => s.prepare(`SELECT id FROM ${table} ORDER BY seq`).all().map((r) => r.id);
 
@@ -198,33 +198,29 @@ test('units of work: a write joins the open unit, a read inside it sees the writ
   L.close(); rm(dir);
 });
 
-// ============================================================= the snapshot path
-test('the snapshot path: a whole-file save round-trips all eight collections; an omitted collection is kept; junk is refused by position and id (never by value) and changes nothing; an organisation the audit rows name cannot be dropped; the IDV guardians are judged on the FINAL state (a queue naming a missing guardian refused; an identity rewrite removing a guardian the queue names refused, the queue omitted)', () => {
+// ============================================================= fixtures
+test('fixtures: all eight collections written through the repository read back record for record; junk is refused by collection and id (never by value) and writes nothing; a missing organisation or ID-check guardian is refused; Q4: a player id that resolves to nothing is stored as it is', () => {
   const audit = { blocks: [block()], reports: [report(), report({ id: 'rep-2', status: 'resolved', outcome: 'Done.', resolvedAt: T + 1 })], moderationLog: [modHit()], orgNotes: [note()], ledger: [led(), led({ id: 'led-c', type: 'combine_request_created', detail: { requestId: 'cr', protocols: ['a@1'] } })], opsEvents: [ops()], sourceChanges: [srcc()], idvQueue: [idv()] };
-  const dir = tempDir('sa-snap'); fixtureFile(dir, audit);
-  const tool = openStore(dir);
-  const read = () => SAFETY_AUDIT_SNAPSHOT.read(tool.sqlite);
+  const dir = tempDir('sa-fix'); fixtureFile(dir, audit);
+  const read = () => { const r = readRecords(dir); return Object.fromEntries(AUDIT_COLLECTIONS.map((n) => [n, r[n]])); };
+  const dumpOf = () => { const s = openRaw(dir); try { return dump(s); } finally { s.close(); } };
   assert.deepEqual(plain(read()), plain(audit), 'round trip, record for record');
-  tool.save({ idCounter: 1000, db: fixtureDb({ blocks: [] }) }); assert.deepEqual(read().blocks, []); assert.deepEqual(plain(read().ledger), plain(audit.ledger), 'an omitted collection is kept');
-  const before = dump(tool.sqlite); const SECRET = 'SECRET-NOTE-44';
+  const before = dumpOf(); const SECRET = 'SECRET-NOTE-44';
   for (const [label, extra, re] of [
-    ['duplicate', { ledger: [led(), led()] }, /SAFETY_AUDIT_IMPORT_BLOCKED[^]*ledger entry #1 duplicates/],
-    ['not an object', { blocks: ['blk-2'] }, /blocks entry #0 is not an object/],
-    ['not an array', { reports: { id: 'r' } }, /reports: the snapshot collection must be an array/],
-    ['unknown field', { orgNotes: [note({ secret: SECRET })] }, /orgNotes entry #0 note-1 carries field\(s\)[^]*secret/],
-    ['wrong type', { orgNotes: [note({ text: [SECRET] })] }, /orgNotes entry #0 note-1\.text must be text/],
-    ['missing org', { blocks: [block({ orgId: 'org-nobody' })] }, /SAFETY_AUDIT_REFERENCE_MISSING[^]*blocks blk-1 orgId → orgs org-nobody/],
-    ['missing guardian', { idvQueue: [idv({ guardianId: 'gd-missing' })] }, /IDV_GUARDIAN_MISSING[^]*idv-1/],
+    ['duplicate', { ledger: [led({ id: 'led-d' }), led({ id: 'led-d' })] }, /AUDIT_DUPLICATE[^]*ledger led-d already exists/],
+    ['not an object', { blocks: ['blk-2'] }, /AUDIT_RECORD_INVALID[^]*not an object/],
+    ['unknown field', { orgNotes: [note({ id: 'note-2', secret: SECRET })] }, /AUDIT_RECORD_INVALID[^]*note-2 carries field\(s\)[^]*secret/],
+    ['wrong type', { orgNotes: [note({ id: 'note-2', text: [SECRET] })] }, /AUDIT_RECORD_INVALID[^]*note-2\.text must be text/],
+    ['missing org', { blocks: [block({ id: 'blk-2', orgId: 'org-nobody' })] }, /AUDIT_REFERENCE_MISSING[^]*org-nobody/],
+    ['missing guardian', { idvQueue: [idv({ id: 'idv-2', guardianId: 'gd-missing' })] }, /IDV_GUARDIAN_MISSING[^]*idv-2/],
   ]) {
-    assert.throws(() => tool.save({ idCounter: 1000, db: fixtureDb(extra) }), (e) => re.test(e.message) && !e.message.includes(SECRET), label);
-    assert.equal(dump(tool.sqlite), before, `${label}: nothing changed`);
+    assert.throws(() => writeFixture(dir, extra, { now: NOW }), (e) => re.test(e.message) && !e.message.includes(SECRET), label);
+    assert.equal(dumpOf(), before, `${label}: nothing changed`);
   }
-  const { idvQueue: _q, ...noQueue } = fixtureDb();
-  assert.throws(() => tool.save({ idCounter: 1000, db: { ...noQueue, guardians: noQueue.guardians.filter((g) => g.id !== 'gd-primary'), players: noQueue.players.filter((p) => !p.guardianId) } }), /IDV_GUARDIAN_MISSING|guardian/, 'the queue still names gd-primary');
-  assert.equal(dump(tool.sqlite), before);
-  tool.save({ idCounter: 1000, db: fixtureDb({ ledger: [led({ playerId: 'pl-gone' })], sourceChanges: [srcc({ playerId: 'pl-gone' })] }) });
-  assert.equal(read().ledger[0].playerId, 'pl-gone', 'Q4: a player id that resolves to nothing is stored as it is');
-  tool.sqlite.close(); rm(dir);
+  writeFixture(dir, { ledger: [led({ id: 'led-gone', playerId: 'pl-gone' })], sourceChanges: [srcc({ id: 'srcc-gone', playerId: 'pl-gone' })] }, { now: NOW });
+  assert.equal(read().ledger.find((l) => l.id === 'led-gone').playerId, 'pl-gone', 'Q4: a player id that resolves to nothing is stored as it is');
+  assert.equal(read().sourceChanges.find((c) => c.id === 'srcc-gone').playerId, 'pl-gone');
+  rm(dir);
 });
 
 console.log(`safety audit: ${passed} checks passed`);

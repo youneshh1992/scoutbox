@@ -27,7 +27,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import { tempDir } from './coreIdentityTestFixtures.mjs';
-import { SAFETY_AUDIT_SNAPSHOT } from '../repositories/safetyAudit.mjs';
+import { createSafetyAuditRepository } from '../repositories/safetyAudit.mjs';
 
 let passed = 0;
 const only = process.env.TEST_ONLY || '';
@@ -79,8 +79,8 @@ const live = (dir) => !!q1(dir, 'SELECT 1 AS one FROM data_migrations WHERE id =
 const hasBlobTable = (dir) => !!q1(dir, "SELECT 1 AS one FROM sqlite_master WHERE type = 'table' AND name = 'collections'");
 /** The typed record: every key of the collection in the writer's order, an absent key null. */
 const ordered = (row, keys) => Object.fromEntries(keys.map((k) => [k, row[k] === undefined ? null : row[k]]));
-/** The rows as the DATABASE holds them, in insertion order, as typed records (decoded by the repository's snapshot reader on a second connection). */
-const stored = (dir, name) => { const s = new DatabaseSync(path.join(dir, 'scoutbox.db'), { readOnly: true }); try { return SAFETY_AUDIT_SNAPSHOT.read(s)[name].map((r) => ordered(r, KEYS[name])); } finally { s.close(); } };
+/** The rows as the DATABASE holds them, in insertion order, as typed records (decoded by the repository's own export reader on a second, read-only connection). */
+const stored = (dir, name) => { const s = new DatabaseSync(path.join(dir, 'scoutbox.db'), { readOnly: true }); try { return createSafetyAuditRepository({ sqlite: s }).exportAll()[name].map((r) => ordered(r, KEYS[name])); } finally { s.close(); } };
 const storedAll = (dir) => Object.fromEntries(COLLECTIONS.map((n) => [n, stored(dir, n)]));
 const canon = (name, rows) => rows.map((r) => ordered(r, KEYS[name]));
 

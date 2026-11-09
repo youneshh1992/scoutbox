@@ -5,17 +5,18 @@
 // not match its clocks); an invite is found by its code's hash only, and moves pending → accepted (naming staff of its
 // organisation) | revoked | expired once; an organisation has one SSO configuration and a sign-in state is used once,
 // decided in the database; a ticket keeps its references and replies as ordered rows; a grant is approved for its
-// hours and logs every read; a rolled-back unit leaves nothing; and the snapshot write types,
+// hours and logs every read; a rolled-back unit leaves nothing; and a fixture written through the repository is typed,
 // names a missing reference and reads back what it wrote. Temporary databases only; nothing touches DATA_DIR.
 // Run with: npm test
 
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import crypto from 'node:crypto';
-import { attachDataLayer, DATA_MIGRATIONS, TABLE_BACKED, readTableBacked } from '../repositories/index.mjs';
+import { attachDataLayer, DATA_MIGRATIONS, TABLE_BACKED } from '../repositories/index.mjs';
+import { openLayer, readRecords, writeFixture } from './dataLayerFixture.mjs';
 import { openStore } from '../store.mjs';
 import { NOW, TTL, tempDir, USERS } from './coreIdentityTestFixtures.mjs';
-import { saveFixture, ORG, SCOUT } from './recruitmentTestFixtures.mjs';
+import { saveFixture, fixtureDb, ORG, SCOUT } from './recruitmentTestFixtures.mjs';
 import {
   ENTERPRISE_MIGRATION as MIGRATION, ENTERPRISE_TABLES as TABLES, ENTERPRISE_COLLECTIONS as COLLECTIONS,
   typeInvite, typeSsoState, typeTicket, typeGrant, typeRefs,
@@ -46,10 +47,8 @@ const grant = (over = {}) => ({ id: 'sag-1', ticketId: 'tkt-1', orgId: ORG.id, h
 const FIX = () => ({ users: [...USERS()], notifications: [], dispatches: [] });
 function serverOpen(dir) {
   const store = openStore(dir, { tableBacked: TABLE_BACKED });
-  const db = {}; // S14a: a fixture-saved file is not a first installation, so there is nothing to hand in
-  const layer = attachDataLayer({ db, store, nextId, persist: () => {}, sessionTtlMs: TTL, now: () => NOW, warn: () => {} });
-  const snapshot = () => ({ savedAt: NOW, idCounter: 1000, db });
-  return { store, db, repo: layer.enterprise, unit: (w) => store.unitOfWork(w, { snapshot }), close: () => store.sqlite.close() };
+  const layer = attachDataLayer({ store, nextId, sessionTtlMs: TTL, now: () => NOW, warn: () => {} });
+  return { store, repo: layer.enterprise, unit: (w) => store.unitOfWork(w), close: () => store.sqlite.close() };
 }
 const seeded = (label) => { const dir = tempDir(label); saveFixture(dir, FIX()); return { dir, s: serverOpen(dir) }; };
 
@@ -58,7 +57,7 @@ test('[schema] 0035 is registered after 0034 and creates the STRICT tables (no J
   const ids = DATA_MIGRATIONS.map((m) => m.id);
   assert.equal(ids.indexOf(MIGRATION), ids.indexOf('0034_integrations') + 1);
   for (const n of COLLECTIONS) assert.ok(TABLE_BACKED.includes(n), `${n} is table-backed`);
-  const dir = tempDir('s13b-empty'); const s = openStore(dir).sqlite;
+  const dir = tempDir('s13b-empty'); const s = openLayer(dir).sqlite;
   for (const t of TABLES) {
     const sql = s.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?").get(t).sql;
     assert.match(sql, /STRICT\s*$/, `${t} is STRICT`);
@@ -156,7 +155,7 @@ test('[support] a ticket keeps references and replies as rows; a grant is approv
   s.close(); rm(dir);
 });
 
-// ------------------------------------------------------------- units, retirement, snapshot
+// ------------------------------------------------------------- units, retirement, fixtures
 test('[unit] a rolled-back unit leaves nothing', () => {
   const { dir, s } = seeded('s13b-unit');
   assert.throws(() => s.unit(() => { s.repo.tickets.create(ticket()); s.repo.grants.request(grant()); throw new Error('boom'); }), /boom/);
@@ -165,25 +164,51 @@ test('[unit] a rolled-back unit leaves nothing', () => {
   s.close(); rm(dir);
 });
 
-test('[snapshot] the write types every record, names a missing reference, and reads back what it wrote', () => {
-  const dir = tempDir('s13b-snapshot');
+/**
+ * Records written the way the routes write them: an organisation's SSO configuration is configured (again when it was
+ * changed); a ticket is opened, then each reply sent (the last closing it when it is closed); an access grant is
+ * requested, then approved, then each read logged.
+ */
+const WRITERS = {
+  ssoConfigs: (L, records) => {
+    for (const c of records) {
+      L.enterprise.sso.configure({ id: c.id, orgId: c.orgId, issuer: c.issuer, clientId: c.clientId, at: c.createdAt });
+      if (c.updatedAt !== c.createdAt) L.enterprise.sso.configure({ id: c.id, orgId: c.orgId, issuer: c.issuer, clientId: c.clientId, at: c.updatedAt });
+    }
+  },
+  supportTickets: (L, records) => {
+    for (const { replies = [], status, ...t } of records) {
+      L.enterprise.tickets.create({ ...t, status: 'open', replies: [] });
+      replies.forEach((r, i) => L.enterprise.tickets.reply(t.id, r, { close: status === 'closed' && i === replies.length - 1 }));
+    }
+  },
+  supportAccessGrants: (L, records) => {
+    for (const { status, approvedBy, approvedAt, expiresAt, accessLog = [], ...g } of records) {
+      L.enterprise.grants.request({ ...g, status: 'requested', approvedBy: null, approvedAt: null, expiresAt: null, accessLog: [] });
+      if (status === 'active') L.enterprise.grants.approve(g.id, { by: approvedBy, at: approvedAt });
+      for (const a of accessLog) L.enterprise.grants.logAccess(g.id, a);
+    }
+  },
+};
+const write = (dir, records) => writeFixture(dir, records, { now: NOW, writers: WRITERS });
+test('[fixtures] a record written through the repository is typed, a missing reference is named, a refused write leaves nothing, and the records read back as written', () => {
+  const dir = tempDir('s13b-fix');
   const live = grant({ status: 'active', approvedBy: 'Maria', approvedAt: NOW + 1, expiresAt: NOW + 1 + 4 * 3600_000, accessLog: [{ at: NOW + 2, what: 'org-records' }] });
   const replied = ticket({ replies: [{ at: NOW + 1, by: 'Trust & Safety', text: 'Hello' }] });
   const cfg = { id: 'sso-1', orgId: ORG.id, issuer: 'local-test-idp', clientId: 'scoutbox-org-pro', createdAt: NOW, updatedAt: NOW };
-  saveFixture(dir, { ...FIX(), orgInvites: [invite()], ssoConfigs: [cfg], ssoStates: [ssoState()], supportTickets: [replied], supportAccessGrants: [live] });
-  const store = openStore(dir);
-  const back = readTableBacked(store.sqlite);
+  write(dir, fixtureDb({ ...FIX(), orgInvites: [invite()], ssoConfigs: [cfg], ssoStates: [ssoState()], supportTickets: [replied], supportAccessGrants: [live] }));
+  const back = readRecords(dir);
   assert.deepEqual(plain(back.orgInvites), [plain(invite())]);
+  assert.deepEqual(plain(back.ssoConfigs), [cfg]);
   assert.deepEqual(plain(back.supportTickets), [plain(replied)]);
   assert.deepEqual(plain(back.supportAccessGrants), [plain(live)]);
   assert.deepEqual(plain(back.ssoStates), [plain(ssoState())]);
-  const snap = store.load();
-  refused(() => store.save({ ...snap, db: { ...snap.db, supportAccessGrants: [grant({ ticketId: 'tkt-none' })] } }), /ENTERPRISE_REFERENCE_MISSING.*tkt-none/);
-  refused(() => store.save({ ...snap, db: { ...snap.db, orgInvites: [{ ...invite(), token: 'plain' }] } }), /ENTERPRISE_IMPORT_BLOCKED.*does not store: token/);
-  refused(() => store.save({ ...snap, db: { ...snap.db, ssoConfigs: [cfg, { ...cfg, id: 'sso-2' }] } }), /two SSO configurations name the same organisation/);
-  refused(() => store.save({ ...snap, db: { ...snap.db, supportTickets: [ticket({ refs: [{ kind: 'note', id: 'x' }] })] } }), /ENTERPRISE_IMPORT_BLOCKED.*refs\[0\]\.kind/);
-  assert.deepEqual(readTableBacked(store.sqlite).supportTickets.map((t) => t.replies.length), [1], 'a refused write changed nothing');
-  store.sqlite.close(); rm(dir);
+  refused(() => write(dir, { supportAccessGrants: [grant({ id: 'sag-2', ticketId: 'tkt-none' })] }), /ENTERPRISE_REFERENCE_MISSING.*tkt-none/);
+  refused(() => write(dir, { orgInvites: [{ ...invite({ id: 'inv-2' }), token: 'plain' }] }), /ENTERPRISE_INPUT_INVALID.*does not store: token/);
+  refused(() => write(dir, { supportTickets: [ticket({ id: 'tkt-2', refs: [{ kind: 'note', id: 'x' }] })] }), /ENTERPRISE_INPUT_INVALID.*refs\[0\]\.kind/);
+  const after = readRecords(dir);
+  assert.deepEqual([after.orgInvites.length, after.supportTickets.map((t) => t.replies.length), after.supportAccessGrants.length], [1, [1], 1], 'a refused write changed nothing');
+  rm(dir);
 });
 
 console.log(`\n${passed} enterprise checks passed`);

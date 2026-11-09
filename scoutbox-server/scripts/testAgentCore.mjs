@@ -5,14 +5,14 @@
 // a facet filed under the wrong member association, a request entry that disagrees with its agreement, a minor);
 // each record is created whole and read back; an update keeps what never changes, writes a key once, never reopens an
 // ended membership, keeps a share's content and only grows the history; the queries answer what the routes need; a
-// client's removal leaves id-only tombstones; a rolled-back unit leaves nothing; and the
-// snapshot write types every record, names a missing staff member and reads back what it wrote. Temporary databases
+// client's removal leaves id-only tombstones; a rolled-back unit leaves nothing; and a
+// fixture written through the repository is typed, refuses a missing staff member and reads back what it wrote. Temporary databases
 // only; nothing touches DATA_DIR. Run with: npm test
 
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { attachDataLayer, DATA_MIGRATIONS, TABLE_BACKED, readTableBacked } from '../repositories/index.mjs';
-import { openStore } from '../store.mjs';
+import { DATA_MIGRATIONS, TABLE_BACKED } from '../repositories/index.mjs';
+import { openLayer, readRecords } from './dataLayerFixture.mjs';
 import { NOW, TTL, tempDir } from './coreIdentityTestFixtures.mjs';
 import { saveFixture, ORG, SCOUT } from './recruitmentTestFixtures.mjs';
 import {
@@ -62,11 +62,8 @@ const agreement = (over = {}) => {
 const share = (over = {}) => ({ id: 'shr-1', opportunityId: 'opp-1', via: 'opportunity', title: 'Trial at Eastport', orgName: ORG.name, deadline: null, note: 'Worth a look', sharedAt: NOW, sharedBy: { kind: 'org', userId: UID, name: SCOUT.name }, withdrawnAt: null, rev: 1, revAt: NOW, keys: {}, ...over });
 
 function serverOpen(dir) {
-  const store = openStore(dir, { tableBacked: TABLE_BACKED });
-  const db = {}; // S14a: a fixture-saved file is not a first installation, so there is nothing to hand in
-  const layer = attachDataLayer({ db, store, nextId, persist: () => {}, sessionTtlMs: TTL, now: () => NOW, warn: () => {} });
-  const snapshot = () => ({ savedAt: NOW, idCounter: 1000, db });
-  return { store, db, repo: layer.agentCore, unit: (w) => store.unitOfWork(w, { snapshot }), close: () => store.sqlite.close() };
+  const L = openLayer(dir, { nextId, sessionTtlMs: TTL, now: () => NOW });
+  return { store: L.store, repo: L.layer.agentCore, unit: L.unit, close: L.close };
 }
 
 // ------------------------------------------------------------- schema
@@ -75,7 +72,7 @@ test('[schema] 0026 is registered after 0025, creates the fifteen STRICT tables 
   assert.equal(ids.indexOf(MIGRATION), ids.indexOf('0025_transitions_vouches') + 1);
   assert.equal(TABLES.length, 15);
   for (const n of COLLECTIONS) assert.ok(TABLE_BACKED.includes(n), `${n} is table-backed`);
-  const dir = tempDir('s11a-empty'); const s = openStore(dir).sqlite;
+  const dir = tempDir('s11a-empty'); const s = openLayer(dir).sqlite;
   for (const t of TABLES) {
     assert.match(s.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?").get(t).sql, /STRICT\s*$/, `${t} is STRICT`);
     assert.equal(s.prepare(`SELECT count(*) AS n FROM ${t}`).get().n, 0);
@@ -230,21 +227,22 @@ test('[units] a rolled-back unit leaves nothing', () => {
   } finally { s.close(); rm(dir); }
 });
 
-test('[snapshot] the snapshot write types every record, names a missing staff member, and reads back what it wrote', () => {
-  const dir = tempDir('s11a-snap');
+test('[fixtures] a record written through the repository is typed, a missing staff member is refused, and the records read back as written', () => {
+  const dir = tempDir('s11a-fix');
   const p = profile({ facets: { ...newFacets(), fifa_licence: verified() } });
   saveFixture(dir, { agentProfiles: [p], agencyAffiliations: [affiliation()], representationAgreements: [agreement()] });
-  const store = openStore(dir);
   try {
-    const back = readTableBacked(store.sqlite);
+    const back = readRecords(dir);
     assert.deepEqual(back.agentProfiles, [typeAgentProfile(p).record]);
     assert.deepEqual(back.agencyAffiliations, [typeAgencyAffiliation(affiliation()).record]);
     assert.deepEqual(back.representationAgreements, [typeRepresentationAgreement(agreement()).record]);
-    refused(() => store.save({ savedAt: NOW, idCounter: 1000, db: { ...store.load().db, agencyAffiliations: [affiliation({ userId: 'usr-none' })] } }), /AGENT_CORE_REFERENCE_MISSING[\s\S]*aff-1 userId → org_users usr-none/, 'missing staff member');
-    refused(() => store.save({ savedAt: NOW, idCounter: 1000, db: { ...store.load().db, representationAgreements: [agreement({ status: 'signed' })] } }), /AGENT_CORE_IMPORT_BLOCKED.*rep-1.*status/, 'an unknown status');
-    refused(() => store.save({ savedAt: NOW, idCounter: 1000, db: { ...store.load().db, agentProfiles: [p, profile({ id: 'agp-2', history: [entry('aud-p9', 'agent_profile_created')] })] } }), /two agent profiles name one staff member/, 'two profiles for one person');
-    assert.deepEqual(readTableBacked(store.sqlite).agentProfiles, [typeAgentProfile(p).record], 'a refused save wrote nothing');
-  } finally { store.sqlite.close(); rm(dir); }
+    const bad = [tempDir('s11a-fix-staff'), tempDir('s11a-fix-status'), tempDir('s11a-fix-two')];
+    refused(() => saveFixture(bad[0], { agencyAffiliations: [affiliation({ userId: 'usr-none' })] }), /FOREIGN KEY constraint failed/, 'missing staff member');
+    refused(() => saveFixture(bad[1], { representationAgreements: [agreement({ status: 'signed' })] }), /AGENT_CORE_INPUT_INVALID.*rep-1.*status/, 'an unknown status');
+    refused(() => saveFixture(bad[2], { agentProfiles: [p, profile({ id: 'agp-2', history: [entry('aud-p9', 'agent_profile_created')] })] }), /AGENT_CORE_DUPLICATE: agent_profiles: usr-1 already has a profile/, 'two profiles for one person');
+    for (const d of bad) { const r = readRecords(d); assert.deepEqual([r.agentProfiles.length, r.agencyAffiliations.length, r.representationAgreements.length], [0, 0, 0], 'a refused fixture wrote nothing'); }
+    rm(...bad);
+  } finally { rm(dir); }
 });
 
 console.log(`\nagent core repository: ${passed} checks passed`);

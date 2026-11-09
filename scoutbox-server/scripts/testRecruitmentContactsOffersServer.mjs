@@ -6,7 +6,7 @@
 // and another club's surfaces unchanged (no internal note, no decision id, no body in the journey; another club's 404);
 // a SIGKILL right after a send; the deletion unit's in-place edits with a REAL COMMIT failure leaving every row as it
 // was and the retry landing once; a restored backup given a contact naming a historically missing player serves and
-// counts it (Q8c-a), while one naming a missing guardian is refused at the save (Q8c-b); the admin backup (a copy of the
+// counts it (Q8c-a); the admin backup (a copy of the
 // database) holding the two collections, a restore into a NEW directory serving them row for row.
 // Every database read goes through a second read-only connection. Nothing here touches DATA_DIR or real data. Run
 // with: npm test
@@ -19,7 +19,7 @@ import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import { tempDir } from './coreIdentityTestFixtures.mjs';
 import { readContacts, readOffers } from '../repositories/recruitmentContactsOffers.mjs';
-import { openStore } from '../store.mjs';
+import { openLayer } from './dataLayerFixture.mjs';
 
 let passed = 0;
 const only = process.env.TEST_ONLY || '';
@@ -158,7 +158,7 @@ await test('[routes] a fresh boot records 0017_recruitment_contacts_offers; the 
   await S.stop(); rm(dir);
 });
 
-await test('[routes] the deletion unit redacts the person\'s contacts and offers through the repository (the reply\'s message, the response names and the history names NULL, subject_removed_at set; ids, states and times stay) — a failure of the REAL COMMIT leaves every row as it was and the retry lands once; a restored backup to which a contact naming a historically missing player is added (a snapshot-mode save) serves it as today and counts it (Q8c-a), never refused; one naming a missing guardian is refused by the save with ids (Q8c-b), the file unchanged', async () => {
+await test('[routes] the deletion unit redacts the person\'s contacts and offers through the repository (the reply\'s message, the response names and the history names NULL, subject_removed_at set; ids, states and times stay) — a failure of the REAL COMMIT leaves every row as it was and the retry lands once; a restored backup to which a contact naming a historically missing player is added (through the repository) serves it as today and counts it (Q8c-a), never refused', async () => {
   const dir = tempDir('s8c-unit'); let S = await boot(dir);
   const maria = await orgLogin(S); const a = await signupAdult(S, 'Leaving Adult'); const RID = await plannedRoom(S, maria, a.pid);
   const d = await S.j('POST', `/org/rooms/${RID}/contacts`, { subject: 'Hello', body: 'Body.', clientKey: 'u-create' }, maria); assert.equal(d.status, 201, d.text); const CID = d.body.contact.id;
@@ -178,19 +178,15 @@ await test('[routes] the deletion unit redacts the person\'s contacts and offers
   // every reference OCCURRENCE of the retained person is counted (the review of 535e247, F3): the contact's parent and its player recipient; the offer's parent, the issued revision's recipient snapshot, the acceptance's for-player id and its player actor
   const cap = await S.j('GET', '/capabilities'); assert.deepEqual(cap.body.dataLayer.domains.recruitmentContactsOffers.retainedPlayerReferences, { recruitmentContacts: 2, recruitmentOffers: 4 }, 'the retained person counted per occurrence');
   const rd = await S.j('GET', `/org/rooms/${RID}/contacts/${CID}`, undefined, maria); assert.equal(rd.status, 200, rd.text); assert.equal(rd.body.contact.response?.message ?? null, null, '[compat] the contact is served with the reply\'s words removed');
-  // Q8c-a / Q8c-b through a restored backup
+  // Q8c-a through a restored backup
   const bk = await S.j('POST', '/admin/backup', {}, null, A); assert.equal(bk.status, 201, bk.text); await S.stop();
   const restored = tempDir('s8c-q8c'); fs.cpSync(bk.body.dir, restored, { recursive: true });
-  const addContact = (where, extra) => { const store = openStore(where); try { const loaded = store.load(); const base = loaded.db.recruitmentContacts.find((c) => c.id === CID); loaded.db.recruitmentContacts = [...loaded.db.recruitmentContacts, { ...base, keys: { create: null, send: null, record: null }, history: [], attempts: [], ...extra }]; store.save(loaded); } finally { store.sqlite.close(); } };
+  const addContact = (where, extra) => { const L = openLayer(where); try { const contacts = L.layer.recruitmentContactsOffers.contacts; const base = contacts.byId(CID); contacts.create({ ...base, keys: { create: null, send: null, record: null }, history: [], attempts: [], ...extra }); } finally { L.close(); } };
   addContact(restored, { id: 'rct-gone', playerId: 'pl-gone-long-ago', requestId: null, status: 'cancelled', recipient: null, response: null });
   S = await boot(restored); assert.ok(live(restored)); assert.ok((await S.j('GET', '/capabilities')).body.dataLayer.domains.recruitmentContactsOffers.retainedPlayerReferences.recruitmentContacts >= 1);
   const mariaR = await orgLogin(S); const l = await S.j('GET', `/org/rooms/${RID}/contacts`, undefined, mariaR); assert.ok(JSON.stringify(l.body).includes('rct-gone'), 'the contact of a missing player is served as today');
   assert.equal((await S.j('GET', '/capabilities')).body.dataLayer.domains.recruitmentContactsOffers.unresolvedPlayerReferences.recruitmentContacts, 1); await S.stop();
-  const strict = tempDir('s8c-q8cb'); fs.cpSync(bk.body.dir, strict, { recursive: true }); const strictBefore = recDump(strict);
-  assert.throws(() => addContact(strict, { id: 'rct-ghost', requestId: null, status: 'cancelled', recipient: { type: 'guardian', playerId: a.pid, guardianId: 'gd-ghost', minor: true }, response: null }), (e) => { assert.match(e.message, /CONTACTS_OFFERS_GUARDIAN_MISSING/); assert.match(e.message, /rct-ghost → guardians gd-ghost/); assert.doesNotMatch(e.message, /The reply text|Leaving Adult/, 'ids only'); return true; }, 'Q8c-b: refused by the save');
-  assert.equal(recDump(strict), strictBefore, 'the refused save changed nothing');
-  S = await boot(strict); assert.equal(q1(strict, "SELECT count(*) AS n FROM recruitment_contacts WHERE id = 'rct-ghost'").n, 0, 'the server boots on the unchanged copy'); await S.stop();
-  rm(dir, restored, strict, bk.body.dir);
+  rm(dir, restored, bk.body.dir);
 });
 
 await test('[backup] the admin backup is a copy of the database: the two collections read back from it (keys reassembled, the attempt, the internal note, the status); a restore into a NEW directory serves them row for row', async () => {

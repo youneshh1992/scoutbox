@@ -6,12 +6,14 @@
 // records are created and read back whole, the derived fields (a snapshot's completion, a review's supersededBy and
 // share scopes) worked out on read; an update keeps the fields that never change and only grows the history; the
 // list, count, duplicate and audit-feed queries answer what the routes need; a rolled-back unit leaves nothing; the
-// db.* names throw; and the snapshot write types, names a missing reference and reads back what it wrote.
+// db.* names throw; and a fixture written through the repository is typed, refuses a missing reference (nothing
+// written) and reads back what it wrote.
 // Temporary databases only; nothing touches DATA_DIR. Run with: npm test
 
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { attachDataLayer, DATA_MIGRATIONS, TABLE_BACKED, readTableBacked } from '../repositories/index.mjs';
+import { attachDataLayer, DATA_MIGRATIONS, TABLE_BACKED } from '../repositories/index.mjs';
+import { openLayer, readRecords } from './dataLayerFixture.mjs';
 import { openStore } from '../store.mjs';
 import { NOW, TTL, tempDir } from './coreIdentityTestFixtures.mjs';
 import { saveFixture, ORG, SCOUT } from './recruitmentTestFixtures.mjs';
@@ -80,10 +82,8 @@ const review = (over = {}) => ({
 
 function serverOpen(dir) {
   const store = openStore(dir, { tableBacked: TABLE_BACKED });
-  const db = {}; // S14a: a fixture-saved file is not a first installation, so there is nothing to hand in
-  const layer = attachDataLayer({ db, store, nextId, persist: () => {}, sessionTtlMs: TTL, now: () => NOW, warn: () => {} });
-  const snapshot = () => ({ savedAt: NOW, idCounter: 1000, db });
-  return { store, db, repo: layer.development, unit: (w) => store.unitOfWork(w, { snapshot }), close: () => store.sqlite.close() };
+  const layer = attachDataLayer({ store, nextId, sessionTtlMs: TTL, now: () => NOW, warn: () => {} });
+  return { store, repo: layer.development, unit: (w) => store.unitOfWork(w), close: () => store.sqlite.close() };
 }
 /** A server-shaped store holding one club plan with a goal, an action, a link and a review. */
 function seeded(label) {
@@ -99,7 +99,7 @@ test('[schema] 0030 is registered after 0029 and creates the eighteen STRICT tab
   assert.equal(ids.indexOf(MIGRATION), ids.indexOf('0029_agent_transactions') + 1);
   for (const n of COLLECTIONS) assert.ok(TABLE_BACKED.includes(n), `${n} is table-backed`);
   assert.equal(TABLES.length, 18);
-  const dir = tempDir('s12a-empty'); const s = openStore(dir).sqlite;
+  const dir = tempDir('s12a-empty'); const s = openLayer(dir).sqlite;
   for (const t of TABLES) {
     assert.match(s.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?").get(t).sql, /STRICT\s*$/, `${t} is STRICT`);
     assert.equal(s.prepare(`SELECT count(*) AS n FROM ${t}`).get().n, 0);
@@ -235,24 +235,32 @@ test('[drills] a review is recorded (a second replaces the first) and read back;
   } finally { s.close(); rm(dir); }
 });
 
-// ------------------------------------------------------------- snapshot
-test('[snapshot] the snapshot write types every record, names a missing reference, and reads back what it wrote', () => {
-  const dir = tempDir('s12a-snap');
+// ------------------------------------------------------------- fixtures
+test('[fixtures] a fixture written through the repository is typed (junk refused naming the record, nothing written), a missing reference is refused, and the records read back as written', () => {
+  const dir = tempDir('s12a-fix');
   saveFixture(dir, {
     devObjectives: [objective()], drillGuidance: [{ drillId: 'sprint-30', reviewer: 'Coach', reviewedAt: NOW }],
     developmentPlans: [plan({ originObjectiveId: 'obj-1' })], developmentGoals: [goal()], developmentActions: [action()],
-    developmentEvidenceLinks: [link()], developmentReviews: [review({ id: 'devrev-2', supersedes: 'devrev-1', history: [] }), review()],
+    // the corrected review first, then its correction (as the route writes them)
+    developmentEvidenceLinks: [link()], developmentReviews: [review(), review({ id: 'devrev-2', supersedes: 'devrev-1', history: [] })],
   });
-  const store = openStore(dir);
   try {
-    const back = readTableBacked(store.sqlite);
+    const back = readRecords(dir);
     assert.deepEqual(plain(back.devObjectives), [objective()]);
     assert.deepEqual(plain(back.developmentPlans), [plan({ originObjectiveId: 'obj-1' })]);
-    assert.deepEqual(plain(back.developmentReviews).map((r) => [r.id, r.supersedes, r.supersededBy]), [['devrev-1', null, 'devrev-2'], ['devrev-2', 'devrev-1', null]], 'the corrected review is written first');
-    refused(() => store.save({ savedAt: NOW, idCounter: 1000, db: { ...store.load().db, developmentGoals: [goal({ planId: 'devplan-none' })] } }), /DEVELOPMENT_REFERENCE_MISSING.*devgoal-1 planId/, 'a goal of no plan');
-    refused(() => store.save({ savedAt: NOW, idCounter: 1000, db: { ...store.load().db, developmentPlans: [plan({ owner: { kind: 'org', orgId: 'org-none', orgName: null } })] } }), /FOREIGN KEY|DEVELOPMENT_KEY_VIOLATION/, 'a plan of no organisation');
-    refused(() => store.save({ savedAt: NOW, idCounter: 1000, db: { ...store.load().db, devObjectives: [objective({ reviewAt: '2026-11-05' })] } }), /DEVELOPMENT_IMPORT_BLOCKED.*obj-1.*reviewAt/, 'junk refused naming the record');
-  } finally { store.sqlite.close(); rm(dir); }
+    assert.deepEqual(plain(back.developmentReviews).map((r) => [r.id, r.supersedes, r.supersededBy]), [['devrev-1', null, 'devrev-2'], ['devrev-2', 'devrev-1', null]], 'the correction supersedes the corrected review');
+  } finally { rm(dir); }
+  const refusedFixture = (label, db, re) => {
+    const d = tempDir(`s12a-fix-${label}`);
+    try {
+      refused(() => saveFixture(d, { devObjectives: [objective({ id: 'obj-ok' })], ...db }), re, label);
+      const back = readRecords(d);
+      assert.equal(back.devObjectives.length + back.developmentPlans.length + back.developmentGoals.length, 0, `${label}: a refused fixture wrote nothing`);
+    } finally { rm(d); }
+  };
+  refusedFixture('plan', { developmentGoals: [goal({ planId: 'devplan-none' })] }, /DEVELOPMENT_REFERENCE_MISSING: development_goals devgoal-1: planId/);
+  refusedFixture('org', { developmentPlans: [plan({ owner: { kind: 'org', orgId: 'org-none', orgName: null } })] }, /FOREIGN KEY constraint failed/);
+  refusedFixture('junk', { devObjectives: [objective({ id: 'obj-ok' }), objective({ reviewAt: '2026-11-05' })] }, /DEVELOPMENT_INPUT_INVALID: devObjectives obj-1\.reviewAt/);
 });
 
 console.log(`\ndevelopment repository: ${passed} checks passed`);

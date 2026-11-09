@@ -2,7 +2,7 @@
 //
 //   1  no decision migration of its own: `roomDecisions` is the one decision
 //      table (0016), the draft lives on the case, nothing is renamed
-//   2  a snapshot with legacy + formal rows and a draft restores byte-faithfully
+//   2  a fixture with legacy + formal rows and a draft restores byte-faithfully
 //      through a real boot: chain, keys, draft rev, case status
 //   3  corrupt FORMAL rows are named and omitted, never fabricated, never
 //      repaired; duplicate final heads are corruption, not a tie (500)
@@ -18,7 +18,7 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { openStore } from '../../store.mjs';
+import { writeFixture, readRecords } from '../../scripts/dataLayerFixture.mjs';
 import { JOURNEY_REQUIRED_STORES } from '../../domains/recruitment/lifecycle/journey.mjs';
 import { decisionIntegrity, duplicateFinalHeads, chainHead, isFormal } from '../../domains/recruitment/lifecycle/decision.mjs';
 import { DATA_MIGRATIONS, TABLE_BACKED } from '../../repositories/index.mjs';
@@ -59,7 +59,7 @@ async function bootOn(dataDir, port) {
   const stop = async () => {
     proc.kill('SIGTERM');
     for (let i = 0; i < 60 && proc.exitCode == null; i += 1) await sleep(100);
-    return openStore(dataDir).load()?.db ?? null;
+    return readRecords(dataDir);
   };
   return { up, j, stop, log: () => log };
 }
@@ -121,6 +121,8 @@ const draftRow = (over = {}) => ({
   ...over,
 });
 
+const write = (dir, db) => writeFixture(dir, db);
+
 // Key-order-insensitive: since S8b (migration 0016) the five collections are read back from tables in the stored shape's
 // column order, not the writer's insertion order (the documented S8a/S8b limitation); every key and value is compared.
 const canon = (v) => (Array.isArray(v) ? v.map(canon) : v && typeof v === 'object' ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, canon(v[k])])) : v);
@@ -138,19 +140,19 @@ section('1 — no P5 migration: one decision store, the draft on the case, nothi
 }
 
 // ======================================================= 2 — byte-faithful restore
-section('2 — a snapshot with legacy + formal rows and a draft restores byte-faithfully through a real boot');
+section('2 — a fixture with legacy + formal rows and a draft restores byte-faithfully through a real boot');
 {
   const DIR = mkdtempSync(path.join(tmpdir(), 'sbx-m23d-restore-'));
   const db = baseDb();
   db.roomDecisions.push(legacyRow(), formalRow(), headRow());
   db.recruitmentCases[0].decisionDraft = draftRow();
   db.recruitmentCases[0].room.status = 'on_hold';
-  openStore(DIR).save({ db });
-  // The typed tables read every record back whole (an absent field reads null): the reference is the store as saved.
-  const saved = openStore(DIR).load().db;
+  write(DIR, db);
+  // The typed tables read every record back whole (an absent field reads null): the reference is the store as written.
+  const saved = readRecords(DIR);
   const beforeRows = saved.roomDecisions.map(stableJson); const beforeDraft = stableJson(saved.recruitmentCases[0].decisionDraft);
   const s = await bootOn(DIR, PORT);
-  ok(s.up, 'the server boots on the snapshot');
+  ok(s.up, 'the server boots on the fixture');
   const L = await lead(s);
   const sf = await s.j('GET', '/org/rooms/case-x/decision', undefined, L.token);
   ok(sf.status === 200 && sf.body.current?.id === 'rdec-formal-2' && sf.body.current.outcome === 'hold' && sf.body.current.rev === 1 && sf.body.current.supersession?.reason === 'Budget review.' && sf.body.omitted === 0 && sf.body.duplicateHeads.length === 0, 'the surface: the hold is current, with its supersession reason; nothing omitted');
@@ -163,7 +165,7 @@ section('2 — a snapshot with legacy + formal rows and a draft restores byte-fa
   const fk = await s.j('POST', '/org/rooms/case-x/decision/finalize', { expectedRev: 2, clientKey: 'fin-2' }, L.token);
   neg(fk.status === 409 && fk.body.error === 'DECISION_IDEMPOTENCY_CONFLICT', 'the finalize key on the formal row was restored too');
   const stale = await s.j('PATCH', '/org/rooms/case-x/decision/draft', { note: 'x', expectedRev: 1 }, L.token);
-  neg(stale.status === 409 && stale.body.error === 'DECISION_VERSION_CONFLICT' && stale.body.currentRev === 2, 'the draft rev is enforced from the snapshot');
+  neg(stale.status === 409 && stale.body.error === 'DECISION_VERSION_CONFLICT' && stale.body.currentRev === 2, 'the draft rev is enforced from the fixture');
   const legacyRoute = await s.j('GET', '/org/rooms/case-x/decisions', undefined, L.token);
   ok(legacyRoute.status === 200 && legacyRoute.body.current?.id === 'rdec-formal-2' && legacyRoute.body.history.length === 3, 'the M17 route reads the same three rows and the same head');
   const jr = await s.j('GET', '/org/rooms/case-x/journey', undefined, L.token);
@@ -204,29 +206,30 @@ section('3 — corrupt formal rows are named and omitted; duplicate heads are co
   // an operator fixes a copy by hand. The old contract ("tolerated on disk, omitted on read") is kept below for the
   // corrupt rows the cutover does carry losslessly: every row defect but the dangling chain pointer.
   {
-    // Since §4.2 a snapshot is written straight into the tables (store.mjs, snapshot mode): the save itself refuses
-    // such a file, names the entries, and writes nothing; there is no blob for a later boot to import.
-    // What a fresh file holds (the migrations' reference rows, by id): the yardstick for "nothing was written".
+    // A fixture is written through the decisions repository's create, one unit of work: a record it cannot type is
+    // refused by its id and field, and nothing of the fixture is written (only the first installation's organisation
+    // and player, which a new directory imports on its own, are there: the yardstick for "nothing was written").
     const rowIds = (d) => JSON.stringify(Object.fromEntries(Object.entries(d).map(([k, rows]) => [k, rows.map((r) => r?.id ?? JSON.stringify(r))])));
-    const FRESH = rowIds(openStore(mkdtempSync(path.join(tmpdir(), 'sbx-m23d-fresh-'))).load().db);
+    const { orgs, players, guardians } = baseDb();
+    const FRESH = rowIds(readRecords(writeFixture(mkdtempSync(path.join(tmpdir(), 'sbx-m23d-fresh-')), { orgs, players, guardians })));
     const refused = async (label, rows, pattern) => {
       const D = mkdtempSync(path.join(tmpdir(), 'sbx-m23d-refused-'));
       const fixture = baseDb(); fixture.roomDecisions.push(legacyRow({ supersededById: 'rdec-formal-2' }), headRow({ supersedes: 'rdec-legacy' }), ...rows);
       let err = null;
-      try { openStore(D).save({ db: fixture }); } catch (e) { err = e; }
+      try { write(D, fixture); } catch (e) { err = e; }
       const refusal = String(err?.message ?? '');
-      ok(!!err && pattern.test(refusal), `${label}: the save is REFUSED and the refusal names the entries (${refusal.slice(0, 160)}…)`);
-      ok(rowIds(openStore(D).load().db) === FRESH, `${label}: nothing was written — nothing deleted, nothing repaired`); // rewritten in S14a: load() was null with no blob
+      ok(!!err && pattern.test(refusal), `${label}: the write is REFUSED and the refusal names the entry (${refusal.slice(0, 160)}…)`);
+      ok(rowIds(readRecords(D)) === FRESH, `${label}: nothing was written — nothing deleted, nothing repaired`);
     };
-    await refused('three alien entries (null, a string, a number)', [null, 'string', 42], /roomDecisions entry #2 is not an object \(null\); roomDecisions entry #3 is not an object \(a string\); roomDecisions entry #4 is not an object \(a number\)/);
-    await refused('six corrupt rows the typed columns cannot hold', unstorable, /RECRUITMENT_CASES_INPUT_INVALID[\s\S]*6 roomDecisions entries refused[\s\S]*rdec-bad-outcome\.outcome[\s\S]*rdec-bad-proto\.outcome[\s\S]*rdec-bad-time\.createdAt[\s\S]*rdec-bad-reasons\.reasonCodes[\s\S]*rdec-bad-refs\.evidenceRefs[\s\S]*rdec-bad-rev\.rev/);
+    for (const [alien, what] of [[null, 'null'], ['string', 'a string'], [42, 'a number']]) await refused(`an alien entry (${what})`, [alien], new RegExp(`RECRUITMENT_CASES_INPUT_INVALID: roomDecisions is not an object \\(${what}\\)`));
+    for (const [r, field] of unstorable.map((r, i) => [r, ['outcome', 'outcome', 'createdAt', 'reasonCodes', 'evidenceRefs', 'rev'][i]])) await refused(`a corrupt row the typed columns cannot hold (${r.id}.${field})`, [r], new RegExp(`RECRUITMENT_CASES_INPUT_INVALID[\\s\\S]*${r.id}\\.${field}`));
     await refused('two corrupt rows whose chain pointer names a decision that does not exist', bad, /DECISION_CHAIN_BROKEN[\s\S]*rdec-bad-actor \(room case-x\) names x1 \(supersededById\): no such decision/);
   }
   // The two storable defects, each row superseded by the real head, are stored and judged on read as before.
   for (const r of bad) r.supersededById = 'rdec-formal-2';
   db.roomDecisions.push(legacyRow({ supersededById: 'rdec-formal-2' }), headRow({ supersedes: 'rdec-legacy' }), ...bad);
-  openStore(DIR).save({ db });
-  const savedRows = openStore(DIR).load().db.roomDecisions;
+  write(DIR, db);
+  const savedRows = readRecords(DIR).roomDecisions;
   const s = await bootOn(DIR, PORT + 1);
   if (!s.up) console.error(s.log().split('\n').slice(-12).join('\n'));
   ok(s.up, 'the server boots with two corrupt formal rows in the store');
@@ -250,8 +253,8 @@ section('3 — corrupt formal rows are named and omitted; duplicate heads are co
   const db2 = baseDb();
   db2.roomDecisions.push(headRow({ id: 'rdec-head-a', supersedes: null }), headRow({ id: 'rdec-head-b', supersedes: null, createdAt: T0 + 21 }));
   db2.recruitmentCases[0].decisionDraft = draftRow();
-  openStore(DIR2).save({ db: db2 });
-  const saved2 = openStore(DIR2).load().db;
+  write(DIR2, db2);
+  const saved2 = readRecords(DIR2);
   neg(duplicateFinalHeads(db2.roomDecisions).length === 2 && chainHead(db2.roomDecisions).id === 'rdec-head-b', 'the pure check names both heads (the chain reader alone would silently pick the later one)');
   const s2 = await bootOn(DIR2, PORT + 2);
   ok(s2.up, 'the server boots with two formal rows both claiming to be current');
@@ -276,8 +279,8 @@ section('4 — legacy M17 rows read as advisory and keep their chain; P5 judges 
     // An odd legacy row: no actor and no reason (a time and a reason list are typed columns now; a save refuses junk there).
     legacyRow({ id: 'rdec-l-odd', by: null, reasonCodes: [], supersededById: 'rdec-l1' }),
   );
-  openStore(DIR).save({ db });
-  const savedLegacy = openStore(DIR).load().db.roomDecisions;
+  write(DIR, db);
+  const savedLegacy = readRecords(DIR).roomDecisions;
   const s = await bootOn(DIR, PORT + 3);
   ok(s.up, 'the server boots on a legacy-only decision memory');
   const L = await lead(s);
@@ -295,7 +298,7 @@ section('4 — legacy M17 rows read as advisory and keep their chain; P5 judges 
 section('5 — clean boot: draft → finalize → stop → reboot: one store, keys replay, the draft is gone');
 {
   const DIR = mkdtempSync(path.join(tmpdir(), 'sbx-m23d-clean-'));
-  openStore(DIR).save({ db: baseDb() });
+  write(DIR, baseDb());
   const s = await bootOn(DIR, PORT + 4);
   const L = await lead(s);
   const d = await s.j('POST', '/org/rooms/case-x/decision/draft', { outcome: 'progress', reasonCodes: ['position_need'], note: 'Clean.', clientKey: 'clean-draft' }, L.token);

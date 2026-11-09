@@ -1,6 +1,6 @@
 // Notifications and category notification preferences as typed tables with explicit writes (repositories/
-// notifications.mjs, migration 0009; explicit since S14e, docs/architecture/migration.md §4.6): the migration; the
-// snapshot path (typed, junk refused whole, a staff audience a key); the repository's writes (each joins the open unit
+// notifications.mjs, migration 0009; explicit since S14e, docs/architecture/migration.md §4.6): the migration;
+// fixtures written through the repository (typed, junk refused whole, a staff audience a key); the repository's writes (each joins the open unit
 // of work or runs in its own transaction; junk refused by field) and its SQL reads (the feed in reverse insertion
 // order, coalescing, the counts, the undispatched notices, preferences); units of work (a failure, a caught refusal or
 // a real COMMIT failure leaves nothing); the M18.2 preference module over the repository; m13 notifyAction; the boot
@@ -10,7 +10,7 @@ import fs from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import { runDataMigrations } from '../repositories/database.mjs';
 import { attachDataLayer, DATA_MIGRATIONS, TABLE_BACKED } from '../repositories/index.mjs';
-import { createNotificationsRepository, feedItem, NOTIFICATIONS_TABLE, NOTIFICATIONS_MIGRATION, NOTIFICATION_TABLES, NOTIFY_COALESCE_MS, NOTIFICATION_LIMITS } from '../repositories/notifications.mjs';
+import { createNotificationsRepository, feedItem, typeNotification, typeNotificationPrefs, NOTIFICATIONS_MIGRATION, NOTIFICATION_TABLES, NOTIFY_COALESCE_MS, NOTIFICATION_LIMITS } from '../repositories/notifications.mjs';
 import { createOutboxPushRepository } from '../repositories/outboxPush.mjs';
 import { createDispatchesRepository } from '../repositories/dispatches.mjs';
 import { registerNotificationPrefs, CATEGORY_NAMES } from '../domains/platform/notificationPrefs.mjs';
@@ -18,6 +18,7 @@ import { createOperationsRepository } from '../repositories/operations.mjs';
 import { registerDelivery } from '../m13/delivery.mjs';
 import { openStore } from '../store.mjs';
 import { NOW, TTL, tempDir, freshFile, FIXTURE, ORGS, USERS, SESSIONS, openRaw, dump, hasBlobTable } from './coreIdentityTestFixtures.mjs';
+import { writeFixture, readRecords } from './dataLayerFixture.mjs';
 
 let passed = 0;
 const only = process.env.TEST_ONLY || '';
@@ -29,28 +30,56 @@ const MIN = 60_000;
 const HOUR = 60 * MIN;
 const tableExists = (s, t) => !!s.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(t);
 const plain = (v) => JSON.parse(JSON.stringify(v));
+const fileDump = (dir) => { const s = new DatabaseSync(`${dir}/scoutbox.db`, { readOnly: true }); try { return dump(s); } finally { s.close(); } };
 const STAFF = { kind: 'org_user', id: 'usr-1' };
 const PLAYER = { kind: 'player', id: 'pl-adult' };
 const TEXT = 'Eastport FC (Head of Recruitment) sent a message.';
-/** A notification record in the shape the snapshot path carries. */
+/** A notification record in the shape the repository reads back. */
 const ntf = (over = {}) => ({ id: 'ntf-a', ts: NOW - MIN, audience: STAFF, type: 'message', text: TEXT, refId: 'chan-1', read: false, repeatCount: 1, category: 'messages', deferredPush: false, ...over });
 const pref = (over = {}) => ({ audienceKind: 'org_user', audienceId: 'usr-1', categories: { mentions: false }, emailIntent: false, updatedAt: NOW - HOUR, ...over });
 
-/** A migrated file holding the fixture's staff, organisations, players and guardians, plus any notification collections given (a snapshot-mode save). */
+const recordInvalid = (reason) => Object.assign(new Error(`NOTIFICATION_RECORD_INVALID: ${reason}`), { code: 'NOTIFICATION_RECORD_INVALID' });
+/**
+ * The fixture writers: a whole notification record typed (junk refused by field), then written the way the routes
+ * write it (create, a coalesce per repeat, the acknowledgment, the delivery marker, markRead); a preference record
+ * typed, then one updatePrefs. markRead reads the audience's whole feed, so a read record cannot follow an unread one
+ * of the same audience.
+ */
+const WRITERS = {
+  notifications: (L, records) => {
+    const repo = L.notifications;
+    for (const raw of records) {
+      const v = typeNotification(raw); if (!v.ok) throw recordInvalid(v.reason);
+      const r = v.row;
+      if (r.read && repo.unreadCount(r.audience.kind, r.audience.id) > 0) throw new Error(`fixture: notification ${r.id} is read but an earlier one of its audience is not (markRead reads the whole feed)`);
+      repo.create({ id: r.id, audience: r.audience, type: r.type, text: r.text, refId: r.refId, category: r.category, deferredPush: r.deferredPush, actionRequired: r.action ? { deadline: r.action.deadline } : null, at: r.ts });
+      for (let i = 1; i < r.repeatCount; i++) repo.coalesce(r.id, { at: r.ts });
+      if (r.action && r.action.ackedAt !== null) repo.ack(r.id, r.audience, { at: r.action.ackedAt });
+      if (r.dispatchedAt !== null) repo.markDispatched(r.id, { at: r.dispatchedAt });
+      if (r.read) repo.markRead(r.audience.kind, r.audience.id);
+    }
+  },
+  notificationPrefs: (L, records) => {
+    for (const raw of records) {
+      const v = typeNotificationPrefs(raw); if (!v.ok) throw recordInvalid(v.reason);
+      L.notifications.updatePrefs(v.row.audienceKind, v.row.audienceId, { categories: v.row.categories, emailIntent: v.row.emailIntent }, { at: v.row.updatedAt });
+    }
+  },
+};
+const write = (dir, collections) => writeFixture(dir, collections, { now: NOW, idCounter: 1000, writers: WRITERS });
+/** A migrated file holding the fixture's staff, organisations, players and guardians, plus any notification collections given (written through the repositories). */
 function fixtureFile(dir, { notifications, notificationPrefs } = {}) {
   const db = { users: USERS(), sessions: SESSIONS(), orgs: ORGS(), ...FIXTURE(), requests: [], ledger: [] };
   if (notifications !== undefined) db.notifications = notifications;
   if (notificationPrefs !== undefined) db.notificationPrefs = notificationPrefs;
-  const tool = openStore(dir);
-  try { tool.save({ idCounter: 1000, db }); } finally { tool.sqlite.close(); }
+  write(dir, db);
 }
 const migrate = (s, { now = NOW } = {}) => runDataMigrations(s, DATA_MIGRATIONS, { now, context: { sessionTtlMs: TTL } });
 /** A server-mode store with the data layer attached, as the server runs it. */
-function live(dir, { db: given } = {}) {
+function live(dir) {
   const store = openStore(dir, { tableBacked: TABLE_BACKED });
-  const db = given ?? {};
-  const layer = attachDataLayer({ db, store, nextId, sessionTtlMs: TTL, now: () => NOW, warn: () => {} });
-  return { store, db, layer, repo: layer.notifications, close: () => store.sqlite.close() };
+  const layer = attachDataLayer({ store, nextId, sessionTtlMs: TTL, now: () => NOW, warn: () => {} });
+  return { store, layer, repo: layer.notifications, close: () => store.sqlite.close() };
 }
 const bare = (s) => createNotificationsRepository({ sqlite: s, now: () => NOW, nextId });
 
@@ -75,8 +104,8 @@ test('migration 0009: a first installation creates the tables and imports nothin
   rm(none, early, odd);
 });
 
-// ============================================================= the snapshot path
-test('snapshot save: rows are written in array position (the feed order, whatever the timestamps) with their acknowledgment contracts; absent read, repeatCount, category, deferredPush and dispatchedAt take their defaults; groupKey and ackedBy are worked out on read, never stored; preferences are written as given (a stored mandatory false included); reading back gives the same records', () => {
+// ============================================================= fixtures
+test('fixtures: rows are written in array position (the feed order, whatever the timestamps) with their acknowledgment contracts; absent read, repeatCount, category, deferredPush and dispatchedAt take their defaults; groupKey and ackedBy are worked out on read, never stored; preferences are written as given (a stored mandatory false included); reading back gives the same records', () => {
   const dir = tempDir('ntf-snap');
   const rows = [
     ntf({ id: 'ntf-1', ts: NOW - 3 * HOUR }),
@@ -91,25 +120,24 @@ test('snapshot save: rows are written in array position (the feed order, whateve
   const r2 = s.prepare('SELECT * FROM notifications WHERE id = ?').get('ntf-2');
   assert.deepEqual([r2.repeat_count, r2.read, r2.category, r2.deferred_push, r2.dispatched_at, r2.action_required, r2.staff_id], [1, 1, null, 0, null, 0, null]);
   assert.equal(s.prepare('SELECT staff_id FROM notifications WHERE id = ?').get('ntf-1').staff_id, 'usr-1', 'a staff audience is keyed through the generated column');
-  const back = NOTIFICATIONS_TABLE.read(s);
+  const back = readRecords(dir).notifications;
   assert.deepEqual(back.map((n) => n.groupKey), ['message:chan-1', 'badge:pl-adult', 'transition:trn-1', null], 'worked out from type and refId');
   assert.deepEqual(back[2].actionRequired, { deadline: NOW + 7 * 86_400_000, ackedAt: NOW, ackedBy: 'usr-1' });
   assert.deepEqual(back[1], { id: 'ntf-2', ts: NOW - 2 * HOUR, audience: PLAYER, type: 'badge', text: 'Badge earned: Regular.', refId: 'pl-adult', read: true, repeatCount: 1, groupKey: 'badge:pl-adult', category: null, deferredPush: false, dispatchedAt: null });
   assert.equal(back[3].dispatchedAt, NOW - HOUR);
   assert.deepEqual(s.prepare('SELECT audience_id, category, enabled FROM notification_pref_categories ORDER BY rowid').all().map((r) => [r.audience_id, r.category, r.enabled]), [['usr-1', 'mentions', 0], ['pl-adult', 'compliance', 0], ['pl-adult', 'discovery_nudges', 1]]);
-  // Round trip through a tool.
-  const tool = openStore(dir); const snap = tool.load(); const before = plain(snap.db.notifications);
-  tool.save(snap); assert.deepEqual(plain(tool.load().db.notifications), before, 'round-tripped'); assert.deepEqual(plain(tool.load().db.notificationPrefs), plain(prefs));
-  tool.sqlite.close(); s.close(); rm(dir);
+  assert.deepEqual(plain(readRecords(dir).notificationPrefs), plain(prefs), 'the preferences read back as written');
+  s.close(); rm(dir);
 });
 
-test('snapshot save refusals: an unknown field, a wrong-typed field, a duplicate id, an audience kind outside player/guardian/org_user, a staff audience that does not exist, an empty or over-long text, an unknown category, a group key that is not the worked-out one, an acknowledger who is not the audience; a preference with an unknown field, a non-boolean value, an unknown category, a duplicate person or no updatedAt — each refuses the whole save, naming the entry and never the text, and writes nothing', () => {
-  const dir = tempDir('ntf-snap-bad'); fixtureFile(dir, { notifications: [ntf({ id: 'ok' })], notificationPrefs: [pref()] });
+test('fixture refusals: an unknown field, a wrong-typed field, a duplicate id, an audience kind outside player/guardian/org_user, a staff audience that does not exist, an empty or over-long text, an unknown category, a group key that is not the worked-out one, an acknowledger who is not the audience; a preference with an unknown field, a non-boolean value, an unknown category or no updatedAt, or of a staff member that does not exist — each refuses the whole fixture, naming the entry and never the text, and writes nothing', () => {
+  const dir = tempDir('ntf-fix-bad'); fixtureFile(dir, { notifications: [ntf({ id: 'ok' })], notificationPrefs: [pref()] });
   const SECRET = 'SECRET-TEXT-S14E';
-  const tool = openStore(dir); const snap = tool.load(); const before = dump(tool.sqlite);
+  const before = fileDump(dir);
+  // A valid notice goes first in each refused fixture: the whole unit rolls back, so it is not written either.
   const refuse = (db, re, label) => {
-    assert.throws(() => tool.save({ ...snap, db: { ...snap.db, players: snap.db.players.map((p, i) => (i ? p : { ...p, name: 'Unrelated Change' })), ...db } }), (e) => re.test(e.message) && !e.message.includes(SECRET), label);
-    assert.equal(dump(tool.sqlite), before, `${label}: nothing written`);
+    assert.throws(() => write(dir, { ...db, notifications: [ntf({ id: 'ok-2' }), ...(db.notifications ?? [])] }), (e) => re.test(e.message) && !e.message.includes(SECRET), label);
+    assert.equal(fileDump(dir), before, `${label}: nothing written`);
   };
   for (const [label, over, re] of [
     ['an unknown field', { future: { x: 1 } }, /notification bad: unknown field\(s\) future/],
@@ -124,9 +152,8 @@ test('snapshot save refusals: an unknown field, a wrong-typed field, a duplicate
     ['a group key not worked out', { groupKey: 'message:other' }, /notification bad: groupKey is worked out/],
     ['another acknowledger', { actionRequired: { deadline: null, ackedAt: NOW, ackedBy: 'usr-2' } }, /notification bad: actionRequired\.ackedBy/],
     ['an acknowledger without an acknowledgment', { actionRequired: { deadline: null, ackedAt: null, ackedBy: 'usr-1' } }, /notification bad: actionRequired\.ackedBy/],
-  ]) refuse({ notifications: [ntf({ id: 'bad', text: SECRET, ...over })] }, new RegExp(`NOTIFICATIONS_IMPORT_BLOCKED[\\s\\S]*${re.source}`), label);
-  refuse({ notifications: [ntf({ id: 'dup' }), ntf({ id: 'dup' })] }, /entry #1: duplicates an earlier entry \(dup\)/, 'a duplicate id');
-  refuse({ notifications: 'all' }, /must be an array/, 'not an array');
+  ]) refuse({ notifications: [ntf({ id: 'bad', text: SECRET, ...over })] }, new RegExp(`NOTIFICATION_RECORD_INVALID[\\s\\S]*${re.source}`), label);
+  refuse({ notifications: [ntf({ id: 'dup' }), ntf({ id: 'dup' })] }, /NOTIFICATION_DUPLICATE: notifications dup already exists/, 'a duplicate id');
   refuse({ notifications: [ntf({ id: 'ghost', audience: { kind: 'org_user', id: 'usr-ghost' } })] }, /NOTIFICATIONS_STAFF_MISSING[\s\S]*usr-ghost/, 'a staff member that does not exist');
   for (const [label, over, re] of [
     ['an unknown field', { extra: 1 }, /unknown field\(s\) extra/],
@@ -136,22 +163,18 @@ test('snapshot save refusals: an unknown field, a wrong-typed field, a duplicate
     ['no updatedAt', { updatedAt: null }, /updatedAt must be an integer timestamp/],
     ['a system audience', { audienceKind: 'system' }, /audienceKind \/ audienceId\.kind must be one of/],
   ]) refuse({ notificationPrefs: [pref(over)] }, re, `preference: ${label}`);
-  refuse({ notificationPrefs: [pref(), pref()] }, /entry #1: duplicates an earlier entry \(org_user usr-1\)/, 'a duplicate person');
   refuse({ notificationPrefs: [pref({ audienceId: 'usr-ghost' })] }, /NOTIFICATIONS_STAFF_MISSING[\s\S]*usr-ghost/, 'a preference of a staff member that does not exist');
-  // A collection the snapshot omits leaves its table alone.
-  { const { notifications: _n, ...rest } = snap.db; tool.save({ ...snap, db: rest }); assert.deepEqual(tool.load().db.notifications.map((n) => n.id), ['ok']); }
-  tool.sqlite.close(); rm(dir);
+  rm(dir);
 });
 
-test('a staff member a notification names cannot be pruned by a snapshot (the RESTRICT key), and the notifications and preferences are written before the staff prune so an intentional removal of both succeeds', () => {
-  const dir = tempDir('ntf-snap-staff');
+test('a staff member a notification names is a RESTRICT key: deleting the staff row is refused and nothing changes', () => {
+  const dir = tempDir('ntf-fix-staff');
   fixtureFile(dir, { notifications: [ntf({ id: 'n-staff' })], notificationPrefs: [pref()] });
-  const tool = openStore(dir); const snap = tool.load(); const before = dump(tool.sqlite);
-  assert.throws(() => tool.save({ ...snap, db: { ...snap.db, users: [], sessions: snap.db.sessions.filter((x) => x.sid !== 'sid-staff') } }), /FOREIGN KEY constraint failed/);
-  assert.equal(dump(tool.sqlite), before);
-  tool.save({ ...snap, db: { ...snap.db, users: [], sessions: snap.db.sessions.filter((x) => x.sid !== 'sid-staff'), notifications: [], notificationPrefs: [] } });
-  assert.deepEqual(tool.load().db.users, []);
-  tool.sqlite.close(); rm(dir);
+  const before = fileDump(dir);
+  const s = openRaw(dir);
+  try { assert.throws(() => s.prepare("DELETE FROM org_users WHERE id = 'usr-1'").run(), /FOREIGN KEY constraint failed/); } finally { s.close(); }
+  assert.equal(fileDump(dir), before);
+  rm(dir);
 });
 
 // ============================================================= the repository
@@ -278,7 +301,7 @@ test('preferences through the real M18.2 module over the repository: defaults ar
   const dir = tempDir('ntf-prefs'); fixtureFile(dir, { notificationPrefs: [pref({ audienceKind: 'guardian', audienceId: 'g-1', categories: { combine: false, security_account: false } })] });
   const s = openRaw(dir); const repo = bare(s);
   const routes = {}; const stubFor = (prefix) => ({ get(p, h) { routes[`get ${prefix}${p}`] = h; }, put(p, h) { routes[`put ${prefix}${p}`] = h; } });
-  const { allows, effective } = registerNotificationPrefs({ db: {}, notifications: repo, orgRouter: stubFor('/org'), playerRouter: stubFor('/player'), guardianRouter: stubFor('/guardian') });
+  const { allows, effective } = registerNotificationPrefs({ notifications: repo, orgRouter: stubFor('/org'), playerRouter: stubFor('/player'), guardianRouter: stubFor('/guardian') });
   const res = () => { const r = { code: 200, body: null, status(c) { r.code = c; return r; }, json(b) { r.body = b; return r; } }; return r; };
   const put = (body) => { const r = res(); routes['put /org/notification-preferences']({ orgUser: { id: 'usr-1' }, body }, r); return r; };
   assert.equal(allows(STAFF, 'recruitment_room', 'Maria mentioned you'), true, 'a mention is delivered by default');
@@ -295,7 +318,7 @@ test('preferences through the real M18.2 module over the repository: defaults ar
     r = put(body); assert.equal(r.code, 400, JSON.stringify(body)); assert.equal(r.body.error, code, JSON.stringify(body));
   }
   r = put({ emailIntent: true }); assert.equal(r.code, 200); assert.equal(repo.prefsFor('org_user', 'usr-1').emailIntent, true); assert.deepEqual(plain(repo.prefsFor('org_user', 'usr-1').categories), { mentions: false }, 'a write without categories keeps the stored ones');
-  assert.throws(() => registerNotificationPrefs({ db: {}, orgRouter: stubFor('/x'), playerRouter: stubFor('/x'), guardianRouter: stubFor('/x') }), /needs the notifications repository/);
+  assert.throws(() => registerNotificationPrefs({ orgRouter: stubFor('/x'), playerRouter: stubFor('/x'), guardianRouter: stubFor('/x') }), /needs the notifications repository/);
   assert.ok(CATEGORY_NAMES.includes('security_account'));
   s.close(); rm(dir);
 });
@@ -320,7 +343,7 @@ test('m13 notifyAction: a muted notification (the gate returned null) yields nul
 // ============================================================= the boot
 test('boot: no mirror — db.notifications and db.notificationPrefs throw, naming the repository; an array handed in on db is never imported; the report carries counts only; the attach refuses tables without the migration record', () => {
   const dir = tempDir('ntf-boot'); fixtureFile(dir, { notifications: [ntf({ id: 'ntf-old' })] });
-  const L = live(dir, { db: {} });
+  const L = live(dir);
   assert.equal(L.repo.byId('ntf-old').id, 'ntf-old');
   const report = JSON.stringify(L.layer.report());
   assert.match(report, /"notifications":\{"mode":"live","rows":\{"notifications":1,"notificationPrefs":0\},"pendingWrites":0/); assert.doesNotMatch(report, /sent a message/);
