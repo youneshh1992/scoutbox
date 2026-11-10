@@ -5,6 +5,7 @@
 import assert from 'node:assert/strict';
 import { checkHistoryFeed } from './historyFeedCheck.mjs';
 import { registerContact } from '../domains/recruitment/lifecycle/contactRoutes.mjs';
+import { registerOffers } from '../domains/recruitment/offers/index.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -218,10 +219,11 @@ test('[repository] the deletion unit\'s redactions: the contacts about the playe
   L.close(); rm(d);
 });
 
-test('[wiring] the contact routes refuse to register without the cross-app integration seam (no silent player-only fallback)', () => {
+test('[wiring] the contact routes refuse to register without the cross-app integration seam (no silent player-only fallback), and the offers without the signing summary', () => {
   const base = { recruitmentContactsOffers: { contacts: {} }, unit: () => {}, afterCommit: () => {} };
   assert.throws(() => registerContact(base), (e) => e instanceof TypeError && /integration seam/.test(e.message));
   assert.throws(() => registerContact({ ...base, integration: { contactRoute: () => null } }), (e) => e instanceof TypeError && /integration seam/.test(e.message));
+  assert.throws(() => registerOffers({ recruitmentContactsOffers: { offers: {} }, unit: () => {}, afterCommit: () => {} }), (e) => e instanceof TypeError && /summaryForOffer/.test(e.message));
 });
 
 test('[capabilities] the live report: explicit write mode, no pending writes, the typed tables and the player counters', () => {

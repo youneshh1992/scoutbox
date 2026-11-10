@@ -2458,7 +2458,7 @@ orgRouter.post('/trials/:trialId/report', (req, res) => {
 orgRouter.post('/players/:id/signing', (req, res) => {
   // The LEGACY recording route, kept for clients that do not use the signing
   // workflow. It writes nothing itself: the completed-signing record and
-  // every side effect come from the ONE writer (m29Ctx), and a recruitment
+  // every side effect come from the ONE writer (signingsDomain), and a recruitment
   // that went through the canonical Offer cannot be short-circuited here — an
   // accepted Offer or a signing package between this club and player means
   // the signing workflow on the case owns the outcome.
@@ -2471,7 +2471,7 @@ orgRouter.post('/players/:id/signing', (req, res) => {
   if (!p) return res.status(404).json({ error: 'PLAYER_NOT_FOUND' });
   if (!visibleToOrg(p, req.org)) return res.status(403).json({ error: 'UNDER_18_WALL' });
   if (isBlocked(p.id, req.org.id)) return res.status(403).json({ error: 'BLOCKED' });
-  const blocker = m29Ctx?.legacyRecordingBlocker?.(p.id, req.org.id, Date.now());
+  const blocker = signingsDomain?.legacyRecordingBlocker?.(p.id, req.org.id, Date.now());
   if (blocker) return res.status(409).json({ ok: false, error: blocker.error, message: blocker.message });
   // ONE standing legacy row per club and player. A second
   // recording while one stands (not cancelled, voided or revoked) would be a
@@ -2482,14 +2482,14 @@ orgRouter.post('/players/:id/signing', (req, res) => {
   const standing = signingsFollowUps.signings.forOrgPlayer(req.org.id, p.id).find((s) => !s.signingPackageId && !s.cancelledAt && !s.revokedAt && !s.voidedAt);
   if (standing) return res.status(409).json({ ok: false, error: 'SIGNING_ALREADY_RECORDED', message: 'A signing of this player by your club is already on record.', signingId: standing.id });
   if (rateLimit.limited('signing_closure', req.org.id)) return res.status(429).json(rateLimitedBody('signing_closure'));
-  if (!m29Ctx?.recordCompletedSigning) return res.status(500).json({ error: 'SIGNING_STORE_MISSING' });
+  if (!signingsDomain?.recordCompletedSigning) return res.status(500).json({ error: 'SIGNING_STORE_MISSING' });
   // The ledger row, the signings row and the player's level / contract columns commit as one unit of work.
   // Typed input only — a note is text of at most 400 characters, or absent; never sliced.
   const legacyNote = req.body?.note;
   if (legacyNote !== undefined && legacyNote !== null && legacyNote !== '' && (typeof legacyNote !== 'string' || legacyNote.length > 400)) return res.status(400).json({ error: 'FIELD_INVALID', field: 'note', message: 'The note is text of at most 400 characters.' });
   let written;
   try {
-    written = unit(() => m29Ctx.recordCompletedSigning({ player: p, org: req.org, actor: req.orgUser, at: Date.now(), legacy: { note: typeof legacyNote === 'string' && legacyNote ? legacyNote : null } }));
+    written = unit(() => signingsDomain.recordCompletedSigning({ player: p, org: req.org, actor: req.orgUser, at: Date.now(), legacy: { note: typeof legacyNote === 'string' && legacyNote ? legacyNote : null } }));
   } catch (e) {
     console.error(`SIGNING legacy_recording_rolled_back ${p.id}: ${e?.message ?? e}`);
     return res.status(500).json({ ok: false, error: 'SIGNING_STATE_UNKNOWN', message: 'The signing could not be recorded; nothing was recorded.' });
@@ -3414,7 +3414,7 @@ playerRouter.post('/location', (req, res) => {
 
 // The player's self-service declaration. `under_contract` is CANONICAL
 // contract truth and is written by exactly one thing — the completed-signing
-// writer (m29Ctx) — so it cannot be self-declared here, and
+// writer (signingsDomain) — so it cannot be self-declared here, and
 // while a canonical live contract stands no self-declared word replaces it.
 // The other five words remain the player's own to declare (their intent and
 // their reading of a contract ScoutBox did not write); availability is always
@@ -4022,8 +4022,8 @@ function deletePlayerData(playerId) {
   // the person; every representation naming the subject is withdrawn.
   transactionsDomain?.onPlayerDeleted?.(playerId, at);
   // Offers keep ids, states and times and lose the person's name and words.
-  m28Ctx?.onPlayerDeleted?.(playerId, at);
-  m29Ctx?.onPlayerDeleted?.(playerId, at);
+  offersDomain?.onPlayerDeleted?.(playerId, at);
+  signingsDomain?.onPlayerDeleted?.(playerId, at);
   // Every thread of the player goes, guardian–club threads included, with its
   // messages, attachments and receipts, inside this unit (D-B, docs/decisions.md;
   // that settled scope, not retention).
@@ -4142,8 +4142,8 @@ let complianceDomain = null;
 // The Agent Transaction Workspace, declared here because the
 // account-deletion sweep above runs before its registration below.
 let transactionsDomain = null;
-let m28Ctx = null; // assigned when the Offer module registers, below
-let m29Ctx = null; // assigned when the Signing module registers, below
+let signingsDomain = null; // assigned when the Signing module registers, below
+let offersDomain = null; // assigned when the Offer module registers, below
 const tsRouter = express.Router();
 app.use('/ts', (req, res, next) => (complianceDomain ? complianceDomain.reviewerAuth(req, res, next) : res.status(503).json({ error: 'REVIEWER_LANE_NOT_READY' })), tsRouter);
 
@@ -4730,40 +4730,13 @@ agentCoreDomain = registerAgent({
   auditSources: [complianceDomain.complianceAuditRows, transactionsDomain.agencyAuditRows],
 });
 
-// ------------------------------------------------- canonical Offer workflow
-// The authoritative Offer domain. A formal decision to progress AUTHORISES
-// considering an Offer and creates none; an explicit club act drafts one;
-// issuing freezes an exact immutable revision and moves the case to
-// `offer_made`; the recipient's own acceptance or decline — and nothing else
-// — moves it to `offer_accepted` / `offer_declined`. It moves the case only
-// through the ONE validator (with the real evidence provider) and the ONE
-// status writer; it never writes `signed`, never touches the signings, never
-// negotiates and never lets an agent act for a player. Registered after the
-// Agent layers because it reads the integration seam (an agent's basis and
-// scope) and the transactions' readiness seam, by reference.
-m28Ctx = registerOffers({
-  ...m19Ctx,
-  recruitmentCases, // the case's history entries are written in the offer's unit
-  recruitmentContactsOffers,
-  unit, afterCommit: (fn) => store.afterCommit(fn),
-  faults: faultLayer, // the development fault seam after an answer moved the case
-  isAdult,
-  storage,
-  findRoomForRequest: m17Ctx.findRoomForRequest,
-  applyLifecycleTransition: m17Ctx.applyLifecycleTransition,
-  recruitmentEvidenceProvider: recruitmentEvidence,
-  access: agentAccess,
-  integration: integrationDomain.seam,
-  transactions: transactionsDomain,
-});
-
 // ----------------------------------------------- Signing & Contract Completion
 // The ONE writer of the signings, of the lifecycle move to
 // `signed` and of a player's `contractStatus` for a recruitment signing.
-// Registered after the Offer module because a package is opened over an
-// ACCEPTED Offer revision and read by reference; the Offer views get a
-// read-only signing summary through a late-bound hook.
-m29Ctx = registerSigning({
+// A package is opened over an ACCEPTED Offer revision, read from the offers
+// repository, so it registers before the Offer module, whose views carry its
+// read-only signing summary.
+signingsDomain = registerSigning({
   ...m19Ctx,
   isAdult,
   storage,
@@ -4783,7 +4756,34 @@ m29Ctx = registerSigning({
   evidence: { storeFile: m14Ctx.storeEvidenceFile, add: m14Ctx.addEvidence },
   faults: faultLayer,
 });
-m28Ctx.setSigningSummary?.(m29Ctx.summaryForOffer);
+
+// ------------------------------------------------- canonical Offer workflow
+// The authoritative Offer domain. A formal decision to progress AUTHORISES
+// considering an Offer and creates none; an explicit club act drafts one;
+// issuing freezes an exact immutable revision and moves the case to
+// `offer_made`; the recipient's own acceptance or decline — and nothing else
+// — moves it to `offer_accepted` / `offer_declined`. It moves the case only
+// through the ONE validator (with the real evidence provider) and the ONE
+// status writer; it never writes `signed`, never touches the signings, never
+// negotiates and never lets an agent act for a player. It reads the integration
+// seam (an agent's basis and scope), the transactions' readiness seam and the
+// signing summary.
+offersDomain = registerOffers({
+  ...m19Ctx,
+  recruitmentCases, // the case's history entries are written in the offer's unit
+  recruitmentContactsOffers,
+  unit, afterCommit: (fn) => store.afterCommit(fn),
+  faults: faultLayer, // the development fault seam after an answer moved the case
+  isAdult,
+  storage,
+  findRoomForRequest: m17Ctx.findRoomForRequest,
+  applyLifecycleTransition: m17Ctx.applyLifecycleTransition,
+  recruitmentEvidenceProvider: recruitmentEvidence,
+  access: agentAccess,
+  integration: integrationDomain.seam,
+  transactions: transactionsDomain,
+  signingSummary: signingsDomain.summaryForOffer,
+});
 
 // ------------------------------------------------------ journey audiences
 // The player's, the guardian's and an authorized agent's journeys, and the

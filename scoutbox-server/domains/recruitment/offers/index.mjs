@@ -55,6 +55,7 @@ export function registerOffers(rawCtx) {
     guardians, orgRouter, playerRouter, guardianRouter, nextId, notify, broadcast, findPlayer, isBlocked,
     rateLimit, isLead, moderateOrRefuse, auditEntry, orgCanSee, isAdult, storage,
     access = null, integration = null, transactions = null, faults = null,
+    signingSummary, // the signings domain's `summaryForOffer(offerId, orgId, at)`
     // Every Offer write is an explicit repository operation (offers.create / update) inside `unit`.
     recruitmentContactsOffers, unit, afterCommit,
     recruitmentReads,
@@ -65,6 +66,7 @@ export function registerOffers(rawCtx) {
   /** A case history entry is an explicit write of its case (never an in-place push on the read-only view). */
   const caseAudit = (kase, ...entry) => ctx.recruitmentCases.cases.recordAct(kase.id, { history: [auditEntry(...entry)] });
   if (typeof unit !== 'function' || typeof afterCommit !== 'function' || !recruitmentContactsOffers?.offers) throw new TypeError('registerOffers needs the contacts/offers repository, unit and afterCommit from the data layer');
+  if (typeof signingSummary !== 'function') throw new TypeError('registerOffers needs the signings domain\'s summaryForOffer (ctx.signingSummary)');
   const offers = recruitmentContactsOffers.offers;
   /** A case of this organisation, or null. */
   const caseOfOrg = (id, orgId) => { const k = recruitmentReads.cases.byId(id); return k && k.orgId === orgId ? k : null; };
@@ -111,11 +113,9 @@ export function registerOffers(rawCtx) {
    */
   const safe = (label, fn) => { try { return fn(); } catch (e) { console.error(`OFFER side_effect_failed ${label}: ${e?.message ?? e}`); return undefined; } };
 
-  // A read-only signing summary on every Offer view (ids and the
-  // status word), bound late by the server once the Signing module exists.
+  // A read-only signing summary on every Offer view (ids and the status word).
   // An accepted Offer with no package reads `signing: null`: nothing is inferred.
-  let signingSummary = null;
-  const withSigning = (o, at, view) => ({ ...view, signing: signingSummary ? signingSummary(o.id, o.orgId, at) : null });
+  const withSigning = (o, at, view) => ({ ...view, signing: signingSummary(o.id, o.orgId, at) });
   const clubView = (o, at) => withSigning(o, at, offerClubView(o, at));
 
   // ------------------------------------------------------------- lookups
@@ -886,7 +886,6 @@ export function registerOffers(rawCtx) {
   }
 
   return {
-    setSigningSummary: (fn) => { signingSummary = typeof fn === 'function' ? fn : null; },
     offerEvidenceReady: true,
     offersOfCase,
     onPlayerDeleted,
