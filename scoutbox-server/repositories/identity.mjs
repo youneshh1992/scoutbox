@@ -874,7 +874,8 @@ export function createIdentityRepositories({ sqlite, log = () => {}, unit = null
       if (!isPlainObject(stats)) throw playerInvalid(id, [`stats must be an object (got ${describe(stats)})`]);
       const unknown = Object.keys(stats).filter((k) => !STATS_KEYS.includes(k));
       if (unknown.length) throw playerInvalid(id, unknown.map((k) => `stats.${k} is not a stat`));
-      const cols = Object.fromEntries(Object.entries(stats).map(([k, v]) => [STATS_COLUMN[k], v]));
+      const given = Object.entries(stats).filter(([, v]) => v !== undefined); // an undefined stat is an absent one
+      const cols = Object.fromEntries(given.map(([k, v]) => [STATS_COLUMN[k], v]));
       const zeroIfUnknown = Object.fromEntries(['appearances', 'goals', 'assists'].filter((k) => stats[k] === undefined).map((k) => [STATS_COLUMN[k], `COALESCE(${STATS_COLUMN[k]}, 0)`]));
       return setColumns(id, cols, zeroIfUnknown);
     },

@@ -162,6 +162,7 @@ test('player acts: each named act writes its own columns at once and the table j
 
   // Stats: the given fields replace theirs, the others stay, and the three counts read 0 once anything is recorded.
   t.players.recordStats('pl-adult', { paceKmh: 30 });
+  assert.equal(t.players.recordStats('pl-adult', { appearances: undefined }).stats.appearances, 0, 'an undefined stat is an absent one');
   assert.deepEqual(t.players.recordStats('pl-adult', { goals: 3 }).stats, { appearances: 0, goals: 3, assists: 0, paceKmh: 30, passCompletionPct: null, duelSuccessPct: null, cleanSheets: null });
 
   // A new track clears the previous track's completed sessions in the same act.
