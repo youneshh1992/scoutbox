@@ -183,7 +183,7 @@ export const ORGS_TABLE = {
 };
 
 // ------------------------------------------------------------------ the repository
-const WRITES = new Set(['create', 'update', 'setStanding', 'setPasswordHash', 'initialize']);
+const WRITES = new Set(['create', 'update', 'setStanding', 'verifyEmailDomain', 'setPasswordHash', 'initialize']);
 
 /** `createOrgsRepository({ sqlite, nextId, unit, now, log })`: the organisation writes and queries, plus `reads` (the queries alone). */
 export function createOrgsRepository({ sqlite, nextId = null, unit = null, now = Date.now, log = () => {} }) {
@@ -269,6 +269,12 @@ export function createOrgsRepository({ sqlite, nextId = null, unit = null, now =
       if (!byId(id)) throw refusal('ORG_NOT_FOUND', `organisation ${id} does not exist`);
       const cols = Object.keys(set);
       if (cols.length) q(`UPDATE orgs SET ${cols.map((c) => `${c} = @${c}`).join(', ')} WHERE id = @id`).run({ ...set, id });
+      return byId(id);
+    }),
+    /** The club proved control of a mailbox at `domain`: the domain is stored and marked verified. Returns the stored record. */
+    verifyEmailDomain: (id, domain) => operation(() => {
+      if (!textOk(domain, L.domain)) throw invalid(id, [`emailDomain must be text of 1 to ${L.domain} characters`]);
+      if (q('UPDATE orgs SET email_domain = ?, email_domain_verified = 1 WHERE id = ?').run(domain, id).changes !== 1) throw refusal('ORG_NOT_FOUND', `organisation ${id} does not exist`);
       return byId(id);
     }),
     /** Store a new password hash (or null to remove the password). Returns the stored record. */

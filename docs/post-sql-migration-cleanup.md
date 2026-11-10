@@ -135,8 +135,9 @@ The rules are likely well under half of the production lines.
    those repositories have no JavaScript validator: a create must read back as written, and composite foreign keys
    replace the cross-record checks. The shared write kit is `repositories/writes.mjs`. Most repositories shrank by
    10–26% in characters (`verification.mjs` grew); the case for the work was soundness rather than size.
-   About 62 draft edits remain (`users` 7, `orgs` 7, then 1–5 per repository; `players` has none since 10 Nov and no
-   `update`), none of them in a multi-step state machine, and most of them in the routes still in `server.mjs`. Convert each one when its route
+   About 60 draft edits remain (`users` 6, `orgs` 6, then 1–5 per repository; `players` has none since 10 Nov and no
+   `update`), none of them in a multi-step state machine, and none left in `server.mjs` since 10 Nov (the rest are in
+   the milestone modules, enterprise and the claims review). Convert each one when its route
    moves into `domains/` (item 2), so every line is touched once. Two groups go first, in wiring slice (a):
    - the guardian verification flags (`emailVerified`, `idVerified`, `disclaimerAccepted`), which gate minors'
      safety, become one-way acts guarded in SQL;
@@ -177,8 +178,15 @@ The rules are likely well under half of the production lines.
         lifecycle, so the export's forward reference and the inbox's `lifecycleDomain?.` lookups are gone. Every
         `players.update` edit, the five outside these routes included, is a named act, and `players.update` is
         gone.
-     4. Club routes: org auth, search, contact and trials, film room, open trials, squad, friendlies,
-        e-mail-domain verification, ledger and plan.
+     4. ~~Club routes.~~ Done 10 Nov: `domains/identity/orgs.mjs` (the `/org` session, sign-in, Grassroots
+        registration, the directory), `domains/discovery/search.mjs` and `filmRoom.mjs`,
+        `domains/recruitment/requests.mjs` (the one request and accepted-trial writers), `clubTrials.mjs`,
+        `ledger.mjs` and `signings/legacy.mjs`, `domains/development/grassrootsClub.mjs` (open days, squad, match
+        days, friendlies) and `domains/verification/clubChecks.mjs` (e-mail domain and federation). The MFA guards are
+        created before the log-in (`createMfaGuards`), so the `m13Ctx.mfaGuards` lookup is gone; the legacy signing
+        route registers after the signings domain, so its `signingsDomain?.` lookups are gone. The two draft edits
+        are `users.setRole` and `orgs.verifyEmailDomain`. The coach-reference submission joined the Grassroots
+        journey.
      5. The platform remainder (live sync, meta, media, capabilities, operator surface), then the remaining
         milestone names and directories.
 

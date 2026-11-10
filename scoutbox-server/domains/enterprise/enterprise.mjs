@@ -64,6 +64,27 @@ export function requestInstrumentation() {
   };
 }
 
+/**
+ * Wrong-code counting for staff second factors, shared by the org log-in and the MFA set-up routes: five wrong codes
+ * lock the account's code checks for five minutes. Per process, like the rate limiter.
+ */
+export function createMfaGuards() {
+  const attempts = new Map(); // userId → { fails, lockedUntil }
+  return {
+    mfaLocked(userId) {
+      const a = attempts.get(userId);
+      return !!a?.lockedUntil && a.lockedUntil > Date.now();
+    },
+    mfaFail(userId) {
+      const a = attempts.get(userId) ?? { fails: 0, lockedUntil: 0 };
+      a.fails++;
+      if (a.fails >= 5) { a.lockedUntil = Date.now() + 5 * 60_000; a.fails = 0; }
+      attempts.set(userId, a);
+    },
+    clear: (userId) => { attempts.delete(userId); },
+  };
+}
+
 export function registerEnterprise(ctx) {
   const {
     byId, users, sessions, orgs, mediaDeletions, codes, notifications, dispatches, outbox, pushLog, pushTokens, channels, safetyAudit, recruitment, recruitmentCases, players, app, orgRouter, adminRouter, nextId, notify,
@@ -71,6 +92,7 @@ export function registerEnterprise(ctx) {
     storage, DATA_DIR, backupDatabase, unit, enterprise, enterpriseReads, schemaVersion,
   } = ctx;
   if (!enterprise || !enterpriseReads) throw new TypeError('registerEnterprise needs the enterprise repository (ctx.enterprise, ctx.enterpriseReads)');
+  if (typeof ctx.mfaGuards?.mfaFail !== 'function') throw new TypeError('registerEnterprise needs the MFA guards the org log-in shares (createMfaGuards)');
   if (!ctx.groupReads) throw new TypeError('registerEnterprise needs groupReads (the audit export lists the group grants)');
   // An ops event is a row of ops_events (repositories/safetyAudit.mjs), written at once.
   const opsEvent = (row) => safetyAudit.opsEvents.record(row);
@@ -197,18 +219,7 @@ export function registerEnterprise(ctx) {
   orgRouter.get('/onboarding', (req, res) => res.json(onboardingFor(req.org, req.orgUser)));
 
   // ================================================== B. MFA + sessions
-  const mfaAttempts = new Map(); // userId → {fails, lockedUntil}
-  function mfaLocked(userId) {
-    const a = mfaAttempts.get(userId);
-    return a?.lockedUntil && a.lockedUntil > Date.now();
-  }
-  function mfaFail(userId) {
-    const a = mfaAttempts.get(userId) ?? { fails: 0, lockedUntil: 0 };
-    a.fails++;
-    if (a.fails >= 5) { a.lockedUntil = Date.now() + 5 * 60_000; a.fails = 0; }
-    mfaAttempts.set(userId, a);
-  }
-  ctx.mfaGuards = { mfaLocked, mfaFail, clear: (id) => mfaAttempts.delete(id) };
+  const { mfaLocked, mfaFail } = ctx.mfaGuards;
 
   orgRouter.post('/mfa/setup', (req, res) => {
     if (req.orgUser.mfa?.enabledAt) return res.status(409).json({ error: 'MFA_ALREADY_ENABLED' });

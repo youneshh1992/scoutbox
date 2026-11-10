@@ -152,6 +152,17 @@ test('reads: forOrg (creation order, active filter), firstActive, activeByEmail,
   assert.ok(Object.isFrozen(users.reads) && !('create' in users.reads) && typeof users.reads.byId === 'function');
 });
 
+test('setRole: one role column changes, typed; junk and an unknown account are refused, changing nothing; neither it nor remove is a read', () => {
+  const s = fresh(); const users = repoOn(s);
+  const u = users.create({ orgId: 'org-a', name: 'Sam', role: 'Scout' });
+  const after = users.setRole(u.id, 'Head of Recruitment');
+  assert.equal(after.role, 'Head of Recruitment'); assert.equal(after.name, 'Sam'); assert.equal(u.role, 'Scout', 'a record already handed out does not change');
+  for (const role of ['', ' Scout', 'x'.repeat(STAFF_LIMITS.role + 1), 7, null]) refused(() => users.setRole(u.id, role), 'STAFF_RECORD_INVALID', 'role');
+  refused(() => users.setRole('usr-none', 'Scout'), 'STAFF_NOT_FOUND');
+  assert.equal(users.byId(u.id).role, 'Head of Recruitment', 'every refused change left the row as it was');
+  assert.ok(!('setRole' in users.reads) && !('remove' in users.reads), 'the acts are not reads');
+});
+
 test('writes join the caller\'s transaction: a rollback leaves no staff row, code or secret', () => {
   const s = fresh(); const users = repoOn(s);
   const u = users.create({ orgId: 'org-a', name: 'Lead', role: 'Manager' });

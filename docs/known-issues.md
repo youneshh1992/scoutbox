@@ -36,6 +36,11 @@ end of the feature freeze.
   a session without the account's MFA. So a lead who invites "Maria Keane" to their own address signs in as Maria.
   The fix is probably that an invite under a current colleague's name is refused, or needs that person's
   confirmation: a product question.
+- **Club e-mail verification has its own list of free-mail providers.** `domains/verification/clubChecks.mjs` refuses
+  fewer providers than the claims' list (`domains/verification/claims/shared.mjs`), so an address at a provider only
+  the claims' list knows (for example `yandex` or `zoho`) can verify a club's domain. The shared list can't simply be
+  reused, because it also refuses `mail.` hosts, and a club's own `mail.club.example` mailbox does prove control of its
+  domain. The fix is one shared list with that difference made explicit.
 - **A coach affiliation is matched to a staff member by display name**, not by account (`m12/shared.mjs`). Keying it
   by account would restrict affiliations to people with a login: a product question.
 - **Assessment templates are shared by every club.** When one club's lead publishes a new version of a position

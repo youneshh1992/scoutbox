@@ -156,7 +156,7 @@ export const USERS_TABLE = {
 };
 
 // ------------------------------------------------------------------ the repository
-const WRITES = new Set(['create', 'update', 'startMfa', 'enableMfa', 'disableMfa', 'useRecoveryCode']);
+const WRITES = new Set(['create', 'update', 'setRole', 'remove', 'startMfa', 'enableMfa', 'disableMfa', 'useRecoveryCode']);
 
 /** `createUsersRepository({ sqlite, nextId, unit, now, log })`: the staff writes and queries, plus `reads` (the queries alone). */
 export function createUsersRepository({ sqlite, nextId, unit = null, now = Date.now, log = () => {} }) {
@@ -214,6 +214,12 @@ export function createUsersRepository({ sqlite, nextId, unit = null, now = Date.
       const m = mustExist(id);
       q(`UPDATE org_users SET ${COLS.split(', ').filter((c) => c !== 'id').map((c) => `${c} = @${c}`).join(', ')} WHERE id = @id`)
         .run(params({ ...draft, deliveryPrefs: prefsOf(draft.deliveryPrefs) }, { secret: m.mfa_secret, enabledAt: m.mfa_enabled_at }));
+      return byId(id);
+    }),
+    /** Give a staff member another role (text of 1 to 60 characters, trimmed). Returns the stored record. */
+    setRole: (id, role) => operation(() => {
+      if (!textOk(role, L.role)) throw invalid(id, [`role must be text of 1 to ${L.role} characters without surrounding spaces`]);
+      if (q('UPDATE org_users SET role = ? WHERE id = ?').run(role, id).changes !== 1) throw refusal('STAFF_NOT_FOUND', `org_users ${id} does not exist`);
       return byId(id);
     }),
     /**

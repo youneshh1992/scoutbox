@@ -7,7 +7,7 @@ import { installAsyncErrorForwarding } from './domains/platform/asyncErrors.mjs'
 // A rejected async handler answers 500 instead of ending the process.
 installAsyncErrorForwarding();
 
-import { optText, reqText, badField, dateOnlyOrRefuse } from './domains/platform/input.mjs';
+import { reqText } from './domains/platform/input.mjs';
 import cors from 'cors';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -16,11 +16,7 @@ import { fileURLToPath } from 'node:url';
 import { buildSeed } from './seed.mjs';
 import { openStore } from './store.mjs';
 import { attachDataLayer } from './repositories/index.mjs';
-import { STAFF_LIMITS } from './repositories/users.mjs';
 import { createIdCounter } from './repositories/counters.mjs';
-import { GRASSROOTS_LIMITS, boxAround } from './repositories/grassroots.mjs';
-import { CLUB_SETUP_LIMITS, LOOKING_FOR_POSITIONS } from './repositories/clubSetup.mjs';
-import { TRANSITION_LIMITS } from './repositories/transitionsVouches.mjs';
 import { registerM12 } from './m12/index.mjs';
 import { registerM13 } from './m13/index.mjs';
 import { registerVerificationClaims } from './domains/verification/claims/index.mjs';
@@ -69,10 +65,16 @@ import { createPlayerErasure, registerDataRights } from './domains/identity/data
 import { DRILLS, registerPlayerRecord } from './domains/development/record.mjs';
 import { registerGrassrootsJourney } from './domains/development/grassroots.mjs';
 import { registerRequestInbox } from './domains/recruitment/inbox.mjs';
-import { validateContactReply } from './domains/recruitment/lifecycle/contact.mjs';
-import { icsLocal as trialIcsLocal, icsText as trialIcsText } from './domains/recruitment/lifecycle/trial.mjs';
-import { requestInstrumentation } from './domains/enterprise/enterprise.mjs';
-import { totpValid } from './m13/shared.mjs';
+import { createOrgViews, createOrgSession, registerOrgAccount, registerClubDirectory } from './domains/identity/orgs.mjs';
+import { registerPlayerSearch } from './domains/discovery/search.mjs';
+import { registerFilmRoom } from './domains/discovery/filmRoom.mjs';
+import { createRequestWriters, registerClubRequests, requestForRecipient } from './domains/recruitment/requests.mjs';
+import { registerClubTrials } from './domains/recruitment/clubTrials.mjs';
+import { registerLegacySigning } from './domains/recruitment/signings/legacy.mjs';
+import { registerLedger, ledgerView } from './domains/recruitment/ledger.mjs';
+import { registerGrassrootsClub, grassrootsOrgOnly } from './domains/development/grassrootsClub.mjs';
+import { registerClubChecks } from './domains/verification/clubChecks.mjs';
+import { createMfaGuards, requestInstrumentation } from './domains/enterprise/enterprise.mjs';
 import { earnedGrassrootsBadges } from './grassrootsJourney.mjs';
 import {
   hashPassword,
@@ -91,24 +93,12 @@ import {
   visibleToOrg,
   computeTrustScore,
   trustBreakdown,
-  validateTrialReport,
-  TRIAL_REPORT_FIELDS,
-  parseTrialDate,
-  trialReportDueAt,
-  validateTrialDetails,
-  chooseTrialSlot,
-  similarityScore,
   moderateText,
   haversineKm,
-  GRASSROOTS_RADIUS_KM,
   computeStreak,
 } from './domain.mjs';
-import { readInstant, utcDayOf } from './temporal.mjs';
-import { readPage, sendPageError } from './domains/platform/paging.mjs';
-import { AUDIT_LIMITS } from './repositories/safetyAudit.mjs';
-import { PLANS, ARCHETYPES } from './catalogue.mjs';
+import { PLANS } from './catalogue.mjs';
 
-import { invoiceView } from './adapters.mjs';
 import { createLookups } from './domains/platform/lookups.mjs';
 import { createMatchFactsKeeper } from './domains/discovery/matchFacts.mjs';
 
@@ -137,8 +127,6 @@ const dataLayer = attachDataLayer({
   log: (m) => { if (process.env.M13_QUIET_LOGS !== '1') console.log(m); },
 });
 const { users, sessions, orgs, players, guardians, identity, mediaDeletions, codes, notifications, dispatches, outbox, pushLog, pushTokens, channels, safetyAudit, recruitment, recruitmentCases, recruitmentContactsOffers, signingsFollowUps, scoutingEvidence, scoutingAssessments, clubSetup, opportunitiesCampaigns, verification, passport, transitionsVouches, agentCore, compliancePolicies, complianceRecords, agentTransactions, development, boxCam, discovery, insightCoverage, integrations, enterprise, groups, grassroots, operations, matchFacts } = dataLayer;
-// A record the caller may use, or null: `onlyIf(repo.byId(id), (r) => r.orgId === orgId)`.
-const onlyIf = (record, ok) => (record && ok(record) ? record : null);
 // Each domain's read-only query objects (`<domain>Reads`), handed to every module context.
 const safetyReads = safetyAudit.reads;
 const recruitmentReads = Object.freeze({ ...recruitmentContactsOffers.reads, ...signingsFollowUps.reads, ...recruitment.reads, ...recruitmentCases.reads });
@@ -558,23 +546,8 @@ const nextId = (prefix) => {
   return `${prefix}-${idCounter.next()}`;
 };
 
-/** The organisation as the apps see it: an allowlist of the record (the password hash is never on it). */
-function orgSafe(o) {
-  // What the club is looking for and its federation-route request are club setup tables, not facets of the
-  // record; the apps read both from the session's organisation, so they are added here explicitly.
-  const fed = clubSetup.federation.forOrg(o.id);
-  return {
-    id: o.id, name: o.name, type: o.type, level: o.level, plan: o.plan, country: o.country,
-    location: o.location ? { lat: o.location.lat, lng: o.location.lng, city: o.location.city } : null,
-    federationRef: o.federationRef ? { federation: o.federationRef.federation, registrationId: o.federationRef.registrationId } : null,
-    trustedPartner: o.trustedPartner, verified: o.verified, verifiedDomain: o.verifiedDomain,
-    safeguardingContractSigned: o.safeguardingContractSigned, suspended: o.suspended,
-    emailDomain: o.emailDomain, emailDomainVerified: o.emailDomainVerified, mfaRequiredForLeads: o.mfaRequiredForLeads,
-    verificationRevokedAt: o.verificationRevokedAt, createdAt: o.createdAt,
-    lookingFor: [...clubSetup.lookingFor.forOrg(o.id)],
-    federationCheck: fed ? { federation: fed.federation, registrationId: fed.registrationId, contactEmail: fed.contactEmail, status: fed.status, submittedAt: fed.submittedAt } : null,
-  };
-}
+// The organisation as the apps see it, and whether its safeguarding certification stands.
+const { orgSafe, safeguardingCertified } = createOrgViews({ clubSetup, safetyAudit });
 
 function findPlayer(id) {
   return byId.player(id);
@@ -589,10 +562,6 @@ function ledgerAppend(entry) {
   broadcast('ledger', { type: row.type, playerId: row.playerId });
   return row;
 }
-
-// Response allowlists for the audit records (repositories/safetyAudit.mjs).
-const ledgerView = (l) => ({ id: l.id, ts: l.ts, type: l.type, playerId: l.playerId, orgId: l.orgId, orgName: l.orgName, userId: l.userId, scoutName: l.scoutName, detail: l.detail });
-const noteView = (n) => ({ id: n.id, orgId: n.orgId, playerId: n.playerId, userId: n.userId, scoutName: n.scoutName, text: n.text, ts: n.ts });
 
 function isBlocked(playerId, orgId) {
   return safetyAudit.blocks.has(playerId, orgId);
@@ -668,6 +637,10 @@ function devLoginRefused(res) {
   return true;
 }
 
+// One rate limiter for the whole server. Every limited action is named in RATE_LIMIT_POLICY with its window and
+// scope, and the capability report says plainly that the memory provider counts per process.
+const rateLimit = createRateLimiter();
+
 // ----------------------------------------------------- failed-login budget
 //
 // Complements `authLimiter` above rather than replacing it. That one is per IP
@@ -741,19 +714,6 @@ function vouchView(v) {
 function publishedVouchesFor(playerId) {
   return verificationReads.vouches.publishedFor(playerId).map(vouchView);
 }
-
-// Safeguarding certification is EARNED and losable: verification + signed
-// contract + no unresolved urgent report against the org.
-function safeguardingCertified(org) {
-  if (!org.verified || !org.safeguardingContractSigned) return false;
-  return !safetyAudit.reports.openUrgentAgainst(org.id);
-}
-
-// Scout tag vocabulary — structured, professional, no free text.
-const SCOUT_TAGS = [
-  'first_touch', 'pace', 'positioning', 'work_rate', 'left_foot', 'right_foot',
-  'aerial', 'composure', 'vision', 'pressing', 'finishing', 'distribution',
-];
 
 // ---------------------------------------------------------------- insights
 // "Who's watching you": the player's side of the Discovery Ledger.
@@ -853,8 +813,7 @@ app.get('/meta', (_req, res) => {
 
 // The authenticated routers. The guardian's is created with the guardian account, below; the player account's
 // routes are domains/identity/players.mjs.
-const orgRouter = express.Router();
-app.use('/org', orgAuth, orgRouter);
+const { orgRouter } = createOrgSession({ app, findOrg: byId.org, users, sessionFor });
 const { playerRouter, guardianManagedOnly } = createPlayerSession({ app, findPlayer, sessionFor });
 
 // -------------------------------------------------------------- guardians
@@ -871,1470 +830,37 @@ const { openChannel } = registerMessaging({
   unit, nextId, notify, broadcast, ledgerAppend, moderateOrRefuse, guardianManagedOnly,
 });
 
-// ---------------------------------------------------------------- org auth
-app.get('/orgs', (req, res) => {
-  // Platform separation starts at the login screen: the Grassroots app lists
-  // only grassroots clubs, the main app never lists them. The Agent
-  // app lists agency organisations only. Unpaged: the sign-in pickers have no
-  // search yet (docs/known-issues.md).
-  const filter = { grassroots: { level: 'grassroots' }, main: { notLevel: 'grassroots' }, agent: { type: 'agency' } }[req.query.platform] ?? {};
-  const list = orgs.list(filter);
-  res.json(list.map((o) => ({
-    id: o.id, name: o.name, type: o.type, level: o.level ?? null, plan: o.plan, trustedPartner: o.trustedPartner,
-    verified: o.verified, safeguardingCertified: safeguardingCertified(o),
-    ...(o.level === 'grassroots' ? { city: o.location?.city ?? null, federation: o.federationRef?.federation ?? null } : {}),
-  })));
+// ------------------------------------------------------------- organisations
+// The sign-in pickers, Grassroots registration and staff log-in (domains/identity/orgs.mjs). The MFA guards are
+// shared with the MFA set-up routes (domains/enterprise/enterprise.mjs).
+const mfaGuards = createMfaGuards();
+registerOrgAccount({
+  app, orgs, users, safetyAudit, findOrg: byId.org, unit, nextId, broadcast, createSession, loginLockedOut, noteLoginFailure,
+  devLogins: DEV_LOGINS, devLoginRefused, mfaGuards, orgSafe, safeguardingCertified,
 });
 
-// ScoutBox Grassroots club registration: federation-registered semi-pro
-// clubs and below. Registration is open; verification (federation record,
-// email domain, safeguarding contract) is checked by T&S before the club can
-// see any minor — the same bar every club faces.
-app.post('/auth/org/register-grassroots', (req, res) => {
-  const { name, country = 'GB', city, lat, lng, federation, registrationId, scoutName, role, password } = req.body || {};
-  if (password !== undefined && String(password).length < 8) {
-    return res.status(400).json({ error: 'PASSWORD_TOO_SHORT', message: 'Club passwords need at least 8 characters.' });
-  }
-  if (!reqText(name, 120)) return res.status(400).json({ error: 'NAME_REQUIRED' });
-  for (const [f, v, max] of [['country', country, 2], ['city', city, 80], ['federation', federation, 120], ['registrationId', registrationId, 60], ['role', role, 60]]) if (!optText(v, max)) return badField(res, f);
-  if (!Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) {
-    if (typeof lat === 'number' || typeof lng === 'number') return badField(res, 'location');
-  }
-  if (typeof country !== 'string' || !country.trim() || country !== country.trim()) return badField(res, 'country');
-  if (!federation?.trim() || !registrationId?.trim()) {
-    return res.status(400).json({ error: 'FEDERATION_REQUIRED', message: 'Grassroots clubs must hold a federation registration — name the federation and your registration id.' });
-  }
-  if (typeof lat !== 'number' || typeof lng !== 'number') {
-    return res.status(400).json({ error: 'LOCATION_REQUIRED', message: 'The 50km scouting radius is measured from your ground — a location is required.' });
-  }
-  if (!reqText(scoutName, 120)) return res.status(400).json({ error: 'SCOUT_NAME_REQUIRED' });
-  // The organisation, its administrator's account and the session are one unit.
-  const { org, user, token } = unit(() => {
-    const created = orgs.create({
-      name: name.trim(),
-      type: 'club',
-      level: 'grassroots',
-      location: { lat, lng, city: city?.trim() || null },
-      federationRef: { federation: federation.trim(), registrationId: registrationId.trim() },
-      plan: 'Grassroots',
-      country,
-      passwordHash: password ? hashPassword(String(password)) : null,
-    });
-    const admin = users.create({ orgId: created.id, name: scoutName.trim(), role: role?.trim() || 'Manager' });
-    return { org: created, user: admin, token: createSession('org', created.id, { userId: admin.id }) };
-  });
-  broadcast('orgs');
-  res.status(201).json({
-    userId: user.id, role: user.role, org: { ...orgSafe(org), safeguardingCertified: safeguardingCertified(org) },
-    token,
-    note: 'Registered. Adults within 50km are visible now; under-18 visibility needs verification + the safeguarding contract, reviewed by Trust & Safety.',
-  });
+// ------------------------------------------------------------- club routes
+// The one writer of a request row and of an accepted trial: the Contact, Trial and open-day flows and the Inbox's
+// answers all go through them.
+const { issueRecruitmentRequest, issueAcceptedTrial, contactReplyFrom } = createRequestWriters({
+  recruitment, nextId, ledgerAppend, notify, broadcast, safeguardingCertified, moderateOrRefuse,
 });
-
-app.post('/auth/org/login', (req, res) => {
-  const { orgId, scoutName, role, platform } = req.body || {};
-  if (loginLockedOut(res, `org:${orgId}`)) return;
-  const org = byId.org(orgId);
-  if (!org) { noteLoginFailure(`org:${orgId}`); return res.status(404).json({ error: 'ORG_NOT_FOUND' }); }
-  // Hard platform separation: a grassroots club exists only on ScoutBox
-  // Grassroots; every other org exists only on ScoutBox. No crossover.
-  const wantsGrassroots = platform === 'grassroots';
-  if (org.level === 'grassroots' && !wantsGrassroots) {
-    return res.status(403).json({ error: 'GRASSROOTS_PLATFORM_ONLY', message: 'This club is registered on ScoutBox Grassroots — log in there.' });
-  }
-  if (org.level !== 'grassroots' && wantsGrassroots) {
-    return res.status(403).json({ error: 'PLATFORM_MISMATCH', message: 'ScoutBox Grassroots is for federation-registered grassroots clubs only.' });
-  }
-  // ScoutBox Agent is for agency organisations only. (An agency can still log
-  // into the club app: the m13 representation lane and its suites live there.)
-  if (platform === 'agent' && org.type !== 'agency') {
-    return res.status(403).json({ error: 'PLATFORM_MISMATCH', message: 'ScoutBox Agent is for agency organisations only.' });
-  }
-  if (!optText(role, 60)) return badField(res, 'role');
-  if (typeof scoutName !== 'string' || !scoutName.trim()) {
-    // Accountability by user: no anonymous / shared workspace access.
-    return res.status(400).json({ error: 'SCOUT_NAME_REQUIRED', message: 'Every session is attributed to a named individual.' });
-  }
-  if (scoutName.trim().length > STAFF_LIMITS.name) return res.status(400).json({ error: 'FIELD_INVALID', field: 'scoutName', message: `scoutName is at most ${STAFF_LIMITS.name} characters.` });
-  // Org credentials: provisioned orgs require their password; unprovisioned
-  // (seeded demo) orgs are a development shortcut only.
-  const passwordHash = orgs.passwordHashOf(org.id);
-  if (passwordHash) {
-    const check = verifyPassword(req.body?.password ?? '', passwordHash);
-    if (!check) { noteLoginFailure(`org:${orgId}`); return res.status(401).json({ error: 'BAD_PASSWORD', message: 'This organisation is password-protected.' }); }
-    if (check === 'upgrade') orgs.setPasswordHash(org.id, hashPassword(req.body.password));
-  } else if (!DEV_LOGINS) {
-    return devLoginRefused(res);
-  }
-  let user = users.byOrgAndName(orgId, scoutName);
-  if (user?.removedAt) {
-    // Departed staff don't come back by typing their old name.
-    return res.status(403).json({ error: 'USER_REMOVED', message: 'This staff member\'s access was removed by the organisation.' });
-  }
-  // Second factor. A user who enabled MFA never gets a session from the
-  // password alone; recovery codes are one-time; wrong codes rate-limit.
-  if (user?.mfa?.enabledAt) {
-    if (m13Ctx?.mfaGuards?.mfaLocked(user.id)) {
-      return res.status(429).json({ error: 'MFA_LOCKED', message: 'Too many wrong codes — try again in a few minutes.' });
-    }
-    const { mfaCode, recoveryCode } = req.body ?? {};
-    let second = false;
-    if (mfaCode) second = totpValid(users.mfaSecretOf(user.id), mfaCode);
-    else if (recoveryCode) {
-      // Each code works exactly once: spending it deletes its row, and only the call that deleted it passes.
-      second = users.useRecoveryCode(user.id, crypto.createHash('sha256').update(String(recoveryCode)).digest('hex'));
-    }
-    if (!second) {
-      if (mfaCode || recoveryCode) m13Ctx?.mfaGuards?.mfaFail(user.id);
-      return res.status(401).json({
-        error: mfaCode || recoveryCode ? 'MFA_CODE_WRONG' : 'MFA_REQUIRED',
-        message: mfaCode || recoveryCode ? 'That code is not valid.' : 'This account uses two-factor authentication — send mfaCode (authenticator) or recoveryCode.',
-      });
-    }
-    m13Ctx?.mfaGuards?.clear(user.id);
-  }
-  // Roles are assigned by the organisation, never by the person logging in.
-  //
-  // An organisation that holds real credentials (its password was set at
-  // registration or provisioned by Trust & Safety) gets staff accounts only
-  // through server-controlled flows: the registering administrator, a lead's
-  // invitation, or — exactly once — the first login with the organisation
-  // password, which bootstraps the administrator account for organisations
-  // provisioned without one. The role sent with a login is ignored on such an
-  // organisation; the stored role answers, so nobody with the shared password
-  // can make themselves staff or rewrite another person's role.
-  //
-  // Unprovisioned (seeded demo) organisations keep the development shortcut:
-  // a login names its own role. That path is refused outside development
-  // above (`devLoginRefused`), so it is never reachable in production.
-  const credentialed = !!passwordHash;
-  let roleNote;
-  if (!user) {
-    if (credentialed) {
-      if (users.firstActive(orgId)) {
-        return res.status(403).json({
-          error: 'STAFF_NOT_PROVISIONED',
-          message: 'No staff account with this name exists in the organisation. Ask a lead for an invitation — the organisation password does not create accounts.',
-        });
-      }
-      // First account on a credentialed organisation: the administrator. A
-      // lead-tier role is required so the organisation can invite its staff.
-      const requested = (role || '').trim();
-      user = unit(() => {
-        const created = users.create({
-          orgId, name: scoutName.trim(),
-          role: isLeadRole(requested) ? requested : 'Manager',
-          provenance: 'org_password_bootstrap',
-        });
-        safetyAudit.opsEvents.record({ id: nextId('ops'), at: Date.now(), kind: 'staff_bootstrapped', detail: { orgId: org.id, userId: created.id, by: created.name } });
-        return created;
-      });
-    } else {
-      user = users.create({ orgId, name: scoutName.trim(), role: role?.trim() || 'Scout' });
-    }
-  } else if (role && role.trim() && role.trim() !== user.role) {
-    if (credentialed) {
-      roleNote = 'Roles are assigned by your organisation; the role entered at sign-in was not applied.';
-    } else {
-      user = users.update(user.id, (d) => { d.role = role.trim(); }); // development shortcut only — see above
-    }
-  }
-  res.json({
-    userId: user.id, role: user.role,
-    org: { ...orgSafe(org), safeguardingCertified: safeguardingCertified(org) },
-    token: createSession('org', org.id, { userId: user.id }),
-    ...(roleNote ? { roleNote } : {}),
-    // Organisation policy nudge, never a lockout: existing users keep access
-    // and are steered through MFA setup.
-    mfaSetupRequired: !!(org.mfaRequiredForLeads && user && isLeadRole(user.role) && !user.mfa?.enabledAt) || undefined,
-  });
-});
-
-// Accountability by user: sessions are minted per INDIVIDUAL scout at login —
-// the token resolves to both the org and the named user, so shared/anonymous
-// workspace access is structurally impossible.
-function orgAuth(req, res, next) {
-  const session = sessionFor(req);
-  if (session?.kind !== 'org') return res.status(401).json({ error: 'ORG_AUTH_REQUIRED', message: 'Log in again — this session is no longer valid.' });
-  const org = byId.org(session.refId);
-  if (!org) return res.status(401).json({ error: 'ORG_AUTH_REQUIRED' });
-  const user = users.byId(session.userId);
-  if (!user || user.orgId !== org.id) return res.status(401).json({ error: 'USER_UNKNOWN' });
-  if (user.removedAt) return res.status(401).json({ error: 'USER_REMOVED', message: 'Your access to this organisation has been removed.' });
-  if (org.suspended) {
-    return res.status(403).json({ error: 'ORG_SUSPENDED', message: 'This organisation is suspended pending a safety review.' });
-  }
-  req.org = org;
-  req.orgUser = user;
-  next();
-}
-
-
-// ----------------------------------------------------------------- search
-orgRouter.get('/players', (req, res) => {
-  const { q, position, academyPlus, availability, country, ageGroup, newDays } = req.query;
-  // A filter sent twice arrives as a list: refused by name, never bound into the query.
-  for (const f of ['q', 'position', 'academyPlus', 'availability', 'country', 'ageGroup', 'newDays']) {
-    if (req.query[f] !== undefined && typeof req.query[f] !== 'string') return res.status(400).json({ error: 'FIELD_INVALID', field: f, message: `${f} is given once, as text.` });
-  }
-  const AGE_GROUPS = { u16: { ageBelow: 16 }, u18: { ageBelow: 18 }, '18-21': { ageAtLeast: 18, ageBelow: 22 }, senior: { ageAtLeast: 22 } };
-  // An unknown age group or a day count that is not a whole number of days is refused, not read as "any".
-  if (ageGroup && !Object.hasOwn(AGE_GROUPS, ageGroup)) return res.status(400).json({ error: 'FIELD_INVALID', field: 'ageGroup', message: `ageGroup is one of ${Object.keys(AGE_GROUPS).join(', ')}.` });
-  if (newDays && !(/^\d{1,5}$/.test(newDays) && Number(newDays) > 0)) return res.status(400).json({ error: 'FIELD_INVALID', field: 'newDays', message: 'newDays is a whole number of days, from 1.' });
-  let page;
-  try { page = readPage(req.query, players.directoryCursorShape(req.org)); } catch (e) { return sendPageError(res, e); }
-  // The whole visibility rule (the wall, the Grassroots radius, the blocks), the filters, the search and the
-  // declared order are the query's, so the page is exact; the view still applies the rule at the source.
-  //   Pro / agency: Academy+ first (a boosted, opted-in cohort), then PROFILE COMPLETENESS (never ability), then the id.
-  //   Grassroots: First Team Seekers first (need-based, never purchasable), then the nearest ground (to 0.1 km, as
-  //   shown), then completeness, then the id. The id makes the order total, so two reads never swap equal players.
-  const result = players.directoryPage(req.org, {
-    position: position || undefined, availability: availability || undefined, country: country || undefined,
-    academyPlus: academyPlus === 'true' || undefined, ...(AGE_GROUPS[ageGroup] ?? {}),
-    ...(newDays ? { createdSince: Date.now() - Number(newDays) * 24 * 3600 * 1000 } : {}),
-    text: q || undefined,
-  }, page);
-  // The ordering is declared, not inferred.
-  res.set('X-ScoutBox-Ordering', req.org.level === 'grassroots'
-    ? 'first_team_seeker,distance,profile_completeness,player_id'
-    : 'academy_plus,profile_completeness,player_id');
-  res.json({ items: result.items.map((p) => playerViewForOrg(p, req.org)).filter(Boolean), nextCursor: result.nextCursor });
-});
-
-/**
- * The `k` players the organisation may see that are most like `base` (domain.mjs similarityScore), best first; a tie
- * keeps the creation order. Ranked over light rows: only the
- * winners are decoded by the caller.
- */
-function mostSimilar(base, org, k) {
-  const best = [];
-  players.scanLight({ visibleTo: org, exceptId: base.id }, (c) => {
-    const score = similarityScore(base, c);
-    if (best.length === k && score <= best[k - 1].score) return;
-    let i = best.length; while (i > 0 && best[i - 1].score < score) i -= 1;
-    best.splice(i, 0, { c, score }); if (best.length > k) best.pop();
-  });
-  return best;
-}
-
-orgRouter.get('/players/:id', (req, res) => {
-  const p = findPlayer(req.params.id);
-  if (!p) return res.status(404).json({ error: 'PLAYER_NOT_FOUND' });
-  if (!visibleToOrg(p, req.org)) {
-    // Agencies never see minors; unverified clubs don't either.
-    const code = req.org.type === 'agency' ? 'UNDER_18_WALL' : 'VERIFIED_CLUBS_ONLY';
-    return res.status(403).json({
-      error: code,
-      message: code === 'UNDER_18_WALL'
-        ? 'Agency accounts cannot view minors.'
-        : 'Under-18 profiles are visible to verified clubs only. Complete club verification to continue.',
-    });
-  }
-  if (isBlocked(p.id, req.org.id)) return res.status(404).json({ error: 'PLAYER_NOT_FOUND' });
-  ledgerAppend({ type: 'view', playerId: p.id, orgId: req.org.id, orgName: req.org.name, userId: req.orgUser.id, scoutName: req.orgUser.name });
-  const view = playerViewForOrg(p, req.org);
-  // Ranked over light rows (the visibility rule is the query's); the winners keep the creation order on a tie.
-  const similar = mostSimilar(p, req.org, 3).map(({ c, score }) => ({ playerId: c.id, name: c.name, position: c.position, score }));
-  const archetypes = ARCHETYPES
-    .map((a) => ({ archetypeId: a.id, label: a.label, score: similarityScore(p, a) }))
-    .sort((a, b) => b.score - a.score)
-    .slice(0, 2);
-  const orgNotes = safetyAudit.orgNotes.forOrgPlayer(req.org.id, p.id).map(noteView);
-  res.json({ ...view, orgNotes, similarPlayers: { note: 'Statistical similarity — a lead, not a verdict.', players: similar, archetypes } });
-});
-
-// Internal scouting notes — shared inside the org, never visible to the
-// player or any other organisation.
-orgRouter.post('/players/:id/notes', (req, res) => {
-  const p = findPlayer(req.params.id);
-  // A player who blocked this organisation reads as absent
-  // on every discovery route, exactly as the profile read already answers.
-  if (!p || !visibleToOrg(p, req.org) || isBlocked(p.id, req.org.id)) return res.status(404).json({ error: 'PLAYER_NOT_FOUND' });
-  const { text } = req.body || {};
-  if (typeof text !== 'string' || !text.trim()) return res.status(400).json({ error: 'TEXT_REQUIRED' });
-  if (text.trim().length > AUDIT_LIMITS.note) return badField(res, 'text');
-  const note = { id: nextId('note'), orgId: req.org.id, playerId: p.id, userId: req.orgUser.id, scoutName: req.orgUser.name, text: text.trim(), ts: Date.now() };
-  const stored = safetyAudit.orgNotes.add(note);
-  broadcast('players', { playerId: p.id });
-  res.status(201).json(noteView(stored));
-});
-
-// "More like this" — the similarity engine as a search entry point.
-orgRouter.get('/players/:id/morelike', (req, res) => {
-  const p = findPlayer(req.params.id);
-  if (!p || !visibleToOrg(p, req.org) || isBlocked(p.id, req.org.id)) return res.status(404).json({ error: 'PLAYER_NOT_FOUND' });
-  const top = mostSimilar(p, req.org, 10);
-  const full = new Map(players.byIds(top.map(({ c }) => c.id)).map((c) => [c.id, c]));
-  const ranked = top.map(({ c, score }) => { const view = full.has(c.id) ? playerViewForOrg(full.get(c.id), req.org) : null; return view ? { ...view, similarity: score } : null; }).filter(Boolean);
-  res.json({ base: { id: p.id, name: p.name, position: p.position }, players: ranked });
-});
-
-for (const action of ['save', 'shortlist']) {
-  orgRouter.post(`/players/:id/${action}`, (req, res) => {
-    const p = findPlayer(req.params.id);
-    if (!p || isBlocked(p.id, req.org.id)) return res.status(404).json({ error: 'PLAYER_NOT_FOUND' });
-    if (!visibleToOrg(p, req.org)) return res.status(403).json({ error: 'UNDER_18_WALL' });
-    const row = ledgerAppend({ type: action, playerId: p.id, orgId: req.org.id, orgName: req.org.name, userId: req.orgUser.id, scoutName: req.orgUser.name });
-    res.status(201).json({ ok: true, ledgerId: row.id });
-  });
-}
-
-orgRouter.get('/shortlist', (req, res) => {
-  const ids = safetyAudit.ledger.playersListedBy(req.org.id);
-  // A shortlisted player who has since deleted their account is simply absent (the ledger row stays, id only).
-  res.json(ids.map((id) => findPlayer(id)).filter(Boolean).map((p) => playerViewForOrg(p, req.org)).filter(Boolean));
-});
-
-// ------------------------------------------------------- contact & trials
-// Scout Inbox: there is no direct message channel anywhere in this API.
-// An org can only file a request; contact unlocks on acceptance. For minors
-// the request NEVER reaches the child — it routes to the guardian, and any
-// conversation that opens is between adults.
-orgRouter.post('/players/:id/request', (req, res) => {
-  const p = findPlayer(req.params.id);
-  if (!p) return res.status(404).json({ error: 'PLAYER_NOT_FOUND' });
-  if (!visibleToOrg(p, req.org)) {
-    return res.status(403).json({
-      error: req.org.type === 'agency' ? 'UNDER_18_WALL' : 'VERIFIED_CLUBS_ONLY',
-      message: req.org.type === 'agency' ? 'Agency accounts cannot contact minors.' : 'Only verified clubs can contact under-18 players (via their guardian).',
-    });
-  }
-  if (isBlocked(p.id, req.org.id)) {
-    return res.status(403).json({ error: 'BLOCKED', message: 'This player (or their guardian) has blocked your organisation.' });
-  }
-  const { type, message } = req.body || {};
-  if (!['contact', 'trial'].includes(type)) return res.status(400).json({ error: 'TYPE_MUST_BE_CONTACT_OR_TRIAL' });
-  if (!moderateOrRefuse(res, message, { kind: 'org_request_message', orgId: req.org.id, userId: req.orgUser.id })) return;
-
-  if (type === 'trial') {
-    // Trial reports are mandatory: an org with an unfiled report for a past
-    // trial cannot request new trials until it files.
-    // A report can never be filed for a subject who removed their account,
-    // so a tombstoned trial does not hold the organisation hostage.
-    const overdue = recruitment.trials.forOrgStatus(req.org.id, 'awaiting_report').filter((t) => !t.subjectRemovedAt);
-    if (overdue.length > 0) {
-      return res.status(409).json({
-        error: 'REPORTS_OUTSTANDING',
-        message: `You have ${overdue.length} trial(s) awaiting a mandatory performance report. File them before requesting new trials.`,
-        trialIds: overdue.map((t) => t.id),
-      });
-    }
-  }
-
-  // Trial logistics: what the player/guardian is actually agreeing to.
-  // altSlots lets the other side pick a date that works (counter-proposal).
-  // Every date is validated by the one Trial date validator and the text
-  // fields are bounded BEFORE anything is written, so a malformed date never
-  // reaches the trial row as a NaN deadline.
-  let trialDetails = null;
-  if (type === 'trial') {
-    const check = validateTrialDetails(req.body);
-    if (!check.ok) return res.status(400).json(check);
-    trialDetails = check.details;
-    if (trialDetails.notes && !moderateOrRefuse(res, trialDetails.notes, { kind: 'trial_notes', orgId: req.org.id })) return;
-  }
-  // This route is a second path to the same inbox row as a canonical Contact
-  // send or Trial invitation. After the body has been validated, it draws on
-  // the SAME budgets and keeps the same one-pending rule, so it is not an
-  // unmetered alias: a club cannot flood a player through this door.
-  const pendingSame = recruitment.requests.forOrgPlayer(req.org.id, p.id).find((r) => r.type === type && r.status === 'pending' && !r.subjectRemovedAt);
-  if (pendingSame) return res.status(409).json({ error: 'REQUEST_PENDING', message: `A ${type} request to this player is already awaiting an answer.`, requestId: pendingSame.id });
-  if (rateLimit.limited(type === 'trial' ? 'trial_invite' : 'contact_send', req.org.id)) return res.status(429).json(rateLimitedBody(type === 'trial' ? 'trial_invite' : 'contact_send'));
-  const request = issueRecruitmentRequest({ org: req.org, orgUser: req.orgUser, player: p, type, message, trialDetails });
-  res.status(201).json({ ok: true, requestId: request.id, status: 'pending', routedTo: request.routedTo });
-});
-
-/**
- * THE one writer of an org → player/guardian request row.
- *
- * The Contact workflow's send creates its recipient-visible object through
- * exactly the same path as the direct request route:
- * the same routing rule (scout → parent, never scout → child), the same
- * ledger entry, the same notifications, the same `inbox` ping. A second
- * writer would be a second Inbox by another name.
- *
- * `guardianId` lets a caller that has already resolved the guardian route
- * (the Contact workflow validates the record, the child link and the
- * verification gates) name it; the direct route keeps the player's own link.
- * `notice` lets a caller with its own occasion word the notifications
- * (`{ kind, toGuardian, toPlayer }`, the open-day invitation); the row, the
- * routing, the ledger entry and the inbox ping are the same either way.
- * `workflow` lets the Trial invitation write its case link, recipient snapshot
- * and client key in the same create (`{ caseId, recipient, keys }`).
- * The row is written at once (`requests.create`); the returned record is the
- * stored, read-only one.
- */
-function issueRecruitmentRequest({
-  org, orgUser, player, type, message = '', trialDetails = null,
-  subject = null, contactId = null, guardianId = undefined, at = Date.now(), notice = null, workflow = null,
-}) {
-  const minor = !isAdult(player);
-  const request = {
-    id: nextId('req'),
-    playerId: player.id,
-    playerName: player.name,
-    orgId: org.id,
-    orgName: org.name,
-    orgType: org.type,
-    orgVerified: !!org.verified,
-    orgSafeguardingCertified: safeguardingCertified(org),
-    trustedPartner: org.trustedPartner,
-    userId: orgUser.id,
-    scoutName: orgUser.name,
-    scoutRole: orgUser.role || 'Scout',
-    type,
-    message: message || '',
-    // A Contact carries an optional subject, and the row remembers
-    // which Contact created it. `contactId` is an internal link and is
-    // stripped from every recipient-facing view (`requestForRecipient`).
-    ...(subject ? { subject } : {}),
-    ...(contactId ? { contactId } : {}),
-    trialDetails,
-    status: 'pending',
-    createdAt: at,
-    // Scout → Parent, never Scout → Child.
-    routedTo: minor ? 'guardian' : 'player',
-    guardianId: minor ? (guardianId ?? player.guardianId) : null,
-    contactChannel: null, // stays null until the player/guardian accepts
-    ...(workflow ? { caseId: workflow.caseId, trialId: null, recipient: workflow.recipient, keys: workflow.keys } : {}),
-  };
-  const stored = recruitment.requests.create(request); // written now (inside the caller's unit when there is one)
-  ledgerAppend({ type: `${type}_request${minor ? '_to_guardian' : ''}`, playerId: player.id, orgId: org.id, orgName: org.name, userId: orgUser.id, scoutName: orgUser.name });
-  const kind = notice?.kind ?? 'request';
-  if (minor) {
-    notify({ kind: 'guardian', id: stored.guardianId }, kind, notice?.toGuardian ?? `${org.name} has requested to discuss a ${type === 'trial' ? 'trial' : 'conversation'} for ${player.name}.`, stored.id);
-    notify({ kind: 'player', id: player.id }, kind, notice?.toPlayer ?? `${org.name} contacted your parent/guardian about a ${type === 'trial' ? 'trial' : 'conversation'}.`, stored.id);
-  } else {
-    notify({ kind: 'player', id: player.id }, kind, notice?.toPlayer ?? `${org.name} sent you a ${type} request.`, stored.id);
-  }
-  broadcast('inbox', { playerId: player.id });
-  return stored;
-}
-
-/**
- * The ONE writer of an accepted trial. Both respond routes — the adult's own
- * and the guardian's on a minor's behalf — call this with the slot they
- * already validated (`chooseTrialSlot`), so the two rows cannot drift apart: same fields, same clock (`at` is the response
- * instant the caller stamped on the request), same deadline derivation.
- * `trialDate` is a validated `YYYY-MM-DD` or null (date to be confirmed);
- * the deadline is never NaN because `trialReportDueAt` never returns one.
- */
-function issueAcceptedTrial({ request, player, trialDate, by, at, actor = null }) {
-  const details = request.trialDetails ?? {};
-  // A slot-based invitation carries concrete slots (UTC instants + the
-  // organiser's timezone + a venue). Accepting one of them IS the schedule
-  // confirmation: the trial is born `scheduled` with revision 1 confirmed by
-  // the recipient. A date-only invitation, or an undated one, is born `accepted` with no schedule — a date the club typed
-  // is not a confirmed schedule, and nothing is fabricated from it.
-  const slot = Array.isArray(details.slots) ? details.slots.find((s) => s && s.day === trialDate) ?? null : null;
-  const recipient = { type: by, playerId: player.id, guardianId: by === 'guardian' ? (actor?.id ?? null) : null, minor: by === 'guardian', at };
-  const who = { kind: by, id: actor?.id ?? null, name: actor?.name ?? null };
-  // The address line and the instructions were held back from the
-  // invitation; they join the session now that the family accepted.
-  const priv = details.private && typeof details.private === 'object' ? details.private : {};
-  const session = slot ? {
-    id: nextId('tses'), kind: slot.kind ?? 'training', startsAt: slot.startsAt, endsAt: slot.endsAt,
-    venue: slot.venue ? { name: slot.venue.name, town: slot.venue.town ?? null, address: typeof priv.venueAddress === 'string' ? priv.venueAddress : null } : null,
-    instructions: typeof priv.instructions === 'string' ? priv.instructions : null,
-    evidence: [],
-  } : null;
-  const proposedBy = { kind: 'org', userId: request.userId ?? null, name: request.scoutName ?? null };
-  const schedule = session ? {
-    timezone: slot.timezone, revision: 1, proposedAt: request.createdAt ?? at, proposedBy,
-    confirmedAt: at, confirmedBy: who,
-    sessions: [session],
-    revisions: [{ revision: 1, timezone: slot.timezone, sessions: [{ ...session, evidence: undefined }], proposedAt: request.createdAt ?? at, proposedBy, confirmedAt: at, confirmedBy: who, supersededAt: null, reason: 'invitation', material: null }],
-  } : null;
-  const trial = {
-    id: nextId('trial'),
-    requestId: request.id,
-    caseId: request.caseId ?? null,
-    playerId: player.id,
-    playerName: player.name,
-    orgId: request.orgId,
-    orgName: request.orgName,
-    scoutName: request.scoutName,
-    acceptedAt: at,
-    acceptedBy: by,
-    guardianApproved: by === 'guardian',
-    proposedDate: trialDate,
-    venue: typeof details.venue === 'string' && details.venue !== '' ? details.venue : null,
-    notes: typeof details.notes === 'string' ? details.notes : '',
-    // The mandatory report is due 7 days after the trial day (or acceptance).
-    reportDueAt: trialReportDueAt(trialDate, at),
-    status: 'awaiting_report', // mandatory report gate
-    // ---- Operational containers. One clock: `at`.
-    workflowState: schedule ? 'scheduled' : 'accepted',
-    schedule,
-    attendance: [],
-    completion: null,
-    recipient,
-    history: [
-      { id: nextId('aud'), at, action: 'trial_accepted', by: who, detail: { recipientType: by, slotId: slot?.id ?? null, day: trialDate ?? null } },
-      ...(schedule ? [{ id: nextId('aud'), at, action: 'trial_schedule_confirmed', by: who, detail: { revision: 1, sessionCount: 1 } }] : []),
-    ],
-    reminders: {},
-    rev: 1, revAt: at, revBy: null,
-  };
-  return recruitment.trials.create(trial); // with its children, written now (inside the respond route's unit)
-}
-
-/** A request row as its RECIPIENT may see it: no org id, no user id, no internal Contact link. */
-// `caseId` and `trialId` are the club's workflow ids and never travel to a
-// recipient; the family reaches the trial through its own family view, where
-// `requestId` matches the invitation.
-const requestForRecipient = ({ orgId, userId, contactId, caseId, recipient, keys, trialId, ...visible }) => {
-  // The trial the recipient's own acceptance created is THEIR record (it is
-  // what /player/trials and /guardian/trials list); its id travels so the
-  // Inbox can deep-link to it. The case id and the org's internals never do.
-  const out = { ...visible, trialId: trialId ?? null };
-  // The address line and the instructions of an invitation are shared
-  // after acceptance only: they never appear in the Inbox view.
-  if (out.trialDetails && typeof out.trialDetails === 'object' && 'private' in out.trialDetails) {
-    const { private: _p, ...td } = out.trialDetails;
-    return { ...out, trialDetails: td };
-  }
-  return out;
-};
-
-/**
- * An optional short reply on a CONTACT-type request. Validated before
- * anything is mutated; refused if it is not text or if moderation refuses it.
- * Returns `{ ok, reply }` or answers the request and returns `{ ok: false }`.
- */
-function contactReplyFrom(req, res, request) {
-  const check = validateContactReply(req.body?.message, { isContact: request.type === 'contact' });
-  if (!check.ok) { res.status(400).json({ error: check.error, message: check.message }); return { ok: false }; }
-  if (check.reply && !moderateOrRefuse(res, check.reply, { kind: 'contact_reply', requestId: request.id })) return { ok: false };
-  return { ok: true, reply: check.reply };
-}
-
-// ------------------------------------------------------- film room & feed
-
-// The Film Room: full-screen swipe deck of playable clips from players this
-// org is allowed to see. Verified Clips surface first.
-orgRouter.get('/filmroom', (req, res) => {
-  // Paged by cursor in SQL ({ items, nextCursor }): verified clips first, then the most viewed.
-  let page;
-  try { page = readPage(req.query, ['number', 'number', 'string', 'number']); } catch (e) { return sendPageError(res, e); }
-  const { items, nextCursor } = players.clipPage(req.org, page);
-  res.json({
-    items: items.map(({ player: p, media: m }) => {
-      const view = playerViewForOrg(p, req.org);
-      if (!view) return null;
-      return {
-        media: { id: m.id, title: m.title, url: m.url, views: m.views ?? 0, verifiedClip: m.verifiedClip, tags: m.tags ?? {} },
-        player: {
-          id: view.id, name: view.name, position: view.position, age: view.age,
-          trustScore: view.trustScore, academyPlus: view.academyPlus, guardianManaged: !!view.guardianManaged,
-        },
-      };
-    }).filter(Boolean),
-    nextCursor,
-  });
-});
-
-// Per-clip view tracking — honest scouting signal back to the player.
-orgRouter.post('/players/:pid/media/:mid/view', (req, res) => {
-  const p = findPlayer(req.params.pid);
-  if (!p || !visibleToOrg(p, req.org) || isBlocked(p.id, req.org.id)) return res.status(404).json({ error: 'NOT_FOUND' });
-  const m = p.media.find((x) => x.id === req.params.mid);
-  if (!m) return res.status(404).json({ error: 'MEDIA_NOT_FOUND' });
-  const views = (m.views ?? 0) + 1;
-  players.patchItem(p.id, 'media', { id: m.id }, { views }); // committed before the response
-  broadcast('players', { playerId: p.id });
-  res.json({ views });
-});
-
-// "What scouts noticed": structured tags, aggregated anonymously for the player.
-orgRouter.post('/players/:pid/media/:mid/tags', (req, res) => {
-  const p = findPlayer(req.params.pid);
-  if (!p || !visibleToOrg(p, req.org) || isBlocked(p.id, req.org.id)) return res.status(404).json({ error: 'NOT_FOUND' });
-  const m = p.media.find((x) => x.id === req.params.mid);
-  if (!m) return res.status(404).json({ error: 'MEDIA_NOT_FOUND' });
-  const { tags } = req.body || {};
-  if (!Array.isArray(tags) || tags.length === 0) return res.status(400).json({ error: 'TAGS_REQUIRED', allowed: SCOUT_TAGS });
-  const invalid = tags.filter((t) => !SCOUT_TAGS.includes(t));
-  if (invalid.length) return res.status(400).json({ error: 'UNKNOWN_TAGS', invalid, allowed: SCOUT_TAGS });
-  const next = { ...(m.tags ?? {}) };
-  for (const t of tags) next[t] = (next[t] ?? 0) + 1;
-  // ONE unit of work: the clip's tag rows and the ledger row commit together.
-  let stored;
-  unit(() => {
-    stored = players.patchItem(p.id, 'media', { id: m.id }, { tags: next });
-    ledgerAppend({ type: 'clip_tagged', playerId: p.id, orgId: req.org.id, orgName: req.org.name, userId: req.orgUser.id, scoutName: req.orgUser.name });
-    broadcast('players', { playerId: p.id });
-  });
-  res.json({ tags: stored.tags });
-});
-
-orgRouter.get('/tags', (_req, res) => res.json(SCOUT_TAGS));
-
-// The club home feed: what changed since you last looked.
-orgRouter.get('/feed', (req, res) => {
-  const FOURTEEN_DAYS = Date.now() - 14 * 24 * 3600 * 1000;
-  const items = [];
-  const shortlisted = new Set(safetyAudit.ledger.playersListedBy(req.org.id, ['shortlist', 'save']));
-  // The newest 40 of each kind from SQL (the visibility rule is the query's); the page is the newest 40 of all.
-  const recent = players.recentFor(req.org, FOURTEEN_DAYS, 40);
-  for (const p of recent.players) {
-    items.push({ type: 'new_player', ts: p.createdAt, playerId: p.id, playerName: p.name, position: p.position, age: ageOn(p.dob), guardianManaged: !isAdult(p) });
-  }
-  for (const { player: p, media: m } of recent.clips) {
-    items.push({
-      type: shortlisted.has(p.id) ? 'shortlist_new_clip' : 'new_clip',
-      ts: new Date(m.uploadedAt).getTime(), playerId: p.id, playerName: p.name,
-      mediaId: m.id, title: m.title, hasVideo: !!m.url, verifiedClip: !!m.verifiedClip,
-    });
-  }
-  // A trial whose subject removed their account (a tombstone) has no
-  // report to file, so it is neither listed as due nor reminded about.
-  for (const t of recruitment.trials.forOrgStatus(req.org.id, 'awaiting_report').filter((x) => !x.subjectRemovedAt)) {
-    const dueAt = Number.isFinite(t.reportDueAt) ? t.reportDueAt : null;
-    items.push({ type: 'report_due', ts: dueAt ?? Date.now(), playerId: t.playerId, playerName: t.playerName, trialId: t.id, dueAt });
-    // one-shot reminder when the mandatory report is due within 48h
-    if (!t.reminderSent && dueAt !== null && dueAt - Date.now() < 48 * 3600 * 1000) {
-      recruitment.trials.markReportReminderSent(t.id); // the one-shot marker, written now
-      const request = recruitment.requests.byId(t.requestId);
-      if (request?.userId) notify({ kind: 'org_user', id: request.userId }, 'report_due', `Mandatory trial report for ${t.playerName} is due ${utcDayOf(dueAt)}.`, t.id); // the UTC day, not the server locale
-    }
-  }
-  items.sort((a, b) => b.ts - a.ts);
-  res.json(items.slice(0, 40));
-});
-
-// --------------------------------------------------------- saved searches (domains/discovery/savedSearches.mjs)
+registerPlayerSearch({ orgRouter, players, safetyAudit, findPlayer, isBlocked, ledgerAppend, broadcast, nextId, playerViewForOrg });
+registerClubRequests({ orgRouter, recruitment, findPlayer, isBlocked, moderateOrRefuse, rateLimit, issueRecruitmentRequest });
+registerFilmRoom({ orgRouter, players, recruitment, safetyAudit, findPlayer, isBlocked, unit, ledgerAppend, notify, broadcast, playerViewForOrg });
 const { checkSavedSearches } = registerSavedSearches({ byId, orgRouter, notify, nextId, playerViewForOrg, reqText, savedSearches: operations.savedSearches });
-
-// Calendar export for an accepted trial.
-orgRouter.get('/trials/:id/ics', (req, res) => {
-  const t = onlyIf(recruitment.trials.byId(req.params.id), (x) => x.orgId === req.org.id);
-  if (!t) return res.status(404).json({ error: 'TRIAL_NOT_FOUND' });
-  const deadline = Number.isFinite(t.reportDueAt) ? ` Mandatory performance report due ${new Date(t.reportDueAt).toISOString().slice(0, 10)}.` : '';
-  // A trial with a confirmed schedule exports every session as its
-  // own timed event in the organiser's zone (`DTSTART;TZID=`), from the
-  // current revision only. A cancelled trial exports its sessions as
-  // CANCELLED rather than silently vanishing from a calendar that already
-  // holds them. The exact address and instructions are the club's own.
-  if (t.schedule && Array.isArray(t.schedule.sessions) && t.schedule.sessions.length) {
-    const tz = t.schedule.timezone;
-    const cancelled = t.completion?.state === 'cancelled';
-    // An unconfirmed revision is TENTATIVE: the club can hold the slots, the
-    // calendar says the family has not yet agreed to them.
-    const status = cancelled ? 'CANCELLED' : t.schedule.confirmedAt ? 'CONFIRMED' : 'TENTATIVE';
-    // DTSTAMP from the first READABLE clock, so a row with none never throws
-    // inside toISOString.
-    const stampMs = readInstant(t.schedule.confirmedAt) ?? readInstant(t.schedule.proposedAt) ?? readInstant(t.acceptedAt) ?? Date.now();
-    const stamp = new Date(stampMs).toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
-    const events = t.schedule.sessions.slice().sort((a, b) => (a.startsAt - b.startsAt) || String(a.id).localeCompare(String(b.id))).flatMap((s) => {
-      const where = s.venue ? [s.venue.name, s.venue.address, s.venue.town].filter(Boolean).join(', ') : (t.venue ?? null);
-      return [
-        'BEGIN:VEVENT', `UID:${t.id}-${s.id}@scoutbox`, `DTSTAMP:${stamp}`,
-        `DTSTART;TZID=${tz}:${trialIcsLocal(s.startsAt, tz)}`, `DTEND;TZID=${tz}:${trialIcsLocal(s.endsAt, tz)}`,
-        `SEQUENCE:${Number(t.schedule.revision) || 1}`,
-        `STATUS:${status}`,
-        `SUMMARY:${trialIcsText(`ScoutBox trial (${s.kind ?? 'session'}) — ${t.playerName ?? 'removed player'}${cancelled ? ' — CANCELLED' : ''}`)}`,
-        `DESCRIPTION:${trialIcsText(`${s.instructions || t.notes || 'Trial session'}.${deadline}`)}`,
-        where ? `LOCATION:${trialIcsText(where)}` : null,
-        'END:VEVENT',
-      ].filter(Boolean);
-    });
-    const ics = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//ScoutBox//Trials//EN', ...events, 'END:VCALENDAR'].join('\r\n');
-    return res.set('Content-Type', 'text/calendar').send(ics);
-  }
-  // Without any schedule (a date-only invitation, or an acceptance of an
-  // undated one) the export is honest: the accepted day as an all-day event,
-  // and nothing invented about a time or a venue. A stored date that is not
-  // a calendar day is refused as what it is — never a 500, never a
-  // fabricated day. A missing deadline is simply not stated.
-  const day = parseTrialDate(t.proposedDate);
-  if (!day.ok) return res.status(422).json({ error: 'TRIAL_DATE_INVALID', message: 'This trial was recorded with a date that is not a calendar day; postpone it to a valid day to export it.', expected: day.expected });
-  const startAt = day.t ?? (Number.isFinite(t.acceptedAt) ? t.acceptedAt : null);
-  if (startAt === null) return res.status(422).json({ error: 'TRIAL_DATE_INVALID', message: 'This trial has no usable date to export.' });
-  const start = new Date(startAt).toISOString().slice(0, 10).replace(/-/g, '');
-  // RFC 5545 text: backslash, semicolon, comma and line breaks are escaped so
-  // no stored text can begin a new calendar line.
-  const icsText = (s) => String(s).replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\r?\n/g, '\\n');
-  const ics = [
-    'BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//ScoutBox//Trials//EN', 'BEGIN:VEVENT',
-    `UID:${t.id}@scoutbox`, `DTSTART;VALUE=DATE:${start}`,
-    `SUMMARY:${icsText(`ScoutBox trial — ${t.playerName ?? 'removed player'}`)}`,
-    `DESCRIPTION:${icsText(t.notes || 'Assessment trial')}.${deadline}`,
-    t.venue ? `LOCATION:${icsText(t.venue)}` : null,
-    'END:VEVENT', 'END:VCALENDAR',
-  ].filter(Boolean).join('\r\n');
-  res.set('Content-Type', 'text/calendar').send(ics);
+registerClubTrials({ orgRouter, recruitment, findPlayer, isBlocked, moderateOrRefuse, unit, nextId, ledgerAppend, notify, broadcast });
+const { pathwayRecord, openTrialView } = registerGrassrootsClub({
+  orgRouter, players, grassroots, clubSetup, transitionsVouches, signings: signingsFollowUps.signings, findPlayer, findOrg: byId.org,
+  unit, seam, nextId, ledgerAppend, notify, broadcast, moderateOrRefuse, playerViewForOrg, recordActivity, canonicalContractFor,
+  issueRecruitmentRequest,
 });
-
-// Fixture-graph scouting: verified attendances form a map of real fixtures.
-orgRouter.get('/fixtures', (req, res) => {
-  // Paged by cursor in SQL ({ items, nextCursor }): the (fixture, date) groups, newest date first.
-  let page;
-  try { page = readPage(req.query, ['string', 'string']); } catch (e) { return sendPageError(res, e); }
-  const { items, nextCursor } = players.fixturePage(req.org, page);
-  res.json({
-    items: items.map((g) => ({ fixture: g.fixture, venue: g.venue, date: g.date, players: g.players.map((p) => ({ id: p.id, name: p.name, position: p.position, age: ageOn(p.dob), trustScore: p.profileSignal })) })),
-    nextCursor,
-  });
+registerClubChecks({ orgRouter, orgs, codes, clubSetup, mailer, rateLimit, unit, seam, broadcast });
+registerLedger({
+  orgRouter, safetyAudit, recruitment, signings: signingsFollowUps.signings, invoices: operations.invoices,
+  reputationSeed: operations.reputationSeed, findPlayer, isBlocked,
 });
-
-// The club's Requests and Trials lists, newest first, paged by cursor (domains/platform/paging.mjs): { items, nextCursor }.
-// The home dashboards read their figures from /org/recruitment-counts, never by counting a page.
-orgRouter.get('/requests', (req, res) => {
-  let page;
-  try { page = readPage(req.query, ['number']); } catch (e) { return sendPageError(res, e); }
-  res.json(recruitment.requests.pageForOrg(req.org.id, page));
-});
-
-orgRouter.get('/trials', (req, res) => {
-  let page;
-  try { page = readPage(req.query, ['number']); } catch (e) { return sendPageError(res, e); }
-  res.json(recruitment.trials.pageForOrg(req.org.id, page));
-});
-
-// The Pro and Grassroots home figures: pending requests, trials awaiting a report, and every trial on record.
-orgRouter.get('/recruitment-counts', (req, res) => {
-  res.json({
-    requestsPending: recruitment.requests.countForOrgStatus(req.org.id, 'pending'),
-    trialsAwaitingReport: recruitment.trials.countForOrgStatus(req.org.id, 'awaiting_report'),
-    trials: recruitment.trials.countForOrg(req.org.id),
-  });
-});
-
-// Trial Performance Reports — mandatory, complete or rejected.
-orgRouter.post('/trials/:trialId/report', (req, res) => {
-  const trial = onlyIf(recruitment.trials.byId(req.params.trialId), (x) => x.orgId === req.org.id);
-  if (!trial) return res.status(404).json({ error: 'TRIAL_NOT_FOUND' });
-  if (trial.status === 'reported') return res.status(409).json({ error: 'ALREADY_REPORTED' });
-  // The subject removed their account. There is no profile for the
-  // report to land on and nobody to deliver feedback to; the tombstone keeps
-  // what happened, and nothing new is written about a person who left.
-  if (trial.subjectRemovedAt || !findPlayer(trial.playerId)) {
-    return res.status(409).json({ error: 'TRIAL_SUBJECT_REMOVED', message: 'This player removed their ScoutBox account. The trial stays on record; no report can be filed for it.' });
-  }
-
-  const check = validateTrialReport(req.body);
-  if (!check.ok) {
-    return res.status(400).json({
-      error: 'REPORT_INCOMPLETE',
-      message: 'Trial performance reports are mandatory and must be complete. Partial reports are rejected.',
-      requiredFields: TRIAL_REPORT_FIELDS,
-      missing: check.missing,
-      invalid: check.invalid,
-    });
-  }
-
-  // Optional development feedback for the player — one strength, one focus
-  // area. Moderated like everything else, and delivered even when the trial
-  // doesn't lead anywhere: the player always gets something back.
-  const { strengthNote, focusNote } = req.body || {};
-  if (strengthNote && !moderateOrRefuse(res, strengthNote, { kind: 'trial_feedback', orgId: req.org.id })) return;
-  if (focusNote && !moderateOrRefuse(res, focusNote, { kind: 'trial_feedback', orgId: req.org.id })) return;
-
-  const report = {
-    id: nextId('rep'),
-    trialId: trial.id,
-    playerId: trial.playerId,
-    orgId: req.org.id,
-    orgName: req.org.name,
-    userId: req.orgUser.id,
-    scoutName: req.orgUser.name,
-    filedAt: Date.now(),
-    ...Object.fromEntries(TRIAL_REPORT_FIELDS.map((f) => [f, req.body[f]])),
-    notes: req.body.notes || '',
-    strengthNote: strengthNote || null,
-    focusNote: focusNote || null,
-  };
-  // Filed reports raise Trust Score (institutional corroboration). The
-  // player's `trialReports` is DERIVED from the trials: the report written on
-  // the trial is what the profile serves, in filing order — no copy is pushed
-  // onto the player. The report and its ledger row commit together.
-  const p = findPlayer(trial.playerId);
-  unit(() => {
-    recruitment.trials.fileReport(trial.id, { report });
-    ledgerAppend({ type: 'trial_report', playerId: p.id, orgId: req.org.id, orgName: req.org.name, userId: req.orgUser.id, scoutName: req.orgUser.name });
-  });
-  // The mandatory report closes the club's obligation even while
-  // the family has blocked the club, but the block stands — no notification
-  // reaches the player or guardian from a blocked club. The report is still
-  // on the profile when they look.
-  if (!isBlocked(p.id, req.org.id)) {
-    notify({ kind: 'player', id: p.id }, 'trial_report', `${req.org.name} filed your trial report${report.strengthNote ? ' — with development feedback' : ''}. It's on your profile.`, report.id);
-    if (p.guardianId) notify({ kind: 'guardian', id: p.guardianId }, 'trial_report', `${req.org.name} filed the trial report for ${p.name}.`, report.id);
-  }
-  broadcast('players', { playerId: p.id });
-  res.status(201).json({ ok: true, report, playerTrustScore: computeTrustScore(p) });
-});
-
-// The revenue event, completed: recording a signing updates the player's
-// timeline + contract, freezes the attribution evidence from the Proof Pack,
-// and notifies the player (and guardian for minors).
-orgRouter.post('/players/:id/signing', (req, res) => {
-  // The LEGACY recording route, kept for clients that do not use the signing
-  // workflow. It writes nothing itself: the completed-signing record and
-  // every side effect come from the ONE writer (signingsDomain), and a recruitment
-  // that went through the canonical Offer cannot be short-circuited here — an
-  // accepted Offer or a signing package between this club and player means
-  // the signing workflow on the case owns the outcome.
-  // Recording a joining is a CLUB's act and a lead's act.
-  // An agency has no squad to sign a player into, and a scout could not
-  // complete the canonical workflow either; the same authority applies here.
-  if (req.org.type === 'agency' || req.org.level === 'agent') return res.status(403).json({ error: 'SIGNING_NOT_PERMITTED', message: 'Only a club records a signing.' });
-  if (!isLeadRole(req.orgUser?.role)) return res.status(403).json({ error: 'LEAD_REQUIRED', message: 'Only recruitment leads and directors can record a signing.' });
-  const p = findPlayer(req.params.id);
-  if (!p) return res.status(404).json({ error: 'PLAYER_NOT_FOUND' });
-  if (!visibleToOrg(p, req.org)) return res.status(403).json({ error: 'UNDER_18_WALL' });
-  if (isBlocked(p.id, req.org.id)) return res.status(403).json({ error: 'BLOCKED' });
-  const blocker = signingsDomain?.legacyRecordingBlocker?.(p.id, req.org.id, Date.now());
-  if (blocker) return res.status(409).json({ ok: false, error: blocker.error, message: blocker.message });
-  // ONE standing legacy row per club and player. A second
-  // recording while one stands (not cancelled, voided or revoked) would be a
-  // second signing row, a second invoice and a second set of notifications for
-  // one joining — the same invariant the canonical workflow keeps per package
-  // and per Offer. The route also draws on the canonical closure budget, so it
-  // is not an unmetered alias of `/signings/:id/complete`.
-  const standing = signingsFollowUps.signings.forOrgPlayer(req.org.id, p.id).find((s) => !s.signingPackageId && !s.cancelledAt && !s.revokedAt && !s.voidedAt);
-  if (standing) return res.status(409).json({ ok: false, error: 'SIGNING_ALREADY_RECORDED', message: 'A signing of this player by your club is already on record.', signingId: standing.id });
-  if (rateLimit.limited('signing_closure', req.org.id)) return res.status(429).json(rateLimitedBody('signing_closure'));
-  if (!signingsDomain?.recordCompletedSigning) return res.status(500).json({ error: 'SIGNING_STORE_MISSING' });
-  // The ledger row, the signings row and the player's level / contract columns commit as one unit of work.
-  // Typed input only — a note is text of at most 400 characters, or absent; never sliced.
-  const legacyNote = req.body?.note;
-  if (legacyNote !== undefined && legacyNote !== null && legacyNote !== '' && (typeof legacyNote !== 'string' || legacyNote.length > 400)) return res.status(400).json({ error: 'FIELD_INVALID', field: 'note', message: 'The note is text of at most 400 characters.' });
-  let written;
-  try {
-    written = unit(() => signingsDomain.recordCompletedSigning({ player: p, org: req.org, actor: req.orgUser, at: Date.now(), legacy: { note: typeof legacyNote === 'string' && legacyNote ? legacyNote : null } }));
-  } catch (e) {
-    console.error(`SIGNING legacy_recording_rolled_back ${p.id}: ${e?.message ?? e}`);
-    return res.status(500).json({ ok: false, error: 'SIGNING_STATE_UNKNOWN', message: 'The signing could not be recorded; nothing was recorded.' });
-  }
-  const { signing, effects } = written;
-  try { effects?.(); } catch (e) { console.error(`SIGNING legacy side_effect_failed: ${e?.message ?? e}`); }
-  res.status(201).json({ ok: true, signing });
-});
-
-// Newest first, paged by cursor (domains/platform/paging.mjs): { items, nextCursor }. No app reads this list yet; one
-// that does will need a "load more" (product decision: no load-more UI yet).
-orgRouter.get('/signings', (req, res) => {
-  let page;
-  try { page = readPage(req.query, ['number']); } catch (e) { return sendPageError(res, e); }
-  res.json(signingsFollowUps.signings.pageForOrg(req.org.id, page));
-});
-
-// The organisation's invoices, newest first, by cursor (`?limit=&cursor=`); the apps read the first page.
-orgRouter.get('/invoices', (req, res) => {
-  let page;
-  try { page = readPage(req.query, ['number']); } catch (e) { return sendPageError(res, e); }
-  const { items, nextCursor } = operations.invoices.pageForOrg(req.org.id, page);
-  res.json({ items: items.map(invoiceView), nextCursor });
-});
-
-// ------------------------------------------- open trial days (grassroots)
-function grassrootsOrgOnly(req, res) {
-  if (req.org.level !== 'grassroots') {
-    res.status(403).json({ error: 'GRASSROOTS_ORGS_ONLY', message: 'Open days are a ScoutBox Grassroots feature.' });
-    return true;
-  }
-  return false;
-}
-
-// Open days, match days and friendlies are rows of repositories/grassroots.mjs; responses are built from these
-// allowlists. A club's name is read live (not a copy taken when it posted).
-const GL = GRASSROOTS_LIMITS;
-const orgNameOf = (orgId) => byId.org(orgId)?.name ?? null;
-const registrationView = (r) => ({
-  id: r.id, playerId: r.playerId, playerName: r.playerName, byGuardian: r.byGuardian, ...(r.guardianId ? { guardianId: r.guardianId } : {}),
-  ts: r.ts, outcome: r.outcome, outcomeNote: r.outcomeNote, outcomeAt: r.outcomeAt,
-});
-const openTrialView = (t) => ({
-  id: t.id, orgId: t.orgId, orgName: orgNameOf(t.orgId), title: t.title, date: t.date, venue: t.venue, ageGroup: t.ageGroup,
-  positions: [...t.positions], notes: t.notes, createdByUserId: t.createdByUserId, createdAt: t.createdAt,
-});
-const fieldInvalid = (res, field, message) => res.status(400).json({ error: 'FIELD_INVALID', field, message });
-/** The positions an open day asks for: absent is none; otherwise a list of at most 20 short texts (repeats dropped). */
-function openDayPositions(v) {
-  if (v === undefined || v === null) return [];
-  if (!Array.isArray(v) || v.length > GL.positions || !v.every((x) => typeof x === 'string' && x.trim() && x.trim().length <= GL.position)) return null;
-  return [...new Set(v.map((x) => x.trim()))];
-}
-
-orgRouter.post('/open-trials', (req, res) => {
-  if (grassrootsOrgOnly(req, res)) return;
-  // The no-ghosting rule: nobody — least of all a kid at their first session —
-  // leaves an open day without an answer. Unresolved past registrants block
-  // the next posting, the same way unfiled trial reports block new trials.
-  const today = new Date().toISOString().slice(0, 10);
-  const unresolved = grassroots.openTrials.unresolvedBefore(req.org.id, today);
-  if (unresolved > 0) {
-    return res.status(409).json({
-      error: 'OUTCOMES_OUTSTANDING',
-      message: `${unresolved} player(s) from your past open day(s) are still waiting for an answer. Resolve them (invite or a kind no) before posting the next one.`,
-    });
-  }
-  const { title, date, venue, ageGroup, positions, notes } = req.body || {};
-  if (!reqText(title, GL.title) || !date || !reqText(venue, GL.venue)) return res.status(400).json({ error: 'TITLE_DATE_VENUE_REQUIRED' });
-  if (!optText(ageGroup, GL.ageGroup)) return badField(res, 'ageGroup');
-  if (!optText(notes, GL.notes)) return badField(res, 'notes');
-  // The open-day date gates the no-ghosting rule above (`date < today`) and
-  // the upcoming lists (`date >= today`) by string comparison, so it must be
-  // a real day: other text would compare as "upcoming for ever" and never
-  // become a past day whose registrants are owed an answer.
-  if (!dateOnlyOrRefuse(res, date, 'date')) return;
-  const wanted = openDayPositions(positions); // junk is refused, never filtered or cut off
-  if (!wanted) return fieldInvalid(res, 'positions', `positions is a list of at most ${GL.positions} positions, each text of at most ${GL.position} characters.`);
-  if (notes && !moderateOrRefuse(res, notes, { kind: 'open_trial_notes', orgId: req.org.id })) return;
-  const trial = unit(() => {
-    const t = grassroots.openTrials.create({
-      id: nextId('open'), orgId: req.org.id, title: title.trim(), date, venue: venue.trim(),
-      ageGroup: ageGroup?.trim() || 'open', positions: wanted, notes: notes || '', createdByUserId: req.orgUser.id, createdAt: Date.now(),
-      deletedAt: null, registrations: [],
-    });
-    ledgerAppend({ type: 'open_trial_posted', playerId: null, orgId: req.org.id, orgName: req.org.name, userId: req.orgUser.id, scoutName: req.orgUser.name });
-    return t;
-  });
-  broadcast('openTrials');
-  res.status(201).json({ openTrial: { ...openTrialView(trial), registrations: [] } });
-});
-
-/** The club's open days, newest first, a page at a time (the apps read the first page). */
-orgRouter.get('/open-trials', (req, res) => {
-  if (grassrootsOrgOnly(req, res)) return;
-  let page;
-  try { page = readPage(req.query, ['number']); } catch (e) { return sendPageError(res, e); }
-  const { items, nextCursor } = grassroots.openTrials.pageForOrg(req.org.id, page);
-  // Registration lists respect visibility: a club that cannot see a minor
-  // never received their registration in the first place.
-  res.json({
-    items: items.map((t) => ({
-      ...openTrialView(t),
-      registrations: t.registrations.map((r) => {
-        const p = findPlayer(r.playerId);
-        const view = p ? playerViewForOrg(p, req.org) : null;
-        return { ...registrationView(r), age: view?.age ?? null, position: view?.position ?? null, trustScore: view?.trustScore ?? null, guardianManaged: !!view?.guardianManaged };
-      }),
-    })),
-    nextCursor,
-  });
-});
-
-// Deleting stamps the open day; it leaves every list (a coverage assignment naming it keeps its key).
-orgRouter.delete('/open-trials/:id', (req, res) => {
-  if (grassrootsOrgOnly(req, res)) return;
-  if (!grassroots.openTrials.remove(req.org.id, req.params.id, Date.now())) return res.status(404).json({ error: 'OPEN_TRIAL_NOT_FOUND' });
-  broadcast('openTrials');
-  res.json({ deleted: true });
-});
-
-// What the club is looking for — powers the players' opportunity radar.
-// Position codes only (the radar matches them against the player's position), at most five; an explicit write.
-orgRouter.post('/looking-for', (req, res) => {
-  if (grassrootsOrgOnly(req, res)) return;
-  const positions = req.body?.positions;
-  if (!Array.isArray(positions) || positions.length > CLUB_SETUP_LIMITS.lookingFor) return res.status(400).json({ error: 'FIELD_INVALID', field: 'positions', message: `positions is a list of at most ${CLUB_SETUP_LIMITS.lookingFor} position codes.` });
-  const wrong = positions.findIndex((p) => !LOOKING_FOR_POSITIONS.includes(p));
-  if (wrong >= 0) return res.status(400).json({ error: 'FIELD_INVALID', field: `positions[${wrong}]`, message: `Use position codes: ${LOOKING_FOR_POSITIONS.join(', ')}.` });
-  const lookingFor = clubSetup.lookingFor.set(req.org.id, [...new Set(positions)]);
-  broadcast('orgs');
-  res.json({ lookingFor });
-});
-
-// Every open-day registrant gets an answer: an invitation (which creates a
-// real, properly-routed trial request) or a kind no.
-orgRouter.post('/open-trials/:id/registrations/:regId/outcome', (req, res) => {
-  if (grassrootsOrgOnly(req, res)) return;
-  const trial = grassroots.openTrials.forOrgById(req.org.id, req.params.id);
-  const reg = trial?.registrations.find((r) => r.id === req.params.regId);
-  if (!trial || !reg) return res.status(404).json({ error: 'REGISTRATION_NOT_FOUND' });
-  if (reg.outcome) return res.status(409).json({ error: 'ALREADY_RESOLVED' });
-  const { outcome, note } = req.body || {};
-  if (!['invite_trial', 'declined'].includes(outcome)) return res.status(400).json({ error: 'OUTCOME_INVALID' });
-  if (!optText(note, 10_000)) return badField(res, 'note');
-  if (note && !moderateOrRefuse(res, note, { kind: 'open_day_outcome', orgId: req.org.id })) return;
-  const outcomeNote = note?.trim() ? note.trim().slice(0, GL.outcomeNote) : null;
-  const p = findPlayer(reg.playerId);
-  // ONE unit of work: the answer, the trial request it may raise and the notifications commit together.
-  const answered = unit(() => {
-    const r = grassroots.openTrials.resolve(trial.id, reg.id, { outcome, note: outcomeNote, at: Date.now() });
-    if (p && visibleToOrg(p, req.org)) {
-      if (outcome === 'invite_trial') {
-        // Through THE request writer: the same row, routing (guardian-first for a
-        // minor), ledger entry and inbox ping as every other trial invitation;
-        // only the notifications are worded for the open day. Several pending
-        // invitations per player stay allowed (product decision).
-        issueRecruitmentRequest({
-          org: req.org, orgUser: req.orgUser, player: p, type: 'trial',
-          message: outcomeNote || `We liked what we saw at "${trial.title}" — come for a proper trial.`,
-          trialDetails: { proposedDate: null, altSlots: [], venue: trial.venue, notes: `Follow-up from open day "${trial.title}".` },
-          notice: {
-            kind: 'open_trial',
-            toGuardian: `Good news: ${req.org.name} would like to invite ${p.name} for a trial after the open day.`,
-            toPlayer: isAdult(p)
-              ? `${req.org.name} liked what they saw at "${trial.title}" — trial invitation in your inbox.`
-              : `${req.org.name} liked what they saw at the open day — they've contacted your parent/guardian about a trial.`,
-          },
-        });
-      } else {
-        const kindNo = outcomeNote || 'Thanks for coming — not this time, but keep playing and keep logging your football.';
-        if (!isAdult(p) && p.guardianId) {
-          notify({ kind: 'guardian', id: p.guardianId }, 'open_trial', `${req.org.name} on ${p.name}'s open day: ${kindNo}`, trial.id);
-        }
-        notify({ kind: 'player', id: p.id }, 'open_trial', `${req.org.name}: ${kindNo}`, trial.id);
-      }
-    }
-    return r;
-  });
-  broadcast('openTrials');
-  res.json({ registration: registrationView(answered) });
-});
-
-// ----------------------------------------------- squad + match-day logging
-// The club's own players in one place — and one Saturday action that gives
-// the whole squad verified, coach-signed attendance.
-const POSITION_GROUPS = { GK: ['GK'], DEF: ['CB', 'RB', 'LB', 'RWB', 'LWB'], MID: ['CDM', 'CM', 'CAM'], ATT: ['ST', 'CF', 'RW', 'LW'] };
-
-// The squad is rows of org_squad_members; a club's shadow list (the Pro squad planner) is never part of it.
-function squadView(org) {
-  const entries = clubSetup.squad.forOrg(org.id).map((e) => {
-    const p = e.playerId ? findPlayer(e.playerId) : null;
-    return { id: e.id, name: e.name, position: e.position, playerId: e.playerId, source: e.source, ...(e.approvedBy ? { approvedBy: e.approvedBy } : {}), addedAt: e.addedAt, onPlatform: !!p, trustScore: p ? computeTrustScore(p) : null };
-  });
-  const coverage = Object.fromEntries(Object.entries(POSITION_GROUPS).map(([group, positions]) => [
-    group, entries.filter((e) => positions.includes(e.position)).length,
-  ]));
-  const gaps = Object.entries(coverage).filter(([, n]) => n < 2).map(([g]) => g);
-  const suggestedLookingFor = gaps.flatMap((g) => POSITION_GROUPS[g].slice(0, 2)).slice(0, 5);
-  return { entries, coverage, gaps, suggestedLookingFor };
-}
-
-orgRouter.get('/squad', (req, res) => {
-  if (grassrootsOrgOnly(req, res)) return;
-  res.json(squadView(req.org));
-});
-
-orgRouter.post('/squad', (req, res) => {
-  if (grassrootsOrgOnly(req, res)) return;
-  const { name, position, playerId } = req.body || {};
-  if (!reqText(name, 120)) return res.status(400).json({ error: 'NAME_REQUIRED' });
-  if (!optText(position, 40)) return badField(res, 'position');
-  if (!optText(playerId, 80)) return badField(res, 'playerId');
-  if (playerId) {
-    const p = findPlayer(playerId);
-    if (!p || !visibleToOrg(p, req.org)) return res.status(403).json({ error: 'PLAYER_NOT_VISIBLE' });
-    if (clubSetup.squad.has(req.org.id, playerId)) return res.status(409).json({ error: 'ALREADY_ON_SQUAD' });
-  }
-  clubSetup.squad.create({ id: nextId('sq'), orgId: req.org.id, name: String(name).trim(), position: position || null, playerId: playerId || null, source: 'manual', addedAt: Date.now() });
-  res.status(201).json(squadView(req.org));
-});
-
-// Release with a reference: the worst moment in grassroots football, done
-// properly — availability restored, and optionally a club-authored reference
-// published on the way out (club identity is already authenticated).
-orgRouter.post('/squad/:entryId/release', (req, res) => {
-  if (grassrootsOrgOnly(req, res)) return;
-  const entry = clubSetup.squad.byId(req.params.entryId);
-  if (!entry || entry.orgId !== req.org.id) return res.status(404).json({ error: 'SQUAD_ENTRY_NOT_FOUND' });
-  const raw = (req.body || {}).referenceText;
-  if (raw !== undefined && raw !== null && typeof raw !== 'string') return res.status(400).json({ error: 'FIELD_INVALID', field: 'referenceText', message: 'The reference is text.' });
-  const referenceText = raw ? raw.trim().slice(0, TRANSITION_LIMITS.text) : '';
-  if (referenceText && !moderateOrRefuse(res, referenceText, { kind: 'release_reference', orgId: req.org.id })) return;
-  // ONE unit of work: the squad row, the player's availability and contract
-  // columns, the published reference, the ledger row and the notifications
-  // commit together; the pushes and the broadcast go out after COMMIT.
-  unit(() => {
-    clubSetup.squad.remove(entry.id);
-    const p = entry.playerId ? findPlayer(entry.playerId) : null;
-    if (p) {
-      // Releasing a player from THIS club's squad does not speak
-      // for a contract another club completed in ScoutBox. The squad row goes;
-      // the canonical contract truth stays with its writer.
-      const other = canonicalContractFor(p.id, Date.now(), { exceptOrgId: req.org.id });
-      if (!other) players.setAvailability(p.id, { availability: 'available_now', contractStatus: 'free_agent' });
-      seam('squad.release.after_row');
-      if (referenceText) {
-        // A row of vouches, published at once (the club's identity is the session; no email, no code).
-        transitionsVouches.vouches.create({
-          id: nextId('vch'), playerId: p.id, playerName: p.name?.slice(0, TRANSITION_LIMITS.name) ?? null,
-          coachName: req.orgUser.name.slice(0, TRANSITION_LIMITS.coachName), coachEmail: null, role: `${req.orgUser.role || 'Manager'}, ${req.org.name}`.slice(0, TRANSITION_LIMITS.role),
-          status: 'published', codeHash: null, text: referenceText,
-          seasons: null, ts: Date.now(), publishedAt: Date.now(), conflictOfInterest: null, withdrawn: null,
-        });
-      }
-      ledgerAppend({ type: 'released_by_club', playerId: p.id, orgId: req.org.id, orgName: req.org.name, userId: req.orgUser.id, scoutName: req.orgUser.name });
-      notify({ kind: 'player', id: p.id }, 'released',
-        `${req.org.name} has released you${referenceText ? ' — with a reference now on your profile' : ''}. You're marked available to every local club; the First Team Seeker flag is yours to switch on.`, p.id);
-      if (p.guardianId) notify({ kind: 'guardian', id: p.guardianId }, 'released', `${req.org.name} released ${p.name}${referenceText ? ' with a reference' : ''}. Their profile is marked available again.`, p.id);
-      broadcast('players', { playerId: p.id });
-    }
-  });
-  res.json(squadView(req.org));
-});
-
-orgRouter.post('/matchday', (req, res) => {
-  if (grassrootsOrgOnly(req, res)) return;
-  const { fixture, venue, date, result, playerIds } = req.body || {};
-  if (!fixture || !date) return res.status(400).json({ error: 'FIXTURE_AND_DATE_REQUIRED' });
-  if (!reqText(fixture, GL.fixture)) return fieldInvalid(res, 'fixture', `fixture is text of at most ${GL.fixture} characters.`);
-  if (!optText(venue, GL.venue)) return fieldInvalid(res, 'venue', `venue is text of at most ${GL.venue} characters.`);
-  if (!optText(result, GL.result)) return fieldInvalid(res, 'result', `result is text of at most ${GL.result} characters (e.g. 3-1).`);
-  if (!dateOnlyOrRefuse(res, date, 'date')) return; // a match day is a day that exists
-  const ids = playerIds === undefined || playerIds === null ? [] : playerIds;
-  if (!Array.isArray(ids) || ids.length > GL.matchdayPlayers || !ids.every((x) => typeof x === 'string' && x.length > 0 && x.length <= GL.id)) {
-    return fieldInvalid(res, 'playerIds', `playerIds is a list of at most ${GL.matchdayPlayers} player ids.`);
-  }
-  const onSquad = new Set(clubSetup.squad.playerIds(req.org.id)); // the squad only, never the shadow list
-  const credited = [];
-  const fixtureText = fixture.trim();
-  // ONE unit of work: every credited player's attendance row and activity,
-  // the match-day row and the ledger row commit together.
-  unit(() => {
-    for (const pid of new Set(ids)) { // a player listed twice is credited once
-      if (!onSquad.has(pid)) continue; // only your own rostered players
-      const p = findPlayer(pid);
-      if (!p || !visibleToOrg(p, req.org)) continue;
-      players.addItem(p.id, 'attendance', {
-        id: nextId('att'), fixture: fixtureText, venue: venue?.trim() || req.org.location?.city || '',
-        date, gps: req.org.location ? { lat: req.org.location.lat, lng: req.org.location.lng } : null,
-        verified: true, corroboratedBy: req.org.name, // coach counter-signature
-      });
-      recordActivity(p);
-      notify({ kind: 'player', id: p.id }, 'matchday', `📍 ${req.org.name} logged your appearance in "${fixtureText}" — verified, coach-signed attendance on your profile.`, p.id);
-      credited.push(p.id);
-      broadcast('players', { playerId: p.id });
-    }
-    grassroots.matchdays.create({
-      id: nextId('md'), orgId: req.org.id, fixture: fixtureText, venue: venue?.trim() ?? '',
-      date, result: result?.trim() || null, playerIds: credited, loggedByUserId: req.orgUser.id, ts: Date.now(),
-    });
-    ledgerAppend({ type: 'matchday_logged', playerId: null, orgId: req.org.id, orgName: req.org.name, userId: req.orgUser.id, scoutName: req.orgUser.name });
-  });
-  res.status(201).json({ credited: credited.length, matchdays: grassroots.matchdays.countForOrg(req.org.id) });
-});
-
-/** The club's match days, newest first, a page at a time (the apps read the first page). */
-orgRouter.get('/matchdays', (req, res) => {
-  if (grassrootsOrgOnly(req, res)) return;
-  let page;
-  try { page = readPage(req.query, ['number']); } catch (e) { return sendPageError(res, e); }
-  const { items, nextCursor } = grassroots.matchdays.pageForOrg(req.org.id, page);
-  res.json({
-    items: items.map((m) => ({ id: m.id, orgId: m.orgId, fixture: m.fixture, venue: m.venue, date: m.date, result: m.result, playerIds: [...m.playerIds], loggedByUserId: m.loggedByUserId, ts: m.ts })),
-    nextCursor,
-  });
-});
-
-// --------------------------------------------------- pathway club record
-// Grassroots reputation currency: not resale multiples — players developed.
-function pathwayRecord(org) {
-  const orgSignings = signingsFollowUps.signings.forOrg(org.id);
-  const registrants = grassroots.openTrials.registrantsOf(org.id);
-  const involvedIds = new Set([
-    ...orgSignings.map((sg) => sg.playerId),
-    ...clubSetup.squad.playerIds(org.id),
-    ...registrants.map((r) => r.playerId),
-  ]);
-  const firstInvolvement = (pid) => Math.min(
-    ...orgSignings.filter((sg) => sg.playerId === pid).map((sg) => sg.ts),
-    ...registrants.filter((r) => r.playerId === pid).map((r) => r.ts),
-  );
-  const progressed = [...involvedIds].filter((pid) => {
-    const upward = signingsFollowUps.signings.forPlayer(pid).find((sg) => sg.orgId !== org.id && (byId.org(sg.orgId)?.level ?? '') !== 'grassroots');
-    return upward && upward.ts > firstInvolvement(pid);
-  });
-  return { progressed: progressed.length, pathwayClub: progressed.length >= 1 };
-}
-
-orgRouter.get('/pathway-record', (req, res) => {
-  if (grassrootsOrgOnly(req, res)) return;
-  res.json({
-    ...pathwayRecord(req.org),
-    openDaysRun: grassroots.openTrials.countForOrg(req.org.id),
-    matchdaysLogged: grassroots.matchdays.countForOrg(req.org.id),
-    note: 'Progressed = players your club signed or hosted who later signed for an academy or pro club. Development is the reputation that matters here.',
-  });
-});
-
-// Federation-route verification: real Sunday-league clubs run on free email —
-// they prove themselves through their federation registration instead, and
-// Trust & Safety checks the record.
-orgRouter.post('/verification/federation', (req, res) => {
-  if (grassrootsOrgOnly(req, res)) return;
-  const { federation, registrationId, contactEmail } = req.body || {};
-  if (!federation || !registrationId) return res.status(400).json({ error: 'FEDERATION_REQUIRED' });
-  // Typed and refused at the route (FIELD_INVALID naming the field); one row per club, replaced on resubmission.
-  if (!reqText(federation, CLUB_SETUP_LIMITS.federation)) return res.status(400).json({ error: 'FIELD_INVALID', field: 'federation', message: `federation is text of at most ${CLUB_SETUP_LIMITS.federation} characters.` });
-  if (!reqText(registrationId, CLUB_SETUP_LIMITS.registrationId)) return res.status(400).json({ error: 'FIELD_INVALID', field: 'registrationId', message: `registrationId is text of at most ${CLUB_SETUP_LIMITS.registrationId} characters.` });
-  const email = typeof contactEmail === 'string' ? contactEmail.trim() : contactEmail;
-  if (!(email === undefined || email === null || email === '' || (typeof email === 'string' && email.length <= CLUB_SETUP_LIMITS.contactEmail && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)))) return res.status(400).json({ error: 'FIELD_INVALID', field: 'contactEmail', message: 'contactEmail is an e-mail address.' });
-  clubSetup.federation.submit({ orgId: req.org.id, federation: federation.trim(), registrationId: registrationId.trim(), contactEmail: email || null, status: 'pending', submittedAt: Date.now() });
-  broadcast('orgs');
-  res.status(201).json({
-    submitted: true,
-    note: 'Trust & Safety cross-checks the registration with your federation. Verification (and with the safeguarding contract, U18 visibility) follows their approval.',
-  });
-});
-
-// ---------------------------------------------------- friendlies board
-// Club-to-club, same 50km radius: trial matches are how grassroots scouting
-// actually happens — and a reason to open the app between transfer windows.
-const friendlyView = (f, viewer) => {
-  const other = byId.org(f.orgId);
-  const mine = f.orgId === viewer.id;
-  return {
-    id: f.id, orgId: f.orgId, orgName: other?.name ?? null, postedByUserId: f.postedByUserId, ageGroup: f.ageGroup, date: f.date,
-    venue: f.venue, notes: f.notes, status: 'open', createdAt: f.createdAt, mine,
-    distanceKm: mine || !other?.location || !viewer.location ? 0 : Math.round(haversineKm(other.location, viewer.location) * 10) / 10,
-    // responder details only for the poster
-    responses: f.responses.map((r) => ({ orgId: r.orgId, orgName: orgNameOf(r.orgId), message: mine ? r.message : '', respondedByUserId: r.respondedByUserId, ts: r.ts })),
-  };
-};
-
-orgRouter.post('/friendlies', (req, res) => {
-  if (grassrootsOrgOnly(req, res)) return;
-  const { ageGroup, date, venue, notes } = req.body || {};
-  if (!date) return res.status(400).json({ error: 'DATE_REQUIRED' });
-  for (const [f, v, max] of [['ageGroup', ageGroup, GL.ageGroup], ['venue', venue, GL.venue], ['notes', notes, GL.notes]]) if (!optText(v, max)) return badField(res, f);
-  if (!dateOnlyOrRefuse(res, date, 'date')) return;
-  if (notes && !moderateOrRefuse(res, notes, { kind: 'friendly_notes', orgId: req.org.id })) return;
-  const friendly = grassroots.friendlies.create({
-    id: nextId('fr'), orgId: req.org.id, postedByUserId: req.orgUser.id,
-    ageGroup: ageGroup?.trim() || 'open', date, venue: venue?.trim() || (req.org.location?.city ?? '').slice(0, GL.venue),
-    notes: notes || '', responses: [], createdAt: Date.now(),
-  });
-  broadcast('friendlies');
-  res.status(201).json({ friendly: friendlyView(friendly, req.org) });
-});
-
-/** The local board: the club's own friendlies and those posted within the radius, by match date, a page at a time. */
-orgRouter.get('/friendlies', (req, res) => {
-  if (grassrootsOrgOnly(req, res)) return;
-  let page;
-  try { page = readPage(req.query, ['string', 'string']); } catch (e) { return sendPageError(res, e); }
-  const here = req.org.location;
-  const box = here ? boxAround(here, GRASSROOTS_RADIUS_KM) : null;
-  const near = (f) => { const loc = byId.org(f.orgId)?.location; return !!loc && haversineKm(loc, here) <= GRASSROOTS_RADIUS_KM; };
-  const { items, nextCursor } = grassroots.friendlies.boardPage(req.org.id, box, page, near);
-  res.json({ items: items.map((f) => friendlyView(f, req.org)), nextCursor });
-});
-
-orgRouter.post('/friendlies/:id/respond', (req, res) => {
-  if (grassrootsOrgOnly(req, res)) return;
-  const friendly = grassroots.friendlies.byId(req.params.id);
-  if (!friendly) return res.status(404).json({ error: 'FRIENDLY_NOT_FOUND' });
-  if (friendly.orgId === req.org.id) return res.status(400).json({ error: 'OWN_POST' });
-  const { message } = req.body || {};
-  if (!optText(message, 10_000)) return badField(res, 'message');
-  if (message && !moderateOrRefuse(res, message, { kind: 'friendly_response', orgId: req.org.id })) return;
-  if (friendly.responses.some((r) => r.orgId === req.org.id)) return res.status(409).json({ error: 'ALREADY_RESPONDED' });
-  // ONE unit of work: the response and the poster's notification commit together.
-  unit(() => {
-    grassroots.friendlies.respond(friendly.id, { orgId: req.org.id, message: message ? message.trim().slice(0, GL.message) : '', respondedByUserId: req.orgUser.id, ts: Date.now() });
-    notify({ kind: 'org_user', id: friendly.postedByUserId }, 'friendly', `${req.org.name} is up for your friendly on ${friendly.date}.`, friendly.id);
-  });
-  broadcast('friendlies');
-  res.status(201).json({ responded: true });
-});
-
-// ------------------------------------------------------ recruitment funnel
-// The club's whole pipeline computed from the ledger — every stage is a real
-// recorded event, so the numbers are the numbers.
-orgRouter.get('/funnel', (req, res) => {
-  const byType = safetyAudit.ledger.countsForOrg(req.org.id);
-  const count = (type) => Object.entries(byType).reduce((n, [t, c]) => n + (t.startsWith(type) ? c : 0), 0);
-  res.json({
-    stages: [
-      { key: 'views', label: 'Profile views', count: count('view') },
-      { key: 'saves', label: 'Saves', count: count('save') },
-      { key: 'shortlists', label: 'Shortlists', count: count('shortlist') },
-      { key: 'requests', label: 'Requests sent', count: recruitment.requests.countForOrg(req.org.id) },
-      { key: 'accepted', label: 'Requests accepted', count: recruitment.requests.countForOrgStatus(req.org.id, 'accepted') },
-      { key: 'trials', label: 'Trials booked', count: recruitment.trials.countForOrg(req.org.id) },
-      { key: 'reports', label: 'Reports filed', count: recruitment.trials.countForOrgStatus(req.org.id, 'reported') },
-      { key: 'signings', label: 'Signings', count: signingsFollowUps.signings.countForOrg(req.org.id) },
-    ],
-    byScout: safetyAudit.ledger.topActorsForOrg(req.org.id, 8),
-  });
-});
-
-// -------------------------------------------- club email-domain verification
-// Verification stops being an attestation: the club proves control of a
-// company mailbox. Free-mail domains are refused outright.
-const FREE_MAIL = /@(gmail|googlemail|hotmail|outlook|yahoo|icloud|aol|proton|protonmail|gmx|live|msn)\./i;
-
-orgRouter.post('/verification/email', async (req, res) => {
-  const { email } = req.body || {};
-  if (!reqText(email, 254) || !email.includes('@')) return res.status(400).json({ error: 'EMAIL_REQUIRED' });
-  if (FREE_MAIL.test(email)) {
-    return res.status(422).json({
-      error: 'COMPANY_EMAIL_REQUIRED',
-      message: 'Free email providers don\'t prove domain control. No club domain? Use federation verification instead — your federation registration is checked by Trust & Safety.',
-    });
-  }
-  // Every request sends a mail, so requests are bounded per organisation.
-  if (rateLimit.limited('email_challenge_request', req.org.id)) return res.status(429).json(rateLimitedBody('email_challenge_request'));
-  // The challenge is a row of email_challenges (stored as a hash; 30-minute
-  // lifetime; one live challenge per organisation, the previous one replaced),
-  // durable BEFORE the mail is sent. The plain code exists in the issue result
-  // and in the mail only: `secrets` makes the persisted outbox record withhold
-  // it while the recipient's mail carries it. A mail that fails to send leaves
-  // the row (it expires; a re-request replaces it).
-  const { code } = codes.issueEmailChallenge(req.org.id, email);
-  await mailer.send({
-    to: email,
-    subject: `Verify ${req.org.name} on ScoutBox`,
-    text: `Your ScoutBox club verification code is ${code}.\n\nEntering it confirms ${req.org.name} controls this company mailbox — one of the safeguarding requirements before a club can see under-18 players.`,
-    secrets: [code],
-  });
-  res.status(201).json({ sent: true, note: 'Enter the code from the mailbox to confirm domain control.' });
-});
-
-orgRouter.post('/verification/email/confirm', (req, res) => {
-  const { code } = req.body || {};
-  // A wrong code is charged against the organisation's confirm budget (a
-  // correct one costs nothing) and counted on the challenge itself, which is
-  // cancelled after EMAIL_CHALLENGE_MAX_ATTEMPTS wrong codes; the budget is
-  // tested before the code is judged, so a correct guess after it is gone is
-  // refused rather than rewarded (as with the failed-login budget).
-  if (rateLimit.peek('email_challenge_confirm', req.org.id).remaining === 0) return res.status(429).json(rateLimitedBody('email_challenge_confirm')); // exactly `max` wrong codes are judged; the next attempt is refused
-  const check = codes.checkEmailChallenge(req.org.id, code);
-  if (check.status === 'none') {
-    rateLimit.limited('email_challenge_confirm', req.org.id);
-    return res.status(404).json({ error: 'CHALLENGE_NOT_FOUND', message: 'Request a fresh code — none is active for this club.' });
-  }
-  if (check.status === 'invalid') {
-    rateLimit.limited('email_challenge_confirm', req.org.id);
-    const { attemptsRemaining, invalidated } = codes.noteFailedEmailAttempt(req.org.id);
-    return res.status(400).json({
-      error: 'CODE_INVALID',
-      message: invalidated ? 'That code doesn\'t match, and this challenge is now cancelled after too many wrong codes — request a fresh one.' : 'That code doesn\'t match — check the email.',
-      attemptsRemaining,
-    });
-  }
-  // ONE unit of work: the challenge is consumed (its row deleted) and the
-  // organisation's domain columns written together — a failure anywhere, the
-  // real COMMIT included, keeps the challenge live and the organisation
-  // unverified, and the retry lands both.
-  const updated = unit(() => {
-    const consumed = codes.consumeEmailChallenge(req.org.id, code);
-    if (!consumed) throw new Error('email challenge: the challenge changed between the check and the confirmation');
-    seam('email_challenge.confirm.after_consume');
-    return orgs.update(req.org.id, (d) => { d.emailDomain = consumed.email.split('@')[1]; d.emailDomainVerified = true; });
-  });
-  broadcast('orgs');
-  res.json({ emailDomainVerified: true, emailDomain: updated.emailDomain });
-});
-
-// ------------------------------------------------- ledger, proof, plan etc
-// Newest first, paged by cursor (domains/platform/paging.mjs): { items, nextCursor }.
-orgRouter.get('/ledger', (req, res) => {
-  let page;
-  try { page = readPage(req.query, ['number']); } catch (e) { return sendPageError(res, e); }
-  const out = safetyAudit.ledger.pageForOrg(req.org.id, page);
-  res.json({ items: out.items.map(ledgerView), nextCursor: out.nextCursor });
-});
-
-// Proof Pack: attribution evidence for this org on this player.
-orgRouter.get('/players/:id/proofpack', (req, res) => {
-  const p = findPlayer(req.params.id);
-  if (!p || isBlocked(p.id, req.org.id)) return res.status(404).json({ error: 'PLAYER_NOT_FOUND' });
-  if (!visibleToOrg(p, req.org)) return res.status(403).json({ error: 'UNDER_18_WALL' });
-  const events = safetyAudit.ledger.forPlayerOrg(p.id, req.org.id).map(ledgerView);
-  const first = events[0] || null;
-  const windowMonths = PLANS[req.org.plan].attributionWindowMonths; // orgs.plan is one of the catalogue's plans (its CHECK)
-  res.json({
-    playerId: p.id,
-    playerName: p.name,
-    org: { id: req.org.id, name: req.org.name, plan: req.org.plan },
-    firstQualifyingInteraction: first,
-    attributionWindowMonths: windowMonths,
-    attributionWindowEnds: first ? new Date(first.ts + windowMonths * 30.44 * 24 * 3600 * 1000).toISOString() : null,
-    eventLog: events,
-    generatedAt: new Date().toISOString(),
-  });
-});
-
-orgRouter.get('/plan', (req, res) => {
-  const plan = PLANS[req.org.plan];
-  res.json({
-    org: { id: req.org.id, name: req.org.name, type: req.org.type, trustedPartner: req.org.trustedPartner },
-    plan,
-    compliance: {
-      attributionWindowMonths: plan.attributionWindowMonths,
-      antiCircumvention: plan.antiCircumvention,
-      feeProtection:
-        'Discovery attribution is evidenced by the append-only ledger and Proof Packs. Fees attach to the first qualifying interaction inside the window.',
-    },
-  });
-});
-
-// Scout & Coach Reputation: seeded track records + live rows from the ledger.
-orgRouter.get('/reputation', (_req, res) => {
-  const live = {};
-  for (const { scoutName, orgName, type, n } of safetyAudit.ledger.countsByActor()) {
-    const key = `${scoutName}|${orgName}`;
-    live[key] ??= { scoutName, orgName, views: 0, contacts: 0, trials: 0, signings: 0, seeded: false };
-    if (type === 'view') live[key].views += n;
-    if (type === 'contact_request') live[key].contacts += n;
-    if (type === 'trial_request' || type === 'trial_report') live[key].trials += n;
-    if (type === 'signing') live[key].signings += n;
-  }
-  res.json({ seeded: operations.reputationSeed.all(), live: Object.values(live) });
-});
-
-// ------------------------------------------------------------- directory
-// The club directory players browse: verified identity + how clubs actually
-// behave (trials run, report turnaround) — accountability as marketing.
-// Paged by cursor, oldest club first (domains/platform/paging.mjs): { items, nextCursor }.
-app.get('/orgs/directory', (req, res) => {
-  let page;
-  try { page = orgs.page({ type: 'club' }, readPage(req.query, ['number'])); } catch (e) { return sendPageError(res, e); }
-  res.json({
-    nextCursor: page.nextCursor,
-    items: page.items.map((o) => {
-      const trials = recruitment.trials.forOrg(o.id);
-      const reported = trials.filter((t) => t.status === 'reported' && t.report);
-      const avgReportDays = reported.length
-        ? Math.round(reported.reduce((sum, t) => sum + (t.report.filedAt - t.acceptedAt), 0) / reported.length / (24 * 3600 * 1000) * 10) / 10
-        : null;
-      return {
-        id: o.id, name: o.name, plan: o.plan, verified: o.verified,
-        trustedPartner: o.trustedPartner, safeguardingCertified: safeguardingCertified(o),
-        trialsRun: trials.length, reportsFiled: reported.length, avgReportDays,
-        // Grassroots clubs wear their development record, not resale multiples.
-        ...(o.level === 'grassroots' ? pathwayRecord(o) : {}),
-      };
-    }),
-  });
-});
-
-// Coach reference submission: the code from the emailed request proves the
-// mailbox; the text passes the same moderation screen as every message.
-app.post('/vouch/submit', (req, res) => {
-  const { code, text, seasons, conflictOfInterest } = req.body || {};
-  const vouch = typeof code === 'string' && code.trim() ? transitionsVouches.vouches.pendingByCode(code) : null;
-  if (!vouch) return res.status(404).json({ error: 'CODE_INVALID', message: 'That reference code is wrong or already used.' });
-  for (const [field, v] of [['text', text], ['seasons', seasons], ['conflictOfInterest', conflictOfInterest]]) {
-    if (v !== undefined && v !== null && typeof v !== 'string') return res.status(400).json({ error: 'FIELD_INVALID', field, message: `${field} is text.` });
-  }
-  if (!text || !text.trim()) return res.status(400).json({ error: 'TEXT_REQUIRED' });
-  if (!moderateOrRefuse(res, text, { kind: 'coach_vouch', playerId: vouch.playerId })) return;
-  const VL = TRANSITION_LIMITS;
-  const player = findPlayer(vouch.playerId);
-  // The published reference (the code cleared: single use) and both notifications commit together.
-  unit(() => {
-    transitionsVouches.vouches.publish(vouch.id, {
-      text: text.trim().slice(0, VL.text),
-      seasons: seasons?.trim() ? seasons.trim().slice(0, VL.seasons) : null,
-      // A reference carries its declared relationship to the player —
-      // "my son", "I run their agency" etc. must be visible, not discoverable.
-      conflictOfInterest: conflictOfInterest?.trim() ? conflictOfInterest.trim().slice(0, VL.conflictOfInterest) : null,
-      at: Date.now(),
-    });
-    notify({ kind: 'player', id: vouch.playerId }, 'vouch', `⭐ ${vouch.coachName} published a coach reference on your profile.`, vouch.id);
-    if (player?.guardianId) notify({ kind: 'guardian', id: player.guardianId }, 'vouch', `${vouch.coachName} published a coach reference on ${player.name}'s profile.`, vouch.id);
-  });
-  broadcast('players', { playerId: vouch.playerId });
-  res.status(201).json({ published: true });
-});
+registerClubDirectory({ app, orgs, trialsForOrg: (orgId) => recruitment.trials.forOrg(orgId), safeguardingCertified, pathwayRecord });
 
 // ------------------------------------------------------ admin (T&S) console
 // ScoutBox staff only. Prototype auth: x-admin-key (ADMIN_KEY env).
@@ -2436,9 +962,9 @@ registerM12({
 });
 
 // ------------------------------------------------------------- m13 modules
-// Same module pattern under m13/. registerM13 returns the enriched context so
-// the login path above can reach the MFA rate-limit guards.
+// Same module pattern under m13/.
 const m13Ctx = registerM13({
+  mfaGuards,
   byId, safetyReads, scoutingReads, verificationReads, agentReads, complianceReads, developmentReads, development, boxCamReads, discoveryReads, insightReads, grassrootsReads, recruitmentReads, users, sessions, orgs, players, guardians, mediaDeletions, codes, notifications, dispatches, outbox, pushLog, pushTokens, channels, unit, app, orgRouter, playerRouter, guardianRouter, adminRouter,
   nextId, notify, ledgerAppend, broadcast, safetyAudit, recruitment, recruitmentCases,
   opportunitiesCampaigns,
@@ -2497,11 +1023,6 @@ registerAudit({
     return false;
   },
 });
-
-// One rate limiter for the whole server. Every limited action is named
-// in RATE_LIMIT_POLICY with its window and scope, and the capability report
-// says plainly that the memory provider counts per process.
-const rateLimit = createRateLimiter();
 
 // Football Passport: a provenance-aware projection over existing records.
 // Registered after the verification claims so it can read them; it
@@ -2799,6 +1320,10 @@ signingsDomain = registerSigning({
   evidence: { storeFile: verificationClaims.storeEvidenceFile, add: verificationClaims.addEvidence },
   faults: faultLayer,
 });
+registerLegacySigning({
+  orgRouter, signings: signingsFollowUps.signings, findPlayer, isBlocked, rateLimit, unit,
+  recordCompletedSigning: signingsDomain.recordCompletedSigning, legacyRecordingBlocker: signingsDomain.legacyRecordingBlocker,
+});
 
 // ------------------------------------------------- canonical Offer workflow
 // The authoritative Offer domain. A formal decision to progress AUTHORISES
@@ -2859,9 +1384,9 @@ registerPlayerRecord({
   ledgerAppend, insightsFor, canonicalContractFor,
 });
 registerGrassrootsJourney({
-  playerRouter, guardianRouter, players, orgs, grassroots, clubSetup, transitionsVouches, findPlayer, findOrg: byId.org, unit, seam,
+  app, playerRouter, guardianRouter, players, orgs, grassroots, clubSetup, transitionsVouches, findPlayer, findOrg: byId.org, unit, seam,
   nextId, broadcast, notify, ledgerAppend, mailer, guardianManagedOnly, recordActivity, publishedVouchesFor,
-  scoutViewsOf: (playerId) => safetyAudit.ledger.countForPlayer(playerId, 'view'), pathwayRecord, openTrialView, safeguardingCertified,
+  scoutViewsOf: (playerId) => safetyAudit.ledger.countForPlayer(playerId, 'view'), pathwayRecord, openTrialView, safeguardingCertified, moderateOrRefuse,
 });
 registerRequestInbox({
   playerRouter, guardianRouter, requests: recruitment.requests, findPlayer, unit, rateLimit, isBlocked, contactReplyFrom,

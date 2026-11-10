@@ -143,8 +143,8 @@ const ENg = keysOf(grassI18n, 'en'); const FRg = keysOf(grassI18n, 'fr');
   neg(![...EN.values()].some((v) => /player (score|rating|rank)/i.test(v)), 'no copy names a player score, rating or rank');
   neg(/not ability/.test(EN.get('discover.ordering')) && /not the Trust Score/.test(EN.get('discover.ordering')), 'the Discover ordering sentence says what completeness is NOT');
   neg(/not ability/i.test(EN.get('discover.orderingGrassroots')), 'the Grassroots ordering sentence does too');
-  const serverSrc = read('scoutbox-server/server.mjs');
-  neg(!/res\.json\([^)]*\btrust\b[^)]*\bcompleteness\b/i.test(serverSrc), 'no route describes completeness as trust');
+  const routeSrc = ['server.mjs', 'domains/discovery/search.mjs', 'domains/discovery/filmRoom.mjs'].map((f) => read(`scoutbox-server/${f}`)).join('\n');
+  neg(!/res\.json\([^)]*\btrust\b[^)]*\bcompleteness\b/i.test(routeSrc), 'no route describes completeness as trust');
 }
 
 section('§6 — EN/FR parity in both web apps');
@@ -170,12 +170,12 @@ section('§6 — EN/FR parity in both web apps');
 // ========================================================== §7 ordering
 section('§7 — every sort has a stable tie-break, and the ordering is declared');
 {
-  const serverSrc = read('scoutbox-server/server.mjs');
+  const searchSrc = read('scoutbox-server/domains/discovery/search.mjs');
   // The Discover order is the query's (repositories/identity.mjs directoryOrder), read from source.
   const identitySrc = read('scoutbox-server/repositories/identity.mjs');
   const discover = identitySrc.slice(identitySrc.indexOf('const directoryOrder'), identitySrc.indexOf('// ---------------------------------------------------------- list operations'));
   ok((discover.match(/\['p\.id', 'ASC'\]\]/g) ?? []).length === 2, 'both Discover sorts (Pro and Grassroots) end on the player id');
-  const route = serverSrc.slice(serverSrc.indexOf("orgRouter.get('/players'"), serverSrc.indexOf("orgRouter.get('/players/:id'"));
+  const route = searchSrc.slice(searchSrc.indexOf("orgRouter.get('/players'"), searchSrc.indexOf("orgRouter.get('/players/:id'"));
   ok(/X-ScoutBox-Ordering/.test(route), 'the ordering is declared on the wire');
   neg(!/score|rank|quality|ability/i.test(route.match(/X-ScoutBox-Ordering'[\s\S]*?\);/)[0]), 'the declared ordering names no score, rank or ability');
   const shared = read('scoutbox-server/domains/discovery/shared.mjs');
@@ -195,7 +195,7 @@ section('§8 — every notification type is classified, mentions are recognised 
   neg(categoryOf('message', 'someone wrote "mentioned you" in a message') !== 'mentions', 'user text saying "mentioned you" in another type is NOT a mention');
   neg(categoryOf('never_seen_type') === null, 'an unknown type is unclassified (and, below, delivered)');
   // The server's notify() call sites: every literal type is classified.
-  const srv = ['server.mjs', 'domains/identity/players.mjs', 'domains/development/grassroots.mjs', 'domains/recruitment/inbox.mjs', 'domains/messaging/channels.mjs', 'domains/scouting/journeys.mjs', 'domains/scouting/scouting.mjs', 'm13/delivery.mjs', 'domains/enterprise/enterprise.mjs', 'domains/verification/claims/index.mjs', 'domains/verification/passport/index.mjs', 'domains/development/boxcam/combine.mjs', 'domains/development/boxcam/index.mjs', 'domains/recruitment/rooms/rooms.mjs', 'domains/discovery/secondLook.mjs', 'domains/discovery/nobodyMissed.mjs', 'grassrootsJourney.mjs']
+  const srv = ['server.mjs', 'domains/identity/players.mjs', 'domains/development/grassroots.mjs', 'domains/recruitment/inbox.mjs', 'domains/recruitment/requests.mjs', 'domains/recruitment/clubTrials.mjs', 'domains/discovery/filmRoom.mjs', 'domains/development/grassrootsClub.mjs', 'domains/messaging/channels.mjs', 'domains/scouting/journeys.mjs', 'domains/scouting/scouting.mjs', 'm13/delivery.mjs', 'domains/enterprise/enterprise.mjs', 'domains/verification/claims/index.mjs', 'domains/verification/passport/index.mjs', 'domains/development/boxcam/combine.mjs', 'domains/development/boxcam/index.mjs', 'domains/recruitment/rooms/rooms.mjs', 'domains/discovery/secondLook.mjs', 'domains/discovery/nobodyMissed.mjs', 'grassrootsJourney.mjs']
     .filter((f) => fs.existsSync(path.join(SERVER_DIR, f)));
   const types = new Set();
   for (const f of srv) for (const m of fs.readFileSync(path.join(SERVER_DIR, f), 'utf8').matchAll(/notify\??\.?\([^,]+,\s*'([a-z_]+)'/g)) types.add(m[1]);

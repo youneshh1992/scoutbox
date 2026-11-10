@@ -15,11 +15,11 @@ import { DRILLS } from './record.mjs';
 const DAY_MS = 24 * 3600 * 1000;
 
 export function registerGrassrootsJourney({
-  playerRouter, guardianRouter, players, orgs, grassroots, clubSetup, transitionsVouches, findPlayer, findOrg, unit, seam,
+  app, playerRouter, guardianRouter, players, orgs, grassroots, clubSetup, transitionsVouches, findPlayer, findOrg, unit, seam,
   nextId, broadcast, notify, ledgerAppend, mailer, guardianManagedOnly, recordActivity, publishedVouchesFor, scoutViewsOf,
-  pathwayRecord, openTrialView, safeguardingCertified,
+  pathwayRecord, openTrialView, safeguardingCertified, moderateOrRefuse,
 }) {
-  if (typeof players?.startProgramme !== 'function' || typeof pathwayRecord !== 'function') throw new TypeError('registerGrassrootsJourney needs the players repository and the clubs\' pathway record');
+  if (typeof players?.startProgramme !== 'function' || typeof pathwayRecord !== 'function' || typeof moderateOrRefuse !== 'function') throw new TypeError('registerGrassrootsJourney needs the players repository, the clubs\' pathway record and moderation');
 
   function grassrootsOnly(req, res) {
     if (req.player.level !== 'pro') return false;
@@ -241,6 +241,33 @@ References are screened by moderation and reviewed by Trust & Safety.`,
   guardianRouter.post('/children/:id/vouches/request', (req, res) => {
     const child = grassrootsChild(req, res); if (!child) return;
     requestVouch(child, req.body ?? {}, res);
+  });
+
+  // The coach's submission, on `app`: the code from the e-mailed request is the coach's only credential.
+  app.post('/vouch/submit', (req, res) => {
+    const { code, text, seasons, conflictOfInterest } = req.body || {};
+    const vouch = typeof code === 'string' && code.trim() ? transitionsVouches.vouches.pendingByCode(code) : null;
+    if (!vouch) return res.status(404).json({ error: 'CODE_INVALID', message: 'That reference code is wrong or already used.' });
+    for (const [field, v] of [['text', text], ['seasons', seasons], ['conflictOfInterest', conflictOfInterest]]) {
+      if (v !== undefined && v !== null && typeof v !== 'string') return res.status(400).json({ error: 'FIELD_INVALID', field, message: `${field} is text.` });
+    }
+    if (!text || !text.trim()) return res.status(400).json({ error: 'TEXT_REQUIRED' });
+    if (!moderateOrRefuse(res, text, { kind: 'coach_vouch', playerId: vouch.playerId })) return;
+    const player = findPlayer(vouch.playerId);
+    // Publishing clears the code (single use); the reference and both notifications commit together.
+    unit(() => {
+      transitionsVouches.vouches.publish(vouch.id, {
+        text: text.trim().slice(0, VL.text),
+        seasons: seasons?.trim() ? seasons.trim().slice(0, VL.seasons) : null,
+        // A declared relationship to the player ("my son", "I run their agency") must be visible, not discoverable.
+        conflictOfInterest: conflictOfInterest?.trim() ? conflictOfInterest.trim().slice(0, VL.conflictOfInterest) : null,
+        at: Date.now(),
+      });
+      notify({ kind: 'player', id: vouch.playerId }, 'vouch', `⭐ ${vouch.coachName} published a coach reference on your profile.`, vouch.id);
+      if (player?.guardianId) notify({ kind: 'guardian', id: player.guardianId }, 'vouch', `${vouch.coachName} published a coach reference on ${player.name}'s profile.`, vouch.id);
+    });
+    broadcast('players', { playerId: vouch.playerId });
+    res.status(201).json({ published: true });
   });
 
   // ------------------------------------------------------------ the season wrap: the year in one card

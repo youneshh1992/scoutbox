@@ -201,6 +201,13 @@ test('repository: create and update(id, draft => …) write at once and return t
     assert.throws(() => repo.setStanding('org-pro', fields), pattern); assert.deepEqual(dump(s), standing, 'nothing was written');
   }
   assert.throws(() => repo.setStanding('org-none', { suspended: true }), /ORG_NOT_FOUND/);
+  // a proved mailbox domain: stored and marked verified together; junk is refused, changing nothing
+  const proved = repo.verifyEmailDomain('org-pro', 'pro.example');
+  assert.deepEqual([proved.emailDomain, proved.emailDomainVerified, proved.verified], ['pro.example', true, stood.verified], 'only the domain columns change');
+  const afterProof = dump(s);
+  for (const domain of ['', ' pro.example', 7, null, 'x'.repeat(300)]) { assert.throws(() => repo.verifyEmailDomain('org-pro', domain), /emailDomain must be text/); assert.deepEqual(dump(s), afterProof, 'nothing was written'); }
+  assert.throws(() => repo.verifyEmailDomain('org-none', 'none.example'), /ORG_NOT_FOUND/);
+  assert.ok(!('verifyEmailDomain' in repo.reads), 'the act is not a read');
   // create
   const created = repo.create({ name: 'New FC', type: 'club', level: 'grassroots', location: { lat: 1, lng: 2, city: '' }, federationRef: { federation: 'FA', registrationId: 'R' }, plan: 'Grassroots', country: 'GB', passwordHash: 'scrypt$aa$bb' });
   assert.match(created.id, /^org-\d+$/, 'the id is minted'); assert.equal(created.createdAt, AT, 'stamped at creation'); assert.equal(created.location.city, null);
