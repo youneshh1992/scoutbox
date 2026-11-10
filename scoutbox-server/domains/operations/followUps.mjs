@@ -39,12 +39,22 @@ export function registerOperations(ctx) {
     return added;
   }
 
-  function followUpView(f) {
+  /** Lookups for one response: a list names the same player and club on every row, so each is read once. */
+  const viewLookups = () => {
+    const players = new Map(); const orgs = new Map();
+    const once = (cache, read) => (id) => { if (!cache.has(id)) cache.set(id, read(id)); return cache.get(id); };
+    return { player: once(players, findPlayer), org: once(orgs, byId.org) };
+  };
+  const followUpViews = (list) => { const look = viewLookups(); return list.map((f) => followUpView(f, look)); };
+
+  function followUpView(f, look = viewLookups()) {
     const report = outcomes.forFollowUp(f.id);
-    const p = findPlayer(f.playerId);
-    const org = byId.org(f.orgId);
+    const p = look.player(f.playerId);
+    const org = look.org(f.orgId);
     return {
-      ...f, playerName: p?.name ?? 'departed player', orgName: org?.name ?? f.orgId,
+      id: f.id, signingId: f.signingId, playerId: f.playerId, orgId: f.orgId, milestone: f.milestone,
+      dueAt: f.dueAt, status: f.status, notifiedAt: f.notifiedAt, createdAt: f.createdAt,
+      playerName: p?.name ?? 'departed player', orgName: org?.name ?? f.orgId,
       report,
       outcomeState: !report ? (f.status === 'due' ? 'unknown_pending' : 'not_due')
         : report.confirmations.some((c) => !c.agree) ? 'disputed'
@@ -56,7 +66,7 @@ export function registerOperations(ctx) {
     let page;
     try { page = readPage(req.query, ['number', 'string']); } catch (e) { return sendPageError(res, e); }
     const { items, nextCursor } = fu.pageForOrg(req.org.id, page);
-    res.json({ items: items.map(followUpView), nextCursor });
+    res.json({ items: followUpViews(items), nextCursor });
   });
 
   orgRouter.post('/followups/:id/report', (req, res) => {
@@ -105,14 +115,14 @@ export function registerOperations(ctx) {
   }
 
   playerRouter.get('/followups', (req, res) => {
-    res.json(fu.forPlayer(req.player.id).map(followUpView));
+    res.json(followUpViews(fu.forPlayer(req.player.id)));
   });
   playerRouter.post('/followups/:id/respond', (req, res) => {
     if (req.playerIsMinor) return res.status(403).json({ error: 'GUARDIAN_MANAGED', message: 'Your parent/guardian confirms placement outcomes.' });
     respondOutcome(req, res, [req.player.id], { kind: 'player', id: req.player.id, name: req.player.name });
   });
   guardianRouter.get('/followups', (req, res) => {
-    res.json(fu.forPlayers(req.guardian.childIds).map(followUpView));
+    res.json(followUpViews(fu.forPlayers(req.guardian.childIds)));
   });
   guardianRouter.post('/followups/:id/respond', (req, res) =>
     respondOutcome(req, res, req.guardian.childIds, { kind: 'guardian', id: req.guardian.id, name: req.guardian.name }));

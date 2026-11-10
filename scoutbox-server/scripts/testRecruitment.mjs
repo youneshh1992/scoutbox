@@ -252,6 +252,41 @@ test('[repository] batched trial lists: every list, page and sweep decodes its t
   L.close(); rm(d);
 });
 
+test('[repository] a player\'s derived trial reports are the reports on their decoded trials in filing order (ties in trial order), read in one statement however many trials and players are asked for, and a player read decodes no trial', () => {
+  // Two more reported trials for pl-adult, one filed at the same instant as rep-1, so the tie order is exercised.
+  const all = EVERY_TRIAL_SHAPE();
+  for (const [k, filedAt] of [['tie', T.filed], ['late', T.filed + 86_400_000]]) {
+    all.requests.push(legacyTrialRequest({ id: `req-${k}`, status: 'accepted', respondedAt: T.accepted, respondedBy: 'player', trialId: `trial-${k}` }));
+    all.trials.push(preP4bTrial({ id: `trial-${k}`, requestId: `req-${k}`, report: report({ id: `rep-${k}`, trialId: `trial-${k}`, filedAt }) }));
+  }
+  const d = file('reports', all); const L = serverOpen(d); const { repo } = L;
+  const players = [...new Set(repo.exportAll().trials.map((t) => t.playerId))];
+  const decoded = (pid) => repo.trials.forPlayer(pid).filter((t) => t.report).map((t) => t.report).sort((a, b) => a.filedAt - b.filedAt);
+  const byPlayer = repo.trialReportsForPlayers(players);
+  for (const pid of players) {
+    assert.deepEqual(plain(byPlayer.get(pid) ?? []), plain(decoded(pid)), `${pid}: the reports read alone equal the decoded trials' reports`);
+    assert.deepEqual(plain(repo.trialReportsFor(pid)), plain(decoded(pid)), `${pid}: trialReportsFor agrees`);
+  }
+  assert.deepEqual(repo.trialReportsFor('pl-adult').map((r) => r.id), ['rep-old', 'rep-1', 'rep-tie', 'rep-late'], 'filing order, a tie in trial order');
+  assert.deepEqual(plain(L.layer.players.byId('pl-adult').trialReports), plain(decoded('pl-adult')), 'the player record carries the same reports');
+  assert.equal(repo.trialReportsForPlayers([]).size, 0); assert.deepEqual(repo.trialReportsFor('pl-nobody'), []);
+
+  const counted = { on: false, n: 0, sql: [] }; const originals = {};
+  for (const name of ['all', 'get', 'iterate']) {
+    originals[name] = StatementSync.prototype[name];
+    StatementSync.prototype[name] = function counting(...args) { if (counted.on) { counted.n += 1; counted.sql.push(this.sourceSQL); } return originals[name].apply(this, args); };
+  }
+  const run = (fn) => { counted.n = 0; counted.sql = []; counted.on = true; try { fn(); } finally { counted.on = false; } return counted.n; };
+  try {
+    assert.equal(run(() => repo.trialReportsForPlayers(players)), 1, `the reports of every player asked for (${players.length}) are one statement`);
+    assert.equal(run(() => repo.trialReportsFor('pl-adult')), 1, 'four reported trials are one statement');
+    run(() => L.layer.players.byId('pl-adult'));
+    assert.ok(counted.n > 0, 'the counter saw the player read');
+    assert.ok(!counted.sql.some((s) => /FROM trials\b|FROM trial_(?!reports)/.test(s.replace(/JOIN trials t ON t\.id = r\.trial_id/, ''))), `a player read decodes no trial: ${counted.sql.filter((s) => /trial/.test(s)).join(' | ')}`);
+  } finally { for (const [name, fn] of Object.entries(originals)) StatementSync.prototype[name] = fn; }
+  L.close(); rm(d);
+});
+
 test('[repository] the reminder sweep query: remindersDue(now) is exactly the confirmed, open trials the sweep would remind at that instant — a session starting within 48 hours whose marker for the current revision is unset, or the last session ended over a day ago without completionPending — at every boundary', () => {
   const H = 3_600_000; const D = 24 * H;
   const copy = ({ evidence: _e, ...x }) => x;

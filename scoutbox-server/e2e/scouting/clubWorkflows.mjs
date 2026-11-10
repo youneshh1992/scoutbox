@@ -664,6 +664,7 @@ r = await post(`/org/followups/${fup.id}/report`, { registrationStatus: 'registe
 ok(r.status === 201, 'club files the follow-up outcome report');
 r = await j('/player/followups', {}, bearer(SVEN));
 ok(r.body.find((f) => f.id === fup.id).report.registrationStatus === 'registered', 'player sees the report');
+ok(JSON.stringify(Object.keys(r.body.find((f) => f.id === fup.id)).sort()) === JSON.stringify(['createdAt', 'dueAt', 'id', 'milestone', 'notifiedAt', 'orgId', 'orgName', 'outcomeState', 'playerId', 'playerName', 'report', 'signingId', 'status']), 'a follow-up is answered from an allowlist');
 r = await post(`/player/followups/${fup.id}/respond`, { agree: true, experienceRating: 4 }, bearer(SVEN));
 ok(r.status === 200 && r.body.followUp.outcomeState === 'confirmed', 'player confirms → outcome is CONFIRMED, not merely reported');
 r = await j('/admin/outcomes', {}, admin);

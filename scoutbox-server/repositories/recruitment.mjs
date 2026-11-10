@@ -456,6 +456,8 @@ function statements(sqlite) {
     ins: Object.fromEntries(Object.keys(COLS).map((t) => [t, insert(t)])),
     requestById: sqlite.prepare('SELECT * FROM recruitment_requests WHERE id = ?'), requestAll: sqlite.prepare('SELECT * FROM recruitment_requests ORDER BY rowid'),
     trialById: sqlite.prepare('SELECT * FROM trials WHERE id = ?'), trialAll: sqlite.prepare('SELECT * FROM trials ORDER BY rowid'),
+    // Ties in filing time keep the trials' order.
+    reportsForPlayers: sqlite.prepare('SELECT r.* FROM trial_reports r JOIN trials t ON t.id = r.trial_id WHERE r.player_id IN (SELECT value FROM json_each(?)) ORDER BY r.player_id, r.filed_at, t.rowid'),
     slotsOf: sqlite.prepare('SELECT * FROM request_trial_slots WHERE request_id = ? ORDER BY position'),
     of: Object.fromEntries(['trial_schedule_sessions', 'trial_schedule_revisions', 'trial_attendance', 'trial_history', 'trial_reminders', 'trial_reports', 'trial_day_staff', 'trial_day_consents', 'trial_day_checkins', 'trial_day_status_events'].map((t) => [t, childOf(t)])),
     evidenceOf: sqlite.prepare('SELECT * FROM trial_session_evidence WHERE trial_id = ? AND session_id = ? ORDER BY position'),
@@ -527,6 +529,7 @@ function decodeRequest(st, row) {
     keys: { invite: row.invite_fp === null ? null : { key: row.invite_key, fp: row.invite_fp } }, subjectRemovedAt: row.subject_removed_at,
   };
 }
+const reportOut = (rep) => ({ id: rep.id, trialId: rep.trial_id, playerId: rep.player_id, orgId: rep.org_id, orgName: rep.org_name, userId: rep.user_id, scoutName: rep.scout_name, filedAt: rep.filed_at, ...Object.fromEntries(TRIAL_REPORT_FIELDS.map((f) => [f, rep[snake(f)]])), notes: rep.notes, strengthNote: rep.strength_note, focusNote: rep.focus_note });
 function decodeTrial(st, row) {
   const O = st.of;
   const schedule = row.schedule_revision === null ? null : {
@@ -542,7 +545,7 @@ function decodeTrial(st, row) {
     id: row.id, requestId: row.request_id, caseId: row.case_id, playerId: row.player_id, playerName: row.player_name, orgId: row.org_id, orgName: row.org_name, scoutName: row.scout_name,
     acceptedAt: row.accepted_at, acceptedBy: row.accepted_by, guardianApproved: flagOut(row.guardian_approved), proposedDate: row.proposed_date, venue: row.venue, notes: row.notes,
     reportDueAt: row.report_due_at, status: row.status, reminderSent: row.reminder_sent === 1, feedbackEscalatedAt: row.feedback_escalated_at,
-    report: rep ? { id: rep.id, trialId: row.id, playerId: rep.player_id, orgId: rep.org_id, orgName: rep.org_name, userId: rep.user_id, scoutName: rep.scout_name, filedAt: rep.filed_at, ...Object.fromEntries(TRIAL_REPORT_FIELDS.map((f) => [f, rep[snake(f)]])), notes: rep.notes, strengthNote: rep.strength_note, focusNote: rep.focus_note } : null,
+    report: rep ? reportOut(rep) : null,
     day: {
       staff: O.trial_day_staff.all(row.id).map((s) => ({ id: s.id, name: s.name, role: s.role, check: s.check_status === null ? null : { kind: s.check_kind, ref: s.check_ref, status: s.check_status, expiresAt: s.check_expires_at, reviewedBy: s.check_reviewed_by, reviewedAt: s.check_reviewed_at }, addedBy: s.added_by_name, addedAt: s.added_at })),
       consents: O.trial_day_consents.all(row.id).map((c) => ({ id: c.id, by: actorOut(c, 'by'), scope: c.scope, at: c.at })),
@@ -607,6 +610,13 @@ export function createRecruitmentRepository({ sqlite, unit = null, now = Date.no
     if (name !== 'trials' || rows.length < 2) return rows.map(decode[name]);
     const bst = batchTrialStatements(sqlite, st, rows.map((r) => r.id));
     return rows.map((r) => deepFreeze(decodeTrial(bst, r)));
+  };
+  const reportsOf = (playerIds) => {
+    const out = new Map();
+    const want = [...new Set((playerIds ?? []).filter((p) => typeof p === 'string'))];
+    if (!want.length) return out;
+    for (const rep of st.reportsForPlayers.all(JSON.stringify(want))) { if (!out.has(rep.player_id)) out.set(rep.player_id, []); out.get(rep.player_id).push(reportOut(rep)); }
+    return out;
   };
   const rowById = { requests: st.requestById, trials: st.trialById };
   const read = (name, id) => { if (typeof id !== 'string') return null; const row = rowById[name].get(id); return row ? decode[name](row) : null; };
@@ -940,15 +950,14 @@ export function createRecruitmentRepository({ sqlite, unit = null, now = Date.no
     },
     /** The derived `players[].trialReports`: the reports filed on the player's trials, in filing order. */
     trialReportsFor(playerId) {
-      return trials.forPlayer(playerId).filter((t) => t.report).map((t) => t.report).sort((a, b) => a.filedAt - b.filedAt);
+      return reportsOf([playerId]).get(playerId) ?? [];
     },
-    /** The trial reports of many players at once (one query): Map player id → reports in filing order. */
-    trialReportsForPlayers(playerIds) {
-      const out = new Map();
-      for (const t of trials.forPlayers(playerIds)) if (t.report) { if (!out.has(t.playerId)) out.set(t.playerId, []); out.get(t.playerId).push(t.report); }
-      for (const list of out.values()) list.sort((a, b) => a.filedAt - b.filedAt);
-      return out;
-    },
+    /**
+     * The trial reports of many players at once (one query): Map player id → reports in filing order. Read from the
+     * report rows alone, never by decoding the trials: every player read pays this. The composite key to trials
+     * makes a report's player its trial's player.
+     */
+    trialReportsForPlayers: (playerIds) => reportsOf(playerIds),
     /** Check migration 0015 is recorded; there is nothing to load. */
     attach() {
       if (!recruitmentLive(sqlite)) throw new Error(`the recruitment repository needs ${RECRUITMENT_MIGRATION} recorded; it never imports an in-memory array`);

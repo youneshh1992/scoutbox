@@ -198,22 +198,28 @@ keep, or code with nothing left to do.
 ## Performance
 
 What still misses the target in [`architecture.md`](architecture.md#performance-target), measured with a busy club at
-100k players in the November 2026 perf runs (re-measure before acting on a figure). None touches every player on
-a write.
+100k players (`npm run perf:recruitment`, 10 November 2026: 19 of 56 timed reads under 5 ms; re-measure before
+acting on a figure). None touches every player on a write.
 
-- **Recruitment.** `/org/recruitment-analytics` (about 0.5 s) decodes records; it needs its own projections in SQL.
-  `/org/rooms` (about 200 ms) and a Room (10–12 ms) are mostly the per-player Passport and Trust assembly. The Room
-  comment write took about 75 ms. `/player/journeys`, `/player/signings`,
-  `/player/offers` and `/player/trials` for a player in many clubs' Rooms decode every record of each club's case.
-- **Discovery.** Matching, Nobody Missed and watchlists count their whole match set for `total` (about 30 ms per
-  count; Nobody Missed counts three times, about 100 ms). Opening a watchlist compares its whole stored membership in
-  code (about 0.4 s at 20,000 members) and writes its "as of" clock every time. Similar players, "more like this",
-  the discovery rotation and the benchmarks rank every visible player over light rows. A first installation or a
-  trust-policy change derives every player's match facts at boot in one transaction (about
-  70 s at 100k players); each later write to an input re-derives its player before commit (about 0.7 ms).
+- **Recruitment.** `/org/audit` (about 0.85 s for the busy club, 70 ms for a typical one) and
+  `/org/recruitment-analytics` (about 0.45 s) decode records; they need their own projections in SQL. `/org/rooms`
+  (about 130 ms) and a Room (about 5.5 ms) are mostly the per-player Passport and Trust assembly. `/org/followups`
+  takes about 35 ms. The Room comment write takes about 12 ms. `/player/journeys` (about 130 ms), `/player/offers`
+  (about 60 ms), `/player/signings` (about 50 ms) and `/player/trials` (about 12 ms) for a player in many clubs'
+  Rooms decode every record of each club's case. `/player/followups` (about 12 ms for 573 follow-ups) reads each
+  one's outcome report by id.
+- **Discovery.** Matching, Nobody Missed and watchlists count their whole match set for `total` (matching about
+  40–70 ms; Nobody Missed counts three times, about 100 ms). Opening a watchlist compares its whole stored membership
+  in code (about 0.4 s at 20,000 members) and writes its "as of" clock every time. A player's profile and "more like
+  this" (about 0.55 s each), the discovery rotation (about 0.5 s) and the benchmarks (about 120 ms) rank every
+  visible player over light rows. A first installation or a trust-policy change derives every player's match facts at
+  boot in one transaction (the 100k-player boot takes about 130 s); each later write to an input re-derives its
+  player before commit (about 0.7 ms).
 - **Directory.** The Grassroots directory orders by distance, so each page sorts the players inside the club's
-  radius. The Film Room pages by view count, which other scouts' views change, so a clip can move across a cursor
-  while someone pages.
+  radius; the Grassroots directory, Film Room, feed and fixtures take about 90–150 ms each. The Film Room pages by
+  view count, which other scouts' views change, so a clip can move across a cursor while someone pages.
+- **Sweeps.** "Signings missing follow-ups" counts every signing's follow-ups each minute (about 140 ms at 10,000
+  signings).
 - **Lists filtered in code after SQL** (bounded by one club, not the player base): the Development Hub's plan list,
   Box Cam's assignment, challenge and Combine request lists, the friendlies board and a guardian's local open days
   (a latitude/longitude box in SQL, the exact 50 km test in code), the player opportunity board, insight's review

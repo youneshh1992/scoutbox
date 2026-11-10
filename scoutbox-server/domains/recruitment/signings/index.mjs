@@ -84,18 +84,20 @@ export function registerSigning(rawCtx) {
   const subjectRemoved = (kase) => !!kase?.subjectRemovedAt || !findPlayer(kase?.playerId);
   const completedRowFor = (pkg) => sg.forPackage(pkg.id);
 
-  const consistencyOf = (pkg, offer, kase, at, rowFor = (id) => sg.forPackage(id)) => signingConsistency(pkg, { offer, kase, rows: [rowFor(pkg.id)].filter(Boolean), player: findPlayer(pkg.playerId) ?? null }, at);
-  const LOOKUPS = Object.freeze({ offerOf, caseOf, rowFor: (id) => sg.forPackage(id) });
+  const consistencyOf = (pkg, offer, kase, at, look = LOOKUPS) => signingConsistency(pkg, { offer, kase, rows: [look.rowFor(pkg.id)].filter(Boolean), player: look.playerOf(pkg.playerId) ?? null }, at);
+  const LOOKUPS = Object.freeze({ offerOf, caseOf, rowFor: (id) => sg.forPackage(id), playerOf: (id) => findPlayer(id) });
   /** The same lookups, answered from the players' offers, cases and signings read once. */
   function lookupsForPlayers(playerIds) {
     const pids = [...new Set(playerIds)];
     const offers = new Map(offerReads.forPlayers(pids).map((o) => [o.id, o]));
     const cases = new Map(pids.flatMap((pid) => recruitmentReads.cases.forPlayer(pid)).map((k) => [k.id, k]));
     const rows = new Map(pids.flatMap((pid) => sg.forPlayer(pid)).filter((r) => r.signingPackageId).map((r) => [r.signingPackageId, r]));
+    const players = new Map(pids.map((pid) => [pid, findPlayer(pid) ?? null]));
     return Object.freeze({
       offerOf: (pkg) => { const o = offers.get(pkg.offerId) ?? offerReads.byId(pkg.offerId); return o && o.orgId === pkg.orgId ? o : null; },
       caseOf: (pkg) => { const k = cases.get(pkg.caseId) ?? recruitmentReads.cases.byId(pkg.caseId); return k && k.orgId === pkg.orgId ? k : null; },
       rowFor: (id) => rows.get(id) ?? sg.forPackage(id),
+      playerOf: (id) => (players.has(id) ? players.get(id) : findPlayer(id)),
     });
   }
   /** Omitted from every projection unless its Offer, case and completed record agree with it. */
@@ -103,7 +105,7 @@ export function registerSigning(rawCtx) {
     if (!pkg || signingIntegrity(pkg).length) return false;
     const offer = look.offerOf(pkg); const kase = look.caseOf(pkg);
     if (!offer || !kase) return false;
-    const c = consistencyOf(pkg, offer, kase, at, look.rowFor);
+    const c = consistencyOf(pkg, offer, kase, at, look);
     if (signingCorrupt(c)) { console.error(`SIGNING consistency ${pkg.id}: ${c.join(',')}`); return false; }
     return true;
   }
