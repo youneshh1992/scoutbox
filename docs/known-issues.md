@@ -14,6 +14,10 @@ end of the feature freeze.
 
 ## Security
 
+- **The admin console key has a default.** With no `ADMIN_KEY` set, `server.mjs` accepts `scoutbox-admin` as the
+  `x-admin-key` for every `/admin` route, including the guardian ID review, in every mode. Secrets should have no
+  default: the server should refuse to serve `/admin` without a key (and the setting should be registered in
+  `domains/platform/capabilities.mjs`). The tests and the seed scripts send the default key and would need to set it.
 - **A verification decision's T&S reviewer is declared, not authenticated.** The verification review routes take the
   shared admin key and a reviewer named in the request (`domains/verification/claims/index.mjs`), unlike the agent
   reviewers, who have their own sessions.
