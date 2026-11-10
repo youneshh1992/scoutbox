@@ -1,0 +1,7 @@
+# Installed by `npm install` / `npm run setup` at the repository root.
+pre-commit:
+  jobs:
+    - name: biome format
+      glob: "*.{js,mjs,cjs,ts,mts,tsx,jsx,json,css}"
+      run: npx biome format --write --no-errors-on-unmatched --files-ignore-unknown=true {staged_files}
+      stage_fixed: true

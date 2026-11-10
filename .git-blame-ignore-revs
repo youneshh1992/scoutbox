@@ -1,0 +1,2 @@
+# Commits that only reformat code. GitHub's blame view skips them automatically;
+# `npm run setup` points local `git blame` at this file too.

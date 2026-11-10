@@ -10,7 +10,8 @@ import { fileURLToPath } from 'node:url';
 import { CONTRACT, runtimeSupport } from '../scoutbox-server/runtime.mjs';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
-const APPS = ['scoutbox-server', 'scoutbox-player', 'scoutbox-club', 'scoutbox-admin', 'e2e'];
+// '.' is the repository root: Biome and the lefthook pre-commit hook, which its `prepare` script installs.
+const APPS = ['.', 'scoutbox-server', 'scoutbox-player', 'scoutbox-club', 'scoutbox-admin', 'e2e'];
 // scoutbox-grassroots/node_modules and scoutbox-agent/node_modules are symlinks to scoutbox-club's — no install.
 
 let failed = false;
@@ -23,8 +24,9 @@ const runtime = runtimeSupport();
 if (runtime.ok) okay(`node ${process.versions.node} (${CONTRACT})`);
 else fail(`${runtime.reason} Install a supported Node.js (https://nodejs.org).`);
 
-for (const app of APPS) {
-  const dir = path.join(ROOT, app);
+for (const rel of APPS) {
+  const app = rel === '.' ? 'repo tools (formatter, git hooks)' : rel;
+  const dir = path.join(ROOT, rel);
   if (!fs.existsSync(path.join(dir, 'package-lock.json'))) { fail(`${app}/package-lock.json missing — clone incomplete?`); continue; }
   const marker = path.join(dir, 'node_modules', '.package-lock.json');
   const lock = path.join(dir, 'package-lock.json');

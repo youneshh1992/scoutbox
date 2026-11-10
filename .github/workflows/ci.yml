@@ -6,6 +6,20 @@ on:
   pull_request:
 
 jobs:
+  format:
+    name: Formatting (Biome)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - run: npm ci
+      - name: Every file is Biome-formatted (fix locally with `npm run format`)
+        run: npm run format:check
+
   server:
     name: Server — unit tests + API end-to-end
     runs-on: ubuntu-latest

@@ -35,6 +35,12 @@ are passwordless development logins, refused in production. To try a phone on th
 
 Running the server, its environment variables and the data-layer rules: [`scoutbox-server/OPERATIONS.md`](scoutbox-server/OPERATIONS.md).
 
+## Formatting
+
+All code is formatted by [Biome](https://biomejs.dev) (`biome.json`). `npm run setup` installs a pre-commit hook that
+formats the files you commit; CI fails on anything unformatted. `npm run format` formats everything. Formatting-only
+commits are listed in `.git-blame-ignore-revs`, so `git blame` skips them.
+
 ## Tests
 
 ```bash
