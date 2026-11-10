@@ -11,8 +11,8 @@
  *   objective verification (regulated only) → rev / idempotency → mutate →
  *   history → event → notification.
  *
- * Compliance review and transactions live in ../compliance and ../transactions,
- * which fill the `hooks` seams below. There is NO route here through which the
+ * Compliance review and transactions live in ../compliance and ../transactions;
+ * the core asks compliance through the functions it is given. There is NO route here through which the
  * shared Trust & Safety key can verify or reject a licence, resolve a dispute
  * or override a state (G-C0).
  */
@@ -38,22 +38,27 @@ import {
   clientTransitionAllowed, agentTransitionAllowed, agreementForAgent, agreementForClient, agreementSummaryForStaff,
 } from './shared.mjs';
 
+/**
+ * `access` is the agent access checks (../access.mjs). `compliance` is the compliance engine's
+ * `{ facetNeedsReview, representationDisputed, authorizeApproach, createApproachReview }`, and `auditSources` lists
+ * the functions `(org) => rows` whose rows join the agency's audit feed.
+ */
 export function registerAgent(rawCtx) {
   const ctx = { ...rawCtx, ...buildShared(rawCtx) };
   const {
     byId, players, users, notifications, orgRouter, playerRouter, adminRouter, nextId, notify, broadcast,
     findPlayer, isBlocked, playerViewForOrg, orgSafe, revokeOrgUserAccess, rateLimit, isAdult,
     orgCanSee, checkEligibility, distanceBand, moderateOrRefuse, verificationProvider, agentCore, unit, log = console,
+    access, compliance, auditSources = [],
   } = ctx;
   if (!notifications) throw new TypeError('registerAgent needs the notifications repository (ctx.notifications)');
   if (typeof agentCore?.agreements?.recordAct !== 'function' || typeof unit !== 'function') throw new TypeError('registerAgent needs the agent core repository and unit from the data layer');
+  if (typeof access?.resolveMembership !== 'function') throw new TypeError('registerAgent needs the agent access checks (ctx.access)');
+  if (typeof compliance?.authorizeApproach !== 'function') throw new TypeError('registerAgent needs the compliance engine\'s review functions (ctx.compliance)');
+  const { resolveMembership, requireCap, profileOf, findOwnAgreement } = access;
   const { profiles, affiliations, agreements, settings } = agentCore;
 
   const testProviderEnabled = process.env.AGENT_VERIFICATION_TEST_PROVIDER === '1';
-  // Seams the Compliance Engine fills after it registers: a facet that needs
-  // attributed review, a client's dispute, and the policy layer's verdict on
-  // an Approach. Absent (tests of the pure core), the core decides alone.
-  const hooks = { facetNeedsReview: null, representationDisputed: null, authorizeApproach: null };
   const now = () => Date.now();
   /** A history entry, for an act's bookkeeping or a whole record's history. */
   const entry = (action, by, detail = null) => ({ id: nextId('aud'), at: now(), action, by, detail });
@@ -88,44 +93,7 @@ export function registerAgent(rawCtx) {
 
   // ------------------------------------------------------------ lookups
   const activeAffiliationOf = (userId, orgId) => affiliations.activeFor(userId, orgId, now());
-  const profileOf = (userId) => profiles.forUser(userId);
   const agreementsOfAgency = (orgId) => agreements.forAgency(orgId);
-
-  /** Step 3: agency membership. Bootstraps the first member of an agency as its admin. */
-  function resolveMembership(req, res) {
-    if (req.org.type !== 'agency') {
-      sendAgentError(res, { error: 'AGENT_ACTION_NOT_PERMITTED', message: 'The Agent workspace is for agency organisations.' }, 'membership');
-      return null;
-    }
-    let aff = activeAffiliationOf(req.orgUser.id, req.org.id);
-    if (!aff) {
-      if (affiliations.anyActiveIn(req.org.id, now())) {
-        sendAgentError(res, { error: 'AGENCY_MEMBERSHIP_REQUIRED', message: 'You are not an active member of this agency. Ask an agency administrator to add you.' }, 'membership');
-        return null;
-      }
-      // First person into an agency with no members: the same bootstrap rule
-      // as the first verification root admin.
-      aff = unit(() => {
-        const draft = {
-          id: nextId('aff'), agencyOrgId: req.org.id, userId: req.orgUser.id, tiers: ['agency_admin'],
-          startedAt: now(), endedAt: null, endedReason: null, createdAt: now(), rev: 1, revAt: now(), revBy: null, keys: {}, history: [],
-        };
-        hist(draft, 'agency_affiliation_created', byOrg(req), { tiers: draft.tiers, bootstrap: true });
-        const created = affiliations.create(draft);
-        broadcast('agency_affiliation_created', { orgId: req.org.id, userId: req.orgUser.id });
-        return created;
-      });
-    }
-    req.affiliation = aff;
-    req.tiers = tiersOf(aff);
-    return aff;
-  }
-
-  const requireCap = (req, res, cap) => {
-    if (can(req.tiers, cap)) return true;
-    sendAgentError(res, { error: 'AGENT_ACTION_NOT_PERMITTED', message: `Your agency role does not include "${cap}".` }, cap);
-    return false;
-  };
 
   /** `?limit=&cursor=` for a list paged newest first by rowid; null after answering a junk page with 400. */
   const pageQuery = (req, res) => { try { return readPage(req.query, ['number']); } catch (e) { sendPageError(res, e); return null; } };
@@ -333,7 +301,7 @@ export function registerAgent(rawCtx) {
           ...(changed ? [entry('agent_verification_state_changed', byOrg(req), { facet, memberAssociation: ma, from: prev?.state ?? 'UNVERIFIED', to: next.state, state: next.state })] : []),
         ],
       });
-      if (next.state === 'MANUAL_REVIEW_REQUIRED' && hooks.facetNeedsReview) hooks.facetNeedsReview(out, { facet, memberAssociation: ma, reference }, byOrg(req));
+      if (next.state === 'MANUAL_REVIEW_REQUIRED') compliance.facetNeedsReview(out, { facet, memberAssociation: ma, reference }, byOrg(req));
       if (changed) {
         broadcast('agent_verification_state_changed', { orgId: req.org.id, userId: out.userId, facet, state: next.state });
         if (next.state === 'VERIFIED' || next.state === 'INACTIVE' || next.state === 'MANUAL_REVIEW_REQUIRED') {
@@ -494,7 +462,8 @@ export function registerAgent(rawCtx) {
     if (!requireCap(req, res, 'agency.audit.read')) return;
     const all = agentAuditRows(agentCore.reads, req.org, { findPlayer, orgCanSee });
     // Compliance rows (contexts, consents, attributed reviews) ride the same feed, same shape.
-    if (hooks.auditRows) { all.push(...hooks.auditRows(req.org)); all.sort((a, b) => (b.at - a.at) || String(b.id).localeCompare(String(a.id))); }
+    for (const rowsOf of auditSources) all.push(...rowsOf(req.org));
+    all.sort((a, b) => (b.at - a.at) || String(b.id).localeCompare(String(a.id)));
     const limit = Math.min(50, Math.max(1, Number(req.query.limit) || 25));
     let start = 0;
     if (req.query.cursor) {
@@ -552,15 +521,6 @@ export function registerAgent(rawCtx) {
     res.json({ items: rows, scopes: SCOPES, maxTermMonths: MAX_TERM_MONTHS, jurisdictions: JURISDICTIONS });
   });
 
-  function findOwnAgreement(req, res, id) {
-    const a = typeof id === 'string' ? agreements.byId(id) : null;
-    if (!a || a.agencyOrgId !== req.org.id) { sendAgentError(res, { error: 'REPRESENTATION_NOT_FOUND' }, 'client'); return null; }
-    if (a.agentUserId === req.orgUser.id && can(req.tiers, 'clients.read.own')) return a;
-    if (can(req.tiers, 'clients.read.shared_summary') && a.shareWithAgencyStaff) return { summaryOnly: true, a };
-    sendAgentError(res, { error: 'REPRESENTATION_NOT_FOUND' }, 'client');
-    return null;
-  }
-
   /**
    * Request a relationship with an ADULT player. A REGULATED action (an
    * Approach), so the objective verification check applies: the agent's
@@ -616,17 +576,14 @@ export function registerAgent(rawCtx) {
     // under the applicable national rules; the exclusive-agreement window,
     // which is UNDER_LEGAL_REVIEW, goes to attributed review, never a block,
     // and never names the other agent).
-    let policyVersions = [];
-    if (hooks.authorizeApproach) {
-      const { decision, policySet } = hooks.authorizeApproach({ profile: profileOf(req.orgUser.id), jurisdiction, player, agentUserId: req.orgUser.id });
-      policyVersions = policySet.policies.map((x) => x.id);
-      if (decision.facetGaps.length) { const g = decision.facetGaps[0]; return sendAgentError(res, { error: g.code, facet: g.facet, memberAssociation: g.memberAssociation, state: g.state, message: `A regulated action needs a VERIFIED ${g.facet}${g.memberAssociation ? ` (${g.memberAssociation})` : ''}; it is ${g.state}.` }, 'request'); }
-      if (decision.blocked) return sendAgentError(res, { error: 'AGENT_ACTION_NOT_PERMITTED', reasons: decision.reasons.filter((r) => r.code !== 'FACET_VERIFIED'), policyVersions, message: 'An ACTIVE encoded rule does not permit this approach.' }, 'request');
-      if (decision.requiresManualReview) {
-        const unsupported = decision.reasons.some((r) => r.code === 'POLICY_NOT_ENCODED');
-        const review = hooks.createApproachReview ? hooks.createApproachReview({ req, decision, playerId: player.id, jurisdiction }) : null;
-        return sendAgentError(res, { error: unsupported ? 'JURISDICTION_UNSUPPORTED' : 'REGULATORY_REVIEW_REQUIRED', reviewId: review?.id ?? undefined, reasons: decision.reasons.filter((r) => r.code !== 'FACET_VERIFIED'), policyVersions, message: unsupported ? 'No encoded policy covers this jurisdiction; the request cannot proceed.' : 'The deciding rule\'s operative status is uncertain. The request was not sent; an attributed Trust & Safety review item records the question.' }, 'request');
-      }
+    const { decision, policySet } = compliance.authorizeApproach({ profile: profileOf(req.orgUser.id), jurisdiction, player, agentUserId: req.orgUser.id });
+    const policyVersions = policySet.policies.map((x) => x.id);
+    if (decision.facetGaps.length) { const g = decision.facetGaps[0]; return sendAgentError(res, { error: g.code, facet: g.facet, memberAssociation: g.memberAssociation, state: g.state, message: `A regulated action needs a VERIFIED ${g.facet}${g.memberAssociation ? ` (${g.memberAssociation})` : ''}; it is ${g.state}.` }, 'request'); }
+    if (decision.blocked) return sendAgentError(res, { error: 'AGENT_ACTION_NOT_PERMITTED', reasons: decision.reasons.filter((r) => r.code !== 'FACET_VERIFIED'), policyVersions, message: 'An ACTIVE encoded rule does not permit this approach.' }, 'request');
+    if (decision.requiresManualReview) {
+      const unsupported = decision.reasons.some((r) => r.code === 'POLICY_NOT_ENCODED');
+      const review = compliance.createApproachReview({ req, decision, playerId: player.id, jurisdiction });
+      return sendAgentError(res, { error: unsupported ? 'JURISDICTION_UNSUPPORTED' : 'REGULATORY_REVIEW_REQUIRED', reviewId: review?.id ?? undefined, reasons: decision.reasons.filter((r) => r.code !== 'FACET_VERIFIED'), policyVersions, message: unsupported ? 'No encoded policy covers this jurisdiction; the request cannot proceed.' : 'The deciding rule\'s operative status is uncertain. The request was not sent; an attributed Trust & Safety review item records the question.' }, 'request');
     }
     const agentName = profileOf(req.orgUser.id)?.displayName ?? req.orgUser.name;
     const a = unit(() => {
@@ -788,7 +745,7 @@ export function registerAgent(rawCtx) {
       notify({ kind: 'org_user', id: out.agentUserId }, notifyType, notifyText, out.id);
       // A dispute becomes an attributed review item. The
       // reason stays with the client; the reviewer sees only that one exists.
-      if (to === 'disputed' && hooks.representationDisputed) hooks.representationDisputed(out, byPlayer(req));
+      if (to === 'disputed') compliance.representationDisputed(out, byPlayer(req));
       return out;
     });
     res.json({ relationship: { ...agreementForClient(updated, now()), agent: agentIdentityForClient(updated) } });
@@ -957,11 +914,6 @@ export function registerAgent(rawCtx) {
 
   return {
     onPlayerDeleted, agentSweep, effectiveAgreementStatus, agreementGrantsAccess, testProviderEnabled,
-    // The Compliance Engine reuses exactly these gates rather than its own copies.
-    resolveMembership, requireCap, profileOf, facetView, hooks,
-    // The integration seam's agent-facing reads resolve `:id` through the
-    // SAME concealing lookup as every other client route, so a foreign agreement
-    // is a 404 there for the same reason it is one here.
-    findOwnAgreement,
+    facetView,
   };
 }

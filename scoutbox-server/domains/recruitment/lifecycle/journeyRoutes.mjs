@@ -23,7 +23,7 @@ import { currentSigningForOffer } from './journeyModel.mjs';
 import { playerJourneyReads } from './journeyReads.mjs';
 
 export function registerJourneyRoutes(ctx) {
-  const { recruitmentReads, scoutingReads, safetyReads, playerRouter, guardianRouter, orgRouter, agent = null, integration = null, findPlayer, guardianOwnsChild } = ctx;
+  const { recruitmentReads, scoutingReads, safetyReads, playerRouter, guardianRouter, orgRouter, access = null, integration = null, findPlayer, guardianOwnsChild } = ctx;
   if (!recruitmentReads?.contacts || !recruitmentReads?.offers || !recruitmentReads?.signings || !recruitmentReads?.signingPackages) throw new TypeError('registerJourneyRoutes needs recruitmentReads (contacts, offers, signings, signingPackages) from the data layer');
   const evidence = () => ctx.recruitmentEvidenceProvider ?? undefined;
   const orgOf = (orgId) => ctx.byId.org(orgId);
@@ -80,8 +80,8 @@ export function registerJourneyRoutes(ctx) {
   }
 
   orgRouter.get('/agent/clients/:id/journey', (req, res) => {
-    if (!agent?.resolveMembership?.(req, res)) return;
-    const found = agent.findOwnAgreement(req, res, req.params.id);
+    if (!access?.resolveMembership?.(req, res)) return;
+    const found = access.findOwnAgreement(req, res, req.params.id);
     if (!found) return;
     if (found.summaryOnly) return res.status(403).json({ error: 'AGENT_ACTION_NOT_PERMITTED', message: 'A summary row does not open a client\'s journey.' });
     const a = found; const at = now(req);

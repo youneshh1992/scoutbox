@@ -51,7 +51,7 @@ export function registerIntegration(ctx) {
   const {
     byId, orgRouter, playerRouter, nextId, notify, broadcast,
     findPlayer, isAdult, isBlocked, orgCanSee, checkEligibility, distanceBand,
-    agent, compliance, rateLimit,
+    access, compliance, rateLimit,
     agentCore, unit, // an opportunity share is a row of its agreement, written by agreements.addShare in a unit
     recruitmentCases, // the handoff is part of its case, written by the case's handoff acts
     recruitmentReads,
@@ -87,7 +87,7 @@ export function registerIntegration(ctx) {
     if (!k.ok) { res.status(400).json({ error: 'AGENT_CLIENT_KEY_INVALID', message: k.message }); return undefined; }
     return k.key;
   };
-  const agentDisplayName = (userId) => agent?.profileOf?.(userId)?.displayName
+  const agentDisplayName = (userId) => access?.profileOf?.(userId)?.displayName
     ?? byId.user(userId)?.name ?? null;
 
   /**
@@ -149,7 +149,7 @@ export function registerIntegration(ctx) {
 
   /** The agent's required facets are VERIFIED for the agreement's jurisdiction, now. */
   function licenceCurrentFor(agentUserId, jurisdiction, at = now()) {
-    const p = agent?.profileOf ? agent.profileOf(agentUserId) : null;
+    const p = access?.profileOf ? access.profileOf(agentUserId) : null;
     if (!p) return false;
     return !verificationGap(p, jurisdiction, at);
   }
@@ -264,7 +264,7 @@ export function registerIntegration(ctx) {
     if (!agreement) return null;
     const decision = decide({ surface: 'club_agent_presence', clientId: player.id, agentUserId: agreement.agentUserId, viewerOrgId, at });
     if (decision.allowed !== true) return null;
-    const profile = agent?.profileOf ? agent.profileOf(agreement.agentUserId) : null;
+    const profile = access?.profileOf ? access.profileOf(agreement.agentUserId) : null;
     const user = byId.user(agreement.agentUserId);
     const org = byId.org(agreement.agencyOrgId);
     return clubAgentPresence({
@@ -291,8 +291,8 @@ export function registerIntegration(ctx) {
    * not on the other side of this door.
    */
   orgRouter.get('/agent/clients/:id/contacts', (req, res) => {
-    if (!agent.resolveMembership(req, res)) return;
-    const found = agent.findOwnAgreement(req, res, req.params.id);
+    if (!access.resolveMembership(req, res)) return;
+    const found = access.findOwnAgreement(req, res, req.params.id);
     if (!found) return;
     if (found.summaryOnly) return res.status(403).json({ error: 'AGENT_ACTION_NOT_PERMITTED', message: 'A summary row does not open a client\'s contacts.' });
     const a = found;
@@ -345,8 +345,8 @@ export function registerIntegration(ctx) {
    * would be exactly that.
    */
   orgRouter.get('/agent/clients/:id/trials', (req, res) => {
-    if (!agent.resolveMembership(req, res)) return;
-    const found = agent.findOwnAgreement(req, res, req.params.id);
+    if (!access.resolveMembership(req, res)) return;
+    const found = access.findOwnAgreement(req, res, req.params.id);
     if (!found) return;
     if (found.summaryOnly) return res.status(403).json({ error: 'AGENT_ACTION_NOT_PERMITTED', message: 'A summary row does not open a client\'s trials.' });
     const a = found;
@@ -409,9 +409,9 @@ export function registerIntegration(ctx) {
    * no parameter here that could start one.
    */
   orgRouter.post('/agent/clients/:id/opportunities/:oppId/share', (req, res) => {
-    if (!agent.resolveMembership(req, res)) return;
-    if (!agent.requireCap(req, res, 'clients.opportunities.share')) return;
-    const found = agent.findOwnAgreement(req, res, req.params.id);
+    if (!access.resolveMembership(req, res)) return;
+    if (!access.requireCap(req, res, 'clients.opportunities.share')) return;
+    const found = access.findOwnAgreement(req, res, req.params.id);
     if (!found) return;
     if (found.summaryOnly) return res.status(403).json({ error: 'AGENT_ACTION_NOT_PERMITTED', message: 'A summary row does not permit sharing.' });
     const a = found;
@@ -492,9 +492,9 @@ export function registerIntegration(ctx) {
 
   /** Withdraw a share. The record stays, marked — it happened. */
   orgRouter.post('/agent/clients/:id/opportunities/shares/:shareId/withdraw', (req, res) => {
-    if (!agent.resolveMembership(req, res)) return;
-    if (!agent.requireCap(req, res, 'clients.opportunities.share')) return;
-    const found = agent.findOwnAgreement(req, res, req.params.id);
+    if (!access.resolveMembership(req, res)) return;
+    if (!access.requireCap(req, res, 'clients.opportunities.share')) return;
+    const found = access.findOwnAgreement(req, res, req.params.id);
     if (!found || found.summaryOnly) { if (found?.summaryOnly) res.status(403).json({ error: 'AGENT_ACTION_NOT_PERMITTED' }); return; }
     const a = found;
     const share = a.opportunityShares.find((s) => s.id === req.params.shareId);
@@ -514,8 +514,8 @@ export function registerIntegration(ctx) {
 
   /** The agent's own list for one client. */
   orgRouter.get('/agent/clients/:id/opportunities/shares', (req, res) => {
-    if (!agent.resolveMembership(req, res)) return;
-    const found = agent.findOwnAgreement(req, res, req.params.id);
+    if (!access.resolveMembership(req, res)) return;
+    const found = access.findOwnAgreement(req, res, req.params.id);
     if (!found) return;
     if (found.summaryOnly) return res.status(403).json({ error: 'AGENT_ACTION_NOT_PERMITTED' });
     // The same gate the other two client-scoped reads use. A share list is a list of
@@ -743,8 +743,8 @@ export function registerIntegration(ctx) {
    * from, and nothing about the club's recruitment thinking.
    */
   orgRouter.get('/agent/handoffs', (req, res) => {
-    if (!agent.resolveMembership(req, res)) return;
-    if (!agent.requireCap(req, res, 'transactions.read')) return;
+    if (!access.resolveMembership(req, res)) return;
+    if (!access.requireCap(req, res, 'transactions.read')) return;
     const items = [];
     for (const kase of recruitmentReads.cases.forHandoffAgent(req.orgUser.id)) {
       const h = kase?.transactionHandoff;

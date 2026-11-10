@@ -72,10 +72,10 @@ order, or from a domain reading another's context where a repository read or a p
 
 | Late binding in `server.mjs`                                  | Direction it really runs                                                                                                                                                       | Fix                                                                                                                                                                                                |
 |---------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `Object.assign(m24Ctx.hooks, m25Ctx.hooks)`                   | Core → compliance (review items for facets and disputes, the Approach verdict). Compliance, transactions and integration use the core only for `requireCap`, `resolveMembership`, `profileOf` and `findOwnAgreement`. | Move those four into an agent-access module over the `agentCore` repository. Register compliance before the core routes and pass its functions in as named arguments.                                  |
+| `Object.assign(m24Ctx.hooks, m25Ctx.hooks)`                   | Core → compliance (review items for facets and disputes, the Approach verdict). Compliance, transactions and integration use the core only for `requireCap`, `resolveMembership`, `profileOf` and `findOwnAgreement`. | **Done (10 Nov):** `domains/agents/access.mjs`; compliance registers before the core and hands it `coreReviews`. |
 | `agentIntegration` holder, filled after `registerIntegration` | Lifecycle → integration (`contactRoute`, `contactTargetSnapshot`); transactions → integration (`caseBelongsTo`, `duplicateTransactionOf`, `bindHandoff`). Integration reads transactions only through `agentTransactions.reads`, and the lifecycle only through pure imports. | Register integration before the lifecycle and transactions, and pass it in as a value. The holder goes away.                                                                                    |
 | `m28Ctx.setSigningSummary(m29Ctx.summaryForOffer)`            | Offers → signings (the summary on an offer view). Signings reads offers only through `recruitmentReads.offers` and pure imports from `offer.mjs`.                               | Register signings before offers and pass `summaryForOffer` to `registerOffers`.                                                                                                                    |
-| `m24Ctx.hooks.auditRows` wrapped to append transaction rows   | Neither: an agency's audit feed merges three repositories' rows.                                                                                                                | One read function over the core, compliance and transaction repositories, given to the core routes.                                                                                               |
+| `m24Ctx.hooks.auditRows` wrapped to append transaction rows   | Neither: an agency's audit feed merges three repositories' rows.                                                                                                                | **Done (10 Nov):** the core takes `auditSources` (compliance's and transactions' row functions). Transaction rows need the transaction module's compliance snapshot view, so transactions now register before the core. |
 | `m25Ctx.transactionSeam.hooks.representationReviewed`         | **Two-way.** Transactions call compliance throughout (open, project, evaluate, consent, review). A T&S decision on a declared-only binding must verify or withdraw the transaction's representation, and that then re-evaluates compliance. | Compliance publishes "review decided" inside the unit of work, and transactions subscribes at wiring. This is the one place for an event. It must stay synchronous and in the same unit, so a decision and its effect on the transaction commit together. |
 
 Smaller late bindings, fixed as their routes move: `m17Ctx.recruitmentEvidence` (create the provider before
@@ -83,8 +83,8 @@ Smaller late bindings, fixed as their routes move: `m17Ctx.recruitmentEvidence` 
 (`m23Ctx` trial hooks, `m13Ctx.mfaGuards`, `m14Ctx.syncLegacyOrgVerification`, `m182Ctx`). Erasure's
 `onPlayerDeleted` fan-out becomes an explicit list of each domain's `redactPlayer`.
 
-Target order: platform and repositories → agent access → compliance → agent core routes → integration →
-transactions and the lifecycle → signings → offers → journeys. The `...m19Ctx` spreads become named arguments
+Target order: platform and repositories → agent access → compliance → integration → transactions and the
+lifecycle → agent core routes → signings → offers → journeys. The `...m19Ctx` spreads become named arguments
 along the way.
 
 ### 3. Helpers rewritten in each module
@@ -146,13 +146,17 @@ The rules are likely well under half of the production lines.
    `insightCoverage`, `signingsFollowUps`, `enterprise`, …) move to "reads back as written" in one pass, with no
    route changes. `offerIntegrity` (`offer.mjs`) still checks shapes the schema now rules out; trim it once the
    batteries that test it on in-memory records have been looked at.
-3. **Wiring (item 2)** after the pilot, since row-level repositories change what each domain needs. Slices, each
-   checked against its batteries: (a) ~~the guardian account and its gates leave `server.mjs`~~ (done 10 Nov:
-   `domains/identity/guardians.mjs`; the guardians repository has no draft update, and `users.remove` ends a
-   membership once; the child-management routes still mount on its router and move in (f)); (b) agent access, then compliance before the core, which retires the core hooks
-   and the audit wrapper; (c) integration before the lifecycle and transactions, which retires the holder; (d)
-   signings before offers; (e) the review-decided event; (f) the remaining `server.mjs` routes, converting their
-   draft edits as they move.
+3. **Wiring (item 2)**, in slices, each checked against its batteries:
+   - (a) ~~The guardian account and its gates leave `server.mjs`.~~ Done 10 Nov: `domains/identity/guardians.mjs`.
+     The guardians repository has no draft update, and `users.remove` ends a membership once. The
+     child-management routes still mount on its router and move in (f).
+   - (b) ~~Agent access, then compliance before the core.~~ Done 10 Nov. `m24Ctx`–`m26Ctx` are now
+     `agentCoreDomain`, `complianceDomain` and `transactionsDomain`.
+   - (c) Integration before the lifecycle and transactions, which retires the holder.
+   - (d) Signings before offers.
+   - (e) The review-decided event.
+   - (f) The remaining `server.mjs` routes, converting their draft edits as they move.
+
    **Names.** Each slice also renames what it touches after its domain: the milestone contexts (`m13Ctx` …
    `m29Ctx`, `m162Ctx`, `m182Ctx`) and registration functions (`registerM12` … `registerM23`) become, for
    example, `rooms` and `registerRooms`, and the milestone directories fold into `domains/` (item 6). By the end of

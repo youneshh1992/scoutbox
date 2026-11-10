@@ -69,7 +69,7 @@ const ID_MAX = AGENT_TRANSACTION_LIMITS.id;
 export function registerTransactions(rawCtx) {
   const {
     byId, orgRouter, playerRouter, tsRouter, nextId, notify, broadcast,
-    findPlayer, isBlocked, isAdult, orgCanSee, rateLimit, agent, compliance,
+    findPlayer, isBlocked, isAdult, orgCanSee, rateLimit, access, compliance,
     // The cross-app integration seam. A HOLDER filled in after this module
     // registers: it carries the recruitment-case handoff binding. Absent (a
     // suite booting transactions alone), a transaction may not cite a
@@ -461,8 +461,8 @@ export function registerTransactions(rawCtx) {
 
   /** Steps 1–6 for the AGENT lane. Conceals every transaction that is not this agent's own. */
   function ownTransaction(req, res, id, { write = false } = {}) {
-    if (!agent.resolveMembership(req, res)) return null;
-    if (!agent.requireCap(req, res, write ? 'transactions.write' : 'transactions.read')) return null;
+    if (!access.resolveMembership(req, res)) return null;
+    if (!access.requireCap(req, res, write ? 'transactions.write' : 'transactions.read')) return null;
     const tx = txById(id);
     // Same-agency privacy: a colleague's transaction is 404, not 403, so the
     // existence of a colleague's client work is not disclosed.
@@ -572,8 +572,8 @@ export function registerTransactions(rawCtx) {
   // ============================================================ AGENT lane
 
   orgRouter.get('/agent/transactions', (req, res) => {
-    if (!agent.resolveMembership(req, res)) return;
-    if (!agent.requireCap(req, res, 'transactions.read')) return;
+    if (!access.resolveMembership(req, res)) return;
+    if (!access.requireCap(req, res, 'transactions.read')) return;
     const status = statusFilterOr400(req, res); if (status === undefined) return;
     let pageReq; try { pageReq = readPage(req.query, ['number']); } catch (e) { return sendPageError(res, e); }
     // Personal to the agent: a colleague's transactions are not listed and
@@ -603,8 +603,8 @@ export function registerTransactions(rawCtx) {
    * compliance projection says PARTIES_NOT_CONFIRMED.
    */
   orgRouter.post('/agent/transactions', (req, res) => {
-    if (!agent.resolveMembership(req, res)) return;
-    if (!agent.requireCap(req, res, 'transactions.write')) return;
+    if (!access.resolveMembership(req, res)) return;
+    if (!access.requireCap(req, res, 'transactions.write')) return;
     const b = req.body ?? {};
     const key = clientKeyOr400(req, res); if (key === undefined) return;
     if (typeof b.type !== 'string' || !TRANSACTION_TYPES.includes(b.type)) return sendTransactionError(res, { error: 'TRANSACTION_INPUT_INVALID', field: 'type', allowed: TRANSACTION_TYPES }, 'create');
@@ -1508,7 +1508,7 @@ export function registerTransactions(rawCtx) {
 
   return {
     onPlayerDeleted, representationReviewed,
-    hooks: { auditRows: (org) => auditRows({ agencyOrgId: org.id }) },
+    agencyAuditRows: (org) => auditRows({ agencyOrgId: org.id }),
     transactionAuditRows: auditRows,
     offerReadinessFor,
   };

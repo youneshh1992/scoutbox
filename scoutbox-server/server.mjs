@@ -38,6 +38,7 @@ import { removeUploadChunks } from './domains/media/uploads.mjs';
 import { registerAnalytics } from './m20/index.mjs';
 import { registerDevelopment } from './domains/development/hub/index.mjs';
 import { registerM23 } from './domains/recruitment/lifecycle/index.mjs';
+import { createAgentAccess } from './domains/agents/access.mjs';
 import { registerAgent } from './domains/agents/core/index.mjs';
 import { registerCompliance } from './domains/agents/compliance/index.mjs';
 import { registerTransactions } from './domains/agents/transactions/index.mjs';
@@ -757,7 +758,7 @@ function pushDeferred(audience, now = new Date()) {
 // direction for the few notifications seeding may create at boot.
 let notificationAllows = () => true;
 let m182Ctx = null; // assigned when the preference and audit modules register, below
-let m24Ctx = null; // assigned when the Agent module registers, below
+let agentCoreDomain = null; // assigned when the Agent core registers, below
 const notificationsSuppressed = { count: 0 };
 
 /**
@@ -4014,12 +4015,12 @@ function deletePlayerData(playerId) {
   uploadIds = operations.uploads.removeForPlayer(playerId); // the player's upload sessions go, in this unit (their chunk files after COMMIT)
   // Agent relationships become id-only tombstones (no name is
   // stored on them; the dispute text and any player-authored history names go).
-  m24Ctx?.onPlayerDeleted?.(playerId, at);
+  agentCoreDomain?.onPlayerDeleted?.(playerId, at);
   // Compliance contexts and consents keep only the id.
-  m25Ctx?.onPlayerDeleted?.(playerId, at);
+  complianceDomain?.onPlayerDeleted?.(playerId, at);
   // A transaction keeps its ids, roles, states and times and loses
   // the person; every representation naming the subject is withdrawn.
-  m26Ctx?.onPlayerDeleted?.(playerId, at);
+  transactionsDomain?.onPlayerDeleted?.(playerId, at);
   // Offers keep ids, states and times and lose the person's name and words.
   m28Ctx?.onPlayerDeleted?.(playerId, at);
   m29Ctx?.onPlayerDeleted?.(playerId, at);
@@ -4137,16 +4138,16 @@ app.use('/admin', (req, res, next) => {
 // The attributed Trust & Safety lane. Every route here resolves
 // a specific authenticated reviewer (never the shared key) before it runs;
 // the middleware is installed by registerCompliance() below.
-let m25Ctx = null;
+let complianceDomain = null;
 // The Agent Transaction Workspace, declared here because the
 // account-deletion sweep above runs before its registration below.
-let m26Ctx = null;
+let transactionsDomain = null;
 // The cross-app integration layer, registered after all four.
 let m27Ctx = null;
 let m28Ctx = null; // assigned when the Offer module registers, below
 let m29Ctx = null; // assigned when the Signing module registers, below
 const tsRouter = express.Router();
-app.use('/ts', (req, res, next) => (m25Ctx ? m25Ctx.reviewerAuth(req, res, next) : res.status(503).json({ error: 'REVIEWER_LANE_NOT_READY' })), tsRouter);
+app.use('/ts', (req, res, next) => (complianceDomain ? complianceDomain.reviewerAuth(req, res, next) : res.status(503).json({ error: 'REVIEWER_LANE_NOT_READY' })), tsRouter);
 
 // The data-layer report with row-level detail: ids of rows the target schema
 // refused and why, and the last projection error. Public /capabilities carries
@@ -4665,65 +4666,58 @@ const m23Ctx = registerM23({
   guardianManagedOnly,
 });
 
-// ------------------------------------------------------ ScoutBox Agent core
-// The Agent app's server domain: agent profiles, agency affiliations
-// and client-confirmed representation relationships. It reads the canonical
-// player, org, block and opportunity records through their own gates and
-// writes nothing into them. No conflict adjudication, no transactions, no
-// fee enforcement and no Trust & Safety mutation live here.
-// The verification provider is created ONCE, here, and handed to both the
-// Agent core (facet submissions) and the Compliance Engine (rechecks): one
-// provider, one honest status, no second path to a VERIFIED facet.
+// ------------------------------------------------------ Agent workspace
+// Agency membership, role capabilities, the agent's profile and the concealing agreement lookup: every agent
+// domain below checks through these.
+const agentAccess = createAgentAccess({ agentCore, unit, nextId, broadcast });
+// One verification provider for the agent core (facet submissions) and compliance (rechecks), so there is one
+// path to a VERIFIED facet.
 const verificationProvider = createVerificationProvider({ synthetic: process.env.AGENT_VERIFICATION_TEST_PROVIDER === '1' });
-m24Ctx = registerAgent({
-  ...m19Ctx,
-  isAdult,
-  verificationProvider,
-  agentCore, unit,
-});
 
 // --------------------------------------------- Conflict & Compliance Engine
-// The regulated compliance layer: per-reviewer Trust & Safety identity,
-// the versioned jurisdiction policy engine, the pure Conflict Engine, the
-// consent ledger, attributed manual review and the minors gate. It reads the
-// Agent core's records and re-authorises every regulated mutation at mutation
-// time. No Transaction Room, no Offer, no signing, no negotiation lives here.
-m25Ctx = registerCompliance({
+// Per-reviewer Trust & Safety identity, the versioned jurisdiction policies, the Conflict Engine, the consent
+// ledger, attributed manual review and the minors gate. It re-authorises every regulated mutation when it happens.
+complianceDomain = registerCompliance({
   ...m19Ctx,
   isAdult, tsRouter, verificationProvider,
   hashPassword, verifyPassword, createSession, sessionFor, sessions, devLogins: DEV_LOGINS,
-  agent: m24Ctx,
+  access: agentAccess,
   agentCore, unit,
   compliancePolicies,
   complianceRecords,
 });
-// The Agent core's hooks into the compliance lane (review items for
-// manual-review facets and disputes; the policy layer's verdict on an Approach).
-Object.assign(m24Ctx.hooks, m25Ctx.hooks);
 
 // ------------------------------------------------ Agent Transaction Workspace
-// The canonical multi-party workspace: Player ↔ Agent ↔ Engaging Club ↔
-// Releasing Club. Operational infrastructure, not a legal actor. It owns the
-// transaction, its party model, its state machine, its document classification
-// and its audience-filtered timeline; it owns NO rule, NO policy and NO consent
-// row — the compliance verdict comes from the compliance engine through one narrow seam and is
-// re-derived at every material mutation. No Offer, no signing, no negotiation.
-m26Ctx = registerTransactions({
+// The multi-party workspace (player, agent, engaging and releasing club): the transaction, its parties, its state
+// machine, its documents and its timeline. The compliance verdict comes from the compliance engine's
+// transaction seam and is re-derived at every material change.
+transactionsDomain = registerTransactions({
   ...m19Ctx,
   isAdult, tsRouter,
-  agent: m24Ctx,
-  compliance: m25Ctx.transactionSeam,
-  // The same integration holder the recruitment side reads. Transactions are
-  // registered before the integration layer too, so the handoff binding and
-  // the duplicate rule arrive by reference.
+  access: agentAccess,
+  compliance: complianceDomain.transactionSeam,
+  // Transactions register before the integration layer, so the handoff binding and the duplicate rule arrive
+  // through the holder.
   integration: agentIntegration,
   agentTransactions, unit,
   channels, // a linked thread's own authorisation
 });
-// An attributed review of a declared-only binding lands on the transaction's own
-// representation row, which is its truth — not only on the compliance context's
-// evaluation projection.
-m25Ctx.transactionSeam.hooks.representationReviewed = m26Ctx.representationReviewed;
+// An attributed review of a declared-only binding lands on the transaction's own representation row.
+complianceDomain.transactionSeam.hooks.representationReviewed = transactionsDomain.representationReviewed;
+
+// ------------------------------------------------------ Agent core
+// Agent profiles, agency affiliations and client-confirmed representation relationships. It asks compliance for
+// review items and the verdict on an Approach, and an agency's audit feed carries the compliance and transaction
+// rows beside its own.
+agentCoreDomain = registerAgent({
+  ...m19Ctx,
+  isAdult,
+  verificationProvider,
+  agentCore, unit,
+  access: agentAccess,
+  compliance: complianceDomain.coreReviews,
+  auditSources: [complianceDomain.complianceAuditRows, transactionsDomain.agencyAuditRows],
+});
 // ------------------------------------------------ Agent cross-app integration
 // The ONE layer that answers "may this agent see or do this, on this surface,
 // for this client, right now?" — for Contact routing, Trial projection, the club
@@ -4740,8 +4734,8 @@ m27Ctx = registerIntegration({
   // than re-derived — the handoff must be as invisible to a foreign club as the
   // case itself is.
   findRoomForRequest: m17Ctx.findRoomForRequest,
-  agent: m24Ctx,
-  compliance: m25Ctx.integrationSeam,
+  access: agentAccess,
+  compliance: complianceDomain.integrationSeam,
   recruitmentCases, // the transaction handoff is an explicit write of its case
   agentCore, unit, // an opportunity share is an explicit write of its agreement
   transactionReads: agentTransactions.reads, // the live transaction covering a case
@@ -4770,9 +4764,9 @@ m28Ctx = registerOffers({
   findRoomForRequest: m17Ctx.findRoomForRequest,
   applyLifecycleTransition: m17Ctx.applyLifecycleTransition,
   recruitmentEvidenceProvider: recruitmentEvidence,
-  agent: m24Ctx,
+  access: agentAccess,
   integration: agentIntegration,
-  transactions: m26Ctx,
+  transactions: transactionsDomain,
 });
 
 // ----------------------------------------------- Signing & Contract Completion
@@ -4796,7 +4790,7 @@ m29Ctx = registerSigning({
   applyLifecycleTransition: m17Ctx.applyLifecycleTransition,
   recruitmentCases, // the case's signing link and history are written in the completion unit
   recruitmentEvidenceProvider: recruitmentEvidence,
-  agent: m24Ctx,
+  access: agentAccess,
   integration: agentIntegration,
   evidence: { storeFile: m14Ctx.storeEvidenceFile, add: m14Ctx.addEvidence },
   faults: faultLayer,
@@ -4811,14 +4805,9 @@ m28Ctx.setSigningSummary?.(m29Ctx.summaryForOffer);
 const journeyCtx = registerJourneyRoutes({
   ...m19Ctx,
   recruitmentEvidenceProvider: recruitmentEvidence,
-  agent: m24Ctx,
+  access: agentAccess,
   integration: agentIntegration,
 });
-
-// The transaction domain's rows join the agency audit feed beside the Agent
-// core's and the compliance engine's rows, so an agency has ONE audit rather than three.
-const m25AuditRows = m24Ctx.hooks.auditRows;
-m24Ctx.hooks.auditRows = (org) => [...(m25AuditRows?.(org) ?? []), ...m26Ctx.hooks.auditRows(org)].sort((a, b) => (b.at - a.at) || String(b.id).localeCompare(String(a.id)));
 
 // -------------------------------------------------------- operator surface
 // What this deployment can and cannot actually do. ScoutBox is careful to be

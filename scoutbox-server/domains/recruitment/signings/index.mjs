@@ -62,7 +62,7 @@ export function registerSigning(rawCtx) {
   const {
     orgRouter, playerRouter, guardianRouter, adminRouter, nextId, notify, broadcast, findPlayer, isBlocked,
     rateLimit, isLead, auditEntry, orgCanSee, storage, ledgerAppend, billing = null, refreshJourneyBadges = null, isAdult = null,
-    agent = null, integration = null, evidence = null, faults = null,
+    access = null, integration = null, evidence = null, faults = null,
     // `afterCommit` defers a side effect until COMMIT returned.
     players, unit, afterCommit,
     signingsFollowUps,
@@ -831,8 +831,8 @@ export function registerSigning(rawCtx) {
   // ================================================================== AGENT (read-only, re-authorised)
 
   orgRouter.get('/agent/clients/:id/signings', (req, res) => {
-    if (!agent?.resolveMembership?.(req, res)) return;
-    const found = agent.findOwnAgreement(req, res, req.params.id);
+    if (!access?.resolveMembership?.(req, res)) return;
+    const found = access.findOwnAgreement(req, res, req.params.id);
     if (!found) return;
     if (found.summaryOnly) return res.status(403).json({ error: 'AGENT_ACTION_NOT_PERMITTED', message: 'A summary row does not open a client\'s signings.' });
     const a = found; const at = now(req);

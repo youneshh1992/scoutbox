@@ -15,6 +15,7 @@ import {
   typeAgentProfile, typeAgencyAffiliation, typeRepresentationAgreement, typeAgencySettings,
 } from '../repositories/agentCore.mjs';
 import { newFacets } from '../domains/agents/core/shared.mjs';
+import { createAgentAccess } from '../domains/agents/access.mjs';
 
 let passed = 0;
 const only = process.env.TEST_ONLY || '';
@@ -159,6 +160,45 @@ test('[affiliations] a membership is active in its window; roles change through 
     refused(() => A.end('aff-1', { at: NOW + 2 * DAY, reason: 'left' }), /STATE_CONFLICT.*already ended/, 'an ended membership does not end again');
     refused(() => A.setTiers('aff-1', { tiers: ['licensed_agent'] }), /STATE_CONFLICT.*has ended/, 'or change');
     refused(() => A.create(affiliation({ id: 'aff-2', userId: 'usr-none', history: [] })), /FOREIGN KEY/, 'a member who is not staff');
+  } finally { s.close(); rm(dir); }
+});
+
+test('[access] membership bootstraps the first member as administrator and refuses later strangers; capabilities come from the tiers; a foreign or unshared agreement is concealed', () => {
+  const dir = tempDir('s11a-access'); saveFixture(dir);
+  const s = serverOpen(dir);
+  const events = [];
+  const access = createAgentAccess({ agentCore: s.repo, unit: s.unit, nextId, broadcast: (type, data) => events.push([type, data]), now: () => NOW });
+  const res = () => ({ status(code) { this.code = code; return this; }, json(body) { this.body = body; return this; } });
+  const agency = { id: ORG.id, type: 'agency' };
+  try {
+    let r = res();
+    assert.equal(access.resolveMembership({ org: { ...agency, type: 'club' }, orgUser: { id: UID, name: SCOUT.name } }, r), null);
+    assert.deepEqual([r.code, r.body.error], [403, 'AGENT_ACTION_NOT_PERMITTED'], 'the workspace is for agencies');
+
+    const first = { org: agency, orgUser: { id: UID, name: SCOUT.name } };
+    const aff = access.resolveMembership(first, res());
+    assert.deepEqual([aff.tiers, first.tiers, aff.history[0].detail], [['agency_admin'], ['agency_admin'], { tiers: ['agency_admin'], bootstrap: true }], 'the first member is the administrator');
+    assert.deepEqual(events, [['agency_affiliation_created', { orgId: ORG.id, userId: UID }]]);
+    assert.equal(access.resolveMembership({ org: agency, orgUser: { id: UID, name: SCOUT.name } }, res()).id, aff.id, 'a second call finds the same membership');
+
+    r = res();
+    assert.equal(access.resolveMembership({ org: agency, orgUser: { id: 'usr-stranger', name: 'Stranger' } }, r), null);
+    assert.deepEqual([r.code, r.body.error], [403, 'AGENCY_MEMBERSHIP_REQUIRED'], 'once an agency has members, a stranger is not bootstrapped');
+
+    assert.equal(access.requireCap(first, res(), 'agency.audit.read'), true);
+    r = res();
+    assert.equal(access.requireCap(first, r, 'clients.read.own'), false);
+    assert.equal(r.code, 403);
+
+    s.repo.agreements.create(agreement());
+    r = res();
+    assert.equal(access.findOwnAgreement(first, r, 'rep-1'), null, 'an administrator without clients.read.own does not see an unshared agreement');
+    assert.deepEqual([r.code, r.body.error], [404, 'REPRESENTATION_NOT_FOUND']);
+    assert.equal(access.findOwnAgreement({ ...first, tiers: ['licensed_agent'] }, res(), 'rep-1').id, 'rep-1', 'the agent sees their own');
+    r = res();
+    assert.equal(access.findOwnAgreement({ ...first, org: { id: 'org-other', type: 'agency' }, tiers: ['licensed_agent'] }, r, 'rep-1'), null, 'another agency\'s agreement is concealed');
+    assert.equal(r.code, 404);
+    assert.equal(access.profileOf(UID), null);
   } finally { s.close(); rm(dir); }
 });
 

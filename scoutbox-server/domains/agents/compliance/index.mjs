@@ -54,7 +54,7 @@ export function registerCompliance(rawCtx) {
   const {
     byId, app, orgRouter, playerRouter, adminRouter, tsRouter, nextId, notify, broadcast,
     findPlayer, isBlocked, isAdult, orgCanSee, moderateOrRefuse, rateLimit,
-    hashPassword, verifyPassword, createSession, sessionFor, sessions, devLogins, agent, verificationProvider, agentCore, unit,
+    hashPassword, verifyPassword, createSession, sessionFor, sessions, devLogins, access, verificationProvider, agentCore, unit,
     compliancePolicies, complianceRecords,
   } = rawCtx;
 
@@ -282,7 +282,7 @@ export function registerCompliance(rawCtx) {
     res.json({ policy: policyPublic(out) });
   });
   orgRouter.get('/agent/compliance/policies', (req, res) => {
-    if (!agent.resolveMembership(req, res)) return;
+    if (!access.resolveMembership(req, res)) return;
     const mas = [...new Set(['INT', ...agencyJurisdictions(req.org.id), ...((profileOf(req.orgUser.id)?.declared?.jurisdictions) ?? [])])];
     const set = policySetFor(mas);
     res.json({ inEffect: set.policies.map(policyPublic), missing: set.missing, ruleStatuses: RULE_STATUSES, honest: 'These are ScoutBox\'s encoded platform rules with their operative status as recorded on the retrieval date. They are not legal advice and a status can change without a deploy.' });
@@ -334,17 +334,17 @@ export function registerCompliance(rawCtx) {
     return out;
   }
 
-  /** Hook for the agent core: a facet submission that ended MANUAL_REVIEW_REQUIRED becomes a review item. Idempotent per facet. */
+  /** For the agent core: a facet submission that ended MANUAL_REVIEW_REQUIRED becomes a review item. Idempotent per facet. */
   function facetNeedsReview(profile, { facet, memberAssociation }, by) {
     if (reviews.openForFacet(profile.id, facet, memberAssociation ?? null)) return null;
     return createReview({ kind: 'verification_facet', agencyOrgId: profile.agencyOrgId, agentUserId: profile.userId, subject: { profileId: profile.id, userId: profile.userId, facet, memberAssociation: memberAssociation ?? null }, reasons: [{ code: 'NO_PROVIDER', ruleId: null, ruleStatus: null, policyVersion: null }], policyVersions: policySetFor([memberAssociation].filter(Boolean)).policies.map((p) => p.id), requestedBy: by });
   }
-  /** Hook for the agent core: a client's dispute becomes a review item. */
+  /** For the agent core: a client's dispute becomes a review item. */
   function representationDisputed(a, by) {
     if (reviews.openForAgreement(a.id)) return null;
     return createReview({ kind: 'representation_dispute', agencyOrgId: a.agencyOrgId, agentUserId: a.agentUserId, subject: { agreementId: a.id }, reasons: [{ code: 'CLIENT_DISPUTE', ruleId: null, ruleStatus: null, policyVersion: null }], policyVersions: policySetFor([a.jurisdiction].filter(Boolean)).policies.map((p) => p.id), requestedBy: by });
   }
-  /** Hook for the agent core's request route: the policy layer's verdict on an Approach (exclusivity window, USA domestic authorisation …). */
+  /** For the agent core's request route: the policy layer's verdict on an Approach (exclusivity window, USA domestic authorisation …). */
   function authorizeApproach({ profile, jurisdiction, player, agentUserId }) {
     const set = policySetFor([jurisdiction]);
     const others = agentReads.agreements.forClient(player.id).filter((a) => a.agentUserId !== agentUserId && a.exclusive && effectiveAgreementStatus(a, now()) === 'active' && a.confirmedAt).map((a) => ({ endAt: a.endAt ?? null }));
@@ -354,8 +354,8 @@ export function registerCompliance(rawCtx) {
 
   /** Re-check a facet against the provider: STALE needs a recheck or attributed review. */
   orgRouter.post('/agent/compliance/facets/:facet/recheck', (req, res) => {
-    if (!agent.resolveMembership(req, res)) return;
-    if (!agent.requireCap(req, res, 'verification.submit')) return;
+    if (!access.resolveMembership(req, res)) return;
+    if (!access.requireCap(req, res, 'verification.submit')) return;
     if (limitedOr429(res, 'agent_profile_write', req.orgUser.id)) return;
     const facet = req.params.facet;
     if (!POLICY_FACETS.includes(facet)) return sendComplianceError(res, { error: 'COMPLIANCE_INPUT_INVALID', field: 'facet', allowed: POLICY_FACETS }, 'recheck');
@@ -400,8 +400,8 @@ export function registerCompliance(rawCtx) {
     };
   };
   orgRouter.get('/agent/compliance/overview', (req, res) => {
-    if (!agent.resolveMembership(req, res)) return;
-    if (!agent.requireCap(req, res, 'compliance.read')) return;
+    if (!access.resolveMembership(req, res)) return;
+    if (!access.requireCap(req, res, 'compliance.read')) return;
     const p = profileOf(req.orgUser.id);
     const facets = p ? facetStatesOf(p) : null;
     const freshness = [];
@@ -529,8 +529,8 @@ export function registerCompliance(rawCtx) {
 
   /** Steps 1–6 for an agent acting on a context of their own. Conceals foreign contexts. */
   function ownContext(req, res, id, { write = false } = {}) {
-    if (!agent.resolveMembership(req, res)) return null;
-    if (!agent.requireCap(req, res, write ? 'compliance.contexts.write' : 'compliance.read')) return null;
+    if (!access.resolveMembership(req, res)) return null;
+    if (!access.requireCap(req, res, write ? 'compliance.contexts.write' : 'compliance.read')) return null;
     const c = contextById(id);
     if (!c || c.agencyOrgId !== req.org.id || c.agentUserId !== req.orgUser.id) { sendComplianceError(res, { error: 'CONTEXT_NOT_FOUND' }, 'context'); return null; }
     return c;
@@ -561,13 +561,13 @@ export function registerCompliance(rawCtx) {
   }
 
   orgRouter.get('/agent/compliance/contexts', (req, res) => {
-    if (!agent.resolveMembership(req, res)) return;
-    if (!agent.requireCap(req, res, 'compliance.read')) return;
+    if (!access.resolveMembership(req, res)) return;
+    if (!access.requireCap(req, res, 'compliance.read')) return;
     res.json({ items: contexts.forAgent(req.org.id, req.orgUser.id).map(contextForAgent), types: CONTEXT_TYPES, partyRoles: PARTY_ROLES });
   });
   orgRouter.post('/agent/compliance/contexts', (req, res) => {
-    if (!agent.resolveMembership(req, res)) return;
-    if (!agent.requireCap(req, res, 'compliance.contexts.write')) return;
+    if (!access.resolveMembership(req, res)) return;
+    if (!access.requireCap(req, res, 'compliance.contexts.write')) return;
     const b = req.body ?? {};
     const key = clientKeyOr400(req, res); if (key === undefined) return;
     const type = String(b.type ?? '');
@@ -1076,7 +1076,7 @@ export function registerCompliance(rawCtx) {
     res.json({ ...page, readOnly: true, note: 'Read-only. Starting, resolving, cancelling or superseding a review requires an authenticated reviewer session (/ts). The shared key can adjudicate nothing.' });
   });
 
-  /** Hook for the agent core's request route: an Approach whose deciding rule is uncertain records an attributed review item. */
+  /** For the agent core's request route: an Approach whose deciding rule is uncertain records an attributed review item. */
   function createApproachReview({ req, decision, playerId, jurisdiction }) {
     return createReview({ kind: 'conflict_evaluation', agencyOrgId: req.org.id, agentUserId: req.orgUser.id, subject: { approach: true, playerId, jurisdiction }, reasons: decision.reasons.filter((r) => r.code !== 'FACET_VERIFIED'), policyVersions: decision.policyVersions, snapshot: { outcome: 'MANUAL_REGULATORY_REVIEW_REQUIRED', evaluatedAt: now() }, requestedBy: byOrg(req) });
   }
@@ -1202,7 +1202,9 @@ export function registerCompliance(rawCtx) {
   };
 
   return {
-    reviewerAuth, provider, onPlayerDeleted, hooks: { facetNeedsReview, representationDisputed, authorizeApproach, createApproachReview, auditRows: (org) => complianceAuditRows(complianceRecords.reads, org) },
+    reviewerAuth, provider, onPlayerDeleted,
+    // What the agent core asks of compliance.
+    coreReviews: { facetNeedsReview, representationDisputed, authorizeApproach, createApproachReview },
     complianceAuditRows: (org) => complianceAuditRows(complianceRecords.reads, org),
     facetStatesOf, policySetFor, transactionSeam, integrationSeam,
   };

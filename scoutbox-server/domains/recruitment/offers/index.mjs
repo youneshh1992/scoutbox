@@ -54,7 +54,7 @@ export function registerOffers(rawCtx) {
   const {
     guardians, orgRouter, playerRouter, guardianRouter, nextId, notify, broadcast, findPlayer, isBlocked,
     rateLimit, isLead, moderateOrRefuse, auditEntry, orgCanSee, isAdult, storage,
-    agent = null, integration = null, transactions = null, faults = null,
+    access = null, integration = null, transactions = null, faults = null,
     // Every Offer write is an explicit repository operation (offers.create / update) inside `unit`.
     recruitmentContactsOffers, unit, afterCommit,
     recruitmentReads,
@@ -847,8 +847,8 @@ export function registerOffers(rawCtx) {
    * lapsed all see nothing, and nothing says an Offer exists.
    */
   orgRouter.get('/agent/clients/:id/offers', (req, res) => {
-    if (!agent?.resolveMembership?.(req, res)) return;
-    const found = agent.findOwnAgreement(req, res, req.params.id);
+    if (!access?.resolveMembership?.(req, res)) return;
+    const found = access.findOwnAgreement(req, res, req.params.id);
     if (!found) return;
     if (found.summaryOnly) return res.status(403).json({ error: 'AGENT_ACTION_NOT_PERMITTED', message: 'A summary row does not open a client\'s Offers.' });
     const a = found;
