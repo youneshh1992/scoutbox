@@ -661,7 +661,7 @@ section('O — partial failure: authoritative state first, side effects never tu
   const src = readFileSync(path.join(HERE, '..', '..', 'domains', 'recruitment', 'offers', 'index.mjs'), 'utf8');
   const unitIdx = [...src.matchAll(/\b(unit|inUnit)\((res, )?\(\) =>/g)].map((m) => m.index);
   const bareBroadcast = [...src.matchAll(/^\s*broadcast\?\.\(/gm)].length;
-  neg(bareBroadcast === 0 && /const safe = \(label, fn\)/.test(src) && unitIdx.length >= 6, 'O2 every broadcast/notification after a persisted write is wrapped in safe() — a throwing side effect is logged, not surfaced as a 500');
+  neg(bareBroadcast === 0 && /const safe = sideEffectRunner\(/.test(src) && unitIdx.length >= 6, 'O2 every broadcast/notification after a persisted write is wrapped in safe() — a throwing side effect is logged, not surfaced as a 500');
   // The case refusing the move is thrown INSIDE the unit, which rolls the Offer rows and the case back together.
   neg(/catch \(e\) \{ console\.error\(`OFFER lifecycle_writer_threw/.test(src) && /throw new OfferRefusal\(\{ error: 'OFFER_LIFECYCLE_CONFLICT'/.test(src) && /try \{ return \{ value: unit\(work\) \}; \} catch \(e\) \{\n\s+if \(!\(e instanceof OfferRefusal\)\) throw e;/.test(src), 'O3 a lifecycle writer that throws is caught and the Offer change rolled back — no half-written state');
   // A replay after a "lost response" returns the committed truth.

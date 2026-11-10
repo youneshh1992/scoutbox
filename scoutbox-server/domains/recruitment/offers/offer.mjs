@@ -37,6 +37,7 @@
  */
 
 import { parseInstant, parseStrictDateOnly, isExpiredAt, readInstant, isAbsent, DAY_MS } from '../../../temporal.mjs';
+import { normaliseClientKey as platformClientKey, payloadFingerprint, CLIENT_KEY_MAX } from '../../platform/idempotency.mjs';
 
 export const OFFER_POLICY_VERSION = 1;
 
@@ -97,7 +98,7 @@ export const OFFER_LIMITS = Object.freeze({
   documentLabel: 120,
   documents: 10,
   revisions: 20,
-  clientKey: 64,
+  clientKey: CLIENT_KEY_MAX,
   /** An issued Offer must expire at least one hour after issue and within 180 days. */
   minExpiryMs: 60 * 60 * 1000,
   maxExpiryMs: 180 * DAY_MS,
@@ -118,25 +119,9 @@ export const minorOfferPathwayOpen = (jurisdiction, policy = MINOR_OFFER_PATHWAY
 
 // ------------------------------------------------------------------ keys
 
-export function normaliseOfferClientKey(raw) {
-  if (raw === undefined || raw === null || raw === '') return { ok: true, key: null };
-  if (typeof raw !== 'string') return { ok: false, error: 'OFFER_CLIENT_KEY_INVALID', message: 'clientKey must be text.' };
-  const k = raw.trim();
-  if (!k || k.length > OFFER_LIMITS.clientKey) return { ok: false, error: 'OFFER_CLIENT_KEY_INVALID', message: 'clientKey must be 1–64 characters.' };
-  return { ok: true, key: k };
-}
+export const normaliseOfferClientKey = (raw) => platformClientKey(raw, 'OFFER_CLIENT_KEY_INVALID');
 
-/** A stable fingerprint of the parts of a request that make it "the same request". */
-// The fingerprint is a DEEP canonical serialisation: every level key-sorted and
-// complete, so a retry under the same key with DIFFERENT nested terms is not
-// mistaken for the same request. (JSON.stringify's key-list replacer would
-// filter nested objects too.)
-const canonical = (v) => {
-  if (Array.isArray(v)) return v.map(canonical);
-  if (v && typeof v === 'object') { const o = {}; for (const k of Object.keys(v).sort()) o[k] = canonical(v[k]); return o; }
-  return v === undefined ? null : v;
-};
-export const payloadFingerprint = (parts) => JSON.stringify(canonical(parts));
+export { payloadFingerprint };
 
 // ------------------------------------------------------------------ terms
 

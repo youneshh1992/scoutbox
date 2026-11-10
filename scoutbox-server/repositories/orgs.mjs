@@ -22,6 +22,7 @@
 import { PLANS } from '../catalogue.mjs';
 import { transaction, migrationApplied } from './database.mjs';
 import { pageOf } from '../domains/platform/paging.mjs';
+import { deepFreeze } from '../domains/platform/values.mjs';
 
 export const ORGS_TABLE_MIGRATION = '0004_orgs_live';
 /** `meta` key holding the initialisation state (`pending` | `done`). */
@@ -66,7 +67,6 @@ CREATE INDEX orgs_type_level ON orgs (type, level);
 `;
 
 // Local (not scoutingEvidence's): recruitment.mjs imports this module, and scoutingEvidence.mjs imports recruitment.mjs.
-const deepFreeze = (v) => { if (v !== null && typeof v === 'object' && !Object.isFrozen(v)) { Object.freeze(v); for (const k of Object.keys(v)) deepFreeze(v[k]); } return v; };
 const refusal = (code, message, extra = {}) => Object.assign(new Error(`${code}: ${message}`), { code, ...extra });
 const isPlainObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 const isClock = (v) => Number.isSafeInteger(v) && v >= 0;

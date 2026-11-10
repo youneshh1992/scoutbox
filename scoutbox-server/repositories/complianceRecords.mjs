@@ -39,7 +39,7 @@
 import { isPlainObject, describe } from './recruitment.mjs';
 import { transaction, migrationApplied } from './database.mjs';
 import { writeKit } from './writes.mjs';
-import { deepFreeze } from './scoutingEvidence.mjs';
+import { deepFreeze } from '../domains/platform/values.mjs';
 import { quote } from './fieldSpecs.mjs';
 import { REVIEWER_ROLES } from './compliancePolicies.mjs';
 import { FACETS, VERIFICATION_STATES, AGREEMENT_STATUSES } from '../domains/agents/core/shared.mjs';

@@ -22,9 +22,9 @@ import { AGENT_CORE_LIMITS as LIM, PROFILE_FIELDS } from '../../../repositories/
 import { buildRouteHelpers } from '../../platform/routeHelpers.mjs';
 import { opportunityBoardFor } from '../../scouting/journeys.mjs';
 import { guardRev, revMeta } from '../../platform/concurrency.mjs';
-import { rateLimitedBody } from '../../platform/rateLimit.mjs';
+import { refuseWhenLimited } from '../../platform/rateLimit.mjs';
 import { readPage, sendPageError, pageOf } from '../../platform/paging.mjs';
-import { normaliseClientKey, payloadFingerprint } from '../../recruitment/lifecycle/contact.mjs';
+import { normaliseClientKey, payloadFingerprint } from '../../platform/idempotency.mjs';
 import { sendAgentError } from './errors.mjs';
 import { agentAuditRows } from './audit.mjs';
 import { feedItem } from '../../../repositories/notifications.mjs';
@@ -37,6 +37,7 @@ import {
   DISCLOSURE_KEYS, normaliseDisclosure,
   clientTransitionAllowed, agentTransitionAllowed, agreementForAgent, agreementForClient, agreementSummaryForStaff,
 } from './shared.mjs';
+import { now } from '../../platform/clock.mjs';
 
 /**
  * `access` is the agent access checks (../access.mjs). `compliance` is the compliance engine's
@@ -59,7 +60,6 @@ export function registerAgent(rawCtx) {
   const { profiles, affiliations, agreements, settings } = agentCore;
 
   const testProviderEnabled = process.env.AGENT_VERIFICATION_TEST_PROVIDER === '1';
-  const now = () => Date.now();
   /** A history entry, for an act's bookkeeping or a whole record's history. */
   const entry = (action, by, detail = null) => ({ id: nextId('aud'), at: now(), action, by, detail });
   const hist = (record, action, by, detail = null) => {
@@ -98,10 +98,7 @@ export function registerAgent(rawCtx) {
   /** `?limit=&cursor=` for a list paged newest first by rowid; null after answering a junk page with 400. */
   const pageQuery = (req, res) => { try { return readPage(req.query, ['number']); } catch (e) { sendPageError(res, e); return null; } };
 
-  const limitedOr429 = (res, action, key) => {
-    if (rateLimit.limited(action, key)) { res.status(429).json(rateLimitedBody(action)); return true; }
-    return false;
-  };
+  const limitedOr429 = refuseWhenLimited(rateLimit);
 
   const clientKeyOr400 = (req, res) => {
     const k = normaliseClientKey(req.body?.clientKey);

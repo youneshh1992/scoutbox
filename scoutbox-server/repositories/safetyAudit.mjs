@@ -28,7 +28,7 @@
  */
 import { isPlainObject, describe, ids } from './recruitment.mjs';
 import { transaction, migrationApplied, childRowsOf } from './database.mjs';
-import { deepFreeze } from './scoutingEvidence.mjs';
+import { deepFreeze } from '../domains/platform/values.mjs';
 import { text, int, bool, oneOf, columnDdl, bad, typeSpec, typeScalar, encode, decode, flat, quote } from './fieldSpecs.mjs';
 import { pageOf } from '../domains/platform/paging.mjs';
 import { MODERATION_FLAGS, MODERATION_SEVERITIES } from '../domain.mjs';

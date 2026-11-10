@@ -654,6 +654,10 @@ section('R7 — decision memory, archive and reopen');
   const a1 = await j('POST', `/org/rooms/${ROOM}/decisions`, { recommendation: 'offer', reasonCodes: ['position_need'], clientKey: key }, maria.token);
   const a2 = await j('POST', `/org/rooms/${ROOM}/decisions`, { recommendation: 'offer', reasonCodes: ['position_need'], clientKey: key }, maria.token);
   neg(a2.body.idempotent === true && a2.body.decision.id === a1.body.decision.id, '[48] a repeated decision submit is idempotent, not a duplicate');
+  for (const bad of ['k'.repeat(65), 42]) {
+    const r = await j('POST', `/org/rooms/${ROOM}/decisions`, { recommendation: 'offer', reasonCodes: ['position_need'], clientKey: bad }, maria.token);
+    neg(r.status === 400 && r.body.error === 'ROOM_CLIENT_KEY_INVALID', `a ${typeof bad === 'number' ? 'numeric' : 'too-long'} client key is refused, not cut or coerced into another key`);
+  }
 
   const hist = await j('GET', `/org/rooms/${ROOM}/decisions`, undefined, maria.token);
   ok(hist.body.history.length >= 2, 'the decision history keeps every entry');

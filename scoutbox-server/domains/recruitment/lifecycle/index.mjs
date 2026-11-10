@@ -25,6 +25,7 @@ import { registerTrial } from './trialRoutes.mjs';
 import { registerDecision } from './decisionRoutes.mjs';
 import { roomRole } from '../rooms/shared.mjs';
 import { guardRev, revMeta } from '../../platform/concurrency.mjs';
+import { requestClock } from '../../platform/clock.mjs';
 import { buildRouteHelpers } from '../../platform/routeHelpers.mjs';
 
 export function registerLifecycle(rawCtx) {
@@ -55,10 +56,7 @@ export function registerLifecycle(rawCtx) {
 
   /** The composed evidence provider (evidence.mjs); without one, the null provider refuses every evidence-bearing move. */
   const evidenceProvider = () => ctx.recruitmentEvidenceProvider ?? NULL_EVIDENCE_PROVIDER;
-  // The same per-request test clock the Offer and signing routes
-  // honour (development only), so an expiry-derived stage reads the same here.
-  const TEST_CLOCK = process.env.SCOUTBOX_TEST_CLOCK === '1' && process.env.NODE_ENV !== 'production';
-  const nowOf = (req) => { if (TEST_CLOCK && req?.get) { const n = Number(req.get('x-scoutbox-test-clock')); if (Number.isFinite(n) && n > 0) return n; } return Date.now(); };
+  const nowOf = requestClock();
 
   // Domain errors answer through `sendDomainError` in errors.mjs — the ONE
   // mapping table, shared with the Contact, Trial and Decision routes.

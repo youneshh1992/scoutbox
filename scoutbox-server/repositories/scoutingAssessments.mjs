@@ -27,7 +27,8 @@
  */
 import { isPlainObject, ids, describe } from './recruitment.mjs';
 import { transaction, migrationApplied, childRowsOf } from './database.mjs';
-import { txt, historyTable, refusal, isInt, isStr, nonEmpty, orNull, clone, bad, optText, reqText, optInstant, reqInstant, unknownFields, first, typeHistory, typeList, histRow, histOut, deepFreeze } from './scoutingEvidence.mjs';
+import { txt, historyTable, refusal, isInt, isStr, nonEmpty, orNull, clone, bad, optText, reqText, optInstant, reqInstant, unknownFields, first, typeHistory, typeList, histRow, histOut } from './scoutingEvidence.mjs';
+import { deepFreeze } from '../domains/platform/values.mjs';
 
 export const SCOUTING_ASSESSMENTS_MIGRATION = '0020_scouting_assessments';
 export const SCOUTING_ASSESSMENTS_COLLECTIONS = Object.freeze(['assessmentTemplates', 'assessments', 'videoSegments', 'playlists']);

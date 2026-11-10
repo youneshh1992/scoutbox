@@ -43,9 +43,10 @@ import { viewerFor, planAccess, canAssign, VIEWER_KINDS, CAPABILITIES } from './
 import { collectPlan, buildDevelopmentPlan, planListItem, buildTimeline, TIMELINE_ACTIONS, PLAN_LIMITATION } from './plan.mjs';
 import { buildGoalSnapshots, validateReview, validateSupersession, pageReviews } from './reviews.mjs';
 import { guardRev, bumpRev } from '../../platform/concurrency.mjs';
-import { rateLimitedBody } from '../../platform/rateLimit.mjs';
+import { rateLimitedBody, limitCheck } from '../../platform/rateLimit.mjs';
 import { metrics } from '../../enterprise/enterprise.mjs';
 import { readPage, sendPageError, pageSorted } from '../../platform/paging.mjs';
+import { now } from '../../platform/clock.mjs';
 
 /** How close together two identical creates must be to count as one retry. */
 const IDEMPOTENCY_WINDOW_MS = 60_000;
@@ -89,8 +90,7 @@ export function registerDevelopment(ctx) {
   };
   const vmetric = (k, n = 1) => { metrics.development[k] = (metrics.development[k] ?? 0) + n; };
 
-  const now = () => Date.now();
-  const limited = (action, keyPart) => !!ctx.rateLimit?.limited(action, keyPart);
+  const limited = limitCheck(ctx.rateLimit);
 
   // ------------------------------------------------------------- primitives
 

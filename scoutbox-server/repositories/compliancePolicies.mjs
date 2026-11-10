@@ -27,7 +27,7 @@
  */
 import { isPlainObject, describe, ids } from './recruitment.mjs';
 import { transaction, migrationApplied } from './database.mjs';
-import { deepFreeze } from './scoutingEvidence.mjs';
+import { deepFreeze } from '../domains/platform/values.mjs';
 import { text, int, oneOf, group, tableDdl, bad, typeSpec, encode, decode, upsertSql, quote } from './fieldSpecs.mjs';
 import { JURISDICTIONS } from '../domains/agents/core/shared.mjs';
 import { RULE_STATUSES, TEXT_STATUSES, OVERRIDE_SCOPES, RULE_PARAMS, typeRuleParams, isCalendarDay, SEEDED_POLICY_VERSIONS } from '../domains/agents/compliance/policyVersions.mjs';

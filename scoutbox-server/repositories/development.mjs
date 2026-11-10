@@ -33,7 +33,7 @@
  */
 import { isPlainObject, ids, describe } from './recruitment.mjs';
 import { transaction, migrationApplied, childRowsOf } from './database.mjs';
-import { deepFreeze } from './scoutingEvidence.mjs';
+import { deepFreeze } from '../domains/platform/values.mjs';
 import { text, int, num, bool, oneOf, group, tableDdl, bad, typeSpec, encode, decode, upsertSql, insertSql, flat } from './fieldSpecs.mjs';
 import { PLAN_OWNER_KINDS, PLAN_VISIBILITY, VISIBILITY_BY_OWNER, PLAN_STATUSES, GOAL_CATEGORIES, GOAL_STATUSES, BLOCK_REASONS, ACTION_TYPES, ACTION_STATUSES, ASSIGNEE_KINDS, EVIDENCE_SOURCES, REVIEWER_KINDS, SHARE_SCOPES, PLAN_TEMPLATES, DEVELOPMENT_HUB_LIMITS, completionPhrase } from '../domains/development/hub/shared.mjs';
 import { TARGET_SOURCES, TARGET_OPERATORS, TARGET_STATES, NO_MEASUREMENT_REASONS } from '../domains/development/hub/targets.mjs';

@@ -6,10 +6,7 @@
  * CHECK; repositories/orgs.mjs ORG_PLANS is derived from this object), so a plan lookup never falls back.
  */
 
-function deepFreeze(v) {
-  if (v && typeof v === 'object') { for (const x of Object.values(v)) deepFreeze(x); Object.freeze(v); }
-  return v;
-}
+import { deepFreeze } from './domains/platform/values.mjs';
 
 /**
  * Billing plans, keyed by the value stored on `org.plan`.

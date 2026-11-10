@@ -18,6 +18,7 @@
  * app shows plain text). It never resolves to a resource of another org.
  */
 
+import { requestClock } from '../../platform/clock.mjs';
 import { buildRecruitmentJourney } from './journey.mjs';
 import { currentSigningForOffer } from './journeyModel.mjs';
 import { playerJourneyReads } from './journeyReads.mjs';
@@ -27,9 +28,7 @@ export function registerJourneyRoutes(ctx) {
   if (!recruitmentReads?.contacts || !recruitmentReads?.offers || !recruitmentReads?.signings || !recruitmentReads?.signingPackages) throw new TypeError('registerJourneyRoutes needs recruitmentReads (contacts, offers, signings, signingPackages) from the data layer');
   const evidence = () => ctx.recruitmentEvidenceProvider ?? undefined;
   const orgOf = (orgId) => ctx.byId.org(orgId);
-  // The same per-request test clock the Offer and signing routes honour (development only).
-  const TEST_CLOCK = process.env.SCOUTBOX_TEST_CLOCK === '1' && process.env.NODE_ENV !== 'production';
-  const now = (req = null) => { if (TEST_CLOCK && req?.get) { const n = Number(req.get('x-scoutbox-test-clock')); if (Number.isFinite(n) && n > 0) return n; } return Date.now(); };
+  const now = requestClock();
   const clubOf = (orgId) => { const o = orgOf(orgId); return o ? { id: o.id, name: o.name ?? null, level: o.level ?? null, verified: !!o.verified } : { id: orgId, name: null, level: null, verified: false }; };
 
   function playerJourneys(viewer, playerId, at) {

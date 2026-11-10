@@ -34,7 +34,7 @@ import { isPlainObject, describe } from './recruitment.mjs';
 import { text, int, bool, oneOf, group, quote, tableDdl, decode, insertSql } from './fieldSpecs.mjs';
 import { transaction, migrationApplied, childRowsOf } from './database.mjs';
 import { writeKit } from './writes.mjs';
-import { deepFreeze } from './scoutingEvidence.mjs';
+import { deepFreeze } from '../domains/platform/values.mjs';
 
 export const VERIFICATION_MIGRATION = '0023_verification';
 export const VERIFICATION_COLLECTIONS = Object.freeze(['verClaims', 'verEvents', 'verEvidence', 'verTokens', 'verAdmins', 'verRootTransfers', 'verRootRequests', 'verDisputes', 'verReferences', 'verPlayerInvites', 'verConflicts', 'verDomainRequests', 'orgVerifiedDomains']);

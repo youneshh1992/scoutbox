@@ -21,6 +21,7 @@
  */
 import { isPlainObject, ids, describe } from './recruitment.mjs';
 import { transaction, migrationApplied, childRowsOf } from './database.mjs';
+import { deepFreeze } from '../domains/platform/values.mjs';
 
 export const SCOUTING_EVIDENCE_MIGRATION = '0019_scouting_evidence';
 export const SCOUTING_EVIDENCE_COLLECTIONS = Object.freeze(['evidence', 'coachAffiliations', 'squadInvites']);
@@ -394,7 +395,6 @@ export const SCOUTING_EVIDENCE_RECORDS = {
 };
 
 // ------------------------------------------------------------------ the repository
-export const deepFreeze = (v) => { if (v !== null && typeof v === 'object' && !Object.isFrozen(v)) { Object.freeze(v); for (const k of Object.keys(v)) deepFreeze(v[k]); } return v; };
 const WRITES = new Set(['create', 'update']);
 /**
  * `createScoutingEvidenceRepository({ sqlite, unit, now, log })`: `evidence`, `coachAffiliations` and `squadInvites`,

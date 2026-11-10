@@ -29,8 +29,9 @@ import {
 } from '../core/shared.mjs';
 import { MINOR_PATHWAY_PRODUCTION_ENABLED } from '../compliance/policy.mjs';
 import { opportunityBoardFor } from '../../scouting/journeys.mjs';
-import { rateLimitedBody } from '../../platform/rateLimit.mjs';
-import { plainShared, normaliseClientKey, payloadFingerprint } from '../../recruitment/lifecycle/contact.mjs';
+import { refuseWhenLimited } from '../../platform/rateLimit.mjs';
+import { plainShared } from '../../recruitment/lifecycle/contact.mjs';
+import { normaliseClientKey, payloadFingerprint } from '../../platform/idempotency.mjs';
 import { chainHead, isFormal } from '../../recruitment/lifecycle/decision.mjs';
 import { roomRole, roomCan } from '../../recruitment/rooms/shared.mjs';
 import { TERMINAL_STATUSES } from '../transactions/transaction.mjs';
@@ -43,6 +44,7 @@ import {
   HANDOFF_STATUSES, HANDOFF_BLOCKERS, HANDOFF_TTL_MS, effectiveHandoffStatus,
   handoffBlockers, duplicateTransactionOf,
 } from './integration.mjs';
+import { now } from '../../platform/clock.mjs';
 
 export function registerIntegration(ctx) {
   const {
@@ -63,7 +65,6 @@ export function registerIntegration(ctx) {
   /** The bookkeeping of a handoff act: its one case history entry. */
   const handoffHistory = (at, action, by, detail) => ({ history: [{ id: nextId('aud'), at, byKind: 'org', byId: by.userId ?? null, byName: by.name ?? null, action, detail }] });
 
-  const now = () => Date.now();
 
   /**
    * The shared rate-limit provider, not a second one. Both of this module's writes end in a
@@ -75,10 +76,7 @@ export function registerIntegration(ctx) {
    * budget of the club or the agent they are impersonating, and a malformed body
    * is not an act.
    */
-  const limitedOr429 = (res, action, key) => {
-    if (rateLimit?.limited?.(action, key)) { res.status(429).json(rateLimitedBody(action)); return true; }
-    return false;
-  };
+  const limitedOr429 = refuseWhenLimited(rateLimit);
   const clientKeyOf = (req, res) => {
     const k = normaliseClientKey(req.body?.clientKey);
     if (!k.ok) { res.status(400).json({ error: 'AGENT_CLIENT_KEY_INVALID', message: k.message }); return undefined; }

@@ -31,8 +31,9 @@ import {
 import { buildReportingContext, buildDashboard, ROOM_PRIORITIES } from './dashboard.mjs';
 import { STALL_THRESHOLDS, DEFAULT_STALL_DAYS } from './timeSeries.mjs';
 import { SOURCE_CONTEXTS } from '../rooms/shared.mjs';
-import { rateLimitedBody } from '../../platform/rateLimit.mjs';
+import { rateLimitedBody, limitCheck } from '../../platform/rateLimit.mjs';
 import { metrics } from '../../enterprise/enterprise.mjs';
+import { now } from '../../platform/clock.mjs';
 
 /** The metrics whose rows a director can page through. */
 export const DRILLDOWN_METRICS = ['stalled_rooms', 'decision_outstanding', 'terminal_with_recorded_decision', 'overdue_trial_reports'];
@@ -62,8 +63,7 @@ export function registerAnalytics(ctx) {
   // the process rather than reaching a director.
   const registryShape = assertMetricRegistry();
 
-  const now = () => Date.now();
-  const limited = (action, keyPart) => !!ctx.rateLimit?.limited(action, keyPart);
+  const limited = limitCheck(ctx.rateLimit);
   const devFaults = process.env.NODE_ENV !== 'production';
 
   // ------------------------------------------------------------- validation

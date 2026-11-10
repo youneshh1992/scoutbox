@@ -36,7 +36,7 @@
  */
 import { isPlainObject, describe, ids } from './recruitment.mjs';
 import { transaction, migrationApplied, childRowsOf } from './database.mjs';
-import { deepFreeze } from './scoutingEvidence.mjs';
+import { deepFreeze } from '../domains/platform/values.mjs';
 import { text, int, bool, oneOf, group, tableDdl, bad, typeSpec, encode, decode, upsertSql, quote } from './fieldSpecs.mjs';
 import { VERIFICATION_STATES, FACETS, JURISDICTIONS, TIERS, AGREEMENT_STATUSES, SCOPES, MAX_TERM_MONTHS, DISCLOSURE_KEYS, MAX_OPPORTUNITY_SHARES, AGENT_TRANSITIONS, CLIENT_TRANSITIONS, termEndAt } from '../domains/agents/core/shared.mjs';
 

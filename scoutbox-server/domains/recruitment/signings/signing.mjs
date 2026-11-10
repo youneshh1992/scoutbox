@@ -21,6 +21,7 @@
  */
 
 import { parseStrictDateOnly, parseInstant, readInstant, isExpiredAt, isOrderedInterval, DAY_MS } from '../../../temporal.mjs';
+import { normaliseClientKey as platformClientKey, payloadFingerprint, CLIENT_KEY_MAX } from '../../platform/idempotency.mjs';
 
 export const SIGNING_POLICY_VERSION = 1;
 
@@ -54,20 +55,14 @@ export const minorSigningPathwayOpen = (jurisdiction, policy = MINOR_SIGNING_PAT
   (jurisdiction && has(policy, jurisdiction) ? policy[jurisdiction] === true : policy.DEFAULT === true);
 
 export const SIGNING_LIMITS = Object.freeze({
-  label: 120, internalNote: 2000, reason: 500, clientKey: 80,
+  label: 120, internalNote: 2000, reason: 500, clientKey: CLIENT_KEY_MAX,
   minExpiryMs: 60 * 60 * 1000, maxExpiryMs: 90 * DAY_MS, defaultExpiryMs: 30 * DAY_MS,
   maxContractYears: 10,
 });
 
 // ------------------------------------------------------------- helpers
 
-/** Deep canonical serialisation: every level key-sorted, never a replacer array (which would filter nested objects). */
-const canonical = (v) => {
-  if (Array.isArray(v)) return v.map(canonical);
-  if (v && typeof v === 'object') { const o = {}; for (const k of Object.keys(v).sort()) o[k] = canonical(v[k]); return o; }
-  return v === undefined ? null : v;
-};
-export const payloadFingerprint = (parts) => JSON.stringify(canonical(parts));
+export { payloadFingerprint };
 
 const CONTROL = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f​-‏‪-‮⁠-⁤⁦-⁩﻿]/g;
 export function cleanText(raw, max) {
@@ -78,11 +73,7 @@ export function cleanText(raw, max) {
   return { ok: true, value: v || null };
 }
 
-export function normaliseSigningClientKey(raw) {
-  if (raw === undefined || raw === null || raw === '') return { ok: true, key: null };
-  if (typeof raw !== 'string' || raw.length > SIGNING_LIMITS.clientKey || /[^\x21-\x7e]/.test(raw)) return { ok: false, error: 'SIGNING_CLIENT_KEY_INVALID', message: 'clientKey must be a short printable string.' };
-  return { ok: true, key: raw };
-}
+export const normaliseSigningClientKey = (raw) => platformClientKey(raw, 'SIGNING_CLIENT_KEY_INVALID');
 
 /** Contract dates are DATE_ONLY days, start ≤ end, and a plausible length. */
 export function validateContractDates({ startDate, endDate } = {}) {

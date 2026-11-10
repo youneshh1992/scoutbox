@@ -26,8 +26,8 @@
 import { visibleToOrg } from '../../../domain.mjs';
 import { parseStrictDateOnly } from '../../../temporal.mjs';
 import { guardRev, bumpRev, revMeta } from '../../platform/concurrency.mjs';
-import { rateLimitedBody } from '../../platform/rateLimit.mjs';
-import { normaliseClientKey, payloadFingerprint } from '../../recruitment/lifecycle/contact.mjs';
+import { rateLimitedBody, refuseWhenLimited } from '../../platform/rateLimit.mjs';
+import { normaliseClientKey, payloadFingerprint } from '../../platform/idempotency.mjs';
 import { hasVerLevel } from '../../verification/claims/shared.mjs';
 import { effectiveFacetState, RECHECK_MS, effectiveAgreementStatus, agreementGrantsAccess, affiliationActive, tiersOf, can, JURISDICTIONS } from '../core/shared.mjs';
 import { sendComplianceError } from './errors.mjs';
@@ -41,6 +41,7 @@ import { complianceAuditRows, reviewerDecisionRows } from './audit.mjs';
 import { REVIEWER_ROLES } from '../../../repositories/compliancePolicies.mjs';
 import { REVIEW_KINDS, REVIEW_STATUSES } from '../../../repositories/complianceRecords.mjs';
 import { readPage, pageOf, sendPageError } from '../../platform/paging.mjs';
+import { now } from '../../platform/clock.mjs';
 
 export { REVIEWER_ROLES, REVIEW_KINDS, REVIEW_STATUSES };
 
@@ -61,7 +62,6 @@ export function registerCompliance(rawCtx) {
   const provider = verificationProvider ?? createVerificationProvider({ synthetic: process.env.AGENT_VERIFICATION_TEST_PROVIDER === '1' });
   if (typeof compliancePolicies?.reviewers?.update !== 'function') throw new TypeError('registerCompliance needs the compliance policies repository from the data layer');
   if (typeof complianceRecords?.contexts?.recordAct !== 'function') throw new TypeError('registerCompliance needs the compliance records repository from the data layer');
-  const now = () => Date.now();
   /** A history entry, for an act's bookkeeping or a whole record's history. */
   const entry = (action, by, detail = null) => ({ id: nextId('aud'), at: now(), action, by, detail });
   const hist = (record, action, by, detail = null) => {
@@ -75,7 +75,7 @@ export function registerCompliance(rawCtx) {
   const byClubUser = (req) => ({ kind: 'club_user', userId: req.orgUser.id, name: req.orgUser.name, orgId: req.org.id });
   const byReviewer = (req) => ({ kind: 'ts_reviewer', userId: req.reviewer.id, name: req.reviewer.name, role: req.reviewer.role });
   const bySystem = (name) => ({ kind: 'system', userId: null, name });
-  const limitedOr429 = (res, action, key) => { if (rateLimit.limited(action, key)) { res.status(429).json(rateLimitedBody(action)); return true; } return false; };
+  const limitedOr429 = refuseWhenLimited(rateLimit);
   const clientKeyOr400 = (req, res) => {
     const k = normaliseClientKey(req.body?.clientKey);
     if (!k.ok) { sendComplianceError(res, { error: 'COMPLIANCE_CLIENT_KEY_INVALID', message: k.message }, 'clientKey'); return undefined; }

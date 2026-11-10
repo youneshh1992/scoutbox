@@ -39,9 +39,9 @@
  */
 
 import { guardRev, revMeta } from '../../platform/concurrency.mjs';
-import { rateLimitedBody } from '../../platform/rateLimit.mjs';
+import { refuseWhenLimited } from '../../platform/rateLimit.mjs';
 import { readPage, pageOf, sendPageError } from '../../platform/paging.mjs';
-import { normaliseClientKey, payloadFingerprint } from '../../recruitment/lifecycle/contact.mjs';
+import { normaliseClientKey, payloadFingerprint } from '../../platform/idempotency.mjs';
 import { isExpiredAt, isAbsent, parseDateOrInstant } from '../../../temporal.mjs';
 import { hasVerLevel } from '../../verification/claims/shared.mjs';
 import { effectiveAgreementStatus, agreementGrantsAccess, can } from '../core/shared.mjs';
@@ -58,6 +58,7 @@ import {
   timelineFor, actorLabel, HOLD_REASON_CODES, CANCEL_REASON_CODES, CLOSE_REASON_CODES,
   TRANSACTION_LIMITS, RELEASING_PARTY_TYPES, PENDING_REASONS,
 } from './transaction.mjs';
+import { now } from '../../platform/clock.mjs';
 
 const HONEST_TRANSACTION = 'A ScoutBox transaction is a permissioned workspace. "Ready" means ScoutBox currently permits this workflow to proceed under the encoded rules — it is not a statement of legal validity, no governing body has approved anything, no offer exists and nothing has been signed.';
 /** A refusal after a write that must not stand: the unit rolls back; the answer was already sent. */
@@ -84,14 +85,13 @@ export function registerTransactions(rawCtx) {
   compliance.onRepresentationReviewed(representationReviewed);
   const { transactions: txs, representations: repsRepo, documents: docsRepo } = agentTransactions;
 
-  const now = () => Date.now();
   /** A history entry, for an act's bookkeeping or a whole record's history. */
   const entry = (action, by, detail = null) => ({ id: nextId('aud'), at: now(), action, by, detail });
   const byAgent = (req) => ({ kind: 'org', userId: req.orgUser.id, name: req.orgUser.name });
   const byClubUser = (req) => ({ kind: 'club_user', userId: req.orgUser.id, name: req.orgUser.name, orgId: req.org.id });
   const byPlayer = (req) => ({ kind: 'player', userId: req.player.id, name: req.player.name });
   const bySystem = (name) => ({ kind: 'system', userId: null, name });
-  const limitedOr429 = (res, action, key) => { if (rateLimit.limited(action, key)) { res.status(429).json(rateLimitedBody(action)); return true; } return false; };
+  const limitedOr429 = refuseWhenLimited(rateLimit);
   const clientKeyOr400 = (req, res) => {
     const k = normaliseClientKey(req.body?.clientKey);
     if (!k.ok) { sendTransactionError(res, { error: 'TRANSACTION_CLIENT_KEY_INVALID', message: k.message }, 'clientKey'); return undefined; }

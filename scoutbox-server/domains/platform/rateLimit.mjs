@@ -288,3 +288,16 @@ export const rateLimitedBody = (action) => ({
   action,
   message: 'Too many requests in a short window — wait a moment and try again.',
 });
+
+/** A check bound to a limiter. Some unit harnesses register a domain without one; nothing is limited then. */
+export const limitCheck = (rateLimit) => (action, keyPart) => !!rateLimit?.limited?.(action, keyPart);
+
+/** The same check, answering 429 when the action is limited. Returns whether it answered. */
+export const refuseWhenLimited = (rateLimit) => {
+  const limited = limitCheck(rateLimit);
+  return (res, action, keyPart) => {
+    if (!limited(action, keyPart)) return false;
+    res.status(429).json(rateLimitedBody(action));
+    return true;
+  };
+};

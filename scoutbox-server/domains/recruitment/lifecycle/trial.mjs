@@ -33,7 +33,7 @@
 
 import { parseTrialDate, isTrialDate } from '../../../domain.mjs';
 import { validateIanaZone, parseInstant as parseCanonicalInstant, localParts as canonicalLocalParts } from '../../../temporal.mjs';
-import { normaliseClientKey, payloadFingerprint } from './contact.mjs';
+import { normaliseClientKey as platformClientKey, payloadFingerprint, CLIENT_KEY_MAX } from '../../platform/idempotency.mjs';
 
 export const TRIAL_POLICY_VERSION = 1;
 
@@ -85,7 +85,7 @@ export const TRIAL_LIMITS = Object.freeze({
   reason: 300,
   note: 300,
   message: 2000,
-  clientKey: 64,
+  clientKey: CLIENT_KEY_MAX,
   evidencePerSession: 20,
   /** A session is at least 15 minutes and at most 12 hours. */
   minSessionMs: 15 * 60 * 1000,
@@ -118,12 +118,7 @@ export function trialRoleAllows(role, action) {
 
 // ------------------------------------------------------------------ keys
 
-/** A client key, in the Trial vocabulary. Same rule as Contact, own error code. */
-export function normaliseTrialClientKey(raw) {
-  const k = normaliseClientKey(raw);
-  if (k.ok) return k;
-  return { ok: false, error: 'TRIAL_CLIENT_KEY_INVALID', message: k.message };
-}
+export const normaliseTrialClientKey = (raw) => platformClientKey(raw, 'TRIAL_CLIENT_KEY_INVALID');
 export { payloadFingerprint };
 
 // ------------------------------------------------------------------ time

@@ -31,6 +31,7 @@ import { ROOM_STATUSES, ROOM_PRIORITIES, ROOM_TRANSITIONS, SOURCE_CONTEXTS, TASK
 import { DECISION_OUTCOMES, DECISION_KINDS, DECISION_STATES, EVIDENCE_REF_KINDS, DECISION_LIMITS } from '../domains/recruitment/lifecycle/decision.mjs';
 import { CURRENCIES, BUDGET_LINE_KINDS, BUDGET_SCHEDULES } from '../domains/recruitment/money.mjs';
 import { HANDOFF_STATUSES } from '../domains/agents/integration/integration.mjs';
+import { deepFreeze } from '../domains/platform/values.mjs';
 
 export const RECRUITMENT_CASES_MIGRATION = '0016_recruitment_cases';
 export const RECRUITMENT_CASES_COLLECTIONS = Object.freeze(['recruitmentCases', 'roomComments', 'roomSnapshots', 'roomDecisions', 'roomEvidenceState']);
@@ -778,7 +779,6 @@ export const RECRUITMENT_CASES_RECORDS = {
 };
 
 // ------------------------------------------------------------------ the repository
-const deepFreeze = (v) => { if (v !== null && typeof v === 'object' && !Object.isFrozen(v)) { Object.freeze(v); for (const k of Object.keys(v)) deepFreeze(v[k]); } return v; };
 /** Only the fields given: `undefined` leaves a column as it is. */
 const given = (cols) => Object.fromEntries(Object.entries(cols).filter(([, v]) => v !== undefined));
 /** The Room statuses a move into `to` may start from. */

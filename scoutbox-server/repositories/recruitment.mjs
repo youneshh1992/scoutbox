@@ -28,6 +28,7 @@ import { TRIAL_WORKFLOW_STATES, TRIAL_SESSION_KINDS, TRIAL_ATTENDANCE_STATES, TR
 import { TRIAL_REPORT_FIELDS } from '../domain.mjs';
 import { refreshProfileSignals } from './identity.mjs';
 import { writeKit } from './writes.mjs';
+import { deepFreeze } from '../domains/platform/values.mjs';
 
 export const RECRUITMENT_MIGRATION = '0015_recruitment';
 export const RECRUITMENT_COLLECTIONS = Object.freeze(['requests', 'trials']);
@@ -587,7 +588,6 @@ export const RECRUITMENT_RECORDS = {
 };
 
 // ------------------------------------------------------------------ the repository
-const deepFreeze = (v) => { if (v !== null && typeof v === 'object' && !Object.isFrozen(v)) { Object.freeze(v); for (const k of Object.keys(v)) deepFreeze(v[k]); } return v; };
 /** A history entry's detail on an erased trial: free text longer than a code is the person's, and goes. */
 const redactedDetail = (json) => JSON.stringify(Object.fromEntries(Object.entries(JSON.parse(json)).filter(([, v]) => typeof v !== 'string' || v.length <= 40)));
 /**

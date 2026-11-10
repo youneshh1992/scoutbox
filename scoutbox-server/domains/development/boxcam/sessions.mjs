@@ -21,7 +21,7 @@ import {
   mergeIntervals, normIntervals, sumIntervals, fmtMs, STATE_COPY, TERMINAL_STATES, typeObservation,
 } from './shared.mjs';
 import { drillByIdVersion, latestDrill, providerFor, LIVENESS_CHALLENGES, PROVIDERS } from './drills.mjs';
-import { rateLimitedBody } from '../../platform/rateLimit.mjs';
+import { rateLimitedBody, limitCheck } from '../../platform/rateLimit.mjs';
 import { hashNonce, nonceMatches, BOX_CAM_LIMITS } from '../../../repositories/boxCam.mjs';
 
 const DRIFT_MS = 7_000;            // allowed client/server clock drift
@@ -62,7 +62,7 @@ export function registerBoxCamSessions(ctx) {
 
   // ----------------------------------------------------------- rate limits
   // The shared limiter and its named policy (see domains/platform/rateLimit.mjs).
-  const limited = (action, keyPart) => !!ctx.rateLimit?.limited(action, keyPart);
+  const limited = limitCheck(ctx.rateLimit);
 
   const caps = (session) => {
     const drill = drillByIdVersion(session.drillId, session.drillVersion);

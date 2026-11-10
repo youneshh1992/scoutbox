@@ -24,8 +24,9 @@ import {
 import { briefCriteriaToCanonical } from './matching/match.mjs';
 import { createMatchReads } from './matching/query.mjs';
 import { pageOf, sendPageError } from '../platform/paging.mjs';
-import { rateLimitedBody } from '../platform/rateLimit.mjs';
+import { rateLimitedBody, limitCheck } from '../platform/rateLimit.mjs';
 import { guardRev, bumpRev, revMeta } from '../platform/concurrency.mjs';
+import { now } from '../platform/clock.mjs';
 
 export function registerNobodyMissed(ctx) {
   const {
@@ -39,9 +40,8 @@ export function registerNobodyMissed(ctx) {
   const reads = ctx.recruitmentReads;
   if (typeof reads?.signings?.forPlayer !== 'function') throw new TypeError('registerNobodyMissed needs recruitmentReads (signings) from the data layer');
 
-  const now = () => Date.now();
   // The shared limiter and its named policy (see domains/platform/rateLimit.mjs).
-  const limited = (action, keyPart) => !!ctx.rateLimit?.limited(action, keyPart);
+  const limited = limitCheck(ctx.rateLimit);
   const SUPPRESS_MIN = 3;
 
   // ------------------------------------------------------------ match facts

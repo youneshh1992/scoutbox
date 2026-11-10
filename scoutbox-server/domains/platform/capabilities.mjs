@@ -30,6 +30,12 @@ export const demoSeedEnabled = (env = process.env) => (
   env.SCOUTBOX_SEED_DEMO === '1' ? true : env.SCOUTBOX_SEED_DEMO === '0' ? false : env.NODE_ENV !== 'production'
 );
 
+/**
+ * Whether requests may pin their own time with the test-clock header (clock.mjs). Development only: a production
+ * boot with SCOUTBOX_TEST_CLOCK set is refused (productionConfigProblems).
+ */
+export const testClockEnabled = (env = process.env) => env.SCOUTBOX_TEST_CLOCK === '1' && env.NODE_ENV !== 'production';
+
 const isSet = (v) => v != null && String(v).trim() !== '';
 
 /** The mail adapter sends through SendGrid when this holds; otherwise it writes the local outbox. */
@@ -218,6 +224,14 @@ export function productionConfigProblems({ env = process.env, trustWeightsTotal 
     problems.push({
       code: 'FAULTS_IN_PRODUCTION',
       message: 'SCOUTBOX_FAULTS is set. Simulated failures must never be configured on a production instance.',
+      fatal: true,
+    });
+  }
+  // A client that can set its own clock could, for example, answer an Offer after it expired.
+  if (production && flagged(env.SCOUTBOX_TEST_CLOCK)) {
+    problems.push({
+      code: 'TEST_CLOCK_IN_PRODUCTION',
+      message: 'SCOUTBOX_TEST_CLOCK is set. Requests must never choose their own time on a production instance.',
       fatal: true,
     });
   }

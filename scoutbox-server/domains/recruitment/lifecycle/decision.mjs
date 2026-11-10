@@ -29,7 +29,7 @@
  */
 
 import { validateReasonCodes, REASON_CODES } from '../rooms/shared.mjs';
-import { normaliseClientKey as contactKey, payloadFingerprint } from './contact.mjs';
+import { normaliseClientKey as platformClientKey, payloadFingerprint, CLIENT_KEY_MAX } from '../../platform/idempotency.mjs';
 import { deriveWorkflowState } from './trial.mjs';
 
 export const DECISION_POLICY_VERSION = 1;
@@ -64,7 +64,7 @@ export const DECISION_LIMITS = Object.freeze({
   note: 2000,
   supersessionReason: 500,
   evidenceRefs: 50,
-  clientKey: 64,
+  clientKey: CLIENT_KEY_MAX,
   reasonCodes: 6,
   historyPage: 100,
 });
@@ -73,12 +73,7 @@ export const DECISION_LIMITS = Object.freeze({
 
 export const plainText = (s, max) => String(s ?? '').replace(/<[^>]*>/g, '').replace(/[<>]/g, '').trim().slice(0, max);
 
-/** A client key in the Decision vocabulary: same rule as Contact and Trial, own code. */
-export function normaliseDecisionClientKey(raw) {
-  const k = contactKey(raw);
-  if (k.ok) return k;
-  return { ok: false, error: 'DECISION_CLIENT_KEY_INVALID', message: k.message };
-}
+export const normaliseDecisionClientKey = (raw) => platformClientKey(raw, 'DECISION_CLIENT_KEY_INVALID');
 export { payloadFingerprint };
 
 /** A row with no `kind` reads as an advisory recommendation, final. */

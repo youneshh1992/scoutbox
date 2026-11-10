@@ -42,6 +42,7 @@ import { decodeFrame, FRAME_ERRORS } from './frames.mjs';
 import { productionCvProvider, PROVIDER_ERRORS } from './provider.mjs';
 import { combineEligibility, boxCamObservedEligible, COMBINE_DISABLED_REASON } from './eligibility.mjs';
 import { nonceMatches } from '../../../../repositories/boxCam.mjs';
+import { limitCheck } from '../../../platform/rateLimit.mjs';
 
 /** Canonical typed errors, mapped to HTTP once, here. */
 const HTTP_FOR = {
@@ -104,7 +105,7 @@ export function registerProductionCvRoutes(ctx) {
   const provider = ctx.productionCv ?? productionCvProvider();
   ctx.productionCv = provider;
 
-  const limited = (action, keyPart) => !!ctx.rateLimit?.limited(action, keyPart);
+  const limited = limitCheck(ctx.rateLimit);
 
   const ownSession = (playerId, id) => { const s = reads.sessions.byId(id); return s && s.playerId === playerId ? s : null; };
 

@@ -38,7 +38,7 @@ import crypto from 'node:crypto';
 import { isPlainObject, describe } from './recruitment.mjs';
 import { transaction, migrationApplied, childRowsOf } from './database.mjs';
 import { writeKit } from './writes.mjs';
-import { deepFreeze } from './scoutingEvidence.mjs';
+import { deepFreeze } from '../domains/platform/values.mjs';
 import { text, int, num, bool, oneOf, group, tableDdl, encode, decode, upsertSql, insertSql, flat } from './fieldSpecs.mjs';
 import { QUALITY, OBSERVATION_KINDS } from '../domains/development/boxcam/shared.mjs';
 import { DRILLS, PROVIDERS, LIVENESS_CHALLENGES } from '../domains/development/boxcam/drills.mjs';

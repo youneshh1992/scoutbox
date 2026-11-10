@@ -44,6 +44,7 @@ import {
   FRAME_LIMITS, CAPTURE_REQUIREMENTS, DETECTION, EVENT_RULES, CONFIDENCE,
 } from './policy.mjs';
 import { QUALITY_THRESHOLDS } from './quality.mjs';
+import { canonicalJson } from '../../../platform/values.mjs';
 
 /**
  * Geometry constants that live in the layer code rather than in policy,
@@ -135,14 +136,7 @@ export function frozenGroups() {
  * unrelated policy lines would report a threshold change and reordering a
  * changed line back would hide one.
  */
-export function canonicalJson(value) {
-  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
-  if (value && typeof value === 'object') {
-    const keys = Object.keys(value).sort();
-    return `{${keys.map((k) => `${JSON.stringify(k)}:${canonicalJson(value[k])}`).join(',')}}`;
-  }
-  return JSON.stringify(value === undefined ? null : value);
-}
+export { canonicalJson };
 
 function sha256(s) { return createHash('sha256').update(s, 'utf8').digest('hex'); }
 

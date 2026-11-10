@@ -29,9 +29,11 @@
  */
 
 import { buildRouteHelpers } from '../../platform/routeHelpers.mjs';
+import { requestClock } from '../../platform/clock.mjs';
+import { sideEffectRunner } from '../../platform/sideEffects.mjs';
 import { roomRole, roomCan, ROOM_STATUS_LABELS } from '../rooms/shared.mjs';
 import { guardRev, expectedRevOf } from '../../platform/concurrency.mjs';
-import { rateLimitedBody } from '../../platform/rateLimit.mjs';
+import { rateLimitedBody, limitCheck } from '../../platform/rateLimit.mjs';
 import { canTransitionRecruitmentCase, NULL_EVIDENCE_PROVIDER, RECRUITMENT_LIFECYCLE_POLICY_VERSION } from '../lifecycle/lifecycle.mjs';
 import { resolveContactRecipient } from '../lifecycle/contact.mjs';
 import { visibleToOrg } from '../../../domain.mjs';
@@ -43,8 +45,6 @@ import {
   effectiveRevisionStatus, currentRevision, liveRevision, liveStatus, wasIssued, offerStatus, canRevise, canRespondToRevision, canWithdrawRevision, responderMatches,
   nextRevisionNumber, offerIntegrity, offerCaseConsistency, offerCaseCorrupt, offerClubView, offerRecipientView, offerAgentView, offerHistoryView,
 } from './offer.mjs';
-
-const TEST_CLOCK = process.env.SCOUTBOX_TEST_CLOCK === '1';
 
 export function registerOffers(rawCtx) {
   // isLead, orgCanSee and audit come from
@@ -72,17 +72,11 @@ export function registerOffers(rawCtx) {
   const caseOfOrg = (id, orgId) => { const k = recruitmentReads.cases.byId(id); return k && k.orgId === orgId ? k : null; };
 
   const err = (res, error, message, extra = {}) => sendOfferError(res, { error, message, ...extra }, 'offer');
-  const limited = (action, keyPart) => !!rateLimit?.limited(action, keyPart);
+  const limited = limitCheck(rateLimit);
   const roleFor = (req, room) => roomRole({ room, user: req.orgUser, isLead: isLead(req.orgUser) });
   const evidenceProvider = () => ctx.recruitmentEvidenceProvider ?? NULL_EVIDENCE_PROVIDER;
   const orgOf = (orgId) => ctx.byId.org(orgId);
-  const now = (req = null) => {
-    if (TEST_CLOCK && req?.get) {
-      const n = Number(req.get('x-scoutbox-test-clock'));
-      if (Number.isFinite(n) && n > 0) return n;
-    }
-    return Date.now();
-  };
+  const now = requestClock();
   const byOrg = (req) => ({ kind: 'org', id: req.orgUser.id, name: req.orgUser.name, role: req.orgUser.role ?? null });
   /** A history entry for an act (appended by the repository with the act). */
   const entry = (action, by, detail, at) => ({ id: nextId('aud'), at, action, by: { kind: by.kind, id: by.id ?? null, name: by.name ?? null }, detail: detail ?? null });
@@ -111,7 +105,7 @@ export function registerOffers(rawCtx) {
    * into a 500 — the client would retry and the replay would say "done"
    * anyway. Logged, never fatal.
    */
-  const safe = (label, fn) => { try { return fn(); } catch (e) { console.error(`OFFER side_effect_failed ${label}: ${e?.message ?? e}`); return undefined; } };
+  const safe = sideEffectRunner('OFFER');
 
   // A read-only signing summary on every Offer view (ids and the status word).
   // An accepted Offer with no package reads `signing: null`: nothing is inferred.

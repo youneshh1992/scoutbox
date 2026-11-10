@@ -23,7 +23,7 @@
 
 import { roomRole, roomCan, ROOM_TRANSITIONS, TERMINAL_ROOM_STATUSES, ROOM_STATUS_LABELS } from '../rooms/shared.mjs';
 import { guardRev, expectedRevOf } from '../../platform/concurrency.mjs';
-import { rateLimitedBody } from '../../platform/rateLimit.mjs';
+import { rateLimitedBody, limitCheck } from '../../platform/rateLimit.mjs';
 import { PROVIDERS } from '../../development/boxcam/drills.mjs';
 import { canTransitionRecruitmentCase, LIFECYCLE_ACTIONS, NULL_EVIDENCE_PROVIDER, RECRUITMENT_LIFECYCLE_POLICY_VERSION } from './lifecycle.mjs';
 import { sendDomainError } from './errors.mjs';
@@ -34,6 +34,7 @@ import {
   decisionIntegrity, duplicateFinalHeads, chainHead, byCreatedThenId,
   summariseAssessments, assessmentSnapshot, evidenceCandidates, decisionView, draftView, decisionRequirements,
 } from './decision.mjs';
+import { now } from '../../platform/clock.mjs';
 
 export function registerDecision(ctx) {
   const {
@@ -49,13 +50,12 @@ export function registerDecision(ctx) {
   const { cases, decisions } = recruitmentCases;
 
   const err = (res, error, message, extra = {}) => sendDomainError(res, { error, message, ...extra }, 'decision');
-  const limited = (action, keyPart) => !!rateLimit?.limited(action, keyPart);
+  const limited = limitCheck(rateLimit);
   const roleFor = (req, room) => roomRole({ room, user: req.orgUser, isLead: isLead(req.orgUser) });
   const evidenceProvider = () => ctx.recruitmentEvidenceProvider ?? NULL_EVIDENCE_PROVIDER;
   const actor = (req) => ({ userId: req.orgUser.id, name: req.orgUser.name, role: req.orgUser.role ?? null });
   /** The bookkeeping of a case act by the club user on the request: one history entry. */
   const byStaff = (req, action, detail) => ({ history: [auditEntry('org', req.orgUser.id, req.orgUser.name, action, detail)] });
-  const now = () => Date.now();
 
   // ------------------------------------------------------------- lookups
 

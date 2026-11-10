@@ -44,6 +44,7 @@ import { isAdult, ADULT_AGE, GRASSROOTS_RADIUS_KM, TRUST, computeTrustScore, tru
 import { pageOf } from '../domains/platform/paging.mjs';
 import { boxAround } from './grassroots.mjs';
 import { SUBRECORD_KEYS, SUBRECORD_SPECS, PLAYER_SUBRECORD_KEYS, subrecordsLive, getSubrecords, validateSubrecordArray, prepareSubrecordStatements, writeChildRows, writeArrayRows, deleteChildRows, readChildren, readChildrenFor, countChildRows, itemRows, storedItem, PLAYER_SUBRECORDS_MIGRATION } from './playerSubrecords.mjs';
+import { deepFreeze } from '../domains/platform/values.mjs';
 
 export const CORE_IDENTITY_LIVE_MIGRATION = '0005_core_identity_live';
 export const PLAYER_ERASURE_MIGRATION = '0014_player_erasure';
@@ -163,7 +164,6 @@ CREATE UNIQUE INDEX guardian_children_one_primary ON guardian_children (player_i
 `;
 
 // ------------------------------------------------------------------ small helpers
-const deepFreeze = (v) => { if (v !== null && typeof v === 'object' && !Object.isFrozen(v)) { Object.freeze(v); for (const k of Object.keys(v)) deepFreeze(v[k]); } return v; };
 const refusal = (code, message, extra = {}) => Object.assign(new Error(`${code}: ${message}`), { code, ...extra });
 const isPlainObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 const isClock = (v) => Number.isSafeInteger(v) && v >= 0;

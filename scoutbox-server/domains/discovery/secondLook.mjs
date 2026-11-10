@@ -21,7 +21,8 @@ import {
   trustLevelChanges, POLICY, LIMITS, clampPage, safeM18Projection,
   CLUB_SIDE_REASONS, REASON_CHANGE_MAP,
 } from './shared.mjs';
-import { rateLimitedBody } from '../platform/rateLimit.mjs';
+import { rateLimitedBody, limitCheck } from '../platform/rateLimit.mjs';
+import { now } from '../platform/clock.mjs';
 
 export function registerSecondLook(ctx) {
   const {
@@ -33,9 +34,8 @@ export function registerSecondLook(ctx) {
   const reads = ctx.recruitmentReads;
   if (typeof reads?.signings?.forPlayer !== 'function') throw new TypeError('registerSecondLook needs recruitmentReads (signings) from the data layer');
 
-  const now = () => Date.now();
   // The shared limiter and its named policy (see domains/platform/rateLimit.mjs).
-  const limited = (action, keyPart) => !!ctx.rateLimit?.limited(action, keyPart);
+  const limited = limitCheck(ctx.rateLimit);
 
   // ------------------------------------------------------ change collection
 

@@ -27,7 +27,7 @@
  * Refusals name the table, the id and the field, never a text or a preference.
  */
 import { transaction, migrationApplied } from './database.mjs';
-import { deepFreeze } from './scoutingEvidence.mjs';
+import { deepFreeze } from '../domains/platform/values.mjs';
 import { CATEGORY_NAMES } from '../domains/platform/notificationPrefs.mjs';
 
 export const NOTIFICATIONS_MIGRATION = '0009_notifications';

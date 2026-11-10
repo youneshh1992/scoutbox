@@ -29,7 +29,7 @@ import {
   combineResultHash, comparisonMatrix, COMBINE_TERMINAL, COMBINE_STATE_COPY,
   liveCombineState,
 } from './combineShared.mjs';
-import { rateLimitedBody } from '../../platform/rateLimit.mjs';
+import { rateLimitedBody, limitCheck } from '../../platform/rateLimit.mjs';
 import { combineCapabilities } from './cv/eligibility.mjs';
 import { CV_PROVIDER_ID } from './cv/policy.mjs';
 import { nonceMatches } from '../../../repositories/boxCam.mjs';
@@ -81,7 +81,7 @@ export function registerCombine(ctx) {
 
   // Rate limits: attempt creation and request creation. The shared limiter and
   // its named policy (see domains/platform/rateLimit.mjs).
-  const limited = (action, keyPart) => !!ctx.rateLimit?.limited(action, keyPart);
+  const limited = limitCheck(ctx.rateLimit);
 
   // ------------------------------------------------------------- views
   const protocolPublic = (p) => ({

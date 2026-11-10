@@ -36,7 +36,8 @@
 import { visibleToOrg, chooseTrialSlot } from '../../../domain.mjs';
 import { roomRole, ROOM_STATUS_LABELS, ROOM_TRANSITIONS } from '../rooms/shared.mjs';
 import { guardRev, expectedRevOf } from '../../platform/concurrency.mjs';
-import { rateLimitedBody } from '../../platform/rateLimit.mjs';
+import { requestClock } from '../../platform/clock.mjs';
+import { rateLimitedBody, limitCheck } from '../../platform/rateLimit.mjs';
 import { PROVIDERS } from '../../development/boxcam/drills.mjs';
 import { STATE_COPY as CV_STATE_COPY } from '../../development/boxcam/cv/policy.mjs';
 import { COMBINE_DISABLED_REASON } from '../../development/boxcam/cv/eligibility.mjs';
@@ -66,21 +67,8 @@ export function registerTrial(ctx) {
   const { cases } = ctx.recruitmentCases; // the case's links and history are explicit writes in the same unit
   const caseAudit = (kase, ...entry) => cases.recordAct(kase.id, { history: [auditEntry(...entry)] });
 
-  /**
-   * ONE clock per request. In a test deployment (SCOUTBOX_TEST_CLOCK=1) a
-   * suite may pin it with `x-scoutbox-test-clock: <ms>` so that "the last
-   * session has ended" can be proven without waiting for it to. Production
-   * ignores the header entirely.
-   */
-  const TEST_CLOCK = process.env.SCOUTBOX_TEST_CLOCK === '1';
-  const now = (req = null) => {
-    if (TEST_CLOCK && req?.get) {
-      const n = Number(req.get('x-scoutbox-test-clock'));
-      if (Number.isFinite(n) && n > 0) return n;
-    }
-    return Date.now();
-  };
-  const limited = (action, keyPart) => !!rateLimit?.limited(action, keyPart);
+  const now = requestClock();
+  const limited = limitCheck(rateLimit);
   const err = (res, error, message, extra = {}) => sendDomainError(res, { error, message, ...extra }, 'trial');
   const orgActor = (req) => ({ kind: 'org', userId: req.orgUser.id, name: req.orgUser.name });
   const orgOf = (orgId) => ctx.byId.org(orgId);

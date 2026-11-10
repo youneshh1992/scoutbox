@@ -29,7 +29,7 @@
  */
 import { isPlainObject, ids, describe } from './recruitment.mjs';
 import { transaction, migrationApplied, childRowsOf } from './database.mjs';
-import { deepFreeze } from './scoutingEvidence.mjs';
+import { deepFreeze } from '../domains/platform/values.mjs';
 import { text, int, bool, oneOf, tableDdl, bad, typeSpec, encode, decode, insertSql, upsertSql } from './fieldSpecs.mjs';
 import { parseStrictDateOnly } from '../temporal.mjs';
 import { pageOf } from '../domains/platform/paging.mjs';

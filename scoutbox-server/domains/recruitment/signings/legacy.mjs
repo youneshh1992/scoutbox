@@ -6,6 +6,9 @@ import { visibleToOrg } from '../../../domain.mjs';
 import { isLeadRole } from '../../../roles.mjs';
 import { readPage, sendPageError } from '../../platform/paging.mjs';
 import { rateLimitedBody } from '../../platform/rateLimit.mjs';
+import { sideEffectRunner } from '../../platform/sideEffects.mjs';
+
+const runSideEffect = sideEffectRunner('SIGNING');
 
 export function registerLegacySigning({ orgRouter, signings, findPlayer, isBlocked, rateLimit, unit, recordCompletedSigning, legacyRecordingBlocker }) {
   if (typeof recordCompletedSigning !== 'function' || typeof legacyRecordingBlocker !== 'function') throw new TypeError('registerLegacySigning needs the signing domain\'s one writer and its legacy blocker');
@@ -38,7 +41,7 @@ export function registerLegacySigning({ orgRouter, signings, findPlayer, isBlock
       return res.status(500).json({ ok: false, error: 'SIGNING_STATE_UNKNOWN', message: 'The signing could not be recorded; nothing was recorded.' });
     }
     const { signing, effects } = written;
-    try { effects?.(); } catch (e) { console.error(`SIGNING legacy side_effect_failed: ${e?.message ?? e}`); }
+    if (effects) runSideEffect('legacy', effects);
     res.status(201).json({ ok: true, signing });
   });
 

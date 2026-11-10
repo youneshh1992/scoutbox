@@ -13,6 +13,7 @@ import { createHash } from 'node:crypto';
 import { resolveScope, ruleAt } from './policy.mjs';
 import { PARTY_ROLES } from './policyVersions.mjs';
 import { readInstant } from '../../../temporal.mjs';
+import { canonicalJson } from '../../platform/values.mjs';
 
 export const CONFLICT_OUTCOMES = Object.freeze([
   'CLEAR',
@@ -43,14 +44,7 @@ export const CONTEXT_TYPES = Object.freeze(['employment_contract', 'transfer', '
 
 // ------------------------------------------------------------ canonical hashing
 
-export function canonicalJson(value) {
-  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
-  if (value && typeof value === 'object') {
-    const keys = Object.keys(value).sort();
-    return `{${keys.map((k) => `${JSON.stringify(k)}:${canonicalJson(value[k])}`).join(',')}}`;
-  }
-  return JSON.stringify(value === undefined ? null : value);
-}
+export { canonicalJson };
 export const inputHashOf = (inputs) => createHash('sha256').update(canonicalJson(inputs), 'utf8').digest('hex');
 
 // ------------------------------------------------------------ consent sufficiency

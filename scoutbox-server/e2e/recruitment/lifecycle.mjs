@@ -1440,9 +1440,10 @@ section('Y — the error contract: one table, no default, nothing internal in th
   const produced = new Set();
   for (const f of sources) {
     const text = readFileSync(path.join(LIFECYCLE_DIR, f), 'utf8');
-    // Two producing shapes: a literal `error: 'CODE'` and the routes'
-    // `err(res, 'CODE', …)` helper, which builds exactly that literal.
-    for (const m of text.matchAll(/(?:error:|err\(res,)\s*'([A-Z][A-Z0-9_]+)'/g)) produced.add(m[1]);
+    // Three producing shapes: a literal `error: 'CODE'`, the routes'
+    // `err(res, 'CODE', …)` helper, which builds exactly that literal, and the
+    // shared client-key rule called with the domain's code.
+    for (const m of text.matchAll(/(?:error:|err\(res,|platformClientKey\(raw,)\s*'([A-Z][A-Z0-9_]+)'/g)) produced.add(m[1]);
   }
   ok(produced.size >= 15, `Y1 ${produced.size} error codes found in the lifecycle source, mechanically`);
 

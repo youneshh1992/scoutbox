@@ -32,7 +32,7 @@
 import { visibleToOrg } from '../../../domain.mjs';
 import { roomRole, ROOM_STATUS_LABELS } from '../rooms/shared.mjs';
 import { guardRev, expectedRevOf } from '../../platform/concurrency.mjs';
-import { rateLimitedBody } from '../../platform/rateLimit.mjs';
+import { rateLimitedBody, limitCheck } from '../../platform/rateLimit.mjs';
 import { canTransitionRecruitmentCase, RECRUITMENT_LIFECYCLE_POLICY_VERSION } from './lifecycle.mjs';
 import { sendDomainError } from './errors.mjs';
 import {
@@ -41,6 +41,7 @@ import {
   normaliseClientKey, resolveContactRecipient, validateExternalRecord, cooldownFor,
   payloadFingerprint, contactView, contactIntegrity, caseAcceptsContact, byAtThenId,
 } from './contact.mjs';
+import { now } from '../../platform/clock.mjs';
 
 export function registerContact(ctx) {
   const {
@@ -56,10 +57,9 @@ export function registerContact(ctx) {
   if (typeof unit !== 'function' || typeof afterCommit !== 'function' || !recruitmentContactsOffers?.contacts) throw new TypeError('registerContact needs the contacts/offers repository, unit and afterCommit from the data layer');
   if (typeof integration?.contactRoute !== 'function' || typeof integration?.contactTargetSnapshot !== 'function') throw new TypeError('registerContact needs the cross-app integration seam (ctx.integration)');
   const contacts = recruitmentContactsOffers.contacts;
-  const now = () => Date.now();
   const actorOf = (req) => ({ kind: 'org', userId: req.orgUser.id, name: req.orgUser.name });
   const roleFor = (req, room) => roomRole({ room, user: req.orgUser, isLead: isLead(req.orgUser) });
-  const limited = (action, keyPart) => !!rateLimit?.limited(action, keyPart);
+  const limited = limitCheck(rateLimit);
   const err = (res, error, message, extra = {}) => sendDomainError(res, { error, message, ...extra }, 'contact');
 
   /** One history entry, ONE clock: the caller passes the moment the event happened. */

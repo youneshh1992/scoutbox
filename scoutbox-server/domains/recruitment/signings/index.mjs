@@ -36,9 +36,11 @@ import { PLANS } from '../../../catalogue.mjs';
 import { createHash } from 'node:crypto';
 import { CLUB_SETUP_LIMITS } from '../../../repositories/clubSetup.mjs';
 import { buildRouteHelpers } from '../../platform/routeHelpers.mjs';
+import { requestClock } from '../../platform/clock.mjs';
+import { sideEffectRunner } from '../../platform/sideEffects.mjs';
 import { roomRole, roomCan } from '../rooms/shared.mjs';
 import { guardRev, expectedRevOf } from '../../platform/concurrency.mjs';
-import { rateLimitedBody } from '../../platform/rateLimit.mjs';
+import { rateLimitedBody, limitCheck } from '../../platform/rateLimit.mjs';
 import { canTransitionRecruitmentCase, NULL_EVIDENCE_PROVIDER, RECRUITMENT_LIFECYCLE_POLICY_VERSION } from '../lifecycle/lifecycle.mjs';
 import { playerLevelAfterSigning } from '../../../domain.mjs';
 import { offerStatus as canonicalOfferStatus, effectiveRevisionStatus } from '../offers/offer.mjs';
@@ -54,8 +56,6 @@ import {
   signingIntegrity, signingConsistency, signingCorrupt,
   signingClubView, signingRecipientView, signingAgentView, signingHistoryView, completedSigningRecord,
 } from './signing.mjs';
-
-const TEST_CLOCK = process.env.SCOUTBOX_TEST_CLOCK === '1';
 
 export function registerSigning(rawCtx) {
   const ctx = { ...rawCtx, ...buildRouteHelpers(rawCtx) };
@@ -90,21 +90,18 @@ export function registerSigning(rawCtx) {
   }
 
   const err = (res, error, message, extra = {}) => sendSigningError(res, { error, message, ...extra }, 'signing');
-  const limited = (action, keyPart) => !!rateLimit?.limited(action, keyPart);
+  const limited = limitCheck(rateLimit);
   const roleFor = (req, room) => roomRole({ room, user: req.orgUser, isLead: isLead(req.orgUser) });
   const evidenceProvider = () => ctx.recruitmentEvidenceProvider ?? NULL_EVIDENCE_PROVIDER;
   const orgOf = (orgId) => ctx.byId.org(orgId);
-  const now = (req = null) => {
-    if (TEST_CLOCK && req?.get) { const n = Number(req.get('x-scoutbox-test-clock')); if (Number.isFinite(n) && n > 0) return n; }
-    return Date.now();
-  };
+  const now = requestClock();
   const byOrg = (req) => ({ kind: 'org', id: req.orgUser.id, name: req.orgUser.name, role: req.orgUser.role ?? null });
   // Each helper is an explicit repository write that returns the fresh record.
   const hist = (pkg, action, by, detail, at) => sp.addHistory(pkg.id, { id: nextId('aud'), at, action, by: { kind: by.kind, id: by.id ?? null, name: by.name ?? null }, detail: detail ?? null });
   const keyList = (pkg, act) => (Array.isArray(pkg.keys?.[act]) ? pkg.keys[act] : pkg.keys?.[act] ? [pkg.keys[act]] : []);
   const keyRow = (pkg, act, k) => keyList(pkg, act).find((x) => x && x.key === k) ?? null;
   const addKey = (pkg, act, entry) => sp.addKey(pkg.id, act, entry);
-  const safe = (label, fn) => { try { return fn(); } catch (e) { console.error(`SIGNING side_effect_failed ${label}: ${e?.message ?? e}`); return undefined; } };
+  const safe = sideEffectRunner('SIGNING');
   /** bumpRev's rule (domains/platform/concurrency.mjs) written through the repository: rev + 1, revAt, revBy, updatedAt. */
   const touch = (pkg, req, at, by = req?.orgUser ?? null) => sp.patch(pkg.id, { rev: (Number.isInteger(pkg.rev) ? pkg.rev : 1) + 1, revAt: at, revBy: by ? { userId: by.id ?? null, name: by.name ?? null } : null, updatedAt: at });
 

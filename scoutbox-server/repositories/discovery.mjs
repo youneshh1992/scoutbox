@@ -28,7 +28,7 @@
  */
 import { isPlainObject, ids, describe } from './recruitment.mjs';
 import { transaction, migrationApplied, childRowsOf } from './database.mjs';
-import { deepFreeze } from './scoutingEvidence.mjs';
+import { deepFreeze } from '../domains/platform/values.mjs';
 import { text, int, num, bool, oneOf, group, tableDdl, bad, typeSpec, encode, decode, upsertSql, insertSql } from './fieldSpecs.mjs';
 import { parseStrictDateOnly } from '../temporal.mjs';
 import { BRIEF_STATUSES, POSITIONS, POSITION_GROUP_OF, EVIDENCE_REQUIREMENTS, TRUST_BANDS, SECOND_LOOK_STATUSES, SECOND_LOOK_KINDS, DISMISSAL_REASONS, NOBODY_MISSED_STATES, NM_DISMISSAL_REASONS, REASON_CHANGE_MAP } from '../domains/discovery/shared.mjs';

@@ -25,6 +25,7 @@ import { transaction, migrationApplied, newestHistory, childRowsOf } from './dat
 import { writeChecks, writeKit } from './writes.mjs';
 import { CONTACT_STATUSES, CONTACT_TRANSITIONS, CONTACT_ACTIONS, CONTACT_CHANNELS, CONTACT_MODES, CONTACT_LIMITS, RESPONSE_KINDS } from '../domains/recruitment/lifecycle/contact.mjs';
 import { OFFER_STATUSES, OFFER_REVISION_TRANSITIONS, OFFER_TYPES, OFFER_LIMITS, OFFER_RESPONSE_TYPES, OFFER_RESPONSE_ACTORS } from '../domains/recruitment/offers/offer.mjs';
+import { deepFreeze } from '../domains/platform/values.mjs';
 
 export const RECRUITMENT_CONTACTS_OFFERS_MIGRATION = '0017_recruitment_contacts_offers';
 export const RECRUITMENT_CONTACTS_OFFERS_COLLECTIONS = Object.freeze(['recruitmentContacts', 'recruitmentOffers']);
@@ -550,7 +551,6 @@ export const CONTACTS_OFFERS_RECORDS = {
 };
 
 // ------------------------------------------------------------------ the repository
-const deepFreeze = (v) => { if (v !== null && typeof v === 'object' && !Object.isFrozen(v)) { Object.freeze(v); for (const k of Object.keys(v)) deepFreeze(v[k]); } return v; };
 const CONTACT_READS = {
   forCase: 'SELECT * FROM recruitment_contacts WHERE case_id = ? ORDER BY rowid',
   forOrgPlayer: 'SELECT * FROM recruitment_contacts WHERE org_id = ? AND player_id = ? ORDER BY rowid',

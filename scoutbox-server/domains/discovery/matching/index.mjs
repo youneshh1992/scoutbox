@@ -29,6 +29,8 @@ import {
 } from './watchlists.mjs';
 import { guardRev, bumpRev, revMeta } from '../../platform/concurrency.mjs';
 import { readPage, pageOf, sendPageError } from '../../platform/paging.mjs';
+import { now } from '../../platform/clock.mjs';
+import { limitCheck } from '../../platform/rateLimit.mjs';
 
 /** Every ordering matching offers. None of them is a match quality rank, and the
  *  default is deliberately the least suggestive thing that is still useful. */
@@ -44,8 +46,7 @@ export function registerMatching(ctx) {
   const dreads = ctx.discoveryReads;
   if (typeof dreads?.watchlists?.page !== 'function' || typeof discovery?.watchlists?.reconcile !== 'function') throw new TypeError('registerMatching needs the discovery repository and discoveryReads from the data layer');
 
-  const now = () => Date.now();
-  const limited = (action, keyPart) => !!ctx.rateLimit?.limited(action, keyPart);
+  const limited = limitCheck(ctx.rateLimit);
 
   const combineProtocolIds = () => (ctx.combineProtocolIds?.() ?? null);
 

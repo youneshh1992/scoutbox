@@ -27,7 +27,7 @@
  * Refusals name tables, ids and fields, never a message text or a name.
  */
 import { transaction, migrationApplied, childRowsOf } from './database.mjs';
-import { deepFreeze } from './scoutingEvidence.mjs';
+import { deepFreeze } from '../domains/platform/values.mjs';
 import { pageOf } from '../domains/platform/paging.mjs';
 
 export const CHANNELS_MIGRATION = '0012_channels';

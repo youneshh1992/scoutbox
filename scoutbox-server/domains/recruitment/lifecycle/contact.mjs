@@ -20,6 +20,7 @@
 
 import { ROOM_TRANSITIONS } from '../rooms/shared.mjs';
 import { parseInstant, readInstant } from '../../../temporal.mjs';
+import { normaliseClientKey as platformClientKey, payloadFingerprint, CLIENT_KEY_MAX } from '../../platform/idempotency.mjs';
 
 export const CONTACT_POLICY_VERSION = 1;
 
@@ -102,7 +103,7 @@ export const CONTACT_LIMITS = Object.freeze({
   body: 2000,
   summary: 500,
   replyMessage: 500,
-  clientKey: 64,
+  clientKey: CLIENT_KEY_MAX,
   /** An external contact may be dated up to 15 minutes in the future — clock skew, not planning. */
   occurredAtSkewMs: 15 * 60 * 1000,
   /** And no more than 180 days in the past — a club records a conversation, not a memory. */
@@ -221,14 +222,7 @@ export function validateContactReply(raw, { isContact = true } = {}) {
   return { ok: true, reply: reply || null };
 }
 
-/** A client key: short, opaque, text. Anything else is not a key. */
-export function normaliseClientKey(raw) {
-  if (raw === undefined || raw === null || raw === '') return { ok: true, key: null };
-  if (typeof raw !== 'string') return { ok: false, error: 'CONTACT_CLIENT_KEY_INVALID', message: 'clientKey must be text.' };
-  const k = raw.trim();
-  if (!k || k.length > CONTACT_LIMITS.clientKey) return { ok: false, error: 'CONTACT_CLIENT_KEY_INVALID', message: 'clientKey must be 1–64 characters.' };
-  return { ok: true, key: k };
-}
+export const normaliseClientKey = (raw) => platformClientKey(raw, 'CONTACT_CLIENT_KEY_INVALID');
 
 // -------------------------------------------------------------- recipient
 
@@ -332,10 +326,7 @@ export function cooldownFor(contacts, { orgId, playerId, now = Date.now(), excep
 
 // ------------------------------------------------------------ idempotency
 
-/** A stable fingerprint of the parts of a request that make it "the same request". */
-export function payloadFingerprint(parts) {
-  return JSON.stringify(parts, Object.keys(parts).sort());
-}
+export { payloadFingerprint };
 
 // ------------------------------------------------------------ projections
 

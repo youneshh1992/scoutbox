@@ -90,9 +90,15 @@ along the way.
 
 ### 3. Helpers rewritten in each module
 
-16 local `now()` helpers, 5 readers of the `x-scoutbox-test-clock` header, idempotency handling in 33 files, local
-error and `safe()` side-effect wrappers, and 7 copies of `deepFreeze`. None of these are rules; each should be
-one shared module under `domains/platform/`.
+~~16 local `now()` helpers, 5 readers of the `x-scoutbox-test-clock` header, idempotency handling in 33 files, local
+error and `safe()` side-effect wrappers, and 7 copies of `deepFreeze`.~~ Done 10 Nov: `domains/platform/clock.mjs`
+(`now`, `requestClock`; the test clock is refused in production), `idempotency.mjs` (one client-key rule and one deep
+`payloadFingerprint`; each domain keeps its error code), `values.mjs` (`deepFreeze`, `canonicalJson`),
+`sideEffects.mjs`, and `limitCheck` / `refuseWhenLimited` in `rateLimit.mjs`. The agent modules had used the
+Contact fingerprint, which dropped nested fields: a retry with different parties under the same key replayed the
+first answer. Left alone: the per-domain `err()` bindings (each is one line over a shared sender) and the
+`canonical`/`same` comparisons in `repositories/discovery.mjs` and `development.mjs`, which go with their draft
+updates (item 1).
 
 ### 4. Comments
 
@@ -130,7 +136,7 @@ The rules are likely well under half of the production lines.
 
 ## Plan
 
-1. **Low-risk clean-ups, in any order:** shared helpers (item 3), move the Box Cam evaluation tooling (item 5),
+1. **Low-risk clean-ups, in any order:** ~~shared helpers (item 3)~~ (done 10 Nov), move the Box Cam evaluation tooling (item 5),
    ~~fold the milestone modules (item 6)~~ (done 10 Nov).
 2. **Item 1, writes through named acts: done for the state machines, stopped 10 Nov.** Converted: offers, contacts,
    recruitment cases and Rooms, trials and requests, agent transactions, compliance and core, verification and

@@ -20,6 +20,7 @@
 import { isPlainObject, ids } from './recruitment.mjs';
 import { pageOf } from '../domains/platform/paging.mjs';
 import { transaction, migrationApplied, childRowsOf } from './database.mjs';
+import { deepFreeze } from '../domains/platform/values.mjs';
 
 export const SIGNINGS_FOLLOWUPS_MIGRATION = '0018_signings_follow_ups';
 export const SIGNINGS_FOLLOWUPS_COLLECTIONS = Object.freeze(['signingPackages', 'signings', 'followUps', 'outcomeReports']);
@@ -641,7 +642,6 @@ export const SIGNINGS_FOLLOWUPS_RECORDS = {
 // ------------------------------------------------------------------ the repository
 const WRITES = new Set(['insert', 'patch', 'patchRevision', 'addRevision', 'setDocument', 'setParty', 'addKey', 'addHistory', 'redactPlayer', 'record', 'schedule', 'file', 'addConfirmation']);
 const SIGNINGS_FOLLOWUPS_TABLES_OF = [['signingPackages', 'signing_packages'], ['signings', 'signings'], ['followUps', 'follow_ups'], ['outcomeReports', 'outcome_reports']];
-const deepFreeze = (v) => { if (v !== null && typeof v === 'object' && !Object.isFrozen(v)) { Object.freeze(v); for (const k of Object.keys(v)) deepFreeze(v[k]); } return v; };
 /**
  * `createSigningsFollowUpsRepository({ sqlite, unit, now, log })`. Every operation runs through `operation`: joined into
  * the open unit of work (a failure poisons it), the caller's open raw transaction, or a transaction of its own; it

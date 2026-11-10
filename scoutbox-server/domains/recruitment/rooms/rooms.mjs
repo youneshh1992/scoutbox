@@ -27,7 +27,7 @@ import {
   adoptionStatusForStage, INITIAL_ROOM_STATUS, canTransition,
 } from './shared.mjs';
 import { guardRev, revMeta } from '../../platform/concurrency.mjs';
-import { rateLimitedBody } from '../../platform/rateLimit.mjs';
+import { rateLimitedBody, limitCheck } from '../../platform/rateLimit.mjs';
 // The lifecycle's own role table, so the legacy status route and the
 // semantic-action route agree on WHO may reach a state (a room lead could reach
 // `signed` here while `confirmSignedOutcome` needs a recruitment lead).
@@ -35,6 +35,8 @@ import { LIFECYCLE_ACTIONS } from '../lifecycle/lifecycle.mjs';
 
 import { readPage, sendPageError } from '../../platform/paging.mjs';
 import { isAbsent, parseStrictDateOnly } from '../../../temporal.mjs';
+import { now } from '../../platform/clock.mjs';
+import { normaliseClientKey } from '../../platform/idempotency.mjs';
 export function registerRooms(ctx) {
   const {
     byId, users, orgRouter, adminRouter, nextId, notify, ledgerAppend, broadcast,
@@ -51,14 +53,13 @@ export function registerRooms(ctx) {
 
   // ------------------------------------------------------------- utilities
 
-  const now = () => Date.now();
   const orgUsers = (orgId) => users.forOrg(orgId, { active: true });
   // The staff index, not a scan of the club's staff.
   const orgUser = (orgId, userId) => { const u = byId.user(userId); return u && u.orgId === orgId && !u.removedAt ? u : null; };
 
   // Fixed-window counters for the abuse surfaces; nothing here is
   // security-critical state. One shared limiter, one named policy per action.
-  const limited = (action, keyPart) => !!ctx.rateLimit?.limited(action, keyPart);
+  const limited = limitCheck(ctx.rateLimit);
 
   // Comment bodies are stored inert: markup is removed on write, so no renderer
   // anywhere — ours or a future one — can be talked into executing it.
@@ -1132,7 +1133,9 @@ export function registerRooms(ctx) {
     if (!room) return;
     if (!requireCan(req, res, room, 'record_decision')) return;
 
-    const clientKey = req.body?.clientKey ? String(req.body.clientKey).slice(0, 64) : null;
+    const key = normaliseClientKey(req.body?.clientKey, 'ROOM_CLIENT_KEY_INVALID');
+    if (!key.ok) return res.status(400).json({ error: key.error, message: key.message });
+    const clientKey = key.key;
     if (clientKey) {
       const dup = reads.decisions.forRoom(room.id).find((d) => d.clientKey === clientKey);
       // Idempotent submit: the same key returns the same decision instead of
